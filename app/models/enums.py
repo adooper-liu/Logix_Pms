@@ -45,6 +45,19 @@ class StepStatus(str, Enum):
     SKIPPED = "SKIPPED"
 
 
+class InstanceStatus(str, Enum):
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TaskStatus(str, Enum):
+    PENDING = "PENDING"
+    CLAIMED = "CLAIMED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
 class ToolCategory(str, Enum):
     DIAGNOSE = "DIAGNOSE"  # 诊断
     DESIGN = "DESIGN"  # 设计

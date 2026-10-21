@@ -12,6 +12,7 @@ from app.api.v1 import (
     benchmark,
     dashboard,
     designer,
+    execution,
     knowledge,
     monitor,
     process_map,
@@ -33,6 +34,7 @@ protected.include_router(process_map.router)
 protected.include_router(benchmark.router)
 protected.include_router(workflow.router)
 protected.include_router(projects.router)
+protected.include_router(execution.router)
 protected.include_router(tools.router)
 protected.include_router(designer.router)
 protected.include_router(monitor.router)

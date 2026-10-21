@@ -28,6 +28,7 @@ VIEWS = [
     ("designer", "流程设计器"),
     ("monitor", "运营监控与KPI"),
     ("knowledge", "流程知识库"),
+    ("execution", "流程执行"),
 ]
 
 failures: list[str] = []
@@ -406,6 +407,40 @@ def main() -> int:
             )
             assert tooltip[0] == "visible" and float(tooltip[1]) > 0, f"口径提示未显示：{tooltip}"
 
+        # 流程执行：启动实例、认领任务、完成并推进
+        def execution_flow() -> None:
+            goto("execution")
+            page.click("#execStartBtn")
+            page.wait_for_selector("#exProcess")
+            page.click("#mFoot .btn-p")
+            page.wait_for_timeout(1500)
+            assert "流程已启动" in page.inner_text("#toast"), page.inner_text("#toast")
+
+            row = page.locator("#view .exec-task-row").first
+            iid = row.get_attribute("data-instance-id")
+            try:
+                assert iid, "任务行缺少 instance id"
+                page.click("#view .exec-task-row >> nth=0 >> button")
+                page.wait_for_timeout(900)
+                assert "已认领" in page.inner_text("#toast"), page.inner_text("#toast")
+
+                page.click("#view .exec-task-row >> nth=0 >> button")
+                page.wait_for_selector("#exForm")
+                page.click("#mFoot .btn-p")
+                page.wait_for_timeout(1500)
+                assert "任务已完成" in page.inner_text("#toast"), page.inner_text("#toast")
+                assert "需求汇总与归并" in page.inner_text("#view"), "下一节点任务未生成"
+            finally:
+                if iid:
+                    page.evaluate(
+                        """async (iid) => {
+                          const t = localStorage.getItem('psm_token');
+                          await fetch('/api/v1/execution/instances/' + iid,
+                            {method: 'DELETE', headers: {Authorization: 'Bearer ' + t}});
+                        }""",
+                        int(iid),
+                    )
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
@@ -422,6 +457,7 @@ def main() -> int:
         check("项目甘特图与里程碑", project_gantt)
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)
+        check("流程执行：启动→认领→完成", execution_flow)
 
         # -------------------------------------------------- 收尾：清理自检写入的数据
         def cleanup() -> None:

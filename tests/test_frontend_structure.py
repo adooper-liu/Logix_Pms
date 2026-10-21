@@ -42,6 +42,7 @@ def test_frontend_has_modules():
         "designer.js",
         "monitor.js",
         "knowledge.js",
+        "execution.js",
     } <= names
     assert "main.js" in names
 
@@ -71,6 +72,7 @@ def test_view_modules_are_registered():
         "designer",
         "monitor",
         "knowledge",
+        "execution",
     ):
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
 
@@ -85,6 +87,7 @@ def test_every_view_module_exports_a_renderer():
         "designer.js": "renderDesigner",
         "monitor.js": "renderMonitor",
         "knowledge.js": "renderKnowledge",
+        "execution.js": "renderExecution",
     }
     for filename, symbol in renderers.items():
         src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")

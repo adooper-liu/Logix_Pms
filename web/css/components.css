@@ -208,3 +208,8 @@ canvas{max-width:100%}
   transition:var(--transition,.12s);pointer-events:none;box-shadow:var(--shadow-xl);white-space:normal}
 .metric-help:hover::after,.metric-help:focus::after{opacity:1;visibility:visible}
 @media(max-width:900px){.metric-help::after{max-width:220px}}
+
+/* 可点击指标卡（执行页统计等） */
+button.kpi{border:1px solid var(--line);font-family:inherit;text-align:left;
+  cursor:pointer;transition:var(--transition,.15s)}
+button.kpi:hover{border-color:var(--brand);box-shadow:var(--shadow-hover)}

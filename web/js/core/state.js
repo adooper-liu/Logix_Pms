@@ -17,6 +17,7 @@ export const state = {
   designer: { processId: null, processCode: null, model: null, analysis: null, tab: 'model' },
   knowledge: { type: '', sort: 'recent', keyword: '', tag: '' },
   monitor: { status: '', tab: 'overview' },
+  execution: { tab: 'tasks', filter: 'open' },
 };
 
 export const TITLES = {
@@ -24,6 +25,7 @@ export const TITLES = {
   map: '企业流程地图',
   workflow: '五阶段标准工作流',
   projects: '流程项目组合',
+  execution: '流程执行',
   toolbox: '方法论工具箱',
   designer: '流程设计器',
   monitor: '运营监控与KPI',

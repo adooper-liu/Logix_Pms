@@ -20,6 +20,7 @@ import * as dashboard from './views/dashboard.js';
 import * as mapView from './views/map.js';
 import * as workflowView from './views/workflow.js';
 import * as projectsView from './views/projects.js';
+import * as executionView from './views/execution.js';
 import * as toolboxView from './views/toolbox.js';
 import * as designerView from './views/designer.js';
 import * as monitorView from './views/monitor.js';
@@ -29,6 +30,7 @@ register('dashboard', dashboard.renderDashboard);
 register('map', mapView.renderMap);
 register('workflow', workflowView.renderWorkflow);
 register('projects', projectsView.renderProjects);
+register('execution', executionView.renderExecution);
 register('toolbox', toolboxView.renderToolbox);
 register('designer', designerView.renderDesigner);
 register('monitor', monitorView.renderMonitor);
@@ -56,6 +58,7 @@ Object.assign(window, {
   ...mapView,
   ...workflowView,
   ...projectsView,
+  ...executionView,
   ...toolboxView,
   ...designerView,
   ...monitorView,

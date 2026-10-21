@@ -8,6 +8,7 @@ from app.models.enums import (
     AuditAction,
     ExceptionSeverity,
     ExceptionStatus,
+    InstanceStatus,
     KnowledgeType,
     KpiDimension,
     KpiDirection,
@@ -18,8 +19,10 @@ from app.models.enums import (
     Role,
     ScopeType,
     StepStatus,
+    TaskStatus,
     ToolCategory,
 )
+from app.models.execution import ProcessInstance, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -46,12 +49,16 @@ __all__ = [
     "BenchmarkFramework",
     "BenchmarkCategory",
     "ProcessBenchmarkMap",
+    "ProcessInstance",
+    "ProcessTask",
     # 枚举
     "Methodology",
     "ProjectStatus",
     "ProcessState",
     "ScopeType",
     "StepStatus",
+    "InstanceStatus",
+    "TaskStatus",
     "ToolCategory",
     "NodeType",
     "KpiDimension",

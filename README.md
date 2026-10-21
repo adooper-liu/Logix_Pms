@@ -128,7 +128,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
-种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、33 个工具、24 个标准步骤、
+种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、33 个工具、24 个标准步骤、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
 2 套对标框架（71 个标准分类、249 条流程映射）。
 
@@ -149,7 +149,7 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：8 个视图渲染 + 12 条交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器跑两段：9 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
@@ -221,6 +221,7 @@ app/
   models/       SQLAlchemy ORM（流程域 / 项目域 / 工具 / 监控 / 知识库）
   schemas/      Pydantic 出入参契约
   services/     业务逻辑
+    execution.py    流程执行：实例、任务队列、分支推进
     methodology.py  立项向导：BPR / BPI / 精益 / 混合 自动匹配
     designer.py     流程设计器：周期效率测算 + 9 条改善建议规则
     workflow.py     标准工作流的项目实例化与进度回算
@@ -246,11 +247,11 @@ web/            前端（原生 ES 模块，无构建步骤）
       ui.js         模态框、提示条、视图容器
     views/
       dashboard.js  map.js  workflow.js  projects.js
-      toolbox.js    designer.js  monitor.js  knowledge.js
+      toolbox.js    designer.js  monitor.js  knowledge.js  execution.js
     main.js       注册视图、接线 DOM、暴露模板所需函数、启动
 scripts/
   seed.py             命令行灌库
-  verify_frontend.py  无头浏览器联调自检（8 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器联调自检（9 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
 docs/           行业对标、信息架构、指标口径与可视化选型
 alembic/        数据库迁移脚本（env.py + versions/）
@@ -271,7 +272,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 
 ```text
 main.js
-  └─ views/*        八个视图，各自 import 需要的 core
+  └─ views/*        九个视图，各自 import 需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
             └─ core/{api, auth, state, theme, ui, format}.js
 ```
@@ -315,10 +316,10 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 前端不维护映射表，避免「后端加了新枚举、前端忘了同步」。
 
 **测试守卫**：[tests/test_frontend_structure.py](tests/test_frontend_structure.py) 会在
-pytest 里检查 import 路径是否存在、八个视图是否都注册且有 renderer、样式表是否被引用，
+pytest 里检查 import 路径是否存在、九个视图是否都注册且有 renderer、样式表是否被引用，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**八个模块与对应接口**：
+**九个模块与对应接口**：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
@@ -326,6 +327,7 @@ pytest 里检查 import 路径是否存在、八个视图是否都注册且有 r
 | 企业流程地图 | `/process-map/tree`、`/heatmap`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、改善优先级热力图、SCOR / APQC 对标切换与覆盖率、点热力图行可跳转定位 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
+| 流程执行 | `/execution/*` | 启动实例、任务队列、认领/完成/改派、分支选择、实例时间线 |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配 |
 | 流程设计器 | `/processes/{id}/design` | 泳道建模、节点增删改、改动即时保存并重算指标与建议 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
@@ -349,6 +351,7 @@ pytest 里检查 import 路径是否存在、八个视图是否都注册且有 r
 |---|---|
 | `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分（战略重要性 × 痛点 × 改善空间） |
 | `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
+| `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
 | `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
@@ -404,6 +407,21 @@ pytest 里检查 import 路径是否存在、八个视图是否都注册且有 r
 | PATCH | `/projects/steps/{id}` | 更新步骤状态；阶段完成自动推进，进度自动回算 |
 | GET | `/projects/meta/summary` | 组合汇总 |
 | **POST** | **`/projects/recommend-methodology`** | **立项向导：自动匹配方法论** |
+
+### 流程执行
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/execution/processes` | 可启动流程（设计器里已有节点的流程） |
+| GET | `/execution/instances` | 实例列表，支持 status / process_id |
+| POST | `/execution/instances` | 启动实例；可传 variables 与按节点指派 assignments |
+| GET | `/execution/instances/{id}` | 实例详情、任务时间线与变量 |
+| POST | `/execution/instances/{id}/cancel` | 取消运行中实例（MANAGER+），未完成任务一并取消 |
+| DELETE | `/execution/instances/{id}` | 删除实例及任务（MANAGER+，用于清理） |
+| GET | `/execution/tasks` | 任务队列：status / assignee=me\|id / instance_id / process_id / only_open |
+| GET | `/execution/tasks/{id}` | 任务详情（含可选下一步节点） |
+| POST | `/execution/tasks/{id}/claim` | 认领任务 |
+| POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边时必须传 `next_node_key` |
+| PATCH | `/execution/tasks/{id}/assignee` | 改派或退回公共队列（MANAGER+） |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |
@@ -647,7 +665,7 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 
 已完成：前端接后端、用户与权限、甘特图与里程碑、流程模型并发控制、时间语义统一、
 周期测算改为按图求期望值、切换 Docker PostgreSQL、引入 Alembic 迁移、前端模块化、
-对标框架（SCOR / APQC PCF）的后端交叉映射。还剩：
+对标框架（SCOR / APQC PCF）的后端交叉映射、流程执行第一阶段（实例 + 任务队列 + 分支推进）。还剩：
 
 1. **流程挖掘对接**：接入 ERP/OA 日志，自动发现真实路径（`PROCESS-MINING` 工具已就位，缺数据管道）。
 2. **权限细化**：OWNER 归属已改为 `owner_user_id` 外键（项目 / 流程模型），
@@ -660,3 +678,5 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
+8. **流程执行后续**：当前是单令牌顺序执行，下一步补表单/规则引擎、BPMN 导入导出、
+   并行网关与子流程、通知与 ERP/OA 集成。

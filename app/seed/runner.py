@@ -14,13 +14,17 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
+from app.models.enums import TaskStatus
+from app.models.execution import ProcessInstance, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
 from app.models.user import AuditLog, User
+from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
 from app.seed import benchmark_data, corpus, corpus_data
+from app.services import execution as execution_service
 from app.services.workflow import recompute_progress, seed_project_steps
 
 # 设计器画布上的排布参数
@@ -305,6 +309,74 @@ def _seed_exceptions(
         )
 
 
+def _seed_execution(
+    db: Session,
+    code_to_id: Dict[str, int],
+    project_ids: Dict[str, int],
+    user_ids: Dict[str, int],
+) -> None:
+    """灌两个演示实例：一个留待办（含已指派），一个在公共队列。"""
+    admin = db.scalar(select(User).where(User.username == "admin"))
+    if admin is None or not code_to_id:
+        return
+    db.flush()  # 设计器节点/连线可能还在会话里，先落库再快照
+
+    # L3-032：完成前两步，留下第二阶段的待办并指派给陈经理
+    process = db.get(ProcessArch, code_to_id["L3-032"])
+    if process is not None:
+        instance = execution_service.start_instance(
+            db,
+            process,
+            admin,
+            InstanceStartRequest(
+                process_id=process.id,
+                project_id=project_ids.get("PR-2026-018"),
+                variables={"source": "seed", "batch": "2026-Q3"},
+            ),
+        )
+        for _ in range(2):
+            task = db.scalar(
+                select(ProcessTask)
+                .where(
+                    ProcessTask.instance_id == instance.id,
+                    ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
+                )
+                .order_by(ProcessTask.id)
+            )
+            if task is None:
+                break
+            execution_service.complete_task(
+                db,
+                task,
+                admin,
+                TaskCompleteRequest(form_data={"seed": True}, comment="种子演示：已处理"),
+            )
+        open_task = db.scalar(
+            select(ProcessTask)
+            .where(
+                ProcessTask.instance_id == instance.id,
+                ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
+            )
+            .order_by(ProcessTask.id)
+        )
+        chen_id = user_ids.get("陈经理")
+        if open_task is not None and chen_id is not None:
+            execution_service.assign_task(db, open_task, chen_id)
+
+    # L3-033：停在公共任务队列，演示认领
+    process = db.get(ProcessArch, code_to_id["L3-033"])
+    if process is not None:
+        execution_service.start_instance(
+            db,
+            process,
+            admin,
+            InstanceStartRequest(
+                process_id=process.id,
+                variables={"source": "seed", "batch": "2026-Q3"},
+            ),
+        )
+
+
 def _seed_knowledge(db: Session, project_ids: Dict[str, int]) -> None:
     for row in corpus_data.KNOWLEDGE:
         item = KnowledgeItem(
@@ -401,6 +473,8 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        ProcessTask,
+        ProcessInstance,
         ProcessBenchmarkMap,
         ProcessEdge,
         ProcessNode,
@@ -440,6 +514,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids)
     _seed_design_models(db, code_to_id)
+    _seed_execution(db, code_to_id, project_ids, user_ids)
     db.commit()
 
     return {
@@ -456,6 +531,8 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "users": db.scalar(select(func.count()).select_from(User)) or 0,
         "process_nodes": db.scalar(select(func.count()).select_from(ProcessNode)) or 0,
         "process_edges": db.scalar(select(func.count()).select_from(ProcessEdge)) or 0,
+        "process_instances": db.scalar(select(func.count()).select_from(ProcessInstance)) or 0,
+        "process_tasks": db.scalar(select(func.count()).select_from(ProcessTask)) or 0,
         "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,
