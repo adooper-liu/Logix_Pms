@@ -8,9 +8,9 @@ services:
     image: postgres:16
     container_name: logix-pms-db
     environment:
-      POSTGRES_DB: logix_pms
-      POSTGRES_USER: psm
-      POSTGRES_PASSWORD: psm_dev_password
+      POSTGRES_DB: ${POSTGRES_DB:-logix_pms}
+      POSTGRES_USER: ${POSTGRES_USER:-psm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-psm_dev_password}
       # 时间戳统一按 UTC 存，容器时区不影响数据
       TZ: UTC
     ports:
@@ -21,7 +21,7 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       # 让 api 服务等到数据库真正可接受连接再启动，避免启动竞态
-      test: ["CMD-SHELL", "pg_isready -U psm -d logix_pms"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-psm} -d ${POSTGRES_DB:-logix_pms}"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -35,9 +35,10 @@ services:
     build: .
     container_name: logix-pms-api
     environment:
-      DATABASE_URL: postgresql+psycopg://psm:psm_dev_password@db:5432/logix_pms
-      SEED_ON_STARTUP: "true"
-      CORS_ORIGINS: "*"
+      # 容器内连 db 服务；外部托管数据库用 DATABASE_URL_DOCKER 覆盖整个连接串
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_dev_password}@db:5432/${POSTGRES_DB:-logix_pms}}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
       # 生产环境务必替换
       SECRET_KEY: ${SECRET_KEY:-logix-pms-dev-secret-change-me}
     ports:

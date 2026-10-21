@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
-from app.models.enums import TaskStatus
+from app.models.enums import Role, TaskStatus
 from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
 from app.models.integration import IntegrationDelivery, IntegrationEndpoint
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
@@ -185,8 +185,14 @@ def _seed_projects(
     return ids
 
 
-def _seed_benchmarks(db: Session, code_to_id: Dict[str, int]) -> None:
-    """对标框架、标准分类树与流程映射。"""
+def _seed_benchmarks(
+    db: Session, code_to_id: Dict[str, int], *, with_mappings: bool = True
+) -> None:
+    """对标框架、标准分类树与流程映射。
+
+    with_mappings=False 只灌框架与分类，供生产环境使用：公司流程还没录入时
+    不存在可映射的流程，等流程建好后再通过页面/API 维护映射。
+    """
     frameworks: Dict[str, BenchmarkFramework] = {}
     for row in benchmark_data.BENCHMARK_FRAMEWORKS:
         framework = BenchmarkFramework(
@@ -222,6 +228,9 @@ def _seed_benchmarks(db: Session, code_to_id: Dict[str, int]) -> None:
         db.add(category)
         db.flush()
         categories.setdefault(framework.code, {})[category.code] = category
+
+    if not with_mappings:
+        return
 
     for row in benchmark_data.PROCESS_BENCHMARK_MAP:
         process_id = code_to_id.get(row["process"])
@@ -694,11 +703,112 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
 
 
 def seed_if_empty(db: Session) -> Optional[Dict[str, int]]:
-    """库里有流程数据就跳过，避免每次启动重复灌。"""
+    """库里有流程数据或已有账号就跳过，避免每次启动重复灌。
+
+    已有账号说明这个库已经初始化过：生产环境执行 bootstrap 后流程架构仍为空，
+    此时不能再把演示流程/项目灌进来。需要重建演示库请显式 `--reset`。
+    """
     existing = db.scalar(select(func.count()).select_from(ProcessArch)) or 0
     if existing:
         return None
+    existing_users = db.scalar(select(func.count()).select_from(User)) or 0
+    if existing_users:
+        return None
     return seed(db, reset=False)
+
+
+def seed_reference(db: Session) -> Dict[str, int]:
+    """只灌生产需要的参考数据，不碰演示业务数据。
+
+    - 24 步标准工作流模板
+    - 33 个方法论工具
+    - SCOR / APQC PCF 框架与分类（不含流程映射）
+
+    按表判空，可重复执行。
+    """
+    created = {
+        "workflow_steps": 0,
+        "tools": 0,
+        "benchmark_frameworks": 0,
+        "benchmark_categories": 0,
+    }
+    if (db.scalar(select(func.count()).select_from(WorkflowTemplate)) or 0) == 0:
+        _seed_workflow(db)
+        created["workflow_steps"] = len(corpus.WORKFLOW)
+    if (db.scalar(select(func.count()).select_from(Tool)) or 0) == 0:
+        _seed_tools(db)
+        created["tools"] = len(corpus.TOOLS)
+    if (db.scalar(select(func.count()).select_from(BenchmarkFramework)) or 0) == 0:
+        _seed_benchmarks(db, {}, with_mappings=False)
+        created["benchmark_frameworks"] = len(benchmark_data.BENCHMARK_FRAMEWORKS)
+        created["benchmark_categories"] = len(benchmark_data.BENCHMARK_CATEGORIES)
+    db.commit()
+    return created
+
+
+def ensure_admin(
+    db: Session,
+    username: str,
+    password: str,
+    display_name: str,
+    department: Optional[str] = None,
+    reset_password: bool = False,
+) -> Dict[str, object]:
+    """创建首个管理员；已存在同名账号时默认不改口令。
+
+    生产环境不应使用演示账号，所以这里由部署者显式提供用户名和口令。
+    """
+    username = username.strip()
+    if len(username) < 3:
+        raise ValueError("管理员用户名至少 3 个字符")
+    if len(password) < 8:
+        raise ValueError("管理员口令至少 8 个字符")
+
+    user = db.scalar(select(User).where(User.username == username))
+    if user is not None:
+        if user.role != Role.ADMIN.value:
+            raise ValueError(f"账号 {username} 已存在且不是管理员，拒绝覆盖")
+        if reset_password:
+            user.password_hash = hash_password(password)
+            db.commit()
+        return {
+            "username": username,
+            "created": False,
+            "password_reset": bool(reset_password),
+        }
+
+    user = User(
+        username=username,
+        display_name=display_name.strip(),
+        password_hash=hash_password(password),
+        role=Role.ADMIN.value,
+        department=department,
+    )
+    db.add(user)
+    db.commit()
+    return {"username": username, "created": True, "password_reset": False}
+
+
+def bootstrap_production(
+    db: Session,
+    username: str,
+    password: str,
+    display_name: str,
+    department: Optional[str] = None,
+    include_reference: bool = True,
+    reset_password: bool = False,
+) -> Dict[str, object]:
+    """生产初始化：参考数据 + 首个管理员，不灌任何演示业务数据。"""
+    reference = seed_reference(db) if include_reference else {}
+    admin = ensure_admin(
+        db,
+        username=username,
+        password=password,
+        display_name=display_name,
+        department=department,
+        reset_password=reset_password,
+    )
+    return {"reference": reference, "admin": admin}
 
 
 def _benchmark_counts(db: Session) -> Dict[str, int]:

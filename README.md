@@ -178,7 +178,85 @@ python scripts/verify_frontend.py http://127.0.0.1:8123 _screenshots
 | `CORS_ORIGINS` | `*` | 逗号分隔；生产请收紧 |
 | `SQL_ECHO` | `false` | 打印 SQL |
 | `AUTO_MIGRATE` | `true` | 启动时执行 `alembic upgrade head`；设为 `false` 则直接 `create_all`（测试用） |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `logix_pms` / `psm` / `psm_dev_password` | 仅 docker compose 使用；生产必须改口令 |
+| `DATABASE_URL_DOCKER` | 由上面三项拼出 | 外部托管数据库时，覆盖容器内的整个连接串 |
 | `TEST_DATABASE_URL` | 空 | 设了就让 pytest 针对该库跑 |
+
+---
+
+## 演示数据与生产切换
+
+### 演示数据在哪里
+
+演示数据是代码里的 Python 常量，不是预置的数据库文件：
+
+| 文件 | 内容 |
+|---|---|
+| [app/seed/corpus.py](app/seed/corpus.py) | 148 个 L1–L4 流程节点、24 步标准工作流、33 个方法论工具 |
+| [app/seed/corpus_data.py](app/seed/corpus_data.py) | 8 个项目、KPI 与记录、异常、知识库、设计器模型、表单/规则、流程实例与任务、通知、4 个演示账号 |
+| [app/seed/benchmark_data.py](app/seed/benchmark_data.py) | SCOR / APQC PCF 框架、分类与 62 条流程映射 |
+| [app/seed/runner.py](app/seed/runner.py) | 按外键顺序写库；`seed_if_empty()` 负责判空 |
+
+触发方式：
+
+- **启动时自动灌**：`SEED_ON_STARTUP=true`（默认），且库里既没有流程架构、也没有账号；
+- **手动灌**：`python -m scripts.seed`；`--reset` 会清空重灌（丢业务数据），
+  `--benchmarks` 只重建对标框架。
+
+灌完之后，数据在 PostgreSQL 卷 `pgdata` 里。要彻底回到干净演示库：
+
+```bash
+docker compose down -v          # 删除 pgdata 卷，现有数据全部丢失
+docker compose --profile full up -d --build
+```
+
+### 切换生产环境
+
+生产**不要复用演示库**，也不要只删几张表：新建数据库/卷，用 `bootstrap` 初始化。
+
+1. 在 `.env` 里至少设置：
+
+```dotenv
+SECRET_KEY=<用 python -c "import secrets; print(secrets.token_urlsafe(48))" 生成>
+POSTGRES_PASSWORD=<强口令>
+SEED_ON_STARTUP=false
+CORS_ORIGINS=https://pms.example.com
+```
+
+1. 启动整栈：
+
+```bash
+docker compose --profile full up -d --build
+```
+
+1. 只灌参考数据 + 创建首个管理员（**不灌**演示流程/项目/KPI/实例）：
+
+```bash
+docker compose exec api python -m scripts.bootstrap \
+  --username admin --display-name 系统管理员
+```
+
+口令会交互式输入。自动化部署用环境变量：
+
+```bash
+docker compose exec -e BOOTSTRAP_ADMIN_PASSWORD='<强口令>' api \
+  python -m scripts.bootstrap
+```
+
+`bootstrap` 灌入的是生产也需要的基础数据：24 步工作流、33 个工具、
+SCOR/APQC 框架与分类（**不含**流程映射，等公司流程录入后再维护）。
+完全空系统可加 `--skip-reference`；同名管理员忘记口令可加 `--reset-password`。
+
+1. 用管理员登录，再通过界面/API 创建真实流程、项目与账号。
+
+注意事项：
+
+- `SEED_ON_STARTUP` 在生产必须设为 `false`。即使误设为 `true`，
+  `seed_if_empty()` 发现库里已有账号也会跳过演示数据。
+- 多副本部署把 `AUTO_MIGRATE` 设为 `false`，在发布流程里单独跑一次
+  `alembic upgrade head`，再跑一次 `bootstrap`。
+- 外部托管 PostgreSQL 用 `DATABASE_URL_DOCKER` 覆盖容器连接串；
+  宿主机直接跑 uvicorn 时仍用 `DATABASE_URL`。
 
 ---
 
