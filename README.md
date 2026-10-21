@@ -111,13 +111,15 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
 种子数据：8 个流程项目、48 个流程节点、33 个工具、24 个标准步骤、15 个 KPI × 6 个月时序、
-8 条异常事件、9 篇知识条目、4 个演示用户。
+8 条异常事件、9 篇知识条目、4 个演示用户、2 套对标框架（71 个标准分类、62 条流程映射）。
 
 手动重灌：
 
 ```bash
 python -m scripts.seed            # 库为空时才灌，非空会提示并跳过
 python -m scripts.seed --reset    # 清空重灌
+python -m scripts.seed --benchmarks          # 只补灌 SCOR / APQC 对标数据
+python -m scripts.seed --benchmarks --reset  # 只重建对标数据，不动业务数据
 ```
 
 跑测试：
@@ -205,6 +207,7 @@ app/
     workflow.py     标准工作流的项目实例化与进度回算
     tool_finder.py  「按问题找工具」语义匹配
     dashboard.py    驾驶舱聚合
+    benchmark.py    对标框架：分类树、覆盖率、流程映射
   api/v1/       REST 路由
   seed/         内容底稿与灌库逻辑
 web/            前端（原生 ES 模块，无构建步骤）
@@ -305,6 +308,8 @@ pytest 里检查 import 路径是否存在、八个视图是否都注册且有 r
 | `kpi_definition` / `kpi_record` | KPI 定义与月度时序 |
 | `exception_event` | 异常事件闭环台账 |
 | `knowledge_item` | 案例 / 模板 / 最佳实践 / 标准 |
+| `benchmark_framework` / `benchmark_category` | 对标框架（SCOR / APQC PCF）的 L1–L5 标准分类树 |
+| `process_benchmark_map` | 公司流程 → 标准分类的多对多映射 |
 
 ---
 
@@ -324,6 +329,16 @@ pytest 里检查 import 路径是否存在、八个视图是否都注册且有 r
 | GET | `/process-map/flat` | 扁平清单，支持 `level` / `keyword` |
 | GET | `/process-map/heatmap` | 改善优先级热力图（CRITICAL / HIGH / MEDIUM / LOW） |
 | GET/POST/PATCH/DELETE | `/process-map[/{id}]` | 流程节点 CRUD |
+
+### 对标框架
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/benchmark/frameworks` | 框架清单（SCOR / APQC PCF），含分类数与已映射流程数 |
+| GET | `/benchmark/frameworks/{code}/tree` | 标准分类树，`max_level=1–5` |
+| GET | `/benchmark/frameworks/{code}/coverage` | 公司某层流程的覆盖率与缺口，`process_level=1–4` |
+| GET | `/benchmark/processes/{id}/mappings` | 单个流程在所有框架下的映射 |
+| POST | `/benchmark/mappings` | 新增流程 → 标准分类映射（MANAGER+） |
+| DELETE | `/benchmark/mappings/{id}` | 删除映射（MANAGER+） |
 
 ### 标准工作流
 | 方法 | 路径 | 说明 |
@@ -447,6 +462,46 @@ PCE 6.8%   等待占比 87.6%
 
 ---
 
+## 对标框架：SCOR 与 APQC PCF 可切换
+
+**为什么不做两套流程树**：SCOR 是供应链专用模型（Plan / Source / Make / Deliver /
+Return / Enable），APQC PCF 是跨行业企业流程框架（13 个 L1，含战略、研发、人事）。
+如果把两套分类直接混进 `process_arch`，同一份公司流程会被复制成两棵互不相干的树，
+项目、流程模型、KPI 的引用也会跟着框架漂移。
+
+当前采用**交叉映射**：
+
+```text
+process_arch（公司唯一流程架构，L1–L4）
+        │  多对多
+        ▼
+process_benchmark_map
+        │
+        ├── benchmark_category ── benchmark_framework(SCOR)
+        └── benchmark_category ── benchmark_framework(APQC_PCF)
+```
+
+- 切换框架只改变**参照树与覆盖率**，不改变业务数据；同一个流程可以同时映射到两套框架。
+- 覆盖率按**后代聚合**：流程自身或任一后代映射到该框架，即视为覆盖。所以同一份映射
+  在 L1 / L2 / L3 任一层都能看到有意义的覆盖率，不会出现「下层映射了、上层 0%」。
+- L1/L2 覆盖率接口的参数是 `process_level`，切换框架就是把 `{code}` 从 `SCOR`
+  换成 `APQC_PCF`；前端页面级切换器留到下一轮。
+
+**种子数据的实际对比**（L3 共 28 条流程）：
+
+| 框架 | 已覆盖 | 覆盖率 | 未覆盖 |
+|---|---|---|---|
+| SCOR | 24 / 28 | 85.7% | 新产品开发立项、工艺设计变更、试制与验证、费用报销 |
+| APQC PCF | 28 / 28 | 100% | — |
+
+SCOR 的缺口不是数据缺陷，而是框架边界：研发与费用报销本来就不属于供应链运作。
+这也验证了「两套框架适配不同」——切换后看到的不是同一份结果的换皮。
+
+> ⚠️ 内置的只是 L1/L2 **基线分类**，用于演示映射机制。正式对标前应替换为
+> ASCM / APQC 的授权版本全文，并补齐到 L3–L5；不要把这份数据当作官方框架全文。
+
+---
+
 ## 权限与审计
 
 **认证**：除 `/auth/login` 和 `/health` 外，所有接口都要求 `Authorization: Bearer <token>`。
@@ -541,7 +596,8 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 ## 第二阶段待办
 
 已完成：前端接后端、用户与权限、甘特图与里程碑、流程模型并发控制、时间语义统一、
-周期测算改为按图求期望值、切换 Docker PostgreSQL、引入 Alembic 迁移、前端模块化。还剩：
+周期测算改为按图求期望值、切换 Docker PostgreSQL、引入 Alembic 迁移、前端模块化、
+对标框架（SCOR / APQC PCF）的后端交叉映射。还剩：
 
 1. **流程挖掘对接**：接入 ERP/OA 日志，自动发现真实路径（`PROCESS-MINING` 工具已就位，缺数据管道）。
 2. **权限细化**：OWNER 归属已改为 `owner_user_id` 外键（项目 / 流程模型），
@@ -552,3 +608,5 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    数据库连接的 SSL 与备份策略也还没配。
 6. **前端事件委托**：模板仍用 `onclick` 内联属性，`main.js` 因此要把几十个函数挂到 `window`。
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
+7. **对标框架前端**：后端接口（分类树、覆盖率、映射 CRUD）已就绪，还缺流程地图上的
+   页面级框架切换器、覆盖率可视化和映射维护入口。

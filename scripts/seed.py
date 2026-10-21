@@ -1,8 +1,10 @@
 """灌种子数据。
 
 用法：
-    python -m scripts.seed            # 只在库为空时灌
-    python -m scripts.seed --reset    # 清空重灌（会丢掉已有业务数据）
+    python -m scripts.seed                 # 只在库为空时灌
+    python -m scripts.seed --reset         # 清空重灌（会丢掉已有业务数据）
+    python -m scripts.seed --benchmarks    # 只补灌对标框架数据（已有则跳过）
+    python -m scripts.seed --benchmarks --reset   # 只重建对标框架数据
 """
 
 from __future__ import annotations
@@ -22,12 +24,20 @@ import app.models  # noqa: F401,E402
 from app.core.config import settings  # noqa: E402
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
 from app.core.migrations import upgrade_head  # noqa: E402
-from app.seed.runner import reset_and_seed, seed_if_empty  # noqa: E402
+from app.seed.runner import (  # noqa: E402
+    reset_and_seed,
+    reset_benchmarks,
+    seed_benchmarks_if_empty,
+    seed_if_empty,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Logix PMS 种子数据灌库")
-    parser.add_argument("--reset", action="store_true", help="先清空所有表再灌")
+    parser.add_argument("--reset", action="store_true", help="先清空对应数据再灌")
+    parser.add_argument(
+        "--benchmarks", action="store_true", help="只处理对标框架数据，不动业务数据"
+    )
     args = parser.parse_args()
 
     # 与启动流程保持一致：默认走迁移，测试/临时环境才直接建表
@@ -37,7 +47,12 @@ def main() -> int:
         Base.metadata.create_all(bind=engine)
 
     with SessionLocal() as db:
-        if args.reset:
+        if args.benchmarks:
+            counts = reset_benchmarks(db) if args.reset else seed_benchmarks_if_empty(db)
+            if counts is None:
+                print("对标框架数据已存在，跳过。要重建请加 --benchmarks --reset。")
+                return 0
+        elif args.reset:
             counts = reset_and_seed(db)
         else:
             counts = seed_if_empty(db)

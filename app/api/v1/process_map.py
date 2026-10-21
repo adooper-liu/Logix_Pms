@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import DbSession, ManagerUser, apply_owner_update, resolve_owner
+from app.models.benchmark import ProcessBenchmarkMap
 from app.models.knowledge import KnowledgeItem
 from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -239,6 +240,10 @@ def delete_process(process_id: int, db: DbSession, user: ManagerUser):
     # 否则会留下孤儿节点——一旦新流程复用了同一个 id，就会「继承」别人的模型。
     db.query(ProcessNode).filter(ProcessNode.process_id.in_(ids)).delete(synchronize_session=False)
     db.query(ProcessEdge).filter(ProcessEdge.process_id.in_(ids)).delete(synchronize_session=False)
+    # SQLite 默认不强制外键，对标映射也要显式清理，避免留下孤儿记录
+    db.query(ProcessBenchmarkMap).filter(ProcessBenchmarkMap.process_id.in_(ids)).delete(
+        synchronize_session=False
+    )
     # 下级流程本体交给 ORM 的 children 级联删除，避免和已加载的会话对象打架
 
     # 引用型数据置空，而不是跟着删掉

@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
+from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
 from app.models.user import AuditLog, User
-from app.seed import corpus, corpus_data
+from app.seed import benchmark_data, corpus, corpus_data
 from app.services.workflow import recompute_progress, seed_project_steps
 
 # 设计器画布上的排布参数
@@ -177,6 +178,60 @@ def _seed_projects(
     return ids
 
 
+def _seed_benchmarks(db: Session, code_to_id: Dict[str, int]) -> None:
+    """对标框架、标准分类树与流程映射。"""
+    frameworks: Dict[str, BenchmarkFramework] = {}
+    for row in benchmark_data.BENCHMARK_FRAMEWORKS:
+        framework = BenchmarkFramework(
+            code=row["code"],
+            name=row["name"],
+            name_en=row.get("name_en"),
+            version=row.get("version"),
+            description=row.get("description"),
+            sort_order=row.get("sort_order", 0),
+        )
+        db.add(framework)
+        db.flush()
+        frameworks[framework.code] = framework
+
+    categories: Dict[str, Dict[str, BenchmarkCategory]] = {}
+    for row in sorted(benchmark_data.BENCHMARK_CATEGORIES, key=lambda r: r["level"]):
+        framework = frameworks.get(row["framework"])
+        if framework is None:
+            raise ValueError(f"对标分类 {row['code']} 引用了未知框架 {row['framework']}")
+        parent_code = row.get("parent")
+        parent = categories.get(row["framework"], {}).get(parent_code) if parent_code else None
+        if parent_code and parent is None:
+            raise ValueError(f"对标分类 {row['code']} 的父节点 {parent_code} 尚未入库，检查顺序")
+        category = BenchmarkCategory(
+            framework_id=framework.id,
+            code=row["code"],
+            name=row["name"],
+            name_en=row.get("name_en"),
+            level=row["level"],
+            parent_id=parent.id if parent else None,
+            sort_order=row.get("sort", 0),
+        )
+        db.add(category)
+        db.flush()
+        categories.setdefault(framework.code, {})[category.code] = category
+
+    for row in benchmark_data.PROCESS_BENCHMARK_MAP:
+        process_id = code_to_id.get(row["process"])
+        category = categories.get(row["framework"], {}).get(row["category"])
+        if process_id is None:
+            raise ValueError(f"对标映射引用了未知流程 {row['process']}")
+        if category is None:
+            raise ValueError(f"对标映射引用了未知分类 {row['framework']} / {row['category']}")
+        db.add(
+            ProcessBenchmarkMap(
+                process_id=process_id,
+                category_id=category.id,
+                note=row.get("note"),
+            )
+        )
+
+
 def _seed_kpis(db: Session, code_to_id: Dict[str, int]) -> None:
     periods = [date.fromisoformat(p) for p in corpus_data.KPI_PERIODS]
     for row in corpus_data.KPIS:
@@ -320,6 +375,7 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        ProcessBenchmarkMap,
         ProcessEdge,
         ProcessNode,
         ProjectStep,
@@ -337,6 +393,9 @@ def _wipe(db: Session) -> None:
         db.query(model).delete()
     for level in (4, 3, 2, 1):
         db.query(ProcessArch).filter(ProcessArch.level == level).delete()
+    for level in (5, 4, 3, 2, 1):
+        db.query(BenchmarkCategory).filter(BenchmarkCategory.level == level).delete()
+    db.query(BenchmarkFramework).delete()
     db.commit()
 
 
@@ -349,6 +408,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     code_to_id = _seed_process_arch(db, user_ids)
     _seed_workflow(db)
     _seed_tools(db)
+    _seed_benchmarks(db, code_to_id)
     project_ids = _seed_projects(db, code_to_id, user_ids)
     _seed_kpis(db, code_to_id)
     _seed_exceptions(db, code_to_id, project_ids)
@@ -370,6 +430,10 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "users": db.scalar(select(func.count()).select_from(User)) or 0,
         "process_nodes": db.scalar(select(func.count()).select_from(ProcessNode)) or 0,
         "process_edges": db.scalar(select(func.count()).select_from(ProcessEdge)) or 0,
+        "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
+        or 0,
+        "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,
+        "benchmark_mappings": db.scalar(select(func.count()).select_from(ProcessBenchmarkMap)) or 0,
     }
 
 
@@ -379,6 +443,43 @@ def seed_if_empty(db: Session) -> Optional[Dict[str, int]]:
     if existing:
         return None
     return seed(db, reset=False)
+
+
+def _benchmark_counts(db: Session) -> Dict[str, int]:
+    return {
+        "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
+        or 0,
+        "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,
+        "benchmark_mappings": db.scalar(select(func.count()).select_from(ProcessBenchmarkMap)) or 0,
+    }
+
+
+def seed_benchmarks_if_empty(db: Session) -> Optional[Dict[str, int]]:
+    """只灌对标框架数据；已有框架则跳过。用于存量库升级后的补灌。"""
+    existing = db.scalar(select(func.count()).select_from(BenchmarkFramework)) or 0
+    if existing:
+        return None
+    code_to_id = {p.code: p.id for p in db.scalars(select(ProcessArch)).all()}
+    if not code_to_id:
+        raise RuntimeError("流程架构为空，请先灌业务种子数据（python -m scripts.seed）")
+    _seed_benchmarks(db, code_to_id)
+    db.commit()
+    return _benchmark_counts(db)
+
+
+def reset_benchmarks(db: Session) -> Dict[str, int]:
+    """只重建对标框架数据，不动业务数据。"""
+    db.query(ProcessBenchmarkMap).delete()
+    for level in (5, 4, 3, 2, 1):
+        db.query(BenchmarkCategory).filter(BenchmarkCategory.level == level).delete()
+    db.query(BenchmarkFramework).delete()
+    db.commit()
+    code_to_id = {p.code: p.id for p in db.scalars(select(ProcessArch)).all()}
+    if not code_to_id:
+        raise RuntimeError("流程架构为空，请先灌业务种子数据（python -m scripts.seed）")
+    _seed_benchmarks(db, code_to_id)
+    db.commit()
+    return _benchmark_counts(db)
 
 
 def reset_and_seed(db: Session) -> Dict[str, int]:

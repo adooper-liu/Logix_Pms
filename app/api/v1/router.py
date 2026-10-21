@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_user
 from app.api.v1 import (
     auth,
+    benchmark,
     dashboard,
     designer,
     knowledge,
@@ -29,6 +30,7 @@ api_router.include_router(auth.audit_router)
 protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(dashboard.router)
 protected.include_router(process_map.router)
+protected.include_router(benchmark.router)
 protected.include_router(workflow.router)
 protected.include_router(projects.router)
 protected.include_router(tools.router)

@@ -3,6 +3,7 @@
 注意：导入顺序无关紧要，但必须全部被导入，否则 Base.metadata 不完整。
 """
 
+from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.enums import (
     AuditAction,
     ExceptionSeverity,
@@ -42,6 +43,9 @@ __all__ = [
     "KnowledgeTag",
     "User",
     "AuditLog",
+    "BenchmarkFramework",
+    "BenchmarkCategory",
+    "ProcessBenchmarkMap",
     # 枚举
     "Methodology",
     "ProjectStatus",
