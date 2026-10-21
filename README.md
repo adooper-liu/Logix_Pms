@@ -332,9 +332,10 @@ web/            前端（原生 ES 模块，无构建步骤）
     main.js       注册视图、接线 DOM、暴露模板所需函数、启动
 scripts/
   seed.py             命令行灌库
+  bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
   verify_frontend.py  无头浏览器联调自检（9 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
-docs/           使用指南、行业对标、信息架构、指标口径、BPMN 与集成说明
+docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件与集成说明
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
@@ -387,6 +388,8 @@ main.js
 所有指标的公式、阈值与边界见 [docs/metrics.md](docs/metrics.md)，
 页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入格式见
 [docs/integration.md](docs/integration.md)。
+BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实施顺序见
+[docs/bpmn-editor-and-attachments.md](docs/bpmn-editor-and-attachments.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
