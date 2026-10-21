@@ -41,6 +41,7 @@ from app.schemas.monitor import (
     RadarDimension,
 )
 from app.services import audit as audit_service
+from app.services import integrations as integration_service
 from app.services import notifications as notification_service
 
 router = APIRouter(prefix="/monitor", tags=["运营监控"])
@@ -121,6 +122,21 @@ def _to_exception_out(e: ExceptionEvent) -> ExceptionOut:
         and e.status in (ExceptionStatus.OPEN.value, ExceptionStatus.IN_PROGRESS.value)
     )
     return ExceptionOut.model_validate(data)
+
+
+def _exception_event(e: ExceptionEvent) -> dict:
+    return {
+        "exception_id": e.id,
+        "code": e.code,
+        "title": e.title,
+        "severity": e.severity,
+        "status": e.status,
+        "process_id": e.process_id,
+        "project_id": e.project_id,
+        "owner_user_id": e.owner_user_id,
+        "owner": e.owner,
+        "due_at": e.due_at,
+    }
 
 
 # ------------------------------------------------------------------ KPI
@@ -355,6 +371,7 @@ def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
             entity_type="exception",
             entity_id=obj.id,
         )
+    integration_service.enqueue(db, "exception.created", _exception_event(obj))
     audit_service.record(
         db, user, "CREATE", "exception", obj.id, f"登记异常 {obj.code} {obj.title}"
     )
@@ -419,6 +436,7 @@ def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession,
             # 否则台账会出现「未闭环但已有闭环时间」的矛盾记录
             obj.resolved_at = None
             obj.closed_at = None
+    integration_service.enqueue(db, "exception.updated", _exception_event(obj))
     audit_service.record(
         db,
         user,

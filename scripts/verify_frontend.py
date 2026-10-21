@@ -439,6 +439,14 @@ def main() -> int:
                 config_text = page.inner_text("#view")
                 assert "表单定义" in config_text and "需求发起" in config_text
                 assert "分支规则" in config_text and "审批通过" in config_text
+
+                page.click('#view .seg button:has-text("集成")')
+                page.wait_for_timeout(1000)
+                integration_text = page.inner_text("#view")
+                assert "集成端点" in integration_text and "ERP 事件接收" in integration_text
+                page.click('#view button:has-text("运行待发送")')
+                page.wait_for_timeout(800)
+                assert "没有待发送" in page.inner_text("#toast"), page.inner_text("#toast")
             finally:
                 if iid:
                     page.evaluate(

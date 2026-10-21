@@ -16,6 +16,7 @@ from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.enums import TaskStatus
 from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
+from app.models.integration import IntegrationDelivery, IntegrationEndpoint
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
@@ -450,6 +451,21 @@ def _seed_execution(
         )
 
 
+def _seed_integrations(db: Session) -> None:
+    """放一个未启用的 ERP 示例端点，演示但不产生真实外发。"""
+    db.add(
+        IntegrationEndpoint(
+            code="ERP-DEMO",
+            name="ERP 事件接收（示例）",
+            kind="ERP",
+            url="https://erp.example.com/hooks/logix",
+            secret="demo-secret-change-me",
+            events=["instance.completed", "exception.created"],
+            is_active=False,
+        )
+    )
+
+
 def _seed_notifications(db: Session, user_ids: Dict[str, int]) -> None:
     """给陈经理生成两条演示通知：一条任务指派、一条异常超期。"""
     chen_id = user_ids.get("陈经理")
@@ -611,6 +627,8 @@ def _wipe(db: Session) -> None:
         Project,
         WorkflowTemplate,
         Tool,
+        IntegrationDelivery,
+        IntegrationEndpoint,
         Notification,
         AuditLog,
         User,
@@ -642,6 +660,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)
     _seed_notifications(db, user_ids)
+    _seed_integrations(db)
     db.commit()
 
     return {
@@ -663,6 +682,10 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "form_definitions": db.scalar(select(func.count()).select_from(FormDefinition)) or 0,
         "process_rules": db.scalar(select(func.count()).select_from(ProcessRule)) or 0,
         "notifications": db.scalar(select(func.count()).select_from(Notification)) or 0,
+        "integration_endpoints": db.scalar(select(func.count()).select_from(IntegrationEndpoint))
+        or 0,
+        "integration_deliveries": db.scalar(select(func.count()).select_from(IntegrationDelivery))
+        or 0,
         "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,

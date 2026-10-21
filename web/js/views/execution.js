@@ -18,6 +18,8 @@ const renderExecution = () => {
     ]).then(async ([tasks, instances, processes]) => {
       let forms = [];
       let rules = [];
+      let endpoints = [];
+      let deliveries = [];
       if (ex.tab === 'config' && processes.length) {
         const pid = ex.configProcess || processes[0].id;
         ex.configProcess = pid;
@@ -26,7 +28,13 @@ const renderExecution = () => {
           GET('/execution/rules?process_id=' + pid),
         ]);
       }
-      return { tasks, instances, processes, forms, rules };
+      if (ex.tab === 'integrations') {
+        [endpoints, deliveries] = await Promise.all([
+          GET('/integrations/endpoints'),
+          GET('/integrations/deliveries?limit=100'),
+        ]);
+      }
+      return { tasks, instances, processes, forms, rules, endpoints, deliveries };
     }),
     (d) => {
       state.executionTasks = d.tasks;
@@ -34,6 +42,8 @@ const renderExecution = () => {
       state.executionProcesses = d.processes;
       state.executionForms = d.forms;
       state.executionRules = d.rules;
+      state.executionEndpoints = d.endpoints;
+      state.executionDeliveries = d.deliveries;
 
     const me = AUTH.user ? AUTH.user.id : null;
     const mine = d.tasks.filter((t) => t.assignee_user_id === me);
@@ -85,7 +95,9 @@ const renderExecution = () => {
         <button class="${ex.tab === 'tasks' ? 'on' : ''}" onclick="setExecutionTab('tasks')">待办任务</button>
         <button class="${ex.tab === 'instances' ? 'on' : ''}" onclick="setExecutionTab('instances')">流程实例</button>
         ${canManage() ? `<button class="${ex.tab === 'config' ? 'on' : ''}"
-          onclick="setExecutionTab('config')">表单与规则</button>` : ''}
+          onclick="setExecutionTab('config')">表单与规则</button>
+          <button class="${ex.tab === 'integrations' ? 'on' : ''}"
+          onclick="setExecutionTab('integrations')">集成</button>` : ''}
       </div>`;
 
     const taskPane = `
@@ -178,6 +190,54 @@ const renderExecution = () => {
         </div>
       </div>`;
 
+    const endpointRows = (d.endpoints || []).map((ep) => `
+      <tr><td><b>${esc(ep.code)}</b><div class="tiny">${esc(ep.url)}</div></td>
+        <td>${esc(ep.name)}<div class="tiny">${esc(ep.kind)}</div></td>
+        <td class="tiny">${(ep.events || []).length ? esc(ep.events.join('、')) : '全部事件'}</td>
+        <td>${ep.has_secret ? '<span class="tag t-blu">已签名</span>' : '<span class="muted">无签名</span>'}</td>
+        <td>${ep.is_active ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
+        <td><button class="btn-sm" onclick="editEndpointModal(${ep.id})">编辑</button>
+          <button class="btn-sm" onclick="deleteEndpoint(${ep.id})">删除</button></td></tr>`).join('')
+      || emptyRow(6, '暂无集成端点');
+    const deliveryRows = (d.deliveries || []).map((dl) => `
+      <tr><td><b>${esc(dl.event_type)}</b><div class="tiny">${esc(dl.endpoint_code)}</div></td>
+        <td><span class="tag ${dl.status === 'SUCCESS' ? 't-grn' : dl.status === 'FAILED' ? 't-red' : 't-yel'}">
+          ${esc(dl.status_label)}</span></td>
+        <td>${dl.attempts}</td>
+        <td class="tiny">${dtShort(dl.created_at)}</td>
+        <td class="tiny" style="max-width:260px">${dl.error ? esc(dl.error) : '—'}</td>
+        <td>${dl.status === 'SUCCESS' ? ''
+          : `<button class="btn-sm" onclick="retryDelivery(${dl.id})">重试</button>`}</td></tr>`).join('')
+      || emptyRow(6, '暂无投递记录');
+    const integrationsPane = !canManage()
+      ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
+      : `
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">集成端点</h3>
+            <div class="desc" style="margin:2px 0 0">业务事件写入 Outbox，由「运行待发送」统一投递；
+              配置 secret 后带 HMAC-SHA256 签名</div></div>
+          <div class="gap">
+            <button class="btn-sm" onclick="runDeliveries()">运行待发送</button>
+            <button class="btn-sm" onclick="editEndpointModal(null)">+ 新建端点</button>
+          </div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>端点</th><th>名称 / 类型</th><th>订阅事件</th><th>签名</th>
+            <th>状态</th><th></th></tr></thead>
+          <tbody>${endpointRows}</tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>投递记录</h3>
+        <div class="desc">失败最多重试 3 次；可手动重试。接收方应校验 X-Logix-Signature</div>
+        <table class="tbl">
+          <thead><tr><th>事件</th><th>状态</th><th>尝试</th><th>创建时间</th>
+            <th>错误</th><th></th></tr></thead>
+          <tbody>${deliveryRows}</tbody>
+        </table>
+      </div>`;
+
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
@@ -190,7 +250,7 @@ const renderExecution = () => {
         </div>
         <div class="mt">${tabs}</div>
       </div>
-      ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : taskPane}`;
+      ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : ex.tab === 'integrations' ? integrationsPane : taskPane}`;
     });
 };
 
@@ -209,6 +269,110 @@ function setExecutionConfigProcess(processId) {
   state.execution.configProcess = Number(processId);
   state.execution.tab = 'config';
   RENDERERS.execution();
+}
+
+/* -------------------------------------------------- ERP / OA 集成 */
+
+function editEndpointModal(endpointId) {
+  const endpoints = state.executionEndpoints || [];
+  const ep = endpointId ? endpoints.find((e) => e.id === endpointId) : null;
+  const kinds = ['WEBHOOK', 'ERP', 'OA'].map((kind) =>
+    `<option value="${kind}"${ep && ep.kind === kind ? ' selected' : ''}>${kind}</option>`).join('');
+  openModal(ep ? '编辑集成端点 · ' + ep.code : '新建集成端点', `
+    <div class="row2">
+      <div class="field"><label>编码 *</label>
+        <input id="ieCode" value="${esc(ep ? ep.code : '')}"${ep ? ' readonly' : ''}
+          placeholder="ERP-PROD"></div>
+      <div class="field"><label>名称 *</label>
+        <input id="ieName" value="${esc(ep ? ep.name : '')}" placeholder="ERP 生产事件接收"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>类型</label><select id="ieKind">${kinds}</select></div>
+      <div class="field"><label>状态</label>
+        <select id="ieActive">
+          <option value="true"${!ep || ep.is_active ? ' selected' : ''}>启用</option>
+          <option value="false"${ep && !ep.is_active ? ' selected' : ''}>停用</option>
+        </select></div>
+    </div>
+    <div class="field"><label>Webhook URL *</label>
+      <input id="ieUrl" value="${esc(ep ? ep.url : '')}"
+        placeholder="https://erp.example.com/hooks/logix"></div>
+    <div class="field"><label>签名密钥</label>
+      <input id="ieSecret" placeholder="${
+        ep && ep.has_secret ? '已配置，留空保持原值' : '留空表示不签名'
+      }"><div class="hint">配置后请求头带 X-Logix-Signature: sha256=...</div></div>
+    <div class="field"><label>订阅事件</label>
+      <input id="ieEvents" value="${esc((ep ? ep.events : []).join(', '))}"
+        placeholder="instance.started, task.completed；留空=全部">
+      <div class="hint">可用：instance.started / task.created / task.assigned / task.claimed /
+        task.completed / instance.completed / instance.cancelled / exception.created /
+        exception.updated / *</div></div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitEndpoint(${ep ? ep.id : 'null'})">保存</button>`);
+}
+
+async function submitEndpoint(endpointId) {
+  const code = document.getElementById('ieCode').value.trim();
+  const name = document.getElementById('ieName').value.trim();
+  const url = document.getElementById('ieUrl').value.trim();
+  const events = document.getElementById('ieEvents').value
+    .split(',').map((item) => item.trim()).filter(Boolean);
+  const payload = {
+    name,
+    kind: document.getElementById('ieKind').value,
+    url,
+    events,
+    is_active: document.getElementById('ieActive').value === 'true',
+  };
+  const secret = document.getElementById('ieSecret').value.trim();
+  if (secret) payload.secret = secret;
+  if (!name || !url) return toast('名称和 URL 必填', true);
+  try {
+    if (endpointId) {
+      await PATCH('/integrations/endpoints/' + endpointId, payload);
+    } else {
+      if (!code) return toast('编码必填', true);
+      await POST('/integrations/endpoints', { ...payload, code });
+    }
+    closeModal();
+    toast('集成端点已保存');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteEndpoint(endpointId) {
+  if (!confirm('确定删除这个集成端点？其投递记录会一并删除。')) return;
+  try {
+    await DEL('/integrations/endpoints/' + endpointId);
+    toast('集成端点已删除');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function runDeliveries() {
+  try {
+    const result = await POST('/integrations/deliveries/run', {});
+    toast(result.processed
+      ? `投递完成：成功 ${result.delivered}，失败 ${result.failed}，待发送 ${result.pending}`
+      : '没有待发送的投递');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function retryDelivery(deliveryId) {
+  try {
+    await POST('/integrations/deliveries/' + deliveryId + '/retry', {});
+    toast('已加入重试队列');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 /* -------------------------------------------------- 表单定义 */
@@ -601,8 +765,9 @@ async function cancelInstance(instanceId) {
 
 
 export {
-  renderExecution, cancelInstance, claimTask, completeTask, deleteForm, deleteRule,
-  editFormModal, editRuleModal, openInstance, openTask, setExecutionConfigProcess,
-  setExecutionFilter, setExecutionTab, startInstanceModal, submitForm, submitRule,
+  renderExecution, cancelInstance, claimTask, completeTask, deleteEndpoint, deleteForm,
+  deleteRule, editEndpointModal, editFormModal, editRuleModal, openInstance, openTask,
+  retryDelivery, runDeliveries, setExecutionConfigProcess, setExecutionFilter,
+  setExecutionTab, startInstanceModal, submitEndpoint, submitForm, submitRule,
   submitStartInstance,
 };

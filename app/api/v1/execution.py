@@ -30,6 +30,7 @@ from app.schemas.execution import (
 from app.services import audit as audit_service
 from app.services import execution as execution_service
 from app.services import forms as forms_service
+from app.services import integrations as integration_service
 from app.services import notifications as notification_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
@@ -274,6 +275,37 @@ def _notify_open_task(db, instance) -> None:
         )
 
 
+def _instance_event(instance) -> dict:
+    return {
+        "instance_id": instance.id,
+        "code": instance.code,
+        "process_id": instance.process_id,
+        "process_name": instance.process_name,
+        "project_id": instance.project_id,
+        "status": instance.status,
+        "current_node_key": instance.current_node_key,
+        "started_by_id": instance.started_by_id,
+        "started_by_name": instance.started_by_name,
+        "started_at": instance.started_at,
+    }
+
+
+def _task_event(task) -> dict:
+    return {
+        "task_id": task.id,
+        "instance_id": task.instance_id,
+        "instance_code": task.instance.code,
+        "process_name": task.instance.process_name,
+        "node_key": task.node_key,
+        "name": task.name,
+        "task_type": task.task_type,
+        "status": task.status,
+        "assignee_user_id": task.assignee_user_id,
+        "assignee_name": task.assignee_name,
+        "created_at": task.created_at,
+    }
+
+
 # ------------------------------------------------------------------ 实例
 
 
@@ -304,6 +336,10 @@ def start_instance(payload: InstanceStartRequest, db: DbSession, user: WriteUser
         raise HTTPException(status_code=404, detail="流程不存在")
     instance = execution_service.start_instance(db, process, user, payload)
     _notify_open_task(db, instance)
+    integration_service.enqueue(db, "instance.started", _instance_event(instance))
+    opened = _open_task(db, instance.id)
+    if opened is not None:
+        integration_service.enqueue(db, "task.created", _task_event(opened))
     audit_service.record(
         db,
         user,
@@ -333,6 +369,7 @@ def get_instance(instance_id: int, db: DbSession):
 def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
     execution_service.cancel_instance(db, instance)
+    integration_service.enqueue(db, "instance.cancelled", _instance_event(instance))
     notification_service.notify(
         db,
         instance.started_by_id,
@@ -417,6 +454,7 @@ def get_task(task_id: int, db: DbSession):
 def claim_task(task_id: int, db: DbSession, user: WriteUser):
     task = execution_service.get_task(db, task_id)
     execution_service.claim_task(db, task, user)
+    integration_service.enqueue(db, "task.claimed", _task_event(task))
     audit_service.record(
         db, user, "UPDATE", "process_task", task.id, f"认领任务 {task.name}（{task.instance.code}）"
     )
@@ -445,6 +483,13 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
             )
     else:
         _notify_open_task(db, instance)
+    integration_service.enqueue(db, "task.completed", _task_event(task))
+    if instance.status == InstanceStatus.COMPLETED.value:
+        integration_service.enqueue(db, "instance.completed", _instance_event(instance))
+    else:
+        following = _open_task(db, instance.id)
+        if following is not None:
+            integration_service.enqueue(db, "task.created", _task_event(following))
     audit_service.record(
         db,
         user,
@@ -466,6 +511,7 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
 def assign_task(task_id: int, payload: TaskAssignRequest, db: DbSession, user: ManagerUser):
     task = execution_service.get_task(db, task_id)
     execution_service.assign_task(db, task, payload.assignee_user_id)
+    integration_service.enqueue(db, "task.assigned", _task_event(task))
     if task.assignee_user_id is not None:
         notification_service.notify(
             db,

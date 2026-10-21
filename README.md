@@ -128,7 +128,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
-种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、33 个工具、24 个标准步骤、
+种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
 2 套对标框架（71 个标准分类、249 条流程映射）。
 
@@ -223,6 +223,7 @@ app/
   services/     业务逻辑
     execution.py    流程执行：实例、任务队列、分支推进
     bpmn.py         BPMN 2.0 导入/导出（结构子集）
+    integrations.py ERP/OA Webhook Outbox：投递、签名、重试
     methodology.py  立项向导：BPR / BPI / 精益 / 混合 自动匹配
     designer.py     流程设计器：周期效率测算 + 9 条改善建议规则
     workflow.py     标准工作流的项目实例化与进度回算
@@ -254,7 +255,7 @@ scripts/
   seed.py             命令行灌库
   verify_frontend.py  无头浏览器联调自检（9 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
-docs/           行业对标、信息架构、指标口径与可视化选型
+docs/           行业对标、信息架构、指标口径、BPMN 与集成说明
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
@@ -305,7 +306,8 @@ main.js
 并自动带上状态、阶段或方法论筛选。逐页的元素关系与可视化选型见
 [docs/ui-information-architecture.md](docs/ui-information-architecture.md)；
 所有指标的公式、阈值与边界见 [docs/metrics.md](docs/metrics.md)，
-页面上带 `?` 的指标可以直接悬停查看简版口径。
+页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入格式见
+[docs/integration.md](docs/integration.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
@@ -355,6 +357,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
 | `notification` | 站内通知：任务指派、流程完成、异常超期、里程碑逾期 |
+| `integration_endpoint` / `integration_delivery` | ERP/OA Webhook 端点与 Outbox 投递记录 |
 | `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
 | `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
@@ -438,6 +441,16 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | POST | `/notifications/{id}/read` | 标记单条已读 |
 | POST | `/notifications/read-all` | 全部已读 |
 | POST | `/notifications/scan` | 扫描逾期异常/里程碑并生成提醒（MANAGER+） |
+
+### ERP / OA 集成
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/integrations/events` | 可订阅事件类型 |
+| GET/POST | `/integrations/endpoints` | 端点列表 / 新建（写入需 MANAGER+） |
+| PATCH/DELETE | `/integrations/endpoints/{id}` | 修改 / 删除端点（MANAGER+） |
+| GET | `/integrations/deliveries` | 投递记录，支持 status / limit |
+| POST | `/integrations/deliveries/run` | 投递待发送事件（MANAGER+） |
+| POST | `/integrations/deliveries/{id}/retry` | 手动重试（MANAGER+） |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |
@@ -697,5 +710,5 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
-8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、BPMN 2.0 导入导出；
-   下一步补并行网关与子流程、通知与 ERP/OA 集成。
+8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、BPMN 2.0 导入导出、站内通知、
+   ERP/OA 出站 Webhook；下一步补并行网关与子流程、入站 Webhook/拉取接口、定时投递。

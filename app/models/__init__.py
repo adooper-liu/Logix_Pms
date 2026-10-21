@@ -23,6 +23,7 @@ from app.models.enums import (
     ToolCategory,
 )
 from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
+from app.models.integration import IntegrationDelivery, IntegrationEndpoint
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
@@ -55,6 +56,8 @@ __all__ = [
     "FormDefinition",
     "ProcessRule",
     "Notification",
+    "IntegrationEndpoint",
+    "IntegrationDelivery",
     # 枚举
     "Methodology",
     "ProjectStatus",

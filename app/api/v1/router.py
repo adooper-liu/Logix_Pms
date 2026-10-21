@@ -13,6 +13,7 @@ from app.api.v1 import (
     dashboard,
     designer,
     execution,
+    integrations,
     knowledge,
     monitor,
     notifications,
@@ -36,6 +37,7 @@ protected.include_router(benchmark.router)
 protected.include_router(workflow.router)
 protected.include_router(projects.router)
 protected.include_router(execution.router)
+protected.include_router(integrations.router)
 protected.include_router(tools.router)
 protected.include_router(designer.router)
 protected.include_router(monitor.router)
