@@ -23,6 +23,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import audit as audit_service
+from app.services import ownership as ownership_service
 
 router = APIRouter(prefix="/auth", tags=["认证与权限"])
 audit_router = APIRouter(prefix="/audit", tags=["审计"])
@@ -100,8 +101,12 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
     password = data.pop("password", None)
     if "role" in data and data["role"] is not None:
         data["role"] = data["role"].value
+    old_display_name = obj.display_name
     for field, value in data.items():
         setattr(obj, field, value)
+    if obj.display_name != old_display_name:
+        # owner 文本是展示标签，跟着账号改名走；权限仍只看 owner_user_id
+        ownership_service.sync_owner_display_name(db, obj)
     if password:
         obj.password_hash = hash_password(password)
     audit_service.record(db, admin, "UPDATE", "user", obj.id, f"修改用户 {obj.username}")

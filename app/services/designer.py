@@ -215,7 +215,8 @@ def _aggregate(
             # 增值时间只算「一次通过」：返工是同一个步骤的重复执行，
             # 按精益的定义属于浪费，不能计进增值时间——否则 PCE 会虚高。
             agg.value_added += node.duration_minutes * n_entries
-        agg.cost += node.cost * n_entries
+        # 成本与时间同口径：返工意味着同一动作要再做一次，成本也要重复计
+        agg.cost += node.cost * mult * n_entries
     return agg
 
 

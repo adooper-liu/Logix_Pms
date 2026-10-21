@@ -468,7 +468,8 @@ def test_design_get_and_analyze(client):
     assert m["wait_ratio"] == 0.876
     assert m["rework_loss_minutes"] == 3314.9
     assert m["rework_work_minutes"] == 434.5
-    assert m["unit_cost"] == 57.71
+    # 成本与时间同口径：n2 返工率 25%、n6 返工率 35%，重复执行的成本也要计入
+    assert m["unit_cost"] == 65.51
     assert m["has_branch_or_loop"] is True
     assert m["diverged"] is False
 
@@ -503,6 +504,30 @@ def test_design_get_and_analyze(client):
     assert data["recommended_methodology"] == "BPR"
     # 建议按严重度排序，HIGH 在最前
     assert data["suggestions"][0]["severity"] == "HIGH"
+
+
+def test_rework_cost_counts_repeated_execution(client):
+    """返工 50% → 期望执行 2 次，成本也必须按 2 次计，不能只放大时间。"""
+    payload = {
+        "nodes": [
+            {
+                "node_key": "A",
+                "name": "返工节点",
+                "node_type": "TASK",
+                "lane": "主流程",
+                "duration_minutes": 10,
+                "wait_minutes": 0,
+                "cost": 100,
+                "rework_rate": 0.5,
+                "is_value_added": True,
+                "sequence_order": 1,
+            }
+        ],
+        "edges": [],
+    }
+    m = client.post(f"{API}/design/analyze", json=payload).json()["metrics"]
+    assert m["process_time_minutes"] == 20.0
+    assert m["unit_cost"] == 200.0
 
 
 def test_design_inline_analyze(client):
@@ -1159,3 +1184,11 @@ def test_knowledge_crud_and_read(client):
     assert patched.json()["summary"] == "改过的摘要"
 
     assert client.delete(f"{API}/knowledge/{kid}").status_code == 200
+
+
+def test_lower_better_zero_value_is_full_achievement():
+    """零缺陷/零客诉这类指标，实际值 0 就是达成目标，不能算成空值。"""
+    from app.api.v1.monitor import _achievement
+
+    assert _achievement("LOWER_BETTER", 0, 5) == 100.0
+    assert _achievement("LOWER_BETTER", 10, 5) == 50.0

@@ -85,6 +85,15 @@ class ExceptionEvent(Base):
     status: Mapped[str] = mapped_column(String(16), index=True, default="OPEN")
 
     owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_exception_event_owner_user_id_app_user",
+        ),
+        nullable=True,
+        index=True,
+    )
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

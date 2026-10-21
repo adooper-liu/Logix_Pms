@@ -3,7 +3,7 @@ import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI
 import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
-import { canWrite, canManage } from '../core/auth.js';
+import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { GET, POST, PATCH } from '../core/api.js';
 
 /* ============================================================ 7. 运营监控与KPI */
@@ -37,7 +37,7 @@ const renderMonitor = () => {
         let reach = null;
         if (latest !== null && s.target_value) {
           reach = s.direction === 'LOWER_BETTER'
-            ? (latest > 0 ? (s.target_value / latest) * 100 : null)
+            ? (latest > 0 ? (s.target_value / latest) * 100 : (latest === 0 ? 100 : null))
             : (latest / s.target_value) * 100;
         }
         return `
@@ -60,7 +60,10 @@ const renderMonitor = () => {
           </tr>`;
       }).join('') || emptyRow(7, '暂无 KPI');
 
-      const excRows = d.exceptions.map((e) => `
+      const excRows = d.exceptions.map((e) => {
+        const canEdit = canManage()
+          || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
+        return `
         <tr>
           <td class="tiny">${dtShort(e.detected_at)}</td>
           <td>${esc(e.title)}<div class="tiny">${esc(e.code)}${
@@ -68,8 +71,9 @@ const renderMonitor = () => {
           <td><span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span></td>
           <td>${e.owner ? esc(e.owner) : '<span class="muted">未指派</span>'}</td>
           <td><span class="tag ${EXC_COLOR[e.status]}">${EXC_LABEL[e.status]}</span></td>
-          <td><button class="btn-sm" onclick="openException(${e.id})">处理</button></td>
-        </tr>`).join('') || emptyRow(6, '没有符合条件的异常事件');
+          <td><button class="btn-sm" onclick="openException(${e.id})">${canEdit ? '处理' : '查看'}</button></td>
+        </tr>`;
+      }).join('') || emptyRow(6, '没有符合条件的异常事件');
 
       const s = d.summary;
       viewEl().innerHTML = `
@@ -261,6 +265,9 @@ async function openException(id) {
     const e = await GET('/monitor/exceptions/' + id);
     if (!modalAlive(gen)) return;
     state.currentException = e;
+    const canEdit = canManage()
+      || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
+    const manager = canManage();
     const statusOpts = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((v) =>
       '<option value="' + v + '"' + (e.status === v ? ' selected' : '') + '>' + EXC_LABEL[v] + '</option>').join('');
     openModal(e.title, `
@@ -276,18 +283,19 @@ async function openException(id) {
       <div class="field"><label>异常描述</label><textarea readonly>${esc(e.description || '—')}</textarea></div>
       <div class="row2">
         <div class="field"><label>责任人</label>
-          <input id="exOwner" value="${esc(e.owner || '')}" placeholder="指派处理人"></div>
+          <input id="exOwner" value="${esc(e.owner || '')}" placeholder="指派处理人"${manager ? '' : ' readonly'}></div>
         <div class="field"><label>状态</label>
-          <select id="exStatus">${statusOpts}</select></div>
+          <select id="exStatus"${canEdit ? '' : ' disabled'}>${statusOpts}</select></div>
       </div>
       <div class="field"><label>根因分析</label>
-        <textarea id="exCause" placeholder="用 5 Why 追到可干预的根因">${esc(e.root_cause || '')}</textarea></div>
+        <textarea id="exCause" placeholder="用 5 Why 追到可干预的根因"${canEdit ? '' : ' readonly'}>${esc(e.root_cause || '')}</textarea></div>
       <div class="field"><label>采取的措施</label>
-        <textarea id="exAction" placeholder="做了什么、效果如何">${esc(e.action_taken || '')}</textarea></div>
+        <textarea id="exAction" placeholder="做了什么、效果如何"${canEdit ? '' : ' readonly'}>${esc(e.action_taken || '')}</textarea></div>
       ${e.resolved_at ? '<div class="note">解决时间：' + esc(dtShort(e.resolved_at)) +
-        (e.closed_at ? ' · 关闭时间：' + esc(dtShort(e.closed_at)) : '') + '</div>' : ''}`,
-      `<button class="btn btn-g" onclick="closeModal()">取消</button>
-       <button class="btn btn-p" onclick="saveException(${e.id})">保存</button>`);
+        (e.closed_at ? ' · 关闭时间：' + esc(dtShort(e.closed_at)) : '') + '</div>' : ''}
+      ${canEdit ? '' : '<div class="note">只读：仅流程管理科、系统管理员或该异常的责任人可以处理。</div>'}`,
+      `<button class="btn btn-g" onclick="closeModal()">${canEdit ? '取消' : '关闭'}</button>
+       ${canEdit ? '<button class="btn btn-p" onclick="saveException(' + e.id + ')">保存</button>' : ''}`);
   } catch (err) {
     if (modalAlive(gen)) openModal('加载失败', '<div class="errbar"><div>' + esc(err.message) + '</div></div>');
   }
@@ -324,7 +332,9 @@ async function newExceptionModal() {
           <option value="LOW">低</option><option value="MEDIUM" selected>中</option>
           <option value="HIGH">高</option><option value="CRITICAL">紧急</option>
         </select></div>
-      <div class="field"><label>责任人</label><input id="neOwner" placeholder="处理人"></div>
+      <div class="field"><label>责任人</label><input id="neOwner" value="${
+        role() === 'OWNER' && AUTH.user ? esc(AUTH.user.display_name) : ''
+      }" placeholder="处理人"${role() === 'OWNER' ? ' readonly' : ''}></div>
       <div class="field"><label>要求闭环时间</label><input id="neDue" type="datetime-local"></div>
     </div>
     <div class="field"><label>关联流程</label>

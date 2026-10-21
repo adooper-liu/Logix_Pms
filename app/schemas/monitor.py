@@ -100,6 +100,9 @@ class ExceptionCreate(BaseModel):
     process_id: Optional[int] = None
     project_id: Optional[int] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = Field(
+        default=None, description="责任账号 id，权限判断以它为准；不传则按 owner 姓名尝试绑定"
+    )
     due_at: Optional[UtcDateTimeIn] = None
 
 
@@ -109,6 +112,9 @@ class ExceptionUpdate(BaseModel):
     severity: Optional[ExceptionSeverity] = None
     status: Optional[ExceptionStatus] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = Field(
+        default=None, description="责任账号 id；显式传 null 表示解绑，仅改 owner 文本会重新尝试绑定"
+    )
     due_at: Optional[UtcDateTimeIn] = None
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
@@ -124,6 +130,7 @@ class ExceptionOut(ORMModel):
     process_id: Optional[int] = None
     project_id: Optional[int] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
     detected_at: UtcDateTime
     due_at: Optional[UtcDateTime] = None
     resolved_at: Optional[UtcDateTime] = None

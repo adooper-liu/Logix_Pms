@@ -8,9 +8,22 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
-from app.api.deps import DbSession, ManagerUser, WriteUser
+from app.api.deps import (
+    DbSession,
+    ManagerUser,
+    WriteUser,
+    apply_owner_update,
+    ensure_can_edit_owned,
+    resolve_owner,
+)
 from app.core.timeutil import utcnow
-from app.models.enums import ExceptionSeverity, ExceptionStatus, KpiDimension, KpiDirection
+from app.models.enums import (
+    ExceptionSeverity,
+    ExceptionStatus,
+    KpiDimension,
+    KpiDirection,
+    Role,
+)
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.schemas.common import DeleteResult, as_columns
 from app.schemas.monitor import (
@@ -53,7 +66,9 @@ def _achievement(
         return None
     if direction == KpiDirection.LOWER_BETTER.value:
         if value <= 0:
-            return None
+            # 越小越好的指标实际值为 0（例如零缺陷/零客诉）就是达成目标，
+            # 不能因为除法无意义就返回空值，否则雷达图会把最好的情况漏掉
+            return 100.0
         return round(target / value * 100, 1)
     return round(value / target * 100, 1)
 
@@ -317,7 +332,15 @@ def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
             seq = max(seq, int(code.rsplit("-", 1)[1]))
         except (IndexError, ValueError):
             continue
-    obj = ExceptionEvent(code=f"{prefix}{seq + 1:03d}", **as_columns(payload.model_dump()))
+    data = as_columns(payload.model_dump())
+    data["owner_user_id"], data["owner"] = resolve_owner(
+        db, data.get("owner_user_id"), data.get("owner")
+    )
+    # 流程 Owner 登记异常时挂在自己名下，与项目的归属规则保持一致
+    if user.role == Role.OWNER.value:
+        data["owner_user_id"] = user.id
+        data["owner"] = user.display_name
+    obj = ExceptionEvent(code=f"{prefix}{seq + 1:03d}", **data)
     db.add(obj)
     db.flush()
     audit_service.record(
@@ -343,9 +366,16 @@ def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession,
     obj = db.get(ExceptionEvent, exception_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="异常事件不存在")
+    ensure_can_edit_owned(user, obj.owner_user_id, obj.owner)
     previous_status = obj.status
 
     data = as_columns(payload.model_dump(exclude_unset=True))
+    if user.role == Role.OWNER.value:
+        # 责任人不由 OWNER 自己变更
+        data.pop("owner", None)
+        data.pop("owner_user_id", None)
+    else:
+        apply_owner_update(db, data, obj.owner)
     for field, value in data.items():
         setattr(obj, field, value)
 
@@ -379,6 +409,7 @@ def delete_exception(exception_id: int, db: DbSession, user: WriteUser):
     obj = db.get(ExceptionEvent, exception_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="异常事件不存在")
+    ensure_can_edit_owned(user, obj.owner_user_id, obj.owner)
     audit_service.record(
         db, user, "DELETE", "exception", obj.id, f"删除异常 {obj.code} {obj.title}"
     )

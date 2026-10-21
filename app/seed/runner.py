@@ -254,7 +254,12 @@ def _seed_kpis(db: Session, code_to_id: Dict[str, int]) -> None:
             db.add(KpiRecord(kpi_id=kpi.id, period=period, value=float(value)))
 
 
-def _seed_exceptions(db: Session, code_to_id: Dict[str, int], project_ids: Dict[str, int]) -> None:
+def _seed_exceptions(
+    db: Session,
+    code_to_id: Dict[str, int],
+    project_ids: Dict[str, int],
+    user_ids: Dict[str, int],
+) -> None:
     for row in corpus_data.EXCEPTIONS:
         detected = _parse_dt(row.get("detected_at")) or utcnow()
         settled = _parse_dt(row.get("due_at")) or detected
@@ -269,6 +274,7 @@ def _seed_exceptions(db: Session, code_to_id: Dict[str, int], project_ids: Dict[
                 process_id=code_to_id.get(row["process"]) if row.get("process") else None,
                 project_id=project_ids.get(row["project"]) if row.get("project") else None,
                 owner=row.get("owner"),
+                owner_user_id=_owner_user_id(row.get("owner"), user_ids),
                 detected_at=detected,
                 due_at=_parse_dt(row.get("due_at")),
                 resolved_at=settled if row["status"] in ("RESOLVED", "CLOSED") else None,
@@ -411,7 +417,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_benchmarks(db, code_to_id)
     project_ids = _seed_projects(db, code_to_id, user_ids)
     _seed_kpis(db, code_to_id)
-    _seed_exceptions(db, code_to_id, project_ids)
+    _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids)
     _seed_design_models(db, code_to_id)
     db.commit()

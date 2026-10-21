@@ -345,3 +345,98 @@ def test_audit_records_actor(client):
 
 def test_viewer_cannot_read_audit(viewer_client):
     assert viewer_client.get(f"{API}/audit").status_code == 403
+
+
+# ------------------------------------------------------------------ 异常归属
+
+
+def test_owner_can_edit_own_exception(owner_client):
+    me = owner_client.get(f"{API}/auth/me").json()["id"]
+    rows = owner_client.get(f"{API}/monitor/exceptions").json()
+    mine = next(e for e in rows if e["owner_user_id"] == me)
+
+    changed = owner_client.patch(
+        f"{API}/monitor/exceptions/{mine['id']}", json={"status": "RESOLVED"}
+    )
+    assert changed.status_code == 200, changed.text
+    # 恢复种子状态，避免影响同一会话里的其他断言
+    owner_client.patch(f"{API}/monitor/exceptions/{mine['id']}", json={"status": mine["status"]})
+
+
+def test_owner_cannot_edit_others_exception(owner_client):
+    me = owner_client.get(f"{API}/auth/me").json()["id"]
+    rows = owner_client.get(f"{API}/monitor/exceptions").json()
+    other = next(e for e in rows if e["owner_user_id"] != me)
+
+    assert (
+        owner_client.patch(
+            f"{API}/monitor/exceptions/{other['id']}", json={"status": "RESOLVED"}
+        ).status_code
+        == 403
+    )
+    assert owner_client.delete(f"{API}/monitor/exceptions/{other['id']}").status_code == 403
+
+
+def test_owner_created_exception_is_bound_to_self(owner_client):
+    me = owner_client.get(f"{API}/auth/me").json()["id"]
+    created = owner_client.post(
+        f"{API}/monitor/exceptions",
+        json={"title": "Owner 自建异常", "severity": "LOW", "owner": "冒名顶替"},
+    )
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert data["owner_user_id"] == me
+    assert data["owner"] == "陈经理"
+    assert owner_client.delete(f"{API}/monitor/exceptions/{data['id']}").status_code == 200
+
+
+def test_manager_can_bind_exception_owner(manager_client, owner_client):
+    chen_id = owner_client.get(f"{API}/auth/me").json()["id"]
+    created = manager_client.post(
+        f"{API}/monitor/exceptions",
+        json={"title": "按账号指派异常", "severity": "MEDIUM", "owner_user_id": chen_id},
+    )
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert data["owner_user_id"] == chen_id
+    assert data["owner"] == "陈经理"
+    assert (
+        owner_client.patch(
+            f"{API}/monitor/exceptions/{data['id']}", json={"status": "IN_PROGRESS"}
+        ).status_code
+        == 200
+    )
+    assert manager_client.delete(f"{API}/monitor/exceptions/{data['id']}").status_code == 200
+
+
+# ------------------------------------------------------------------ 标签同步
+
+
+def test_renaming_user_syncs_owner_labels(client):
+    created_user = client.post(
+        f"{API}/auth/users",
+        json={
+            "username": "label_owner",
+            "display_name": "旧名字",
+            "password": "label12345",
+            "role": "OWNER",
+        },
+    )
+    assert created_user.status_code == 201, created_user.text
+    uid = created_user.json()["id"]
+
+    project = client.post(
+        f"{API}/projects",
+        json={"name": "标签同步测试", "methodology": "BPI", "owner_user_id": uid},
+    )
+    assert project.status_code == 201, project.text
+    assert project.json()["owner"] == "旧名字"
+    pid = project.json()["id"]
+
+    renamed = client.patch(f"{API}/auth/users/{uid}", json={"display_name": "新名字"})
+    assert renamed.status_code == 200, renamed.text
+    refreshed = client.get(f"{API}/projects/{pid}").json()["project"]
+    assert refreshed["owner"] == "新名字", "改名后展示标签应同步，权限判断仍看 owner_user_id"
+    assert refreshed["owner_user_id"] == uid
+
+    assert client.delete(f"{API}/projects/{pid}").status_code == 200
