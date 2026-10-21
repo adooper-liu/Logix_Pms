@@ -503,6 +503,38 @@ OWNER 的归属判断目前按**姓名文本**匹配（`user.display_name == pro
 
 ---
 
+## 开发纪律
+
+详细约定见 [CLAUDE.md](CLAUDE.md)（那份文件同时是给 AI 助手的作业规范）。这里只列执行层面。
+
+**一条命令跑全部检查**（与 CI 一致）：
+
+```bash
+python scripts/check.py          # 格式 + 静态检查 + 测试
+python scripts/check.py --fix    # 自动修复后再检查
+python scripts/check.py --fast   # 只跑 lint
+```
+
+Windows 上通常没有 `make`，所以入口是 Python 脚本而不是 Makefile；
+`Makefile` 保留给 CI 和类 Unix 环境。
+
+**提交前自动检查**：`pre-commit install` 之后，每次 `git commit` 会跑
+ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 `language: system`
+的本地钩子，不会去拉远端仓库——内网环境不会卡住。
+
+**CI**：`.github/workflows/ci.yml` 在 SQLite 与 PostgreSQL 两个后端上分别跑一遍测试，
+矩阵里的 `TEST_DATABASE_URL` 决定用哪个。
+
+**提交信息**用 Conventional Commits：`feat:` / `fix:` / `refactor:` / `test:` / `docs:` / `chore:`。
+分支用 `main` + 短生命周期分支，不合长时间存在的开发分支。
+
+**静态检查的规则集是收敛过的**，只选 `E / F / I / B`（语法级错误、未使用导入、
+导入排序、易错写法）。刻意**没开** `UP`（pyupgrade）——它会把 `Optional[X]` 批量改成
+`X | None`、`Dict` 改成 `dict`，一次三百多处改动，收益全在好看，风险却不小。
+那应该是一轮独立的、可单独 review 的重构，不能混在业务改动里。
+
+---
+
 ## 第二阶段待办
 
 已完成：前端接后端、用户与权限、甘特图与里程碑、流程模型并发控制、时间语义统一、
