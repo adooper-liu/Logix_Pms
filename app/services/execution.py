@@ -32,6 +32,7 @@ from app.schemas.execution import (
     TaskCompleteRequest,
     TaskOut,
 )
+from app.services import forms as forms_service
 
 INSTANCE_LABELS = {
     InstanceStatus.RUNNING.value: "运行中",
@@ -106,6 +107,8 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
             }
             for e in edges
         ],
+        "forms": forms_service.form_snapshot(db, process.id),
+        "rules": forms_service.rule_snapshot(db, process.id),
     }
 
 
@@ -284,16 +287,13 @@ def complete_task(
         task.claimed_at = utcnow()
 
     outgoing = _outgoing(instance.snapshot, task.node_key)
+    form = forms_service.form_for_snapshot(instance.snapshot, task.node_key)
+    fields = form.get("fields", []) if form else []
+    form_data = forms_service.validate_form_data(fields, payload.form_data)
+    context = {**(instance.variables or {}), **form_data}
+
     next_key: Optional[str] = None
-    if len(outgoing) == 1:
-        next_key = outgoing[0]["dst"]
-    elif len(outgoing) > 1:
-        if not payload.next_node_key:
-            options = "、".join(f"{e['dst']}" for e in outgoing)
-            raise HTTPException(
-                status_code=400,
-                detail=f"该节点有多个分支，请用 next_node_key 指定下一步（可选：{options}）",
-            )
+    if payload.next_node_key:
         targets = {e["dst"] for e in outgoing}
         if payload.next_node_key not in targets:
             raise HTTPException(
@@ -301,12 +301,31 @@ def complete_task(
                 detail=f"next_node_key 不在该节点的出边目标中（可选：{'、'.join(sorted(targets))}）",
             )
         next_key = payload.next_node_key
+    else:
+        rule_target = forms_service.evaluate_rules(
+            (instance.snapshot.get("rules") or {}).get(task.node_key, []), context
+        )
+        if rule_target:
+            targets = {e["dst"] for e in outgoing}
+            if rule_target not in targets:
+                raise HTTPException(
+                    status_code=400, detail=f"规则目标 {rule_target} 不是该节点的出边目标"
+                )
+            next_key = rule_target
+        elif len(outgoing) == 1:
+            next_key = outgoing[0]["dst"]
+        elif len(outgoing) > 1:
+            options = "、".join(f"{e['dst']}" for e in outgoing)
+            raise HTTPException(
+                status_code=400,
+                detail=f"该节点有多个分支，请用 next_node_key 指定下一步（可选：{options}）",
+            )
 
     task.status = TaskStatus.COMPLETED.value
     task.completed_at = utcnow()
     task.completed_by_id = user.id
     task.completed_by_name = user.display_name
-    task.form_data = payload.form_data
+    task.form_data = form_data
     task.comment = payload.comment
     if payload.variables:
         instance.variables = {**(instance.variables or {}), **payload.variables}
@@ -394,6 +413,7 @@ def task_out(task: ProcessTask) -> TaskOut:
         )
         for e in _outgoing(instance.snapshot, task.node_key)
     ]
+    form = forms_service.form_for_snapshot(instance.snapshot, task.node_key)
     return TaskOut(
         id=task.id,
         instance_id=instance.id,
@@ -416,6 +436,8 @@ def task_out(task: ProcessTask) -> TaskOut:
         completed_at=task.completed_at,
         completed_by_name=task.completed_by_name,
         form_data=task.form_data,
+        form_schema=(form or {}).get("fields", []),
+        form_name=(form or {}).get("name"),
         comment=task.comment,
         next_options=options,
     )

@@ -22,7 +22,7 @@ from app.models.enums import (
     TaskStatus,
     ToolCategory,
 )
-from app.models.execution import ProcessInstance, ProcessTask
+from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -51,6 +51,8 @@ __all__ = [
     "ProcessBenchmarkMap",
     "ProcessInstance",
     "ProcessTask",
+    "FormDefinition",
+    "ProcessRule",
     # 枚举
     "Methodology",
     "ProjectStatus",

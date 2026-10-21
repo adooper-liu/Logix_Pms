@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,8 @@ class TaskOut(BaseModel):
     completed_at: Optional[UtcDateTime] = None
     completed_by_name: Optional[str] = None
     form_data: Optional[Dict] = None
+    form_schema: List[Dict] = []
+    form_name: Optional[str] = None
     comment: Optional[str] = None
     next_options: List[NextOption] = []
 
@@ -98,3 +100,75 @@ class TaskAssignRequest(BaseModel):
     assignee_user_id: Optional[int] = Field(
         default=None, description="传 null 表示退回公共任务队列"
     )
+
+
+# ---------------------------------------------------------------- 表单定义
+
+
+class FormDefinitionCreate(BaseModel):
+    process_id: int
+    node_key: str = Field(default="", max_length=64, description="空字符串表示流程默认表单")
+    name: str = Field(max_length=128)
+    fields: List[Dict] = Field(
+        default_factory=list,
+        description="字段列表，如 {key,label,type,required,options,min,max}",
+    )
+    is_active: bool = True
+
+
+class FormDefinitionUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=128)
+    fields: Optional[List[Dict]] = None
+    is_active: Optional[bool] = None
+
+
+class FormDefinitionOut(BaseModel):
+    id: int
+    process_id: int
+    node_key: str
+    name: str
+    fields: List[Dict] = []
+    is_active: bool = True
+    updated_at: Optional[UtcDateTime] = None
+
+
+# ---------------------------------------------------------------- 分支规则
+
+
+class RuleCondition(BaseModel):
+    field: str
+    op: str = Field(
+        default="eq",
+        description="eq/ne/gt/gte/lt/lte/in/contains/truthy/falsy",
+    )
+    value: Any = None
+
+
+class ProcessRuleCreate(BaseModel):
+    process_id: int
+    node_key: str = Field(max_length=64)
+    name: str = Field(max_length=128)
+    conditions: List[RuleCondition] = Field(default_factory=list)
+    target_node_key: str = Field(max_length=64)
+    priority: int = 100
+    is_active: bool = True
+
+
+class ProcessRuleUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=128)
+    conditions: Optional[List[RuleCondition]] = None
+    target_node_key: Optional[str] = Field(default=None, max_length=64)
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ProcessRuleOut(BaseModel):
+    id: int
+    process_id: int
+    node_key: str
+    name: str
+    conditions: List[Dict] = []
+    target_node_key: str
+    priority: int
+    is_active: bool = True
+    updated_at: Optional[UtcDateTime] = None

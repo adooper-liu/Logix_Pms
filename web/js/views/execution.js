@@ -4,21 +4,36 @@ import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js'
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
-import { GET, POST } from '../core/api.js';
+import { GET, POST, PATCH, DEL } from '../core/api.js';
 
 /* ============================================================ 9. 流程执行 */
 
-const renderExecution = () => renderAsync('execution',
-  () => Promise.all([
-    GET('/execution/tasks?only_open=true&limit=500'),
-    GET('/execution/instances?limit=200'),
-    GET('/execution/processes'),
-  ]).then(([tasks, instances, processes]) => ({ tasks, instances, processes })),
-  (d) => {
-    const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open' });
-    state.executionTasks = d.tasks;
-    state.executionInstances = d.instances;
-    state.executionProcesses = d.processes;
+const renderExecution = () => {
+  const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open' });
+  return renderAsync('execution',
+    () => Promise.all([
+      GET('/execution/tasks?only_open=true&limit=500'),
+      GET('/execution/instances?limit=200'),
+      GET('/execution/processes'),
+    ]).then(async ([tasks, instances, processes]) => {
+      let forms = [];
+      let rules = [];
+      if (ex.tab === 'config' && processes.length) {
+        const pid = ex.configProcess || processes[0].id;
+        ex.configProcess = pid;
+        [forms, rules] = await Promise.all([
+          GET('/execution/forms?process_id=' + pid),
+          GET('/execution/rules?process_id=' + pid),
+        ]);
+      }
+      return { tasks, instances, processes, forms, rules };
+    }),
+    (d) => {
+      state.executionTasks = d.tasks;
+      state.executionInstances = d.instances;
+      state.executionProcesses = d.processes;
+      state.executionForms = d.forms;
+      state.executionRules = d.rules;
 
     const me = AUTH.user ? AUTH.user.id : null;
     const mine = d.tasks.filter((t) => t.assignee_user_id === me);
@@ -69,6 +84,8 @@ const renderExecution = () => renderAsync('execution',
       <div class="seg">
         <button class="${ex.tab === 'tasks' ? 'on' : ''}" onclick="setExecutionTab('tasks')">待办任务</button>
         <button class="${ex.tab === 'instances' ? 'on' : ''}" onclick="setExecutionTab('instances')">流程实例</button>
+        ${canManage() ? `<button class="${ex.tab === 'config' ? 'on' : ''}"
+          onclick="setExecutionTab('config')">表单与规则</button>` : ''}
       </div>`;
 
     const taskPane = `
@@ -111,6 +128,56 @@ const renderExecution = () => renderAsync('execution',
         </table>
       </div>`;
 
+    const cfgProcess = d.processes.find((p) => p.id === ex.configProcess) || d.processes[0];
+    const formRows = (d.forms || []).map((f) => `
+      <tr><td><b>${esc(f.node_key || '流程默认')}</b></td><td>${esc(f.name)}</td>
+        <td>${(f.fields || []).length}</td>
+        <td>${f.is_active ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
+        <td><button class="btn-sm" onclick="editFormModal(${f.id})">编辑</button>
+          <button class="btn-sm" onclick="deleteForm(${f.id})">删除</button></td></tr>`).join('')
+      || emptyRow(5, '暂无表单定义');
+    const ruleRows = (d.rules || []).map((r) => {
+      const cond = (r.conditions || [])
+        .map((c) => `${c.field} ${c.op} ${c.value}`).join(' 且 ') || '无条件（兜底）';
+      return `<tr><td><b>${esc(r.node_key)}</b></td>
+        <td>${esc(r.name)}<div class="tiny">${esc(cond)}</div></td>
+        <td>${esc(r.target_node_key)}</td><td>${r.priority}</td>
+        <td><button class="btn-sm" onclick="editRuleModal(${r.id})">编辑</button>
+          <button class="btn-sm" onclick="deleteRule(${r.id})">删除</button></td></tr>`;
+    }).join('') || emptyRow(5, '暂无分支规则');
+
+    const configPane = !canManage()
+      ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
+      : `
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">表单与规则</h3>
+            <div class="desc" style="margin:2px 0 0">表单随实例启动冻结；规则按优先级匹配，显式下一步优先</div></div>
+          <select class="sel" onchange="setExecutionConfigProcess(this.value)">
+            ${d.processes.map((p) => `<option value="${p.id}"${
+              cfgProcess && p.id === cfgProcess.id ? ' selected' : ''}>L${p.level} ${esc(p.code)} ${esc(p.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid g2" style="align-items:start">
+          <div>
+            <div class="between mb"><h3 style="margin:0">表单定义</h3>
+              <button class="btn-sm" onclick="editFormModal(null)">+ 新建表单</button></div>
+            <table class="tbl">
+              <thead><tr><th>节点</th><th>名称</th><th>字段</th><th>状态</th><th></th></tr></thead>
+              <tbody>${formRows}</tbody>
+            </table>
+          </div>
+          <div>
+            <div class="between mb"><h3 style="margin:0">分支规则</h3>
+              <button class="btn-sm" onclick="editRuleModal(null)">+ 新建规则</button></div>
+            <table class="tbl">
+              <thead><tr><th>节点</th><th>规则</th><th>目标</th><th>优先级</th><th></th></tr></thead>
+              <tbody>${ruleRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
@@ -123,8 +190,9 @@ const renderExecution = () => renderAsync('execution',
         </div>
         <div class="mt">${tabs}</div>
       </div>
-      ${ex.tab === 'instances' ? instancePane : taskPane}`;
-  });
+      ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : taskPane}`;
+    });
+};
 
 function setExecutionTab(tab) {
   state.execution.tab = tab;
@@ -135,6 +203,161 @@ function setExecutionFilter(filter) {
   state.execution.filter = filter;
   state.execution.tab = 'tasks';
   RENDERERS.execution();
+}
+
+function setExecutionConfigProcess(processId) {
+  state.execution.configProcess = Number(processId);
+  state.execution.tab = 'config';
+  RENDERERS.execution();
+}
+
+/* -------------------------------------------------- 表单定义 */
+
+function editFormModal(formId) {
+  const forms = state.executionForms || [];
+  const form = formId ? forms.find((f) => f.id === formId) : null;
+  const fields = form ? form.fields : [
+    { key: 'approved', label: '是否通过', type: 'select', required: true, options: ['是', '否'] },
+  ];
+  openModal(form ? '编辑表单 · ' + form.name : '新建表单', `
+    <div class="row2">
+      <div class="field"><label>节点 key</label>
+        <input id="efNode" value="${esc(form ? form.node_key : '')}"
+          placeholder="如 n1；留空表示流程默认表单"${form ? ' readonly' : ''}></div>
+      <div class="field"><label>表单名称 *</label>
+        <input id="efName" value="${esc(form ? form.name : '')}" placeholder="如：需求审批"></div>
+    </div>
+    <div class="field"><label>字段定义（JSON）*</label>
+      <textarea id="efFields" style="min-height:220px">${esc(JSON.stringify(fields, null, 2))}</textarea>
+      <div class="hint">type 支持 text / textarea / number / date / select / checkbox；
+        select 必须提供 options</div></div>
+    <div class="field"><label>状态</label>
+      <select id="efActive">
+        <option value="true"${!form || form.is_active ? ' selected' : ''}>启用</option>
+        <option value="false"${form && !form.is_active ? ' selected' : ''}>停用</option>
+      </select></div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitForm(${form ? form.id : 'null'})">保存</button>`);
+}
+
+async function submitForm(formId) {
+  const nodeKey = document.getElementById('efNode').value.trim();
+  const name = document.getElementById('efName').value.trim();
+  if (!name) return toast('请填写表单名称', true);
+  let fields;
+  try { fields = JSON.parse(document.getElementById('efFields').value); } catch (e) {
+    return toast('字段定义不是合法 JSON', true);
+  }
+  if (!Array.isArray(fields)) return toast('字段定义必须是数组', true);
+  const active = document.getElementById('efActive').value === 'true';
+  try {
+    if (formId) {
+      await PATCH('/execution/forms/' + formId, { name, fields, is_active: active });
+    } else {
+      await POST('/execution/forms', {
+        process_id: state.execution.configProcess,
+        node_key: nodeKey,
+        name,
+        fields,
+        is_active: active,
+      });
+    }
+    closeModal();
+    toast('表单已保存');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteForm(formId) {
+  if (!confirm('确定删除这个表单定义？已启动实例使用快照，不受影响。')) return;
+  try {
+    await DEL('/execution/forms/' + formId);
+    toast('表单已删除');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* -------------------------------------------------- 分支规则 */
+
+function editRuleModal(ruleId) {
+  const rules = state.executionRules || [];
+  const rule = ruleId ? rules.find((r) => r.id === ruleId) : null;
+  const conditions = rule ? rule.conditions : [{ field: 'approved', op: 'eq', value: '是' }];
+  openModal(rule ? '编辑规则 · ' + rule.name : '新建分支规则', `
+    <div class="row2">
+      <div class="field"><label>节点 key *</label>
+        <input id="erNode" value="${esc(rule ? rule.node_key : 'n4')}"${rule ? ' readonly' : ''}></div>
+      <div class="field"><label>规则名称 *</label>
+        <input id="erName" value="${esc(rule ? rule.name : '')}" placeholder="如：审批通过 → 采购计划"></div>
+    </div>
+    <div class="field"><label>条件（JSON 数组）</label>
+      <textarea id="erConditions" style="min-height:150px">${esc(JSON.stringify(conditions, null, 2))}</textarea>
+      <div class="hint">全部条件满足才命中；空数组表示兜底。op 支持
+        eq/ne/gt/gte/lt/lte/in/contains/truthy/falsy</div></div>
+    <div class="row3">
+      <div class="field"><label>目标节点 *</label>
+        <input id="erTarget" value="${esc(rule ? rule.target_node_key : '')}" placeholder="n5"></div>
+      <div class="field"><label>优先级</label>
+        <input id="erPriority" type="number" value="${rule ? rule.priority : 100}"></div>
+      <div class="field"><label>状态</label>
+        <select id="erActive">
+          <option value="true"${!rule || rule.is_active ? ' selected' : ''}>启用</option>
+          <option value="false"${rule && !rule.is_active ? ' selected' : ''}>停用</option>
+        </select></div>
+    </div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitRule(${rule ? rule.id : 'null'})">保存</button>`);
+}
+
+async function submitRule(ruleId) {
+  const nodeKey = document.getElementById('erNode').value.trim();
+  const name = document.getElementById('erName').value.trim();
+  const target = document.getElementById('erTarget').value.trim();
+  const priority = Number(document.getElementById('erPriority').value || 100);
+  const active = document.getElementById('erActive').value === 'true';
+  if (!nodeKey || !name || !target) return toast('节点、名称、目标节点都必填', true);
+  let conditions;
+  try { conditions = JSON.parse(document.getElementById('erConditions').value || '[]'); } catch (e) {
+    return toast('条件不是合法 JSON', true);
+  }
+  if (!Array.isArray(conditions)) return toast('条件必须是数组', true);
+  try {
+    if (ruleId) {
+      await PATCH('/execution/rules/' + ruleId, {
+        name, conditions, target_node_key: target, priority, is_active: active,
+      });
+    } else {
+      await POST('/execution/rules', {
+        process_id: state.execution.configProcess,
+        node_key: nodeKey,
+        name,
+        conditions,
+        target_node_key: target,
+        priority,
+        is_active: active,
+      });
+    }
+    closeModal();
+    toast('规则已保存');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteRule(ruleId) {
+  if (!confirm('确定删除这条分支规则？已启动实例使用快照，不受影响。')) return;
+  try {
+    await DEL('/execution/rules/' + ruleId);
+    toast('规则已删除');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function claimTask(taskId) {
@@ -202,6 +425,30 @@ async function submitStartInstance() {
   }
 }
 
+function renderFormFields(fields) {
+  return (fields || []).map((f) => {
+    const id = 'exf_' + f.key;
+    const required = f.required ? ' *' : '';
+    const placeholder = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+    let input;
+    if (f.type === 'textarea') {
+      input = `<textarea id="${id}" data-form-key="${esc(f.key)}"
+        data-form-type="textarea"${placeholder}></textarea>`;
+    } else if (f.type === 'select') {
+      input = `<select id="${id}" data-form-key="${esc(f.key)}" data-form-type="select">${
+        (f.options || []).map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
+    } else if (f.type === 'checkbox') {
+      input = `<input id="${id}" type="checkbox" data-form-key="${esc(f.key)}"
+        data-form-type="checkbox">`;
+    } else {
+      const type = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+      input = `<input id="${id}" type="${type}" data-form-key="${esc(f.key)}"
+        data-form-type="${esc(f.type)}"${placeholder}>`;
+    }
+    return `<div class="field"><label>${esc(f.label)}${required}</label>${input}</div>`;
+  }).join('');
+}
+
 async function openTask(taskId) {
   const gen = openModal('加载中…', skeleton(4));
   let task;
@@ -241,9 +488,12 @@ async function openTask(taskId) {
       ${task.next_options.length > 1 ? `
         <div class="field"><label>下一步 *</label>
           <select id="exNext">${options}</select>
-          <div class="hint">该节点有多个分支，请选择实际流转方向</div></div>` : ''}
-      <div class="field"><label>表单数据（JSON，可选）</label>
-        <textarea id="exForm" placeholder='{"审批意见":"同意","金额":10000}'>{}</textarea></div>
+          <div class="hint">该节点有多个分支；有匹配规则时会自动选择，这里可以显式覆盖</div></div>` : ''}
+      ${(task.form_schema && task.form_schema.length)
+        ? '<div class="note">表单：' + esc(task.form_name || task.name) + '</div>' +
+          renderFormFields(task.form_schema)
+        : `<div class="field"><label>表单数据（JSON，可选）</label>
+            <textarea id="exForm" placeholder='{"审批意见":"同意","金额":10000}'>{}</textarea></div>`}
       <div class="field"><label>处理意见 / 备注</label>
         <input id="exComment" placeholder="处理结论或说明"></div>` : ''}
     ${canAct && task.status !== 'COMPLETED'
@@ -255,10 +505,25 @@ async function openTask(taskId) {
 }
 
 async function completeTask(taskId) {
-  const raw = document.getElementById('exForm') ? document.getElementById('exForm').value.trim() : '';
+  const dynamic = Array.from(document.querySelectorAll('[data-form-key]'));
   let formData = null;
-  if (raw) {
-    try { formData = JSON.parse(raw); } catch (e) { return toast('表单数据不是合法 JSON', true); }
+  if (dynamic.length) {
+    formData = {};
+    dynamic.forEach((el) => {
+      const key = el.dataset.formKey;
+      const type = el.dataset.formType;
+      if (type === 'checkbox') formData[key] = el.checked;
+      else if (type === 'number') formData[key] = el.value === '' ? null : Number(el.value);
+      else formData[key] = el.value;
+    });
+  } else {
+    const raw = document.getElementById('exForm')
+      ? document.getElementById('exForm').value.trim() : '';
+    if (raw) {
+      try { formData = JSON.parse(raw); } catch (e) {
+        return toast('表单数据不是合法 JSON', true);
+      }
+    }
   }
   const nextEl = document.getElementById('exNext');
   const commentEl = document.getElementById('exComment');
@@ -336,6 +601,8 @@ async function cancelInstance(instanceId) {
 
 
 export {
-  renderExecution, cancelInstance, claimTask, completeTask, openInstance, openTask,
-  setExecutionFilter, setExecutionTab, startInstanceModal, submitStartInstance,
+  renderExecution, cancelInstance, claimTask, completeTask, deleteForm, deleteRule,
+  editFormModal, editRuleModal, openInstance, openTask, setExecutionConfigProcess,
+  setExecutionFilter, setExecutionTab, startInstanceModal, submitForm, submitRule,
+  submitStartInstance,
 };

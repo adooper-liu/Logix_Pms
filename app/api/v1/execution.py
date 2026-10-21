@@ -5,22 +5,31 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser
 from app.models.enums import InstanceStatus, TaskStatus
-from app.models.process import ProcessArch
+from app.models.execution import FormDefinition, ProcessRule
+from app.models.process import ProcessArch, ProcessNode
 from app.schemas.common import DeleteResult
 from app.schemas.execution import (
     ExecutableProcessOut,
+    FormDefinitionCreate,
+    FormDefinitionOut,
+    FormDefinitionUpdate,
     InstanceDetail,
     InstanceOut,
     InstanceStartRequest,
+    ProcessRuleCreate,
+    ProcessRuleOut,
+    ProcessRuleUpdate,
     TaskAssignRequest,
     TaskCompleteRequest,
     TaskOut,
 )
 from app.services import audit as audit_service
 from app.services import execution as execution_service
+from app.services import forms as forms_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
 
@@ -32,6 +41,210 @@ router = APIRouter(prefix="/execution", tags=["流程执行"])
 )
 def list_executable_processes(db: DbSession):
     return execution_service.executable_processes(db)
+
+
+# ------------------------------------------------------------------ 表单与规则配置
+
+
+def _ensure_process(db, process_id: int) -> ProcessArch:
+    process = db.get(ProcessArch, process_id)
+    if process is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    return process
+
+
+def _ensure_node(db, process_id: int, node_key: str) -> None:
+    if not node_key:
+        return
+    exists = db.scalar(
+        select(ProcessNode.id).where(
+            ProcessNode.process_id == process_id, ProcessNode.node_key == node_key
+        )
+    )
+    if exists is None:
+        raise HTTPException(status_code=400, detail=f"节点 {node_key} 不存在于该流程")
+
+
+def _form_out(form: FormDefinition) -> FormDefinitionOut:
+    return FormDefinitionOut(
+        id=form.id,
+        process_id=form.process_id,
+        node_key=form.node_key,
+        name=form.name,
+        fields=form.fields or [],
+        is_active=form.is_active,
+        updated_at=form.updated_at,
+    )
+
+
+def _rule_out(rule: ProcessRule) -> ProcessRuleOut:
+    return ProcessRuleOut(
+        id=rule.id,
+        process_id=rule.process_id,
+        node_key=rule.node_key,
+        name=rule.name,
+        conditions=rule.conditions or [],
+        target_node_key=rule.target_node_key,
+        priority=rule.priority,
+        is_active=rule.is_active,
+        updated_at=rule.updated_at,
+    )
+
+
+@router.get("/forms", response_model=List[FormDefinitionOut], summary="表单定义列表")
+def list_forms(db: DbSession, process_id: int, node_key: Optional[str] = None):
+    stmt = select(FormDefinition).where(FormDefinition.process_id == process_id)
+    if node_key is not None:
+        stmt = stmt.where(FormDefinition.node_key == node_key)
+    rows = db.scalars(stmt.order_by(FormDefinition.node_key)).all()
+    return [_form_out(f) for f in rows]
+
+
+@router.post(
+    "/forms",
+    response_model=FormDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新增表单定义（MANAGER+）",
+)
+def create_form(payload: FormDefinitionCreate, db: DbSession, user: ManagerUser):
+    _ensure_process(db, payload.process_id)
+    _ensure_node(db, payload.process_id, payload.node_key)
+    existing = db.scalar(
+        select(FormDefinition).where(
+            FormDefinition.process_id == payload.process_id,
+            FormDefinition.node_key == payload.node_key,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="该流程/节点已有表单定义，请直接修改")
+    form = FormDefinition(
+        process_id=payload.process_id,
+        node_key=payload.node_key or "",
+        name=payload.name,
+        fields=forms_service.normalize_fields(payload.fields),
+        is_active=payload.is_active,
+    )
+    db.add(form)
+    db.flush()
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "form_definition",
+        form.id,
+        f"新增表单 {form.name}（{form.node_key or '流程默认'}）",
+    )
+    db.commit()
+    db.refresh(form)
+    return _form_out(form)
+
+
+@router.patch(
+    "/forms/{form_id}", response_model=FormDefinitionOut, summary="修改表单定义（MANAGER+）"
+)
+def update_form(form_id: int, payload: FormDefinitionUpdate, db: DbSession, user: ManagerUser):
+    form = db.get(FormDefinition, form_id)
+    if form is None:
+        raise HTTPException(status_code=404, detail="表单定义不存在")
+    data = payload.model_dump(exclude_unset=True)
+    if "fields" in data and data["fields"] is not None:
+        form.fields = forms_service.normalize_fields(data.pop("fields"))
+    for key, value in data.items():
+        setattr(form, key, value)
+    audit_service.record(db, user, "UPDATE", "form_definition", form.id, f"修改表单 {form.name}")
+    db.commit()
+    db.refresh(form)
+    return _form_out(form)
+
+
+@router.delete("/forms/{form_id}", response_model=DeleteResult, summary="删除表单定义（MANAGER+）")
+def delete_form(form_id: int, db: DbSession, user: ManagerUser):
+    form = db.get(FormDefinition, form_id)
+    if form is None:
+        raise HTTPException(status_code=404, detail="表单定义不存在")
+    audit_service.record(db, user, "DELETE", "form_definition", form.id, f"删除表单 {form.name}")
+    db.delete(form)
+    db.commit()
+    return DeleteResult(deleted=1)
+
+
+@router.get("/rules", response_model=List[ProcessRuleOut], summary="分支规则列表")
+def list_rules(db: DbSession, process_id: int, node_key: Optional[str] = None):
+    stmt = select(ProcessRule).where(ProcessRule.process_id == process_id)
+    if node_key is not None:
+        stmt = stmt.where(ProcessRule.node_key == node_key)
+    rows = db.scalars(
+        stmt.order_by(ProcessRule.node_key, ProcessRule.priority, ProcessRule.id)
+    ).all()
+    return [_rule_out(r) for r in rows]
+
+
+@router.post(
+    "/rules",
+    response_model=ProcessRuleOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新增分支规则（MANAGER+）",
+)
+def create_rule(payload: ProcessRuleCreate, db: DbSession, user: ManagerUser):
+    _ensure_process(db, payload.process_id)
+    forms_service.validate_rule_target(
+        db, payload.process_id, payload.node_key, payload.target_node_key
+    )
+    rule = ProcessRule(
+        process_id=payload.process_id,
+        node_key=payload.node_key,
+        name=payload.name,
+        conditions=forms_service.normalize_conditions([c.model_dump() for c in payload.conditions]),
+        target_node_key=payload.target_node_key,
+        priority=payload.priority,
+        is_active=payload.is_active,
+    )
+    db.add(rule)
+    db.flush()
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "process_rule",
+        rule.id,
+        f"新增规则 {rule.name}：{rule.node_key} → {rule.target_node_key}",
+    )
+    db.commit()
+    db.refresh(rule)
+    return _rule_out(rule)
+
+
+@router.patch("/rules/{rule_id}", response_model=ProcessRuleOut, summary="修改分支规则（MANAGER+）")
+def update_rule(rule_id: int, payload: ProcessRuleUpdate, db: DbSession, user: ManagerUser):
+    rule = db.get(ProcessRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="分支规则不存在")
+    data = payload.model_dump(exclude_unset=True)
+    if "conditions" in data and data["conditions"] is not None:
+        rule.conditions = forms_service.normalize_conditions(
+            [c if isinstance(c, dict) else c.model_dump() for c in data.pop("conditions")]
+        )
+    if "target_node_key" in data and data["target_node_key"] is not None:
+        forms_service.validate_rule_target(
+            db, rule.process_id, rule.node_key, data["target_node_key"]
+        )
+    for key, value in data.items():
+        setattr(rule, key, value)
+    audit_service.record(db, user, "UPDATE", "process_rule", rule.id, f"修改规则 {rule.name}")
+    db.commit()
+    db.refresh(rule)
+    return _rule_out(rule)
+
+
+@router.delete("/rules/{rule_id}", response_model=DeleteResult, summary="删除分支规则（MANAGER+）")
+def delete_rule(rule_id: int, db: DbSession, user: ManagerUser):
+    rule = db.get(ProcessRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="分支规则不存在")
+    audit_service.record(db, user, "DELETE", "process_rule", rule.id, f"删除规则 {rule.name}")
+    db.delete(rule)
+    db.commit()
+    return DeleteResult(deleted=1)
 
 
 # ------------------------------------------------------------------ 实例

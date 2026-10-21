@@ -425,11 +425,19 @@ def main() -> int:
                 assert "已认领" in page.inner_text("#toast"), page.inner_text("#toast")
 
                 page.click("#view .exec-task-row >> nth=0 >> button")
-                page.wait_for_selector("#exForm")
+                page.wait_for_selector("#exf_applicant")
+                page.fill("#exf_applicant", "自检用户")
+                page.fill("#exf_amount", "1000")
                 page.click("#mFoot .btn-p")
                 page.wait_for_timeout(1500)
                 assert "任务已完成" in page.inner_text("#toast"), page.inner_text("#toast")
                 assert "需求汇总与归并" in page.inner_text("#view"), "下一节点任务未生成"
+
+                page.click('#view .seg button:has-text("表单与规则")')
+                page.wait_for_timeout(1000)
+                config_text = page.inner_text("#view")
+                assert "表单定义" in config_text and "需求发起" in config_text
+                assert "分支规则" in config_text and "审批通过" in config_text
             finally:
                 if iid:
                     page.evaluate(

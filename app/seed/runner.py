@@ -15,7 +15,7 @@ from app.core.security import hash_password
 from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.enums import TaskStatus
-from app.models.execution import ProcessInstance, ProcessTask
+from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -309,6 +309,68 @@ def _seed_exceptions(
         )
 
 
+def _seed_forms_rules(db: Session, code_to_id: Dict[str, int]) -> None:
+    """给采购需求提报配上运行时表单与一条自动分支规则。"""
+    process_id = code_to_id.get("L3-032")
+    if process_id is None:
+        return
+    db.add(
+        FormDefinition(
+            process_id=process_id,
+            node_key="n1",
+            name="需求发起",
+            fields=[
+                {"key": "applicant", "label": "申请人", "type": "text", "required": True},
+                {
+                    "key": "amount",
+                    "label": "预计金额（元）",
+                    "type": "number",
+                    "required": True,
+                    "min": 0,
+                },
+                {
+                    "key": "description",
+                    "label": "需求说明",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
+        )
+    )
+    db.add(
+        FormDefinition(
+            process_id=process_id,
+            node_key="n4",
+            name="需求审批",
+            fields=[
+                {
+                    "key": "approved",
+                    "label": "是否通过",
+                    "type": "select",
+                    "required": True,
+                    "options": ["是", "否"],
+                },
+                {
+                    "key": "comment",
+                    "label": "审批意见",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
+        )
+    )
+    db.add(
+        ProcessRule(
+            process_id=process_id,
+            node_key="n4",
+            name="审批通过 → 采购计划生成",
+            conditions=[{"field": "approved", "op": "eq", "value": "是"}],
+            target_node_key="n5",
+            priority=10,
+        )
+    )
+
+
 def _seed_execution(
     db: Session,
     code_to_id: Dict[str, int],
@@ -349,7 +411,16 @@ def _seed_execution(
                 db,
                 task,
                 admin,
-                TaskCompleteRequest(form_data={"seed": True}, comment="种子演示：已处理"),
+                TaskCompleteRequest(
+                    form_data={
+                        "applicant": "种子演示",
+                        "amount": 10000,
+                        "description": "演示数据",
+                    }
+                    if task.node_key == "n1"
+                    else None,
+                    comment="种子演示：已处理",
+                ),
             )
         open_task = db.scalar(
             select(ProcessTask)
@@ -473,6 +544,8 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        FormDefinition,
+        ProcessRule,
         ProcessTask,
         ProcessInstance,
         ProcessBenchmarkMap,
@@ -514,6 +587,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids)
     _seed_design_models(db, code_to_id)
+    _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)
     db.commit()
 
@@ -533,6 +607,8 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "process_edges": db.scalar(select(func.count()).select_from(ProcessEdge)) or 0,
         "process_instances": db.scalar(select(func.count()).select_from(ProcessInstance)) or 0,
         "process_tasks": db.scalar(select(func.count()).select_from(ProcessTask)) or 0,
+        "form_definitions": db.scalar(select(func.count()).select_from(FormDefinition)) or 0,
+        "process_rules": db.scalar(select(func.count()).select_from(ProcessRule)) or 0,
         "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,

@@ -128,7 +128,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
-种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、33 个工具、24 个标准步骤、
+种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、33 个工具、24 个标准步骤、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
 2 套对标框架（71 个标准分类、249 条流程映射）。
 
@@ -352,6 +352,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分（战略重要性 × 痛点 × 改善空间） |
 | `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
+| `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
 | `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
 | `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
@@ -422,6 +423,10 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | POST | `/execution/tasks/{id}/claim` | 认领任务 |
 | POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边时必须传 `next_node_key` |
 | PATCH | `/execution/tasks/{id}/assignee` | 改派或退回公共队列（MANAGER+） |
+| GET/POST | `/execution/forms` | 节点表单定义查询 / 新建（写入需 MANAGER+） |
+| PATCH/DELETE | `/execution/forms/{id}` | 修改 / 删除表单定义（MANAGER+） |
+| GET/POST | `/execution/rules` | 分支规则查询 / 新建（写入需 MANAGER+） |
+| PATCH/DELETE | `/execution/rules/{id}` | 修改 / 删除分支规则（MANAGER+） |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |
@@ -678,5 +683,5 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
-8. **流程执行后续**：当前是单令牌顺序执行，下一步补表单/规则引擎、BPMN 导入导出、
+8. **流程执行后续**：已完成单令牌顺序执行、表单定义与分支规则；下一步补 BPMN 导入导出、
    并行网关与子流程、通知与 ERP/OA 集成。

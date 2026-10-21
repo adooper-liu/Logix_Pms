@@ -11,7 +11,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -99,3 +109,58 @@ class ProcessTask(Base):
         Index("ix_process_task_status_assignee", "status", "assignee_user_id"),
         Index("ix_process_task_instance_status", "instance_id", "status"),
     )
+
+
+class FormDefinition(Base):
+    """节点表单定义。
+
+    `node_key=""` 表示该流程的默认表单；节点没有专属表单时回退到默认表单。
+    字段结构是一个 JSON 数组，例如：
+        [{"key":"approved","label":"是否通过","type":"select","required":true,
+          "options":["是","否"]}]
+    """
+
+    __tablename__ = "form_definition"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE"), index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(64), default="")
+    name: Mapped[str] = mapped_column(String(128))
+    fields: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("process_id", "node_key", name="uq_form_definition_process_node"),
+    )
+
+
+class ProcessRule(Base):
+    """节点分支规则。
+
+    `conditions` 是条件列表（全部满足才命中），例如：
+        [{"field":"approved","op":"eq","value":"是"}]
+    命中后流转到 `target_node_key`。显式传入 next_node_key 时优先使用显式值。
+    """
+
+    __tablename__ = "process_rule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE"), index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(128))
+    conditions: Mapped[list] = mapped_column(JSON, default=list)
+    target_node_key: Mapped[str] = mapped_column(String(64))
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_process_rule_process_node", "process_id", "node_key", "priority"),)

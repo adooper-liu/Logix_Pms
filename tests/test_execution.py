@@ -77,22 +77,28 @@ def test_start_complete_branch_and_finish(client):
         assert claimed.json()["status"] == "CLAIMED"
         assert claimed.json()["assignee_user_id"] is not None
 
-        # n1 → n2 → n3 → n4，每步只有一条出边
-        for _ in range(3):
+        # n1 有必填表单，n2/n3 没有表单；每步只有一条出边
+        for step in range(3):
             task = _open_task(client, iid)
-            done = _complete(client, task["id"], form_data={"node": task["node_key"]})
+            data = {"applicant": "测试申请人", "amount": 12000} if step == 0 else None
+            done = _complete(client, task["id"], form_data=data)
             assert done.status_code == 200, done.text
 
         # n4 是审批分支：不指定下一步应拒绝
         n4 = _open_task(client, iid)
         assert n4["node_key"] == "n4"
         assert {o["node_key"] for o in n4["next_options"]} == {"n5", "n6"}
-        rejected = _complete(client, n4["id"])
+        # 缺必填表单 → 拒绝
+        missing = _complete(client, n4["id"])
+        assert missing.status_code == 400
+        assert "是否通过" in missing.json()["detail"]
+        # 审批不通过没有匹配规则 → 多分支必须显式选择
+        rejected = _complete(client, n4["id"], form_data={"approved": "否"})
         assert rejected.status_code == 400
         assert "多个分支" in rejected.json()["detail"]
 
-        # 选择通过 → n5；n5 无出边 → 实例完成
-        assert _complete(client, n4["id"], next_node_key="n5").status_code == 200
+        # 审批通过命中规则 → 自动进入 n5；n5 无出边 → 实例完成
+        assert _complete(client, n4["id"], form_data={"approved": "是"}).status_code == 200
         n5 = _open_task(client, iid)
         assert n5["node_key"] == "n5"
         assert _complete(client, n5["id"], comment="完成").status_code == 200
@@ -111,12 +117,18 @@ def test_branch_back_to_previous_step_creates_new_task(client):
     instance = _start(client)
     iid = instance["id"]
     try:
-        for _ in range(3):
+        for step in range(3):
             task = _open_task(client, iid)
-            assert _complete(client, task["id"]).status_code == 200
+            data = {"applicant": "回退测试", "amount": 5000} if step == 0 else None
+            assert _complete(client, task["id"], form_data=data).status_code == 200
         n4 = _open_task(client, iid)
         assert n4["node_key"] == "n4"
-        assert _complete(client, n4["id"], next_node_key="n6").status_code == 200
+        assert (
+            _complete(
+                client, n4["id"], form_data={"approved": "否"}, next_node_key="n6"
+            ).status_code
+            == 200
+        )
 
         n6 = _open_task(client, iid)
         assert n6["node_key"] == "n6"
@@ -139,7 +151,11 @@ def test_owner_can_claim_and_complete_unassigned_task(owner_client):
     try:
         task = _open_task(owner_client, iid)
         assert task["assignee_user_id"] is None
-        done = _complete(owner_client, task["id"], form_data={"by": "owner"})
+        done = _complete(
+            owner_client,
+            task["id"],
+            form_data={"applicant": "陈经理", "amount": 8000, "by": "owner"},
+        )
         assert done.status_code == 200
         assert done.json()["assignee_name"] == "陈经理"
     finally:
@@ -169,8 +185,15 @@ def test_manager_can_reassign_task(manager_client, owner_client):
         assert assigned.json()["assignee_user_id"] == chen_id
         assert assigned.json()["status"] == "CLAIMED"
 
-        # 已指派给陈经理后，管理员不能再以普通身份处理（管理员本身有管理权限，允许）
-        assert _complete(manager_client, task["id"]).status_code == 200
+        # 管理员有管理权限，可以直接完成；n1 有必填表单
+        assert (
+            _complete(
+                manager_client,
+                task["id"],
+                form_data={"applicant": "管理员", "amount": 100},
+            ).status_code
+            == 200
+        )
 
         # 退回公共队列
         next_task = _open_task(manager_client, iid)
@@ -218,7 +241,10 @@ def test_execution_writes_are_audited(client):
     try:
         task = _open_task(client, iid)
         client.post(f"{API}/execution/tasks/{task['id']}/claim")
-        client.post(f"{API}/execution/tasks/{task['id']}/complete", json={})
+        client.post(
+            f"{API}/execution/tasks/{task['id']}/complete",
+            json={"form_data": {"applicant": "审计", "amount": 1}},
+        )
     finally:
         client.delete(f"{API}/execution/instances/{iid}")
 
