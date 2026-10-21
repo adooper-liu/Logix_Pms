@@ -44,7 +44,8 @@
 - **工程可维护**：零构建前端、主题令牌、API 优先、Alembic 迁移、SQLite/PostgreSQL 双后端 CI。
 
 行业标准、最佳实践与平台能力的逐条对照见
-[docs/process-management-best-practices.md](docs/process-management-best-practices.md)。
+[docs/process-management-best-practices.md](docs/process-management-best-practices.md)；
+各模块的定位、应用场景与使用路径见 [docs/usage-guide.md](docs/usage-guide.md)。
 
 ---
 
@@ -255,7 +256,7 @@ scripts/
   seed.py             命令行灌库
   verify_frontend.py  无头浏览器联调自检（9 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
-docs/           行业对标、信息架构、指标口径、BPMN 与集成说明
+docs/           使用指南、行业对标、信息架构、指标口径、BPMN 与集成说明
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器

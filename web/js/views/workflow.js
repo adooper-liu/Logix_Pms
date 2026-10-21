@@ -97,13 +97,15 @@ const renderWorkflow = () => renderAsync('workflow',
       <div class="card page-head">
         <div class="between">
           <div><h2>五阶段标准工作流</h2>
-            <div class="desc">${total} 个步骤 · 先按阶段推进，再回到方法论确认路径</div></div>
+            <div class="desc">全公司共用的方法手册 · ${total} 个标准步骤；项目实际进度请在「流程项目组合」里推进</div></div>
           <div class="seg">
             <button class="${wf.tab === 'steps' ? 'on' : ''}" onclick="setWfTab('steps')">五阶段步骤</button>
             <button class="${wf.tab === 'method' ? 'on' : ''}" onclick="setWfTab('method')">方法论匹配</button>
           </div>
         </div>
       </div>
+      <div class="note mt">这是教学与方法手册，不跟踪具体项目。项目立项后，24 步实例在
+        <a class="link" onclick="go('projects')">流程项目组合</a> 的项目详情里推进。</div>
       ${wf.tab === 'method' ? methodPane : stepsPane}`;
   });
 

@@ -141,7 +141,7 @@ function paintDesigner() {
       <div class="between">
         <div>
           <h2>${esc(model.process_name || '')} · 流程设计器</h2>
-          <div class="desc">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标</div>
+          <div class="desc">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标；模型用于流程执行（实例使用启动时快照）</div>
         </div>
         <div class="gap">
           <select class="sel" onchange="switchProcess(this.value)">${opts}</select>

@@ -52,8 +52,11 @@ const renderProjects = () => {
         <div class="card page-head">
           <div class="between">
             <div><h2>流程项目组合</h2>
-              <div class="desc">共 ${page.total} 个项目 · 点击行查看详情、KPI 与下一步动作</div></div>
-            <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
+              <div class="desc">共 ${page.total} 个项目 · 每个项目按 24 步标准工作流推进；点击行查看详情与下一步动作</div></div>
+            <div class="gap">
+              <a class="link" onclick="go('workflow')">查看方法手册</a>
+              <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
+            </div>
           </div>
           <div class="grid g4 stat-row">
             <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">${metricHelp('project_total', '项目总数')}</div></div>
