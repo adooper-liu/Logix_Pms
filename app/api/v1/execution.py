@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser
 from app.models.enums import InstanceStatus, TaskStatus
-from app.models.execution import FormDefinition, ProcessRule
+from app.models.execution import FormDefinition, ProcessRule, ProcessTask
 from app.models.process import ProcessArch, ProcessNode
 from app.schemas.common import DeleteResult
 from app.schemas.execution import (
@@ -30,6 +30,7 @@ from app.schemas.execution import (
 from app.services import audit as audit_service
 from app.services import execution as execution_service
 from app.services import forms as forms_service
+from app.services import notifications as notification_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
 
@@ -247,6 +248,32 @@ def delete_rule(rule_id: int, db: DbSession, user: ManagerUser):
     return DeleteResult(deleted=1)
 
 
+def _open_task(db, instance_id: int):
+    return db.scalar(
+        select(ProcessTask)
+        .where(
+            ProcessTask.instance_id == instance_id,
+            ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
+        )
+        .order_by(ProcessTask.id)
+    )
+
+
+def _notify_open_task(db, instance) -> None:
+    task = _open_task(db, instance.id)
+    if task is not None and task.assignee_user_id is not None:
+        notification_service.notify(
+            db,
+            task.assignee_user_id,
+            "TASK_ASSIGNED",
+            f"新任务：{task.name}",
+            f"{instance.process_name}（{instance.code}）",
+            link="execution",
+            entity_type="process_task",
+            entity_id=task.id,
+        )
+
+
 # ------------------------------------------------------------------ 实例
 
 
@@ -276,6 +303,7 @@ def start_instance(payload: InstanceStartRequest, db: DbSession, user: WriteUser
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
     instance = execution_service.start_instance(db, process, user, payload)
+    _notify_open_task(db, instance)
     audit_service.record(
         db,
         user,
@@ -305,6 +333,16 @@ def get_instance(instance_id: int, db: DbSession):
 def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
     execution_service.cancel_instance(db, instance)
+    notification_service.notify(
+        db,
+        instance.started_by_id,
+        "INSTANCE_CANCELLED",
+        f"流程已取消：{instance.process_name}",
+        f"{instance.code}",
+        link="execution",
+        entity_type="process_instance",
+        entity_id=instance.id,
+    )
     audit_service.record(
         db,
         user,
@@ -392,6 +430,21 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
     task = execution_service.get_task(db, task_id)
     instance_code = task.instance.code
     execution_service.complete_task(db, task, user, payload)
+    instance = task.instance
+    if instance.status == InstanceStatus.COMPLETED.value:
+        if instance.started_by_id:
+            notification_service.notify(
+                db,
+                instance.started_by_id,
+                "INSTANCE_COMPLETED",
+                f"流程已完成：{instance.process_name}",
+                f"{instance.code}",
+                link="execution",
+                entity_type="process_instance",
+                entity_id=instance.id,
+            )
+    else:
+        _notify_open_task(db, instance)
     audit_service.record(
         db,
         user,
@@ -413,6 +466,17 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
 def assign_task(task_id: int, payload: TaskAssignRequest, db: DbSession, user: ManagerUser):
     task = execution_service.get_task(db, task_id)
     execution_service.assign_task(db, task, payload.assignee_user_id)
+    if task.assignee_user_id is not None:
+        notification_service.notify(
+            db,
+            task.assignee_user_id,
+            "TASK_ASSIGNED",
+            f"新任务：{task.name}",
+            f"{task.instance.process_name}（{task.instance.code}）",
+            link="execution",
+            entity_type="process_task",
+            entity_id=task.id,
+        )
     audit_service.record(
         db,
         user,

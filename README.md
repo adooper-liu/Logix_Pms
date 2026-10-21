@@ -128,7 +128,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
-种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、33 个工具、24 个标准步骤、
+种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、33 个工具、24 个标准步骤、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
 2 套对标框架（71 个标准分类、249 条流程映射）。
 
@@ -354,6 +354,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
+| `notification` | 站内通知：任务指派、流程完成、异常超期、里程碑逾期 |
 | `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
 | `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
@@ -428,6 +429,15 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | PATCH/DELETE | `/execution/forms/{id}` | 修改 / 删除表单定义（MANAGER+） |
 | GET/POST | `/execution/rules` | 分支规则查询 / 新建（写入需 MANAGER+） |
 | PATCH/DELETE | `/execution/rules/{id}` | 修改 / 删除分支规则（MANAGER+） |
+
+### 通知
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/notifications` | 我的通知，支持 unread_only / limit |
+| GET | `/notifications/summary` | 未读数与按类型汇总（顶栏徽标） |
+| POST | `/notifications/{id}/read` | 标记单条已读 |
+| POST | `/notifications/read-all` | 全部已读 |
+| POST | `/notifications/scan` | 扫描逾期异常/里程碑并生成提醒（MANAGER+） |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |
@@ -678,7 +688,8 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 1. **流程挖掘对接**：接入 ERP/OA 日志，自动发现真实路径（`PROCESS-MINING` 工具已就位，缺数据管道）。
 2. **权限细化**：OWNER 归属已改为 `owner_user_id` 外键（项目 / 流程模型），
    姓名只在写入时用于尝试绑定唯一账号；还剩字段级可见性控制没有做。
-3. **通知与提醒**：里程碑逾期、异常超期目前只能靠人看板子，没有推送。
+3. **通知与提醒**：站内通知已完成（任务指派/流程完成/异常超期/里程碑逾期，顶栏未读数）；
+   邮件/短信/企业微信等外部推送仍待接入。
 4. **导入导出**：BPMN 2.0 结构导出/导入已完成；Excel 导入流程清单、并行网关/子流程仍待补。
 5. **生产部署**：镜像里用 uvicorn 单进程起服务，上生产需要加 gunicorn/多副本 + 反向代理 + HTTPS；
    数据库连接的 SSL 与备份策略也还没配。

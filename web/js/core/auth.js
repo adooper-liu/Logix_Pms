@@ -83,6 +83,7 @@ export async function doLogin() {
     hideLogin();
     renderUserChip();
     await loadMeta();
+    window.dispatchEvent(new Event('pms:login'));
     go('dashboard');
     toast('欢迎回来，' + body.user.display_name);
   } catch (e) {
@@ -103,6 +104,11 @@ export function logout() {
   document.getElementById('userRole').textContent = '';
   document.getElementById('view').innerHTML = '';
   document.getElementById('mask').classList.remove('show');
+  const badge = document.getElementById('notifBadge');
+  if (badge) {
+    badge.textContent = '0';
+    badge.classList.add('hide');
+  }
   showLogin('已退出登录');
 }
 

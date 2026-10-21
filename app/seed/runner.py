@@ -18,6 +18,7 @@ from app.models.enums import TaskStatus
 from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
+from app.models.notification import Notification
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
@@ -25,6 +26,7 @@ from app.models.user import AuditLog, User
 from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
 from app.seed import benchmark_data, corpus, corpus_data
 from app.services import execution as execution_service
+from app.services import notifications as notification_service
 from app.services.workflow import recompute_progress, seed_project_steps
 
 # 设计器画布上的排布参数
@@ -448,6 +450,55 @@ def _seed_execution(
         )
 
 
+def _seed_notifications(db: Session, user_ids: Dict[str, int]) -> None:
+    """给陈经理生成两条演示通知：一条任务指派、一条异常超期。"""
+    chen_id = user_ids.get("陈经理")
+    if chen_id is None:
+        return
+    task = db.scalar(
+        select(ProcessTask)
+        .where(
+            ProcessTask.assignee_user_id == chen_id,
+            ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
+        )
+        .order_by(ProcessTask.id)
+    )
+    if task is not None:
+        notification_service.notify(
+            db,
+            chen_id,
+            "TASK_ASSIGNED",
+            f"新任务：{task.name}",
+            f"{task.instance.process_name}（{task.instance.code}）",
+            link="execution",
+            entity_type="process_task",
+            entity_id=task.id,
+        )
+    admin_id = user_ids.get("系统管理员")
+    if admin_id is not None:
+        notification_service.notify(
+            db,
+            admin_id,
+            "SYSTEM",
+            "欢迎使用 Logix PMS",
+            "演示数据已就绪：流程执行、表单规则与 BPMN 导入导出均可体验。",
+            link="dashboard",
+        )
+
+    exception = db.scalar(select(ExceptionEvent).where(ExceptionEvent.code == "EXC-2026-001"))
+    if exception is not None and exception.due_at and exception.due_at < utcnow():
+        notification_service.notify(
+            db,
+            chen_id,
+            "EXCEPTION_OVERDUE",
+            f"异常已超期：{exception.title}",
+            f"{exception.code} · 要求闭环时间 {exception.due_at:%Y-%m-%d %H:%M}",
+            link="monitor",
+            entity_type="exception",
+            entity_id=exception.id,
+        )
+
+
 def _seed_knowledge(db: Session, project_ids: Dict[str, int]) -> None:
     for row in corpus_data.KNOWLEDGE:
         item = KnowledgeItem(
@@ -560,6 +611,7 @@ def _wipe(db: Session) -> None:
         Project,
         WorkflowTemplate,
         Tool,
+        Notification,
         AuditLog,
         User,
     ):
@@ -589,6 +641,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_design_models(db, code_to_id)
     _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)
+    _seed_notifications(db, user_ids)
     db.commit()
 
     return {
@@ -609,6 +662,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "process_tasks": db.scalar(select(func.count()).select_from(ProcessTask)) or 0,
         "form_definitions": db.scalar(select(func.count()).select_from(FormDefinition)) or 0,
         "process_rules": db.scalar(select(func.count()).select_from(ProcessRule)) or 0,
+        "notifications": db.scalar(select(func.count()).select_from(Notification)) or 0,
         "benchmark_frameworks": db.scalar(select(func.count()).select_from(BenchmarkFramework))
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,

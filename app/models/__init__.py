@@ -25,6 +25,7 @@ from app.models.enums import (
 from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
+from app.models.notification import Notification
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
@@ -53,6 +54,7 @@ __all__ = [
     "ProcessTask",
     "FormDefinition",
     "ProcessRule",
+    "Notification",
     # 枚举
     "Methodology",
     "ProjectStatus",

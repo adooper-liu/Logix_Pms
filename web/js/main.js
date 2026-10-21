@@ -15,6 +15,10 @@ import { register, go, onSearch, RENDERERS } from './core/router.js';
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, tab } from './core/ui.js';
+import {
+  markAllNotificationsRead, openNotification, openNotifications, refreshNotifications,
+  scanNotifications,
+} from './core/notifications.js';
 
 import * as dashboard from './views/dashboard.js';
 import * as mapView from './views/map.js';
@@ -49,10 +53,14 @@ function applyTheme(code) {
   }
 }
 
+// 交互式登录成功后刷新顶栏未读数（boot 路径在 boot() 里单独刷新）
+window.addEventListener('pms:login', () => { refreshNotifications(); });
+
 // 模板里 onclick/onchange 需要的操作面
 Object.assign(window, {
   // 框架级
   applyTheme, go, closeModal, tab, state, RENDERERS, logout,
+  openNotifications, openNotification, markAllNotificationsRead, scanNotifications,
   // 业务操作
   ...dashboard,
   ...mapView,
@@ -101,6 +109,7 @@ async function boot() {
     hideLogin();
     renderUserChip();
     await loadMeta();
+    await refreshNotifications();
     go('dashboard');
   } catch (e) {
     // 令牌失效时 api() 已经弹过登录框了
@@ -110,3 +119,8 @@ async function boot() {
 }
 
 boot();
+
+// 轻量轮询：只拉未读数，不拉通知正文
+setInterval(() => {
+  if (isLoggedIn()) refreshNotifications();
+}, 60000);

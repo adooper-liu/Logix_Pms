@@ -41,6 +41,9 @@
     <div class="topbar">
       <h1 id="pageTitle">管理驾驶舱</h1>
       <div class="search"><input id="searchInput" placeholder="搜索流程 / 项目 / 工具 / 知识…"></div>
+      <button class="notif-btn" id="notifBtn" onclick="openNotifications()" title="通知">
+        🔔<span class="notif-badge hide" id="notifBadge">0</span>
+      </button>
       <select class="sel theme-sel" id="themeSel" title="切换主题" onchange="applyTheme(this.value)"></select>
       <div class="usr">
         <div class="avatar" id="userAvatar">--</div>

@@ -41,6 +41,7 @@ from app.schemas.monitor import (
     RadarDimension,
 )
 from app.services import audit as audit_service
+from app.services import notifications as notification_service
 
 router = APIRouter(prefix="/monitor", tags=["运营监控"])
 
@@ -343,6 +344,17 @@ def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
     obj = ExceptionEvent(code=f"{prefix}{seq + 1:03d}", **data)
     db.add(obj)
     db.flush()
+    if obj.owner_user_id is not None and obj.owner_user_id != user.id:
+        notification_service.notify(
+            db,
+            obj.owner_user_id,
+            "EXCEPTION_ASSIGNED",
+            f"你被指派处理异常：{obj.title}",
+            f"{obj.code} · 严重度 {obj.severity}",
+            link="monitor",
+            entity_type="exception",
+            entity_id=obj.id,
+        )
     audit_service.record(
         db, user, "CREATE", "exception", obj.id, f"登记异常 {obj.code} {obj.title}"
     )
@@ -368,6 +380,7 @@ def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession,
         raise HTTPException(status_code=404, detail="异常事件不存在")
     ensure_can_edit_owned(user, obj.owner_user_id, obj.owner)
     previous_status = obj.status
+    previous_owner_id = obj.owner_user_id
 
     data = as_columns(payload.model_dump(exclude_unset=True))
     if user.role == Role.OWNER.value:
@@ -378,6 +391,21 @@ def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession,
         apply_owner_update(db, data, obj.owner)
     for field, value in data.items():
         setattr(obj, field, value)
+    if (
+        obj.owner_user_id is not None
+        and obj.owner_user_id != previous_owner_id
+        and obj.owner_user_id != user.id
+    ):
+        notification_service.notify(
+            db,
+            obj.owner_user_id,
+            "EXCEPTION_ASSIGNED",
+            f"异常改派给你：{obj.title}",
+            f"{obj.code} · 严重度 {obj.severity}",
+            link="monitor",
+            entity_type="exception",
+            entity_id=obj.id,
+        )
 
     if "status" in data:
         new_status = data["status"]

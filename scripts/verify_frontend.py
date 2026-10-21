@@ -473,11 +473,24 @@ def main() -> int:
             finally:
                 path.unlink(missing_ok=True)
 
+        # 通知中心：未读徽标与通知列表
+        def notifications() -> None:
+            goto("dashboard")
+            badge = page.locator("#notifBadge")
+            assert badge.count() == 1
+            assert "hide" not in (badge.get_attribute("class") or ""), "应有未读通知"
+            page.click("#notifBtn")
+            page.wait_for_selector(".notif-list")
+            assert "通知中心" in page.inner_text("#mTitle")
+            assert "欢迎使用" in page.inner_text("#mBody"), page.inner_text("#mBody")[:120]
+            close_modal()
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
         check("驾驶舱入口", dashboard_entries)
         check("指标口径提示", metric_help)
+        check("通知中心", notifications)
         check("工作流步骤详情", workflow_step_modal)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)
