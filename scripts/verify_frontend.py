@@ -137,6 +137,25 @@ def main() -> int:
             assert len(after) > len(before), f"面包屑未增长：{before!r} → {after!r}"
             assert page.inner_text("#view").count("Owner:") > 0
 
+        # 对标框架：同一层流程切换 SCOR / APQC，覆盖率应有差异
+        def benchmark_switch() -> None:
+            goto("map")
+            page.select_option("#view select[title='切换对标框架']", "SCOR")
+            page.wait_for_selector("#view :text('对标覆盖')", timeout=8000)
+            text = page.inner_text("#view")
+            assert "24/28" in text, f"SCOR 覆盖率渲染异常：{text[:160]!r}"
+            assert "L3-010" in text, "SCOR 应显示研发类未覆盖流程"
+
+            page.select_option("#view select[title='切换对标框架']", "APQC_PCF")
+            page.wait_for_selector("#view :text('28/28')", timeout=8000)
+            text = page.inner_text("#view")
+            assert "所有 L3 流程" in text, f"APQC 应全量覆盖：{text[:160]!r}"
+
+            page.click("#view .card:has-text('对标覆盖') tr.clk >> nth=0")
+            page.wait_for_selector("#mBody table")
+            assert "编码" in page.inner_text("#mBody")
+            close_modal()
+
         # 标准工作流：步骤详情
         def workflow_step_modal() -> None:
             goto("workflow")
@@ -325,6 +344,7 @@ def main() -> int:
             assert page.inner_text("#userName").strip() == "未登录"
 
         check("地图下钻", map_drill)
+        check("对标框架切换", benchmark_switch)
         check("工作流步骤详情", workflow_step_modal)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)

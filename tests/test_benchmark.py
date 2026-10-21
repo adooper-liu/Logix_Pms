@@ -32,9 +32,10 @@ def test_framework_catalog(client):
 
     assert items["SCOR"]["category_count"] == 32
     assert items["APQC_PCF"]["category_count"] == 39
-    # 已映射的流程数按框架不同：SCOR 只覆盖供应链相关流程
-    assert items["SCOR"]["mapped_process_count"] == 29
-    assert items["APQC_PCF"]["mapped_process_count"] == 33
+    # 已映射的流程数按框架不同：SCOR 只覆盖供应链相关流程。
+    # L4 活动继承所属 L3 的映射，所以数量包含 L3 + L4。
+    assert items["SCOR"]["mapped_process_count"] == 116
+    assert items["APQC_PCF"]["mapped_process_count"] == 133
 
 
 def test_scor_tree_has_six_l1_categories(client):

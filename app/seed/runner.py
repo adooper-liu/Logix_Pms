@@ -231,6 +231,26 @@ def _seed_benchmarks(db: Session, code_to_id: Dict[str, int]) -> None:
             )
         )
 
+    # L4 活动默认继承所属 L3 的对标分类，避免每个活动都手写一条映射。
+    # 已显式映射过的活动（如 L4-201…205）保持原样。
+    process_rows = db.scalars(select(ProcessArch)).all()
+    mapped_categories: Dict[int, List[int]] = {}
+    for row in benchmark_data.PROCESS_BENCHMARK_MAP:
+        process_id = code_to_id[row["process"]]
+        category = categories[row["framework"]][row["category"]]
+        mapped_categories.setdefault(process_id, []).append(category.id)
+    for process in process_rows:
+        if process.level != 4 or process.id in mapped_categories:
+            continue
+        for category_id in mapped_categories.get(process.parent_id, []):
+            db.add(
+                ProcessBenchmarkMap(
+                    process_id=process.id,
+                    category_id=category_id,
+                    note="继承上级流程",
+                )
+            )
+
 
 def _seed_kpis(db: Session, code_to_id: Dict[str, int]) -> None:
     periods = [date.fromisoformat(p) for p in corpus_data.KPI_PERIODS]

@@ -1,5 +1,5 @@
 /* 视图：map */
-import { esc, num, HEAT_COLOR, HEAT_LABEL, emptyRow } from '../core/format.js';
+import { esc, num, bar, HEAT_COLOR, HEAT_LABEL, emptyRow } from '../core/format.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
@@ -63,14 +63,53 @@ const renderMap = () => {
         <td>${h.project_count}</td>
       </tr>`).join('') || emptyRow(6, '暂无待改善项');
 
+    const bench = state.map.benchmark;
+    const frameworkOptions = (state.map.frameworks || []).map((f) =>
+      '<option value="' + f.code + '"' +
+      (state.map.benchmarkFramework === f.code ? ' selected' : '') + '>' +
+      esc(f.name) + (f.version ? ' ' + esc(f.version) : '') + '</option>').join('');
+    const benchCard = state.map.benchmarkFramework && bench ? `
+      <div class="card">
+        <div class="between mb">
+          <div>
+            <h2 style="margin:0">对标覆盖 · ${esc(bench.framework_name)}${
+              bench.framework_version ? ' ' + esc(bench.framework_version) : ''}</h2>
+            <div class="desc" style="margin:0">L3 流程 ${bench.mapped_processes}/${bench.total_processes}
+              能被该框架覆盖 · 切换框架只换对标视图，不改公司流程架构</div>
+          </div>
+          ${bar(bench.coverage_rate * 100, null, 120)}
+        </div>
+        <table class="tbl">
+          <thead><tr><th>标准分类</th><th>覆盖流程数</th><th>包含流程</th></tr></thead>
+          <tbody>${bench.by_top_category.map((c, i) => `
+            <tr class="clk" onclick="openCoverageCategory(${i})">
+              <td><b>${esc(c.code)}</b> ${esc(c.name)}</td>
+              <td>${c.mapped_count}</td>
+              <td class="tiny">${c.processes.slice(0, 5).map((p) => esc(p.code)).join('、') || '—'}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+        ${bench.unmapped_processes.length
+          ? '<div class="note">未覆盖：' + bench.unmapped_processes
+            .map((p) => esc(p.code) + ' ' + esc(p.name)).join('、') +
+            '（不在该框架的适用范围）</div>'
+          : '<div class="note">所有 L3 流程都能在该框架中找到对应分类。</div>'}
+        <div class="note">覆盖率按后代聚合；当前统计 L3 流程，点击分类行可查看明细。</div>
+      </div>` : '';
+
     viewEl().innerHTML = `
       <div class="card">
         <div class="between mb">
           <div><h2 style="margin:0">企业流程架构（L1 → L4 分层）</h2>
             <div class="desc" style="margin:0">点击层级节点逐级下钻 · 优先级 = 战略重要性 × 痛点严重度 × 改善空间</div></div>
-          ${canManage()
-            ? '<button class="btn btn-p" onclick="newProcessModal()">+ 新建流程</button>'
-            : '<span class="tiny">当前角色只读</span>'}
+          <div class="gap">
+            <select class="sel" onchange="setBenchmarkFramework(this.value)" title="切换对标框架">
+              <option value="">不对标</option>
+              ${frameworkOptions}
+            </select>
+            ${canManage()
+              ? '<button class="btn btn-p" onclick="newProcessModal()">+ 新建流程</button>'
+              : '<span class="tiny">当前角色只读</span>'}
+          </div>
         </div>
         <div class="crumb">${crumbs.join(' ')}</div>
         <div class="legend mb">
@@ -82,6 +121,8 @@ const renderMap = () => {
         </div>
         <div class="g3">${cards}</div>
       </div>
+
+      ${benchCard}
 
       <div class="card">
         <h2>改善优先级热力图（L3 流程层 Top 10）</h2>
@@ -95,6 +136,9 @@ const renderMap = () => {
   };
 
   const start = async () => {
+    if (!state.map.frameworks) {
+      state.map.frameworks = await GET('/benchmark/frameworks');
+    }
     if (!state.map.tree) {
       const [tree, heat] = await Promise.all([
         GET('/process-map/tree'),
@@ -108,6 +152,10 @@ const renderMap = () => {
         walk(n.children || []);
       });
       walk(tree);
+    }
+    if (state.map.benchmarkFramework && !state.map.benchmark) {
+      state.map.benchmark = await GET(
+        '/benchmark/frameworks/' + state.map.benchmarkFramework + '/coverage?process_level=3');
     }
     paint();
   };
@@ -164,6 +212,37 @@ function mapGo(index) {
   RENDERERS.map();
 }
 
+/* -------------------------------------------------- 对标框架切换 */
+
+async function setBenchmarkFramework(code) {
+  state.map.benchmarkFramework = code;
+  state.map.benchmark = null;
+  if (code) {
+    try {
+      state.map.benchmark = await GET(
+        '/benchmark/frameworks/' + code + '/coverage?process_level=3');
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+  RENDERERS.map();
+}
+
+function openCoverageCategory(index) {
+  const bench = state.map.benchmark;
+  if (!bench) return;
+  const c = bench.by_top_category[index];
+  if (!c) return;
+  const rows = c.processes.map((p) => `
+    <tr><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>L${p.level}</td></tr>`).join('');
+  openModal(`${c.code} ${c.name} · 覆盖流程`, c.processes.length ? `
+    <table class="tbl">
+      <thead><tr><th>编码</th><th>流程</th><th>层级</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>` : '<div class="empty">该分类下没有已映射流程</div>',
+    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+}
+
 /** 从热力图跳转：逐级展开到该编码所在层级 */
 function mapJump(code) {
   const path = [];
@@ -193,6 +272,7 @@ function mapJump(code) {
 function invalidateProcessCaches() {
   state.map.tree = null;
   state.map.heat = null;
+  state.map.benchmark = null;
   state.designer.processes = null;
   state.designer.model = null;
   state.designer.analysis = null;
@@ -367,4 +447,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, newProcessModal, processParentOptions, refreshParentOptions, saveProcess };
+export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework };

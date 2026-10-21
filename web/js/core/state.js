@@ -8,7 +8,10 @@ export const state = {
   view: 'dashboard',
   /** 五个业务枚举的中文标签，首次启动时从后端 meta 接口拉取 */
   meta: { methodology: {}, status: {}, stage: {} },
-  map: { code: null, name: null, path: [] },
+  map: {
+    code: null, name: null, path: [],
+    frameworks: null, benchmarkFramework: '', benchmark: null,
+  },
   projects: { filter: { methodology: '', status: '', stage: '' }, keyword: '' },
   designer: { processId: null, processCode: null, model: null, analysis: null },
   knowledge: { type: '', sort: 'recent', keyword: '', tag: '' },
