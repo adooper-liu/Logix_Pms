@@ -47,7 +47,23 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
 # ------------------------------------------------------------------ 各部分
 
 
-def _seed_process_arch(db: Session) -> Dict[str, int]:
+def _owner_user_id(owner: Optional[str], user_ids: Dict[str, int]) -> Optional[int]:
+    """把底稿里的 Owner 文本映射到演示账号。
+
+    支持两种写法：与 display_name 完全一致（如「陈经理」），
+    或「部门-姓名」后缀（如「采购部-陈经理」）。匹配不到就保持未绑定。
+    """
+    if not owner:
+        return None
+    if owner in user_ids:
+        return user_ids[owner]
+    for name, uid in user_ids.items():
+        if owner.endswith("-" + name):
+            return uid
+    return None
+
+
+def _seed_process_arch(db: Session, user_ids: Dict[str, int]) -> Dict[str, int]:
     code_to_id: Dict[str, int] = {}
     # 先按 level 排序，保证父节点先入库
     for row in sorted(corpus.PROCESS_ARCH, key=lambda r: r["level"]):
@@ -63,6 +79,7 @@ def _seed_process_arch(db: Session) -> Dict[str, int]:
             level=row["level"],
             parent_id=parent_id,
             owner=row.get("owner"),
+            owner_user_id=_owner_user_id(row.get("owner"), user_ids),
             department=row.get("department"),
             description=row.get("description"),
             strategic_importance=row.get("si", 3.0),
@@ -115,7 +132,9 @@ def _seed_tools(db: Session) -> None:
         )
 
 
-def _seed_projects(db: Session, code_to_id: Dict[str, int]) -> Dict[str, int]:
+def _seed_projects(
+    db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]
+) -> Dict[str, int]:
     ids: Dict[str, int] = {}
     for row in corpus_data.PROJECTS:
         baseline = row.get("baseline_value")
@@ -132,6 +151,7 @@ def _seed_projects(db: Session, code_to_id: Dict[str, int]) -> Dict[str, int]:
             priority=row["priority"],
             process_id=code_to_id.get(row["process"]) if row.get("process") else None,
             owner=row["owner"],
+            owner_user_id=_owner_user_id(row["owner"], user_ids),
             sponsor=row.get("sponsor"),
             department=row.get("department"),
             objective=row.get("objective"),
@@ -279,7 +299,7 @@ def _seed_design_models(db: Session, code_to_id: Dict[str, int]) -> None:
 # ------------------------------------------------------------------ 入口
 
 
-def _seed_users(db: Session) -> None:
+def _seed_users(db: Session) -> Dict[str, int]:
     for row in corpus_data.USERS:
         db.add(
             User(
@@ -290,6 +310,8 @@ def _seed_users(db: Session) -> None:
                 department=row.get("department"),
             )
         )
+    db.flush()
+    return {u.display_name: u.id for u in db.scalars(select(User)).all()}
 
 
 def _wipe(db: Session) -> None:
@@ -322,11 +344,12 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     if reset:
         _wipe(db)
 
-    code_to_id = _seed_process_arch(db)
+    # 先建用户：流程与项目的 owner_user_id 要在灌数据时解析
+    user_ids = _seed_users(db)
+    code_to_id = _seed_process_arch(db, user_ids)
     _seed_workflow(db)
     _seed_tools(db)
-    _seed_users(db)
-    project_ids = _seed_projects(db, code_to_id)
+    project_ids = _seed_projects(db, code_to_id, user_ids)
     _seed_kpis(db, code_to_id)
     _seed_exceptions(db, code_to_id, project_ids)
     _seed_knowledge(db, project_ids)

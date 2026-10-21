@@ -66,7 +66,12 @@ class ProjectBase(BaseModel):
     priority: int = Field(default=3, ge=1, le=5, description="1 最高，5 最低")
 
     process_id: Optional[int] = None
-    owner: str = Field(max_length=64)
+    owner: str = Field(
+        default="", max_length=64, description="展示用姓名；只传 owner_user_id 时由账号姓名填充"
+    )
+    owner_user_id: Optional[int] = Field(
+        default=None, description="归属账号 id，权限判断以它为准；不传则按 owner 姓名尝试绑定"
+    )
     sponsor: Optional[str] = None
     department: Optional[str] = None
 
@@ -95,6 +100,9 @@ class ProjectUpdate(BaseModel):
     current_stage: Optional[int] = Field(default=None, ge=1, le=5)
     priority: Optional[int] = Field(default=None, ge=1, le=5)
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = Field(
+        default=None, description="归属账号 id；显式传 null 表示解绑，仅改 owner 文本会重新尝试绑定"
+    )
     sponsor: Optional[str] = None
     department: Optional[str] = None
     objective: Optional[str] = None
@@ -129,6 +137,7 @@ class ProjectOut(ORMModel):
     process_id: Optional[int] = None
     process_name: Optional[str] = None
     owner: str
+    owner_user_id: Optional[int] = None
     sponsor: Optional[str] = None
     department: Optional[str] = None
     objective: Optional[str] = None

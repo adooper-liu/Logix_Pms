@@ -57,7 +57,7 @@ def save_design(process_id: int, payload: ProcessModelIn, db: DbSession, user: W
     process = db.get(ProcessArch, process_id)
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
-    ensure_can_edit_owned(user, process.owner)
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
 
     # 乐观并发控制：客户端提交它看到的版本号，不一致就拒绝
     if payload.expected_version is not None and payload.expected_version != process.model_version:

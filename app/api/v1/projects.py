@@ -8,7 +8,14 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DbSession, ManagerUser, WriteUser, ensure_can_edit_owned
+from app.api.deps import (
+    DbSession,
+    ManagerUser,
+    WriteUser,
+    apply_owner_update,
+    ensure_can_edit_owned,
+    resolve_owner,
+)
 from app.core.timeutil import utcnow
 from app.models.enums import Methodology, ProjectStatus, Role, StepStatus
 from app.models.monitor import ExceptionEvent, KpiRecord
@@ -178,9 +185,16 @@ def list_projects(
 )
 def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     data = as_columns(payload.model_dump(exclude={"code", "seed_workflow"}))
+    # 归属以账号 id 为准；只给了姓名的历史数据按唯一 display_name 尝试绑定
+    data["owner_user_id"], data["owner"] = resolve_owner(
+        db, data.get("owner_user_id"), data.get("owner")
+    )
     # 流程 Owner 角色立项时，只能挂在自己名下
     if user.role == Role.OWNER.value:
+        data["owner_user_id"] = user.id
         data["owner"] = user.display_name
+    if not data.get("owner"):
+        raise HTTPException(status_code=400, detail="必须指定 Owner（owner 或 owner_user_id）")
     code = payload.code or _next_code(db)
     if db.scalar(select(Project).where(Project.code == code)):
         raise HTTPException(status_code=409, detail=f"项目编码 {code} 已存在")
@@ -282,9 +296,18 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
-    ensure_can_edit_owned(user, project.owner)
-    changed = sorted(payload.model_dump(exclude_unset=True).keys())
-    for field, value in as_columns(payload.model_dump(exclude_unset=True)).items():
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    data = as_columns(payload.model_dump(exclude_unset=True))
+    if user.role == Role.OWNER.value:
+        # 归属不由 OWNER 自己变更，避免把项目转给他人或冒名
+        data.pop("owner", None)
+        data.pop("owner_user_id", None)
+    else:
+        apply_owner_update(db, data, project.owner)
+        if "owner_user_id" in data and not data.get("owner"):
+            raise HTTPException(status_code=400, detail="Owner 姓名不能为空")
+    changed = sorted(data.keys())
+    for field, value in data.items():
         setattr(project, field, value)
     audit_service.record(
         db,
@@ -427,7 +450,7 @@ def update_step(step_id: int, payload: ProjectStepUpdate, db: DbSession, user: W
         raise HTTPException(status_code=404, detail="步骤不存在")
     project = db.get(Project, step.project_id)
     if project is not None:
-        ensure_can_edit_owned(user, project.owner)
+        ensure_can_edit_owned(user, project.owner_user_id, project.owner)
     previous = step.status
     for field, value in as_columns(payload.model_dump(exclude_unset=True)).items():
         setattr(step, field, value)

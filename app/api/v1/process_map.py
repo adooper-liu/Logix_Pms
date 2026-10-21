@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DbSession, ManagerUser
+from app.api.deps import DbSession, ManagerUser, apply_owner_update, resolve_owner
 from app.models.knowledge import KnowledgeItem
 from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -52,6 +52,7 @@ def _to_out(p: ProcessArch) -> ProcessArchOut:
         level=p.level,
         parent_id=p.parent_id,
         owner=p.owner,
+        owner_user_id=p.owner_user_id,
         department=p.department,
         description=p.description,
         strategic_importance=p.strategic_importance,
@@ -146,6 +147,7 @@ def heatmap(
             name=p.name,
             level=p.level,
             owner=p.owner,
+            owner_user_id=p.owner_user_id,
             health_score=p.health_score,
             pain_score=p.pain_score,
             strategic_importance=p.strategic_importance,
@@ -177,7 +179,11 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
         raise HTTPException(status_code=409, detail=f"流程编码 {payload.code} 已存在")
     if payload.parent_id is not None and db.get(ProcessArch, payload.parent_id) is None:
         raise HTTPException(status_code=400, detail="parent_id 指向的流程不存在")
-    obj = ProcessArch(**payload.model_dump())
+    data = payload.model_dump()
+    data["owner_user_id"], data["owner"] = resolve_owner(
+        db, data.get("owner_user_id"), data.get("owner")
+    )
+    obj = ProcessArch(**data)
     db.add(obj)
     db.flush()
     audit_service.record(db, user, "CREATE", "process", obj.id, f"新增流程 {obj.code} {obj.name}")
@@ -191,8 +197,10 @@ def update_process(process_id: int, payload: ProcessArchUpdate, db: DbSession, u
     obj = db.get(ProcessArch, process_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="流程不存在")
-    changed = list(payload.model_dump(exclude_unset=True).keys())
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    apply_owner_update(db, data, obj.owner)
+    changed = sorted(data.keys())
+    for field, value in data.items():
         setattr(obj, field, value)
     audit_service.record(
         db,

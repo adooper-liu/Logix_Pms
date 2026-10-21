@@ -231,7 +231,7 @@ async function openProject(id) {
     </div>`;
 
   const canEditThis = canManage()
-    || (role() === 'OWNER' && AUTH.user && AUTH.user.display_name === p.owner);
+    || (role() === 'OWNER' && AUTH.user && p.owner_user_id === AUTH.user.id);
 
   openModal(p.name, tabs + overview + kpiPane + wfPane + ganttPane + nextPane, `
     ${canManage()

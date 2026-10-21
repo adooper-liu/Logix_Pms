@@ -29,7 +29,18 @@ class Project(Base):
         ForeignKey("process_arch.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # owner 是展示用的姓名/岗位标签；owner_user_id 才是权限判断的唯一依据。
+    # 两者在写入时一起维护（绑定账号就把标签同步成该用户的 display_name）。
     owner: Mapped[str] = mapped_column(String(64))
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_project_owner_user_id_app_user",
+        ),
+        nullable=True,
+        index=True,
+    )
     sponsor: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 

@@ -24,7 +24,17 @@ class ProcessArch(Base):
         ForeignKey("process_arch.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
+    # owner 是展示用的姓名/岗位标签；owner_user_id 才是权限判断的唯一依据
     owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_arch_owner_user_id_app_user",
+        ),
+        nullable=True,
+        index=True,
+    )
     department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

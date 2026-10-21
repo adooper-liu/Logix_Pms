@@ -68,7 +68,7 @@ function paintDesigner() {
 
   const proc = (st.processes || []).find((p) => p.id === st.processId) || {};
   const editable = canWrite() && (canManage()
-    || (AUTH.user && AUTH.user.display_name === (proc.owner || '')));
+    || (AUTH.user && proc.owner_user_id === AUTH.user.id));
 
   const bnSet = new Set((st.analysis ? st.analysis.nodes : []).filter((n) => n.is_bottleneck)
     .map((n) => n.node_key));
@@ -302,7 +302,7 @@ function openNodeEditor(nodeKey) {
   const st = state.designer;
   const proc = (st.processes || []).find((p) => p.id === st.processId) || {};
   const editable = canWrite() && (canManage()
-    || (AUTH.user && AUTH.user.display_name === (proc.owner || '')));
+    || (AUTH.user && proc.owner_user_id === AUTH.user.id));
   if (editable) return editNode(nodeKey);
 
   const n = (st.model.nodes || []).find((x) => x.node_key === nodeKey);

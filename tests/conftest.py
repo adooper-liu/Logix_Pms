@@ -70,7 +70,7 @@ def viewer_client():
 
 @pytest.fixture(scope="session")
 def owner_client():
-    """流程 Owner：display_name 是「陈经理」，与 PR-2026-018 的 owner 一致。"""
+    """流程 Owner：chen 的 display_name 是「陈经理」，种子数据里已按 owner_user_id 绑定。"""
     with TestClient(app) as c:
         c.headers.update(_auth_headers(c, "chen", "chen123"))
         yield c

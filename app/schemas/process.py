@@ -19,6 +19,9 @@ class ProcessArchBase(BaseModel):
     level: int = Field(ge=1, le=4, description="1 价值链 / 2 流程类别 / 3 流程 / 4 活动")
     parent_id: Optional[int] = None
     owner: Optional[str] = Field(default=None, max_length=64)
+    owner_user_id: Optional[int] = Field(
+        default=None, description="归属账号 id，权限判断以它为准；不传则按 owner 姓名尝试绑定"
+    )
     department: Optional[str] = Field(default=None, max_length=64)
     description: Optional[str] = None
 
@@ -36,6 +39,7 @@ class ProcessArchCreate(ProcessArchBase):
 class ProcessArchUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=128)
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
     department: Optional[str] = None
     description: Optional[str] = None
     strategic_importance: Optional[float] = Field(default=None, ge=0, le=5)
@@ -52,6 +56,7 @@ class ProcessArchOut(ORMModel):
     level: int
     parent_id: Optional[int] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
     department: Optional[str] = None
     description: Optional[str] = None
     strategic_importance: float
@@ -80,6 +85,7 @@ class HeatmapItem(BaseModel):
     name: str
     level: int
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
     health_score: Optional[float] = None
     pain_score: float
     strategic_importance: float

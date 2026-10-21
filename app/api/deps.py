@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Tuple
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -76,19 +77,79 @@ def require_admin(user: CurrentUser) -> User:
     return user
 
 
-def ensure_can_edit_owned(user: User, owner_name: Optional[str]) -> None:
+def resolve_owner(
+    db: Session, owner_user_id: Optional[int], owner_name: Optional[str]
+) -> Tuple[Optional[int], Optional[str]]:
+    """确定对象的归属：优先用账号 id，其次按姓名精确绑定。
+
+    返回 (owner_user_id, 展示用 owner 文本)。
+
+    按姓名绑定只发生在**写入时**，且要求 display_name 唯一——同名用户无法判断，
+    就保持未绑定（fail closed，只有 ADMIN / MANAGER 能改）。权限判断永远只看
+    owner_user_id，不再比较姓名字符串，因此改个 display_name 不会凭空获得权限。
+    """
+    if owner_user_id is not None:
+        user = db.get(User, owner_user_id)
+        if user is None:
+            raise HTTPException(status_code=400, detail="owner_user_id 指向的用户不存在")
+        return user.id, user.display_name
+
+    name = (owner_name or "").strip()
+    if not name:
+        return None, None
+
+    matches = db.scalars(select(User).where(User.display_name == name)).all()
+    if len(matches) == 1:
+        return matches[0].id, matches[0].display_name
+    return None, name
+
+
+def apply_owner_update(
+    db: Session,
+    data: dict,
+    current_owner_name: Optional[str],
+) -> dict:
+    """在局部更新的字段字典里解析 owner 与 owner_user_id，就地返回。
+
+    - 显式给了 owner_user_id：以它为准，展示文本同步成该用户的姓名；
+      显式传 null 表示解绑，只保留文本。
+    - 只改了 owner 文本：文本没变就沿用原绑定；变了才按新姓名重新尝试绑定。
+    """
+    if "owner_user_id" in data:
+        uid = data["owner_user_id"]
+        if uid is None:
+            name = data.get("owner", current_owner_name)
+            data["owner"] = (name or "").strip() or None
+            data["owner_user_id"] = None
+        else:
+            data["owner_user_id"], data["owner"] = resolve_owner(db, uid, None)
+    elif "owner" in data:
+        name = (data["owner"] or "").strip()
+        if name == (current_owner_name or "").strip():
+            data["owner"] = name or None
+        else:
+            data["owner_user_id"], data["owner"] = resolve_owner(db, None, name)
+    return data
+
+
+def ensure_can_edit_owned(
+    user: User, owner_user_id: Optional[int], owner_label: Optional[str] = None
+) -> None:
     """OWNER 只能改自己名下的对象；ADMIN / MANAGER 不受限。
 
-    Owner 目前是按姓名文本匹配的（数据模型里 owner 是字符串）。
-    这是已知的简化，接企业账号体系后应改成 owner_user_id 外键。
+    归属判断只认 `owner_user_id` 外键。对象未绑定账号时对 OWNER 一律拒绝——
+    宁可让管理员显式绑定，也不靠姓名字符串猜。
     """
     if user.role in MANAGER_ROLES:
         return
-    if user.role == Role.OWNER.value and (owner_name or "").strip() == user.display_name:
+    if user.role == Role.OWNER.value and owner_user_id == user.id:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"只能修改自己名下的对象（当前用户：{user.display_name}，对象 Owner：{owner_name or '未指定'}）",
+        detail=(
+            f"只能修改自己名下的对象（当前用户：{user.display_name}，"
+            f"对象 Owner：{owner_label or '未绑定账号'}）"
+        ),
     )
 
 
