@@ -43,6 +43,8 @@ known-first-party = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# CI 直接跑 `pytest`（不是 `python -m pytest`），不会自动把仓库根目录加进 sys.path
+pythonpath = ["."]
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.*",
 ]
