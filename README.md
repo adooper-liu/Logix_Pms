@@ -234,7 +234,7 @@ scripts/
   seed.py             命令行灌库
   verify_frontend.py  无头浏览器联调自检（8 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
-docs/           信息架构与可视化选型
+docs/           信息架构、指标口径与可视化选型
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
@@ -283,7 +283,9 @@ main.js
 流程模型 / 指标与建议），仪表盘只保留 4 个主指标并把风险提醒放在首屏右侧。
 驾驶舱的主指标卡、阶段行、方法论图例、风险提醒和项目行都是入口：点击后会跳到对应页面，
 并自动带上状态、阶段或方法论筛选。逐页的元素关系与可视化选型见
-[docs/ui-information-architecture.md](docs/ui-information-architecture.md)。
+[docs/ui-information-architecture.md](docs/ui-information-architecture.md)；
+所有指标的公式、阈值与边界见 [docs/metrics.md](docs/metrics.md)，
+页面上带 `?` 的指标可以直接悬停查看简版口径。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、

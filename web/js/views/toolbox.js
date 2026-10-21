@@ -4,6 +4,7 @@ import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js'
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
+import { metricHelp } from '../core/metrics.js';
 
 /* ============================================================ 5. 方法论工具箱 */
 
@@ -101,7 +102,7 @@ function paintToolMatch(r) {
   }
   box.innerHTML = `
     <table class="tbl">
-      <thead><tr><th>工具</th><th>解决什么问题</th><th>命中关键词</th><th>匹配分</th><th></th></tr></thead>
+      <thead><tr><th>工具</th><th>解决什么问题</th><th>命中关键词</th><th>${metricHelp('match_score', '匹配分')}</th><th></th></tr></thead>
       <tbody>${r.hits.map((h) => `
         <tr><td><b>${esc(h.tool.name)}</b><div class="tiny">${esc(h.tool.code)} · 阶段${h.tool.stage_no}</div></td>
           <td class="muted">${esc(h.tool.purpose)}</td>

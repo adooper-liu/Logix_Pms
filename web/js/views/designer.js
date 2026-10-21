@@ -4,6 +4,7 @@ import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
+import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PUT } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
@@ -127,9 +128,9 @@ function paintDesigner() {
         ${paintMetrics(st.analysis)}
       </div>
       <div class="card">
-        <h3>改善建议</h3>
+        <h3>${metricHelp('suggestion_rules', '改善建议')}</h3>
         <div class="desc">${st.analysis ? st.analysis.suggestions.length : 0} 条 · 按严重度排序，
-          推荐方法论：<b>${esc((state.meta.methodology[st.analysis && st.analysis.recommended_methodology] ||
+          ${metricHelp('methodology_pick', '推荐方法论')}：<b>${esc((state.meta.methodology[st.analysis && st.analysis.recommended_methodology] ||
             (st.analysis && st.analysis.recommended_methodology) || '—'))}</b></div>
         ${paintSuggestions(st.analysis)}
       </div>
@@ -171,7 +172,7 @@ function paintMetrics(a) {
     const w = hasBar ? Math.max(0, Math.min(100, ratio)) : 0;
     return `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <span style="width:104px;font-size:12.5px">${label}</span>
+        <span style="width:112px;font-size:12.5px">${label}</span>
         ${hasBar
           ? '<span style="flex:1;height:7px;background:var(--line-soft);border-radius:4px;overflow:hidden">' +
             '<i style="display:block;height:100%;border-radius:4px;width:' + w + '%;background:' + color + '"></i></span>'
@@ -198,21 +199,21 @@ function paintMetrics(a) {
     : '无分支回路，与线性合计一致';
 
   return warn +
-    row('流程周期效率', num(pce, 1) + '%', '增值 / 期望端到端',
+    row(metricHelp('pce', '流程周期效率'), num(pce, 1) + '%', '增值 / 期望端到端',
       pce, pce >= 35 ? 'var(--ok)' : pce >= 15 ? 'var(--warn)' : 'var(--bad)') +
-    row('等待占比', num(waitShare, 1) + '%', num(m.wait_minutes, 0) + ' 分钟等待',
+    row(metricHelp('wait_ratio', '等待占比'), num(waitShare, 1) + '%', num(m.wait_minutes, 0) + ' 分钟等待',
       waitShare, waitShare >= 50 ? 'var(--bad)' : waitShare >= 30 ? 'var(--warn)' : 'var(--ok)') +
-    row('作业时间占比', num(workShare, 1) + '%', num(m.process_time_minutes, 0) + ' 分钟作业',
+    row(metricHelp('work_share', '作业时间占比'), num(workShare, 1) + '%', num(m.process_time_minutes, 0) + ' 分钟作业',
       workShare, 'var(--brand)') +
-    row('返工损失', dur(m.rework_loss_minutes),
+    row(metricHelp('rework_loss', '返工损失'), dur(m.rework_loss_minutes),
       '额外作业 ' + dur(m.rework_work_minutes) + ' · 占作业 ' + num(reworkShare, 1) + '%',
       reworkShare, reworkShare >= 15 ? 'var(--bad)' : reworkShare > 0 ? 'var(--warn)' : 'var(--ok)') +
-    row('期望端到端周期', dur(m.lead_time_minutes), cycleHint, null, '') +
-    row('跨泳道移交', m.handoff_count + ' 次', m.lane_count + ' 个部门/角色', null, '') +
-    row('累计审批层级', m.total_approval_levels + ' 层',
+    row(metricHelp('lead_time', '期望端到端周期'), dur(m.lead_time_minutes), cycleHint, null, '') +
+    row(metricHelp('handoff_count', '跨泳道移交'), m.handoff_count + ' 次', m.lane_count + ' 个部门/角色', null, '') +
+    row(metricHelp('approval_levels', '累计审批层级'), m.total_approval_levels + ' 层',
       m.approval_node_count + ' 个审批节点', null, '') +
-    row('单次执行成本', num(m.unit_cost, 1) + ' 元', '全部节点的期望成本合计', null, '') +
-    '<div class="note" style="margin-top:4px">按月 1000 单估算，消除返工可释放约 <b>' +
+    row(metricHelp('unit_cost', '单次执行成本'), num(m.unit_cost, 1) + ' 元', '全部节点的期望成本合计', null, '') +
+    '<div class="note" style="margin-top:4px">按月 1000 单估算，' + metricHelp('fte_saved', '可释放人天/月') + '约 <b>' +
       num(m.fte_days_saved_per_month, 0) + ' 人天/月</b>（仅计返工带来的额外作业时间）。</div>';
 }
 

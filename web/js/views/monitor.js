@@ -5,6 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
+import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PATCH } from '../core/api.js';
 
 /* ============================================================ 7. 运营监控与KPI */
@@ -28,7 +29,7 @@ const renderMonitor = () => {
       const dimCards = d.radar.dimensions.map((dim) => `
         <div class="kpi stat">
           <div class="num" style="color:${dimColor[dim.dimension]}">${num(dim.achievement_rate, 0)}<small>%</small></div>
-          <div class="lab">${KPI_DIM_ICON[dim.dimension]} ${esc(dim.label)}</div>
+          <div class="lab">${KPI_DIM_ICON[dim.dimension]} ${metricHelp('dimension_achievement', dim.label)}</div>
           <div class="trend ${dim.status === 'GOOD' ? 'up' : dim.status === 'WATCH' ? '' : 'down'}">
             ${dim.kpi_count} 个指标 · ${dim.status === 'GOOD' ? '达标' : dim.status === 'WATCH' ? '需关注' : '未达标'}</div>
           <div class="pipe"><i class="fill-${dim.status === 'GOOD' ? 'ok' : dim.status === 'WATCH' ? 'warn' : 'bad'}"
@@ -141,7 +142,7 @@ const renderMonitor = () => {
         <div class="grid g4 stat-row">${dimCards}</div>
         <div class="grid g2">
           <div class="card">
-            <h3>流程健康度雷达</h3>
+            <h3>${metricHelp('dimension_achievement', '流程健康度雷达')}</h3>
             <div class="desc">实线为当前达成率，虚线为 100% 目标线</div>
             <canvas id="radar" width="380" height="300"></canvas>
             <div class="legend chart-legend">
@@ -156,27 +157,27 @@ const renderMonitor = () => {
               <a class="link" onclick="setMonitorTab('exceptions')">全部台账 →</a>
             </div>
             <div class="kpi-strip">
-              <div><b>${s.open + s.in_progress}</b><span>未闭环</span></div>
-              <div><b class="risk">${s.overdue}</b><span>超期</span></div>
-              <div><b>${s.resolved + s.closed}</b><span>已闭环</span></div>
+              <div><b>${s.open + s.in_progress}</b><span>${metricHelp('open_exceptions', '未闭环')}</span></div>
+              <div><b class="risk">${s.overdue}</b><span>${metricHelp('exception_overdue', '超期')}</span></div>
+              <div><b>${s.resolved + s.closed}</b><span>${metricHelp('closed_exceptions', '已闭环')}</span></div>
             </div>
             ${recentRows}
           </div>
         </div>
         <div class="grid g2" style="align-items:start">
           <div class="card">
-            <h3>整体达成率趋势</h3>
+            <h3>${metricHelp('overall_trend', '整体达成率趋势')}</h3>
             <div class="desc">按月度汇总各 KPI 达成率的平均值，100% = 达标</div>
             <canvas id="overallTrend" class="trend-canvas" width="440" height="180"></canvas>
           </div>
           <div class="card">
             <div class="between mb">
-              <div><h3 style="margin:0">最弱 5 项</h3>
+              <div><h3 style="margin:0">${metricHelp('achievement_rate', '最弱 5 项')}</h3>
                 <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理</div></div>
               <a class="link" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
             </div>
             <table class="tbl">
-              <thead><tr><th>指标</th><th>当前值</th><th>目标</th><th>达成率</th></tr></thead>
+              <thead><tr><th>指标</th><th>${metricHelp('latest_value', '当前值')}</th><th>${metricHelp('target_value', '目标')}</th><th>${metricHelp('achievement_rate', '达成率')}</th></tr></thead>
               <tbody>${quickRows}</tbody>
             </table>
           </div>
@@ -189,8 +190,8 @@ const renderMonitor = () => {
               <div class="desc" style="margin:2px 0 0">越小越好的指标，达成率取目标与实际的比值</div></div>
           </div>
           <table class="tbl">
-            <thead><tr><th>指标</th><th>维度</th><th>当前值</th><th>目标</th>
-              <th>达成率</th><th>环比</th><th>6 个月走势</th>${canManage() ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>指标</th><th>维度</th><th>${metricHelp('latest_value', '当前值')}</th><th>${metricHelp('target_value', '目标')}</th>
+              <th>${metricHelp('achievement_rate', '达成率')}</th><th>${metricHelp('kpi_trend', '环比')}</th><th>${metricHelp('kpi_series', '6 个月走势')}</th>${canManage() ? '<th></th>' : ''}</tr></thead>
             <tbody>${kpiRows}</tbody>
           </table>
         </div>`;
@@ -217,7 +218,7 @@ const renderMonitor = () => {
         <div class="card page-head">
           <div class="between">
             <div><h2>运营监控</h2>
-              <div class="desc">综合达成率 <b>${num(d.radar.overall_achievement, 1)}%</b>
+              <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
                 · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
             <div class="gap">
               ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}

@@ -5,6 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { AUTH, canManage } from '../core/auth.js';
 import { GET, POST } from '../core/api.js';
+import { metricHelp } from '../core/metrics.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 8. 流程知识库 */
@@ -104,7 +105,7 @@ async function openKnowledge(id) {
       <div class="note mb">${esc(it.summary)}</div>
       <div style="white-space:pre-wrap;font-size:13px;line-height:1.85;color:var(--text)">${esc(it.content)}</div>
       <div class="tiny mt">作者：${esc(it.author || '—')} · ${fmtDate(it.created_at)}
-        · 查阅 ${it.download_count} 次${it.tool_code ? ' · 关联工具 ' + esc(it.tool_code) : ''}</div>`,
+        · ${metricHelp('download_count', '查阅')} ${it.download_count} 次${it.tool_code ? ' · 关联工具 ' + esc(it.tool_code) : ''}</div>`,
       `<button class="btn btn-g" onclick="closeModal()">关闭</button>
        ${it.tool_code ? '<button class="btn btn-p" onclick="closeModal();openToolByCode(\'' +
          esc(it.tool_code) + '\')">查看关联工具</button>' : ''}`, true);

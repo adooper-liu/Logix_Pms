@@ -1,5 +1,6 @@
 /* 视图：map */
 import { esc, num, bar, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
+import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
@@ -135,7 +136,7 @@ const renderMap = () => {
       <div class="card">
         <div class="between mb">
           <div>
-            <h3 style="margin:0">对标覆盖 · ${esc(bench.framework_name)}${
+            <h3 style="margin:0">${metricHelp('benchmark_coverage', '对标覆盖')} · ${esc(bench.framework_name)}${
               bench.framework_version ? ' ' + esc(bench.framework_version) : ''}</h3>
             <div class="desc" style="margin:2px 0 0">L3 流程 ${bench.mapped_processes}/${bench.total_processes}
               能被该框架覆盖 · 切换只换对标视图</div>
@@ -173,14 +174,14 @@ const renderMap = () => {
           </div>
         </div>
         <div class="map-stats">
-          <span class="map-stat"><b>${flat.length}</b> 流程资产</span>
+          <span class="map-stat"><b>${flat.length}</b> ${metricHelp('process_total', '流程资产')}</span>
           <button class="map-stat${improvementOnly ? ' on' : ''}" onclick="toggleImprovement()">
-            <b>${targetCount}</b> 待改善</button>
-          <span class="map-stat"><b>${avgHealth}</b> 平均健康度</span>
-          <span class="map-stat">L1 <b>${levelCounts[1]}</b></span>
-          <span class="map-stat">L2 <b>${levelCounts[2]}</b></span>
-          <span class="map-stat">L3 <b>${levelCounts[3]}</b></span>
-          <span class="map-stat">L4 <b>${levelCounts[4]}</b></span>
+            <b>${targetCount}</b> ${metricHelp('improvement_targets', '待改善')}</button>
+          <span class="map-stat"><b>${avgHealth}</b> ${metricHelp('map_avg_health', '平均健康度')}</span>
+          <span class="map-stat">${metricHelp('level_counts', 'L1')} <b>${levelCounts[1]}</b></span>
+          <span class="map-stat">${metricHelp('level_counts', 'L2')} <b>${levelCounts[2]}</b></span>
+          <span class="map-stat">${metricHelp('level_counts', 'L3')} <b>${levelCounts[3]}</b></span>
+          <span class="map-stat">${metricHelp('level_counts', 'L4')} <b>${levelCounts[4]}</b></span>
         </div>
       </div>
 
@@ -210,8 +211,9 @@ const renderMap = () => {
               <span class="muted">优先级 = 战略 × 痛点 × 改善空间</span>
             </div>
             <table class="tbl map-table">
-              <thead><tr><th>流程</th><th>Owner / 部门</th><th>健康度</th>
-                <th>痛点 / 改善空间</th><th>优先级</th><th>下级</th><th></th></tr></thead>
+              <thead><tr><th>流程</th><th>Owner / 部门</th><th>${metricHelp('health_score', '健康度')}</th>
+                <th>${metricHelp('pain_space', '痛点 / 改善空间')}</th>
+                <th>${metricHelp('priority_score', '优先级')}</th><th>${metricHelp('child_count', '下级')}</th><th></th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>

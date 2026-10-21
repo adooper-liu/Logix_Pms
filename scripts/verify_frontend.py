@@ -392,10 +392,25 @@ def main() -> int:
             assert page.inner_text("#pageTitle") == "运营监控与KPI"
             assert "异常台账" in page.inner_text("#view")
 
+        # 指标口径：页面上必须有可悬停的说明
+        def metric_help() -> None:
+            goto("dashboard")
+            assert page.locator("#view .metric-help").count() > 0, "驾驶舱没有指标口径提示"
+            tip = page.locator("#view .metric-help >> nth=0").get_attribute("data-tip")
+            assert tip and len(tip) > 6, f"指标口径提示为空：{tip!r}"
+            page.hover("#view .metric-help >> nth=0")
+            page.wait_for_timeout(250)
+            tooltip = page.evaluate(
+                "() => { const s = getComputedStyle(document.querySelector('#view .metric-help'), '::after');"
+                " return [s.visibility, s.opacity, s.content]; }"
+            )
+            assert tooltip[0] == "visible" and float(tooltip[1]) > 0, f"口径提示未显示：{tooltip}"
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
         check("驾驶舱入口", dashboard_entries)
+        check("指标口径提示", metric_help)
         check("工作流步骤详情", workflow_step_modal)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)

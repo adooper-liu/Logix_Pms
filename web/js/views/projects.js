@@ -1,5 +1,6 @@
 /* 视图：projects */
 import { esc, num, pct, methodTag, statusTag, bar, emptyRow, skeleton } from '../core/format.js';
+import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, tab, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
@@ -55,12 +56,12 @@ const renderProjects = () => {
             <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
           </div>
           <div class="grid g4 stat-row">
-            <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">项目总数</div></div>
-            <div class="kpi stat"><div class="num">${activeCount}</div><div class="lab">进行中</div></div>
-            <div class="kpi stat"><div class="num">${closedCount}</div><div class="lab">已结项</div></div>
+            <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">${metricHelp('project_total', '项目总数')}</div></div>
+            <div class="kpi stat"><div class="num">${activeCount}</div><div class="lab">${metricHelp('active_count', '进行中')}</div></div>
+            <div class="kpi stat"><div class="num">${closedCount}</div><div class="lab">${metricHelp('closed_count', '已结项')}</div></div>
             <div class="kpi stat ${overdueCount ? 'is-risk' : ''}">
               <div class="num">${avgProgress}<small>%</small></div>
-              <div class="lab">平均进度${overdueCount ? ' · ' + overdueCount + ' 项超期' : ''}</div></div>
+              <div class="lab">${metricHelp('avg_progress', '平均进度')}${overdueCount ? ' · ' + overdueCount + ' 项超期' : ''}</div></div>
           </div>
           <div class="gap mt" style="flex-wrap:wrap">
             <select class="sel" onchange="setPFilter('methodology', this.value)">
@@ -86,7 +87,7 @@ const renderProjects = () => {
         <div class="card">
           <table class="tbl">
             <thead><tr><th>项目</th><th>方法</th><th>阶段</th><th>Owner</th>
-              <th>改善指标</th><th>已用/预算(万)</th><th>整体进度</th><th>状态</th></tr></thead>
+              <th>${metricHelp('improvement_pct', '改善指标')}</th><th>${metricHelp('budget_usage', '已用/预算(万)')}</th><th>${metricHelp('project_progress', '整体进度')}</th><th>状态</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>`;

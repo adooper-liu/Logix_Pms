@@ -1,5 +1,6 @@
 /* 视图：dashboard */
 import { esc, num, M_ICON, methodTag, statusTag, bar, emptyRow } from '../core/format.js';
+import { metricHelp } from '../core/metrics.js';
 import { viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go } from '../core/router.js';
@@ -29,7 +30,7 @@ const renderDashboard = () => renderAsync('dashboard',
       <a class="kpi stat clickable ${tone[c.status] || ''}" href="#"
          onclick="${kpiAction[c.key] || 'openProjects()'};return false">
         <div class="num">${num(c.value, 1)}<small>${esc(c.unit || '')}</small></div>
-        <div class="lab">${esc(c.label)}</div>
+        <div class="lab">${metricHelp(c.key, c.label)}</div>
         <span class="card-go">查看 ›</span>
       </a>`).join('');
 
@@ -38,7 +39,7 @@ const renderDashboard = () => renderAsync('dashboard',
       return `
       <a class="stage-row clickable" href="#" onclick="openStage(${s.stage_no});return false">
         <div class="stagebar">
-          <span class="nm">阶段${s.stage_no}</span>
+          <span class="nm">${metricHelp('stage_progress', '阶段' + s.stage_no)}</span>
           <span class="bar"><i class="fill-${s.health === 'RISK' ? 'bad' : s.health === 'WATCH' ? 'warn' : 'brand'}"
             style="width:${pct === null ? 0 : Math.max(pct, 4)}%"></i></span>
           <span class="pc">${pct === null ? '—' : num(pct, 0) + '%'}</span>
@@ -84,8 +85,8 @@ const renderDashboard = () => renderAsync('dashboard',
       </div>`).join('') || '<div class="empty">暂无健康度预警</div>';
 
     const es = d.exception_summary;
-    const meta = `今年结项 <b>${num(byKey.closed_this_year ? byKey.closed_this_year.value : 0, 0)}</b>
-      · 流程资产 <b>${num(byKey.process_total ? byKey.process_total.value : 0, 0)}</b>`;
+    const meta = `${metricHelp('closed_this_year', '今年结项')} <b>${num(byKey.closed_this_year ? byKey.closed_this_year.value : 0, 0)}</b>
+      · ${metricHelp('process_total', '流程资产')} <b>${num(byKey.process_total ? byKey.process_total.value : 0, 0)}</b>`;
 
     viewEl().innerHTML = `
       <div class="card page-head">
@@ -112,14 +113,14 @@ const renderDashboard = () => renderAsync('dashboard',
 
         <div class="card">
           <div class="between mb">
-            <div><h3 style="margin:0">风险提醒</h3>
+            <div><h3 style="margin:0">${metricHelp('health_alert', '风险提醒')}</h3>
               <div class="desc" style="margin:2px 0 0">健康度低于 70 分或痛点 ≥ 4</div></div>
             <a class="link" onclick="go('map')">流程地图 →</a>
           </div>
           ${alerts}
           <div class="alert-row" onclick="go('monitor')">
             <span class="tag t-red">${es.open + es.in_progress}</span>
-            <div class="alert-main"><b>未闭环异常</b>
+            <div class="alert-main"><b>${metricHelp('open_exceptions', '未闭环异常')}</b>
               <div class="tiny">超期 ${es.overdue} · 已闭环 ${es.resolved + es.closed}</div></div>
             <span class="alert-go">›</span>
           </div>
@@ -128,7 +129,7 @@ const renderDashboard = () => renderAsync('dashboard',
 
       <div class="card">
         <div class="between mb">
-          <div><h3 style="margin:0">方法论分布</h3>
+          <div><h3 style="margin:0">${metricHelp('methodology_share', '方法论分布')}</h3>
             <div class="desc" style="margin:2px 0 0">BPR / BPI / 精益 / 混合 的项目配比</div></div>
         </div>
         <div class="method-bar">${methodBar || '<i style="width:100%;background:var(--line)"></i>'}</div>
@@ -142,7 +143,7 @@ const renderDashboard = () => renderAsync('dashboard',
         </div>
         <table class="tbl">
           <thead><tr><th>项目</th><th>方法</th><th>当前阶段</th>
-            <th>改善指标</th><th>整体进度</th><th>状态</th></tr></thead>
+            <th>改善指标</th><th>${metricHelp('project_progress', '整体进度')}</th><th>状态</th></tr></thead>
           <tbody>${board}</tbody>
         </table>
       </div>`;

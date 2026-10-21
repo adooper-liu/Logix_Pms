@@ -22,7 +22,16 @@ def _modules() -> list[Path]:
 def test_frontend_has_modules():
     names = {p.name for p in _modules()}
     # 核心层
-    assert {"api.js", "auth.js", "format.js", "router.js", "state.js", "theme.js", "ui.js"} <= names
+    assert {
+        "api.js",
+        "auth.js",
+        "format.js",
+        "metrics.js",
+        "router.js",
+        "state.js",
+        "theme.js",
+        "ui.js",
+    } <= names
     # 八个视图
     assert {
         "dashboard.js",
@@ -92,6 +101,17 @@ def test_stylesheets_exist_and_are_referenced():
     assert "/static/styles.css" not in html
     assert "/static/app.js" not in html
     assert "/static/views.js" not in html
+
+
+def test_metric_help_keys_are_registered():
+    """视图里引用的指标口径 key 必须在 core/metrics.js 注册，否则提示会静默消失。"""
+    metrics_src = (JS_ROOT / "core" / "metrics.js").read_text(encoding="utf-8")
+    registered = set(re.findall(r"^  ([a-z_]+):\s*\{", metrics_src, re.MULTILINE))
+    used: set[str] = set()
+    for module in (JS_ROOT / "views").glob("*.js"):
+        used |= set(re.findall(r"metricHelp\('([a-z_]+)'", module.read_text(encoding="utf-8")))
+    missing = sorted(used - registered)
+    assert not missing, f"以下指标未在 metrics.js 注册：{missing}"
 
 
 def test_components_have_no_hardcoded_colors():
