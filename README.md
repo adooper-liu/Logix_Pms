@@ -389,7 +389,9 @@ main.js
 页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入格式见
 [docs/integration.md](docs/integration.md)。
 BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实施顺序见
-[docs/bpmn-editor-and-attachments.md](docs/bpmn-editor-and-attachments.md)。
+[docs/bpmn-editor-and-attachments.md](docs/bpmn-editor-and-attachments.md)；
+步骤契约、工具预制模板、交付物版本与集团/分公司继承见
+[docs/process-deliverable-versioning.md](docs/process-deliverable-versioning.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
