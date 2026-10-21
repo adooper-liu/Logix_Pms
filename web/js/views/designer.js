@@ -5,7 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { metricHelp } from '../core/metrics.js';
-import { GET, POST, PUT } from '../core/api.js';
+import { API_BASE, GET, POST, PUT, getToken } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 6. 流程设计器 */
@@ -145,6 +145,8 @@ function paintDesigner() {
         </div>
         <div class="gap">
           <select class="sel" onchange="switchProcess(this.value)">${opts}</select>
+          <button class="btn btn-g" onclick="exportBpmn()">导出 BPMN</button>
+          ${editable ? '<button class="btn btn-g" onclick="importBpmn()">导入 BPMN</button>' : ''}
           ${editable
             ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
             : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
@@ -159,6 +161,71 @@ function paintDesigner() {
 function setDesignerTab(tab) {
   state.designer.tab = tab;
   RENDERERS.designer();
+}
+
+/* -------------------------------------------------- BPMN 导入 / 导出 */
+
+async function exportBpmn() {
+  const id = state.designer.processId;
+  if (!id) return toast('请先选择一条流程', true);
+  try {
+    const res = await fetch(API_BASE + '/processes/' + id + '/bpmn', {
+      headers: { Authorization: 'Bearer ' + getToken() },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || ('导出失败（' + res.status + '）'));
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (state.designer.processCode || 'process') + '.bpmn';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('BPMN 已导出');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function importBpmn() {
+  const id = state.designer.processId;
+  if (!id) return toast('请先选择一条流程', true);
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.bpmn,.xml,text/xml,application/xml';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      const xml = await file.text();
+      const res = await fetch(API_BASE + '/processes/' + id + '/bpmn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + getToken(),
+        },
+        body: JSON.stringify({
+          xml,
+          expected_version: state.designer.model ? state.designer.model.version : null,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || ('导入失败（' + res.status + '）'));
+      state.designer.model = body;
+      state.designer.savedModel = cloneModel(body);
+      state.designer.analysis = await POST(
+        '/processes/' + id + '/design/analyze', {});
+      toast('BPMN 已导入并更新模型');
+      RENDERERS.designer();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  input.click();
 }
 
 function paintMetrics(a) {
@@ -471,4 +538,4 @@ function addLaneNode() {
 }
 
 
-export { renderDesigner, addDesignerNode, addLaneNode, addNode, cloneModel, deleteNode, editNode, openDesigner, openNodeEditor, paintDesigner, paintMetrics, paintSuggestions, persistDesign, reanalyze, reloadDesign, saveNode, setDesignerTab, switchProcess };
+export { renderDesigner, addDesignerNode, addLaneNode, addNode, cloneModel, deleteNode, editNode, exportBpmn, importBpmn, openDesigner, openNodeEditor, paintDesigner, paintMetrics, paintSuggestions, persistDesign, reanalyze, reloadDesign, saveNode, setDesignerTab, switchProcess };

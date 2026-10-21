@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -54,7 +55,7 @@ def main() -> int:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 950})
+        page = browser.new_page(viewport={"width": 1440, "height": 950}, accept_downloads=True)
 
         page.on(
             "console",
@@ -449,6 +450,29 @@ def main() -> int:
                         int(iid),
                     )
 
+        # BPMN 导出后再导入，结构应保持不变
+        def bpmn_roundtrip() -> None:
+            goto("designer")
+            tmp = tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False)
+            tmp.close()
+            path = Path(tmp.name)
+            try:
+                with page.expect_download() as download_info:
+                    page.click('#view button:has-text("导出 BPMN")')
+                download_info.value.save_as(str(path))
+                xml = path.read_text(encoding="utf-8")
+                assert "<bpmn:process" in xml, "导出的文件不是 BPMN XML"
+                assert 'id="n1"' in xml
+
+                with page.expect_file_chooser() as chooser_info:
+                    page.click('#view button:has-text("导入 BPMN")')
+                chooser_info.value.set_files(str(path))
+                page.wait_for_timeout(1800)
+                assert "BPMN 已导入" in page.inner_text("#toast"), page.inner_text("#toast")
+                assert "采购需求提报" in page.inner_text("#view")
+            finally:
+                path.unlink(missing_ok=True)
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
@@ -466,6 +490,7 @@ def main() -> int:
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)
         check("流程执行：启动→认领→完成", execution_flow)
+        check("BPMN 导入导出", bpmn_roundtrip)
 
         # -------------------------------------------------- 收尾：清理自检写入的数据
         def cleanup() -> None:

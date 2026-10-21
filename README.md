@@ -222,6 +222,7 @@ app/
   schemas/      Pydantic 出入参契约
   services/     业务逻辑
     execution.py    流程执行：实例、任务队列、分支推进
+    bpmn.py         BPMN 2.0 导入/导出（结构子集）
     methodology.py  立项向导：BPR / BPI / 精益 / 混合 自动匹配
     designer.py     流程设计器：周期效率测算 + 9 条改善建议规则
     workflow.py     标准工作流的项目实例化与进度回算
@@ -329,7 +330,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
 | 流程执行 | `/execution/*` | 启动实例、任务队列、认领/完成/改派、分支选择、实例时间线 |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配 |
-| 流程设计器 | `/processes/{id}/design` | 泳道建模、节点增删改、改动即时保存并重算指标与建议 |
+| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道建模、节点增删改、改动即时保存并重算指标与建议；BPMN 2.0 导入/导出 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 
@@ -441,6 +442,8 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET | `/processes/{id}/design` | 读取泳道模型 |
 | PUT | `/processes/{id}/design` | 覆盖式保存（校验 node_key 唯一、连线不悬空） |
 | POST | `/processes/{id}/design/analyze` | 测算已保存模型 |
+| GET | `/processes/{id}/bpmn` | 导出 BPMN 2.0 XML |
+| POST | `/processes/{id}/bpmn` | 导入 BPMN 2.0 并替换设计模型（支持 expected_version） |
 | POST | `/design/analyze` | 边改边算，不落库 |
 
 ### 运营监控
@@ -676,12 +679,12 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 2. **权限细化**：OWNER 归属已改为 `owner_user_id` 外键（项目 / 流程模型），
    姓名只在写入时用于尝试绑定唯一账号；还剩字段级可见性控制没有做。
 3. **通知与提醒**：里程碑逾期、异常超期目前只能靠人看板子，没有推送。
-4. **导入导出**：BPMN 导出、Excel 导入流程清单都还没有。
+4. **导入导出**：BPMN 2.0 结构导出/导入已完成；Excel 导入流程清单、并行网关/子流程仍待补。
 5. **生产部署**：镜像里用 uvicorn 单进程起服务，上生产需要加 gunicorn/多副本 + 反向代理 + HTTPS；
    数据库连接的 SSL 与备份策略也还没配。
 6. **前端事件委托**：模板仍用 `onclick` 内联属性，`main.js` 因此要把几十个函数挂到 `window`。
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
-8. **流程执行后续**：已完成单令牌顺序执行、表单定义与分支规则；下一步补 BPMN 导入导出、
-   并行网关与子流程、通知与 ERP/OA 集成。
+8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、BPMN 2.0 导入导出；
+   下一步补并行网关与子流程、通知与 ERP/OA 集成。

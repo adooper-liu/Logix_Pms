@@ -172,6 +172,13 @@ class ProcessModelOut(BaseModel):
     edges: List[ProcessEdgeOut] = []
 
 
+class BpmnImportRequest(BaseModel):
+    xml: str = Field(description="BPMN 2.0 XML 文本")
+    expected_version: Optional[int] = Field(
+        default=None, description="客户端看到的模型版本；不一致时返回 409"
+    )
+
+
 class NodeMetric(BaseModel):
     node_key: str
     name: str

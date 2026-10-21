@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession, WriteUser, ensure_can_edit_owned
 from app.core.timeutil import utcnow
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.schemas.process import (
+    BpmnImportRequest,
     DesignAnalysis,
     ProcessEdgeOut,
     ProcessModelIn,
@@ -18,6 +19,7 @@ from app.schemas.process import (
     ProcessNodeOut,
 )
 from app.services import audit as audit_service
+from app.services import bpmn as bpmn_service
 from app.services import designer
 
 router = APIRouter(tags=["流程设计器"])
@@ -110,6 +112,81 @@ def save_design(process_id: int, payload: ProcessModelIn, db: DbSession, user: W
     )
     db.commit()
 
+    return _load_model(db, process_id)
+
+
+@router.get(
+    "/processes/{process_id}/bpmn",
+    summary="导出 BPMN 2.0",
+    response_class=Response,
+)
+def export_bpmn(process_id: int, db: DbSession):
+    process = db.get(ProcessArch, process_id)
+    if process is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    nodes = db.scalars(
+        select(ProcessNode)
+        .where(ProcessNode.process_id == process_id)
+        .order_by(ProcessNode.sequence_order, ProcessNode.id)
+    ).all()
+    edges = db.scalars(select(ProcessEdge).where(ProcessEdge.process_id == process_id)).all()
+    if not nodes:
+        raise HTTPException(status_code=400, detail="流程还没有建模，无法导出 BPMN")
+    xml = bpmn_service.export_bpmn(process, list(nodes), list(edges))
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{process.code}.bpmn"',
+        },
+    )
+
+
+@router.post(
+    "/processes/{process_id}/bpmn",
+    response_model=ProcessModelOut,
+    summary="导入 BPMN 2.0（替换设计模型）",
+)
+def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user: WriteUser):
+    process = db.get(ProcessArch, process_id)
+    if process is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
+    if payload.expected_version is not None and payload.expected_version != process.model_version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"流程模型已被他人修改（服务端 v{process.model_version}，"
+                f"你提交的是 v{payload.expected_version}）。请刷新后重新导入。"
+            ),
+        )
+
+    parsed = bpmn_service.import_bpmn(payload.xml)
+
+    for node in db.scalars(select(ProcessNode).where(ProcessNode.process_id == process_id)).all():
+        db.delete(node)
+    for edge in db.scalars(select(ProcessEdge).where(ProcessEdge.process_id == process_id)).all():
+        db.delete(edge)
+    db.flush()
+
+    for index, node in enumerate(parsed["nodes"], start=1):
+        node["sequence_order"] = node.get("sequence_order") or index
+        db.add(ProcessNode(process_id=process_id, **node))
+    for edge in parsed["edges"]:
+        db.add(ProcessEdge(process_id=process_id, **edge))
+
+    process.model_version = (process.model_version or 0) + 1
+    process.model_updated_at = utcnow()
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_design",
+        process_id,
+        f"导入 BPMN {process.code}：{len(parsed['nodes'])} 节点 / {len(parsed['edges'])} 连线"
+        f"（v{process.model_version}）",
+    )
+    db.commit()
     return _load_model(db, process_id)
 
 
