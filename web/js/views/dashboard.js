@@ -19,27 +19,41 @@ const renderDashboard = () => renderAsync('dashboard',
     const primary = ['active_projects', 'improvement_targets', 'open_exceptions', 'avg_improvement']
       .map((key) => byKey[key]).filter(Boolean);
     const tone = { NORMAL: '', WATCH: 'is-watch', RISK: 'is-risk' };
+    const kpiAction = {
+      active_projects: "openProjects({status:'ACTIVE'})",
+      improvement_targets: 'openImprovementMap()',
+      open_exceptions: 'openExceptions()',
+      avg_improvement: 'openProjects()',
+    };
     const kpis = primary.map((c) => `
-      <div class="kpi stat ${tone[c.status] || ''}">
+      <a class="kpi stat clickable ${tone[c.status] || ''}" href="#"
+         onclick="${kpiAction[c.key] || 'openProjects()'};return false">
         <div class="num">${num(c.value, 1)}<small>${esc(c.unit || '')}</small></div>
         <div class="lab">${esc(c.label)}</div>
-      </div>`).join('');
+        <span class="card-go">查看 ›</span>
+      </a>`).join('');
 
-    const stages = d.stage_health.map((s) => `
-      <div class="stage-row">
+    const stages = d.stage_health.map((s) => {
+      const pct = s.project_count ? s.avg_progress : null;
+      return `
+      <a class="stage-row clickable" href="#" onclick="openStage(${s.stage_no});return false">
         <div class="stagebar">
           <span class="nm">阶段${s.stage_no}</span>
           <span class="bar"><i class="fill-${s.health === 'RISK' ? 'bad' : s.health === 'WATCH' ? 'warn' : 'brand'}"
-            style="width:${Math.max(s.avg_progress, s.project_count ? 4 : 0)}%"></i></span>
-          <span class="pc">${num(s.avg_progress, 0)}%</span>
+            style="width:${pct === null ? 0 : Math.max(pct, 4)}%"></i></span>
+          <span class="pc">${pct === null ? '—' : num(pct, 0) + '%'}</span>
         </div>
-        <div class="tiny stage-sub">${esc(s.stage_name)} · ${s.project_count} 个项目在办
+        <div class="tiny stage-sub">${esc(s.stage_name)} ·
+          ${s.project_count ? s.project_count + ' 个项目在办' : '暂无在办项目'}
           · 步骤完成 ${s.done_steps}/${s.total_steps}</div>
-      </div>`).join('');
+      </a>`;
+    }).join('');
 
     const methods = d.methodology_distribution.map((m) => `
-      <span><i style="background:${METHOD_COLOR[m.methodology] || 'var(--brand)'}"></i>
-        ${M_ICON[m.methodology] || ''} ${esc(m.label)} <b>${m.count}</b></span>`).join('');
+      <a class="method-item" href="#" onclick="openMethodology('${m.methodology}');return false">
+        <i style="background:${METHOD_COLOR[m.methodology] || 'var(--brand)'}"></i>
+        ${M_ICON[m.methodology] || ''} ${esc(m.label)} <b>${m.count}</b>
+      </a>`).join('');
     const methodBar = d.methodology_distribution.map((m) =>
       `<i style="width:${num(m.share * 100, 2)}%;background:${
         METHOD_COLOR[m.methodology] || 'var(--brand)'}" title="${esc(m.label)}"></i>`).join('');
@@ -78,7 +92,12 @@ const renderDashboard = () => renderAsync('dashboard',
         <div class="between">
           <div><h2>管理驾驶舱</h2>
             <div class="desc">先看需要关注的事，再看项目推进</div></div>
-          <a class="link" onclick="go('projects')">查看项目组合 →</a>
+          <div class="quick-links">
+            <a class="quick-link" href="#" onclick="go('map');return false">流程地图</a>
+            <a class="quick-link" href="#" onclick="go('projects');return false">项目组合</a>
+            <a class="quick-link" href="#" onclick="go('monitor');return false">运营监控</a>
+            <a class="quick-link" href="#" onclick="go('knowledge');return false">知识库</a>
+          </div>
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
@@ -130,4 +149,30 @@ const renderDashboard = () => renderAsync('dashboard',
   });
 
 
-export { renderDashboard };
+function openProjects(filter) {
+  state.projects.filter = Object.assign(
+    { methodology: '', status: '', stage: '' }, filter || {},
+  );
+  state.projects.keyword = '';
+  go('projects');
+}
+
+function openStage(stage) {
+  openProjects({ stage: String(stage) });
+}
+
+function openMethodology(methodology) {
+  openProjects({ methodology });
+}
+
+function openExceptions() {
+  state.monitor.tab = 'exceptions';
+  go('monitor');
+}
+
+function openImprovementMap() {
+  state.map.improvementOnly = true;
+  go('map');
+}
+
+export { renderDashboard, openExceptions, openImprovementMap, openMethodology, openProjects, openStage };

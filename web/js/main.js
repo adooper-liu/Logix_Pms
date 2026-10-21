@@ -39,6 +39,9 @@ function applyTheme(code) {
   setTheme(code);
   if (state.view === 'monitor' && state.monitorRadar) {
     monitorView.drawRadar(state.monitorRadar);
+    if (state.monitorTrend) {
+      monitorView.drawOverallTrend(state.monitorTrend.trend, state.monitorTrend.periods);
+    }
     state.monitorRadar.series.forEach((series) =>
       monitorView.drawSpark(series.kpi_id, series.points.map((p) => p.value), series.direction));
   }
@@ -49,6 +52,7 @@ Object.assign(window, {
   // 框架级
   applyTheme, go, closeModal, tab, state, RENDERERS, logout,
   // 业务操作
+  ...dashboard,
   ...mapView,
   ...workflowView,
   ...projectsView,

@@ -270,8 +270,11 @@ def main() -> int:
         # 运营监控：KPI 明细 + 异常处理弹窗
         def monitor() -> None:
             goto("monitor")
+            page.click('#view .seg button:has-text("概览")')
+            page.wait_for_timeout(500)
             view = page.inner_text("#view")
             assert "流程健康度雷达" in view, "雷达图未渲染"
+            assert "整体达成率趋势" in view, "整体趋势图未渲染"
             page.click('#view .seg button:has-text("KPI 明细")')
             page.wait_for_timeout(600)
             assert "KPI 明细" in page.inner_text("#view"), "KPI 明细未渲染"
@@ -364,9 +367,35 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert page.evaluate("document.documentElement.dataset.theme") == "default"
 
+        # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
+        def dashboard_entries() -> None:
+            goto("dashboard")
+            page.click('#view .quick-link:has-text("流程地图")')
+            page.wait_for_timeout(700)
+            assert page.inner_text("#pageTitle") == "企业流程地图"
+
+            goto("dashboard")
+            page.click("#view a.kpi.stat >> nth=0")
+            page.wait_for_timeout(900)
+            assert page.inner_text("#pageTitle") == "流程项目组合"
+            assert page.locator("#view select").nth(2).input_value() == "ACTIVE"
+
+            goto("dashboard")
+            page.click("#view a.stage-row >> nth=0")
+            page.wait_for_timeout(900)
+            assert page.inner_text("#pageTitle") == "流程项目组合"
+            assert page.locator("#view select").nth(1).input_value() == "1"
+
+            goto("dashboard")
+            page.click("#view a.kpi.stat >> nth=2")
+            page.wait_for_timeout(900)
+            assert page.inner_text("#pageTitle") == "运营监控与KPI"
+            assert "异常台账" in page.inner_text("#view")
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
+        check("驾驶舱入口", dashboard_entries)
         check("工作流步骤详情", workflow_step_modal)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)

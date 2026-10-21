@@ -108,6 +108,28 @@ const renderMonitor = () => {
           <span class="alert-go">›</span>
         </div>`).join('') || '<div class="empty">没有未闭环异常</div>';
 
+      const periods = (d.radar.series.find((series) => series.points.length) || { points: [] })
+        .points.map((p) => p.period);
+      // 与雷达图同口径：先按维度求平均，再对维度求平均，避免指标多的维度权重过大
+      const trend = periods.map((_, idx) => {
+        const byDimension = {};
+        d.radar.series.forEach((series) => {
+          const point = series.points[idx];
+          if (!point || !series.target_value) return;
+          const reach = series.direction === 'LOWER_BETTER'
+            ? (point.value > 0 ? (series.target_value / point.value) * 100
+              : (point.value === 0 ? 100 : null))
+            : (point.value / series.target_value) * 100;
+          if (reach === null) return;
+          (byDimension[series.dimension] = byDimension[series.dimension] || []).push(reach);
+        });
+        const averages = Object.values(byDimension)
+          .map((values) => values.reduce((a, b) => a + b, 0) / values.length);
+        return averages.length ? averages.reduce((a, b) => a + b, 0) / averages.length : null;
+      });
+
+      state.monitorTrend = { trend, periods };
+
       const tabs = `
         <div class="seg">
           <button class="${tab === 'overview' ? 'on' : ''}" onclick="setMonitorTab('overview')">概览</button>
@@ -141,16 +163,23 @@ const renderMonitor = () => {
             ${recentRows}
           </div>
         </div>
-        <div class="card">
-          <div class="between mb">
-            <div><h3 style="margin:0">KPI 速览</h3>
-              <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理最弱的 5 项</div></div>
-            <a class="link" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
+        <div class="grid g2" style="align-items:start">
+          <div class="card">
+            <h3>整体达成率趋势</h3>
+            <div class="desc">按月度汇总各 KPI 达成率的平均值，100% = 达标</div>
+            <canvas id="overallTrend" class="trend-canvas" width="440" height="180"></canvas>
           </div>
-          <table class="tbl">
-            <thead><tr><th>指标</th><th>当前值</th><th>目标</th><th>达成率</th></tr></thead>
-            <tbody>${quickRows}</tbody>
-          </table>
+          <div class="card">
+            <div class="between mb">
+              <div><h3 style="margin:0">最弱 5 项</h3>
+                <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理</div></div>
+              <a class="link" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
+            </div>
+            <table class="tbl">
+              <thead><tr><th>指标</th><th>当前值</th><th>目标</th><th>达成率</th></tr></thead>
+              <tbody>${quickRows}</tbody>
+            </table>
+          </div>
         </div>`;
 
       const kpiPane = `
@@ -199,7 +228,10 @@ const renderMonitor = () => {
         </div>
         ${tab === 'kpi' ? kpiPane : tab === 'exceptions' ? excPane : overview}`;
 
-      if (tab === 'overview') drawRadar(d.radar);
+      if (tab === 'overview') {
+        drawRadar(d.radar);
+        drawOverallTrend(trend, periods);
+      }
       d.radar.series.forEach((series) =>
         drawSpark(series.kpi_id, series.points.map((p) => p.value), series.direction));
     });
@@ -293,6 +325,99 @@ function drawRadar(radar) {
   ctx.lineWidth = 1;
 
 
+}
+
+function drawOverallTrend(trend, periods) {
+  const c = document.getElementById('overallTrend');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const pad = { l: 36, r: 14, t: 14, b: 24 };
+  const w = W - pad.l - pad.r, h = H - pad.t - pad.b;
+  const grid = cssVar('--chart-grid');
+  const sub = cssVar('--sub');
+  const brand = cssVar('--brand');
+  const ok = cssVar('--ok');
+  const maxY = 130;
+  ctx.clearRect(0, 0, W, H);
+
+  [0, 50, 100, 130].forEach((v) => {
+    const y = pad.t + h - (v / maxY) * h;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y);
+    ctx.lineTo(W - pad.r, y);
+    ctx.strokeStyle = grid;
+    ctx.stroke();
+    if (v % 50 === 0) {
+      ctx.fillStyle = sub;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(v + '%', pad.l - 6, y + 3);
+    }
+  });
+
+  // 100% 目标线
+  const targetY = pad.t + h - (100 / maxY) * h;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, targetY);
+  ctx.lineTo(W - pad.r, targetY);
+  ctx.strokeStyle = ok;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const points = trend.map((v, i) => {
+    if (v === null || v === undefined) return null;
+    return [
+      pad.l + (trend.length > 1 ? (i / (trend.length - 1)) * w : w / 2),
+      pad.t + h - (Math.min(v, maxY) / maxY) * h,
+    ];
+  });
+
+  // 面积
+  ctx.beginPath();
+  let started = false;
+  points.forEach((pt) => {
+    if (!pt) return;
+    if (!started) { ctx.moveTo(pt[0], pt[1]); started = true; } else ctx.lineTo(pt[0], pt[1]);
+  });
+  if (started) {
+    const last = points.filter(Boolean).slice(-1)[0];
+    const first = points.filter(Boolean)[0];
+    ctx.lineTo(last[0], pad.t + h);
+    ctx.lineTo(first[0], pad.t + h);
+    ctx.closePath();
+    ctx.fillStyle = brand;
+    ctx.globalAlpha = 0.08;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 折线
+  ctx.beginPath();
+  started = false;
+  points.forEach((pt) => {
+    if (!pt) return;
+    if (!started) { ctx.moveTo(pt[0], pt[1]); started = true; } else ctx.lineTo(pt[0], pt[1]);
+  });
+  ctx.strokeStyle = brand;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // 数据点 + 月份
+  points.forEach((pt, i) => {
+    if (!pt) return;
+    ctx.beginPath();
+    ctx.arc(pt[0], pt[1], 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = brand;
+    ctx.fill();
+    const label = periods[i] ? String(periods[i]).slice(5, 7) + '月' : '';
+    ctx.fillStyle = sub;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, pt[0], H - 7);
+  });
 }
 
 function drawSpark(kpiId, values, direction) {
@@ -569,4 +694,4 @@ async function submitKpiRecord(kpiId) {
 }
 
 
-export { renderMonitor, addKpiRecordModal, drawRadar, drawSpark, newExceptionModal, newKpiModal, openException, saveException, setMonitorStatus, setMonitorTab, submitException, submitKpi, submitKpiRecord };
+export { renderMonitor, addKpiRecordModal, drawOverallTrend, drawRadar, drawSpark, newExceptionModal, newKpiModal, openException, saveException, setMonitorStatus, setMonitorTab, submitException, submitKpi, submitKpiRecord };
