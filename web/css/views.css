@@ -4,68 +4,68 @@
 /* ===== 管理驾驶舱：五阶段进度条 ===== */
 .stagebar{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .stagebar .nm{width:74px;font-size:13px;color:var(--sub)}
-.stagebar .bar{flex:1;height:8px;background:#eef1f7;border-radius:4px;overflow:hidden}
+.stagebar .bar{flex:1;height:8px;background:var(--line-soft);border-radius:4px;overflow:hidden}
 .stagebar .bar i{display:block;height:100%;border-radius:4px;background:var(--brand)}
 .stagebar .pc{width:44px;text-align:right;font-size:12.5px;font-weight:600}
 
 /* ===== 五阶段标准工作流：阶段画布 ===== */
 .flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 2px}
 .phase{flex:1;min-width:196px;position:relative;display:flex;flex-direction:column}
-.phase-hd{font-size:13px;font-weight:600;padding:9px 14px;border-radius:9px 9px 0 0;color:#fff}
+.phase-hd{font-size:13px;font-weight:600;padding:9px 14px;border-radius:9px 9px 0 0;color:var(--panel)}
 .phase-hd .no{opacity:.75;font-weight:400;margin-right:4px}
-.phase-bd{flex:1;background:#f8fafd;border:1px solid var(--line);border-top:none;
+.phase-bd{flex:1;background:var(--panel-2);border:1px solid var(--line);border-top:none;
   border-radius:0 0 9px 9px;padding:12px;min-height:230px}
-.arrow{display:flex;align-items:center;color:#c3cbe0;font-size:18px;padding:0 6px}
+.arrow{display:flex;align-items:center;color:var(--line-strong);font-size:18px;padding:0 6px}
 
 /* ===== 流程设计器：泳道与节点 ===== */
 .lane{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px}
-.lane-hd{background:#f8fafd;padding:10px 16px;font-weight:600;font-size:13px;
+.lane-hd{background:var(--panel-2);padding:10px 16px;font-weight:600;font-size:13px;
   display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
-.lane-bd{display:flex;padding:14px;gap:10px;overflow-x:auto;min-height:66px;align-items:center;background:#fff}
+.lane-bd{display:flex;padding:14px;gap:10px;overflow-x:auto;min-height:66px;align-items:center;background:var(--panel)}
 .node{min-width:150px;max-width:200px;border:1px solid var(--line);border-radius:9px;
-  padding:10px 12px;font-size:12.5px;background:#fff;cursor:pointer;position:relative}
-.node:hover{border-color:var(--brand);box-shadow:0 3px 10px rgba(47,91,234,.12)}
+  padding:10px 12px;font-size:12.5px;background:var(--panel);cursor:pointer;position:relative}
+.node:hover{border-color:var(--brand);box-shadow:var(--shadow-hover)}
 .node b{display:block;font-size:12.5px}
 .node .meta{font-size:11px;color:var(--sub);margin-top:3px}
-.node.start{border-left:3px solid var(--ok);background:#f5fbf7}
-.node.end{border-left:3px solid var(--bad);background:#fdf6f6}
-.node.gate{border-left:3px solid var(--warn);background:#fffbf2}
-.node.wait{border-left:3px solid #c3cbe0;background:#fafbfd}
-.node.bn{box-shadow:0 0 0 2px rgba(239,68,68,.25)}
-.node .bnbadge{position:absolute;top:-7px;right:-6px;background:var(--bad);color:#fff;
+.node.start{border-left:3px solid var(--ok);background:var(--ok-soft)}
+.node.end{border-left:3px solid var(--bad);background:var(--bad-soft)}
+.node.gate{border-left:3px solid var(--warn);background:var(--panel)bf2}
+.node.wait{border-left:3px solid var(--line-strong);background:var(--panel-2)}
+.node.bn{box-shadow:var(--ring-bad)}
+.node .bnbadge{position:absolute;top:-7px;right:-6px;background:var(--bad);color:var(--panel);
   font-size:10px;padding:1px 6px;border-radius:9px;font-weight:600}
-.add{border:1.5px dashed #cfd8ea;border-radius:9px;padding:10px 18px;color:var(--sub);
-  font-size:12px;cursor:pointer;background:#fbfcff;white-space:nowrap;font-family:inherit}
+.add{border:1.5px dashed var(--line-strong);border-radius:9px;padding:10px 18px;color:var(--sub);
+  font-size:12px;cursor:pointer;background:var(--panel-hover);white-space:nowrap;font-family:inherit}
 .add:hover{border-color:var(--brand);color:var(--brand)}
 
 /* ===== 流程项目组合：步骤清单 ===== */
 .steplist{border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.stepitem{display:flex;gap:10px;align-items:flex-start;padding:10px 13px;border-bottom:1px solid #f2f5fa;font-size:12.5px}
+.stepitem{display:flex;gap:10px;align-items:flex-start;padding:10px 13px;border-bottom:1px solid var(--panel-3);font-size:12.5px}
 .stepitem:last-child{border-bottom:none}
-.stepitem:hover{background:#fafcff}
+.stepitem:hover{background:var(--panel-hover)}
 .stepitem .no{color:var(--sub);font-size:11.5px;width:26px;flex-shrink:0;padding-top:1px}
 .stepitem .nm{flex:1}
 .stepitem .nm i{display:block;color:var(--sub);font-size:11.5px;font-style:normal;margin-top:2px}
-.stepitem.done .nm b{color:var(--sub);text-decoration:line-through;text-decoration-color:#c3cbe0}
+.stepitem.done .nm b{color:var(--sub);text-decoration:line-through;text-decoration-color:var(--line-strong)}
 .stepitem select{padding:3px 7px;font-size:11.5px;border:1px solid var(--line);border-radius:6px;
-  font-family:inherit;background:#fff;cursor:pointer}
+  font-family:inherit;background:var(--panel);cursor:pointer}
 .stageblock{margin-bottom:14px}
 .stageblock .hd{display:flex;justify-content:space-between;font-size:13px;font-weight:600;
-  padding:8px 13px;background:#f8fafd;border:1px solid var(--line);border-radius:10px 10px 0 0;border-bottom:none}
+  padding:8px 13px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px 10px 0 0;border-bottom:none}
 .stageblock .hd.todo{color:var(--sub);font-weight:500}
 
 /* ===== 流程项目组合：甘特图 ===== */
-.gantt{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#fff}
+.gantt{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--panel)}
 .gantt-row{display:flex;align-items:center;gap:10px;padding:6px 0}
 .gantt-label{width:132px;flex-shrink:0;font-size:12.5px;font-weight:600;line-height:1.3}
 .gantt-label i{display:block;font-style:normal;font-weight:400;font-size:11px;color:var(--sub)}
-.gantt-track{position:relative;flex:1;height:24px;background:#f6f8fc;border-radius:6px}
-.gantt-bar{position:absolute;top:3px;bottom:3px;border:1px solid #c3cbe0;border-radius:5px;
-  background:#eef1f7;overflow:hidden;display:flex;align-items:center;min-width:8px}
+.gantt-track{position:relative;flex:1;height:24px;background:var(--panel-2);border-radius:6px}
+.gantt-bar{position:absolute;top:3px;bottom:3px;border:1px solid var(--line-strong);border-radius:5px;
+  background:var(--line-soft);overflow:hidden;display:flex;align-items:center;min-width:8px}
 .gantt-fill{position:absolute;left:0;top:0;bottom:0;opacity:.85;border-radius:4px}
-.gantt-pct{position:relative;font-size:10.5px;font-weight:600;color:#1a2233;
+.gantt-pct{position:relative;font-size:10.5px;font-weight:600;color:var(--text);
   padding-left:6px;white-space:nowrap}
-.gantt-today{position:absolute;top:-2px;bottom:-2px;width:2px;background:#ef4444;opacity:.55}
+.gantt-today{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--bad);opacity:.55}
 .gantt-track-ms{height:26px;background:transparent}
 .gantt-ms{position:absolute;top:4px;transform:translateX(-50%);text-align:center}
 .gantt-ms .dia{display:block;width:11px;height:11px;transform:rotate(45deg);border-radius:2px;margin:0 auto}
@@ -74,3 +74,78 @@
 .gantt-axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 .gantt-axis span:first-child{transform:none}
 .gantt-axis span:last-child{transform:translateX(-100%)}
+
+/* ===== 企业流程地图：层级导航 + 聚焦列表 ===== */
+.map-head{padding:18px 20px}
+.map-head-top{align-items:flex-start}
+.map-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.map-stat{display:inline-flex;align-items:baseline;gap:5px;padding:5px 11px;border-radius:999px;
+  background:var(--panel-3);color:var(--sub);font-size:12px;border:1px solid transparent;font-family:inherit}
+.map-stat b{font-size:14px;color:var(--text);font-weight:700}
+button.map-stat{cursor:pointer}
+.map-stat.on{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand)}
+.map-stat.on b{color:var(--brand)}
+.map-layout{display:grid;grid-template-columns:224px minmax(0,1fr);gap:16px;align-items:start}
+.map-side{margin-bottom:0;padding:14px 12px;position:sticky;top:12px}
+.map-side-hd{font-size:12px;font-weight:600;color:var(--sub);letter-spacing:.04em;padding:0 8px 8px}
+.map-tree{display:flex;flex-direction:column;gap:2px;max-height:calc(100vh - 300px);overflow:auto}
+.tree-item{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:7px;
+  font-size:12.5px;line-height:1.25;cursor:pointer;color:var(--text)}
+.tree-item:hover{background:var(--brand-softer)}
+.tree-item.lv2{padding-left:20px;font-size:12px}
+.tree-item.lv3{padding-left:33px;font-size:12px;color:var(--sub)}
+.tree-item.in-path{color:var(--brand)}
+.tree-item.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.tree-item .cnt{margin-left:auto;color:var(--sub);font-size:11px;font-weight:400}
+.tree-dot{width:6px;height:6px;border-radius:50%;background:var(--line-strong);flex-shrink:0}
+.tree-item.in-path .tree-dot{background:var(--brand)}
+.tree-dot.target{background:var(--bad)}
+.map-side-foot{margin-top:10px;padding:8px 8px 0;border-top:1px solid var(--line);line-height:1.45}
+.map-main{min-width:0}
+.map-table td{padding:11px 12px}
+.map-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.map-code{font-size:11px;color:var(--sub);font-family:monospace;background:var(--bg);
+  padding:1px 5px;border-radius:4px}
+.map-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.map-go{color:var(--brand);font-size:12px;font-weight:600;white-space:nowrap}
+.map-row:hover .map-go{text-decoration:underline}
+.map-bottom{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+.map-bottom.single{grid-template-columns:1fr}
+.map-bottom .card{margin-bottom:0}
+.map-bench-pills{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
+.map-bench-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:pointer;
+  font-family:inherit;font-size:12px;color:var(--text)}
+.map-bench-pill:hover{border-color:var(--brand);color:var(--brand)}
+.map-bench-pill b{font-size:11px;color:var(--brand)}
+.map-bench-pill span{color:var(--sub)}
+.map-bench-pill i{font-style:normal;font-weight:600;background:var(--panel-3);border-radius:999px;
+  padding:1px 7px;font-size:11px}
+@media(max-width:1100px){
+  .map-layout{grid-template-columns:1fr}
+  .map-side{position:static}
+  .map-tree{max-height:none}
+  .map-bottom{grid-template-columns:1fr}
+}
+
+/* ===== 管理驾驶舱：阶段行 ===== */
+.stage-row{margin-bottom:14px}
+.stage-row:last-child{margin-bottom:0}
+.stage-row .stagebar{margin-bottom:2px}
+.stage-sub{margin-left:84px;line-height:1.4}
+
+/* ===== 五阶段工作流：阶段切换与步骤网格 ===== */
+.stage-pills{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:2px}
+.stage-pill{flex:1;min-width:128px;text-align:left;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:9px 12px;cursor:pointer;font-family:inherit;
+  border-top:3px solid var(--pill);transition:var(--transition,.15s)}
+.stage-pill:hover{border-color:var(--brand)}
+.stage-pill.on{background:var(--brand-softer);border-color:var(--brand-line);border-top-color:var(--pill)}
+.stage-pill b{display:block;font-size:12px;color:var(--sub)}
+.stage-pill span{display:block;font-size:12.5px;font-weight:600;color:var(--text);margin-top:1px}
+.stage-pill.on b,.stage-pill.on span{color:var(--brand)}
+.wf-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.wf-grid .step{margin-bottom:0;padding:12px 14px}
+.wf-grid .step b{font-size:13px}
+.wf-grid .step span{display:block;margin-top:3px;line-height:1.45}
+@media(max-width:900px){.wf-grid{grid-template-columns:1fr}}

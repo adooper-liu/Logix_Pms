@@ -131,7 +131,7 @@ def main() -> int:
         def map_drill() -> None:
             goto("map")
             before = page.inner_text(".crumb")
-            page.click("#view .step >> nth=2")
+            page.click("#view tr.map-row >> nth=2")
             page.wait_for_timeout(700)
             after = page.inner_text(".crumb")
             assert len(after) > len(before), f"面包屑未增长：{before!r} → {after!r}"
@@ -151,7 +151,7 @@ def main() -> int:
             text = page.inner_text("#view")
             assert "所有 L3 流程" in text, f"APQC 应全量覆盖：{text[:160]!r}"
 
-            page.click("#view .card:has-text('对标覆盖') tr.clk >> nth=0")
+            page.click("#view .map-bench-pill >> nth=0")
             page.wait_for_selector("#mBody table")
             assert "编码" in page.inner_text("#mBody")
             close_modal()
@@ -168,6 +168,9 @@ def main() -> int:
 
         # 方法论匹配引擎（真实调用后端）
         def workflow_recommend() -> None:
+            goto("workflow")
+            page.click('#view .seg button:has-text("方法论匹配")')
+            page.wait_for_timeout(500)
             page.select_option("#rcState", "SEVERE_OUTDATED")
             page.fill("#rcPct", "60")
             page.select_option("#rcScope", "END_TO_END")
@@ -251,7 +254,7 @@ def main() -> int:
         def designer_edit_node() -> None:
             goto("designer")
             before = page.inner_text("#view")
-            assert "流程周期效率" in before
+            assert "流程模型" in before
             page.click("#view .node >> nth=0")
             page.wait_for_selector("#mask.show")
             assert "编辑活动节点" in page.inner_text("#mTitle")
@@ -259,6 +262,9 @@ def main() -> int:
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(1800)
             assert "指标已重算" in page.inner_text("#toast"), page.inner_text("#toast")
+            page.click('#view .seg button:has-text("指标与建议")')
+            page.wait_for_timeout(800)
+            assert "流程周期效率" in page.inner_text("#view")
             page.screenshot(path=str(out_dir / "interaction-designer.png"), full_page=True)
 
         # 运营监控：KPI 明细 + 异常处理弹窗
@@ -266,7 +272,11 @@ def main() -> int:
             goto("monitor")
             view = page.inner_text("#view")
             assert "流程健康度雷达" in view, "雷达图未渲染"
-            assert "KPI 明细" in view, "KPI 明细未渲染"
+            page.click('#view .seg button:has-text("KPI 明细")')
+            page.wait_for_timeout(600)
+            assert "KPI 明细" in page.inner_text("#view"), "KPI 明细未渲染"
+            page.click('#view .seg button:has-text("异常台账")')
+            page.wait_for_timeout(600)
             # 异常台账在最后一张表，行内才有「处理」按钮
             page.click('#view button:has-text("处理") >> nth=0')
             page.wait_for_selector("#mask.show")
@@ -343,8 +353,20 @@ def main() -> int:
             assert page.is_visible("#loginMask"), "退出后应回到登录页"
             assert page.inner_text("#userName").strip() == "未登录"
 
+        # 主题壳：切换后 data-theme 生效，Canvas 图表要跟着重绘
+        def theme_switch() -> None:
+            goto("monitor")
+            page.select_option("#themeSel", "slate")
+            page.wait_for_timeout(400)
+            assert page.evaluate("document.documentElement.dataset.theme") == "slate"
+            page.screenshot(path=str(out_dir / "theme-slate.png"), full_page=True)
+            page.select_option("#themeSel", "default")
+            page.wait_for_timeout(300)
+            assert page.evaluate("document.documentElement.dataset.theme") == "default"
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
+        check("主题切换", theme_switch)
         check("工作流步骤详情", workflow_step_modal)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)

@@ -138,9 +138,9 @@ uvicorn app.main:app --port 8123      # 另开一个终端
 python scripts/verify_frontend.py http://127.0.0.1:8123 _screenshots
 ```
 
-交互段覆盖：登录、地图下钻、工作流步骤详情、方法论匹配引擎、项目详情四页签与步骤改状态、
-立项向导（真实入库后自动清理）、工具箱详情与按问题找工具、设计器改节点并重算、
-异常处理弹窗、知识库详情、甘特图与里程碑、新建流程、登记异常、退出登录。
+交互段覆盖：登录、地图下钻、对标框架切换、主题切换、工作流步骤详情、方法论匹配引擎、
+项目详情四页签与步骤改状态、立项向导（真实入库后自动清理）、工具箱详情与按问题找工具、
+设计器改节点并重算、异常处理弹窗、知识库详情、甘特图与里程碑、新建流程、登记异常、退出登录。
 
 ---
 
@@ -214,7 +214,7 @@ app/
 web/            前端（原生 ES 模块，无构建步骤）
   index.html    页面骨架
   css/
-    base.css        设计变量、页面骨架、登录页
+    base.css        设计令牌（多主题）、页面骨架、登录页
     components.css  卡片/表格/标签/按钮/表单/模态框/反馈等通用组件
     views.css       仅单个视图使用的样式（流程画布、泳道、甘特图…）
   js/
@@ -224,6 +224,7 @@ web/            前端（原生 ES 模块，无构建步骤）
       format.js     格式化与配色（纯函数）
       router.js     视图注册表、页面切换、搜索派发
       state.js      全局界面状态
+      theme.js      主题注册、切换与 Canvas 取色
       ui.js         模态框、提示条、视图容器
     views/
       dashboard.js  map.js  workflow.js  projects.js
@@ -231,7 +232,7 @@ web/            前端（原生 ES 模块，无构建步骤）
     main.js       注册视图、接线 DOM、暴露模板所需函数、启动
 scripts/
   seed.py             命令行灌库
-  verify_frontend.py  无头浏览器联调自检（8 个视图 + 12 条交互 + 截图）
+  verify_frontend.py  无头浏览器联调自检（8 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
@@ -253,7 +254,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 main.js
   └─ views/*        八个视图，各自 import 需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
-            └─ core/{api, auth, state, ui, format}.js
+            └─ core/{api, auth, state, theme, ui, format}.js
 ```
 
 `core/router.js` 刻意不 import 视图，视图由 `main.js` 注册 ——
@@ -263,6 +264,27 @@ main.js
 **为什么 `main.js` 往 `window` 上挂函数**：模板里的 `onclick="openProject(3)"`
 在全局作用域求值，模块作用域隔离，不挂 window 就点不动。这段挂载是**唯一**的对外操作面，
 集中在一个 `Object.assign(window, …)` 里；将来改成事件委托时，删掉它即可，不用动各视图模块。
+
+**视觉壳与多主题**：所有颜色、圆角、阴影、间距都定义为 `base.css` 里 `:root` 的语义令牌，
+组件和视图只允许用 `var(--token)`，不允许写死 hex。顶栏的「主题」下拉由 `core/theme.js`
+的 `THEMES` 注册表生成，选择后写入 `data-theme` 并持久化到 localStorage。
+
+新增一套主题只需要两步：
+
+1. 在 `base.css` 里加一组 `[data-theme="xxx"]` 的变量覆盖（参考 `slate`）；
+2. 在 `theme.js` 的 `THEMES` 里登记 `{ code, name }`。
+
+`tests/test_frontend_structure.py` 会检查 `components.css` / `views.css` 里没有硬编码颜色，
+防止主题壳被后续改动绕过。Canvas 图表通过 `cssVar()` 读取当前主题色。
+
+**信息层级**：每个页面统一为「页头（标题/说明/主操作 + 分段控件）→ 关键指标 → 内容区」。
+监控、工作流、设计器使用页内页签拆分高密度内容（概览 / KPI / 异常台账；阶段步骤 / 方法论匹配；
+流程模型 / 指标与建议），仪表盘只保留 4 个主指标并把风险提醒放在首屏右侧。
+
+**为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
+这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
+CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态、多人并行开发或移动端需求时，
+再评估 Vue 3 + Vite；届时 `base.css` 的设计令牌与页面结构可以原样复用。
 
 **数据来源**：全部走 `/api/v1/*`，前端不含任何演示数据。枚举的中文标签
 （`methodology_label` / `status_label` / `stage_name` / `heat_level`）由后端下发，

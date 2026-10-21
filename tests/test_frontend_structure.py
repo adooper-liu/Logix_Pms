@@ -22,7 +22,7 @@ def _modules() -> list[Path]:
 def test_frontend_has_modules():
     names = {p.name for p in _modules()}
     # 核心层
-    assert {"api.js", "auth.js", "format.js", "router.js", "state.js", "ui.js"} <= names
+    assert {"api.js", "auth.js", "format.js", "router.js", "state.js", "theme.js", "ui.js"} <= names
     # 八个视图
     assert {
         "dashboard.js",
@@ -92,3 +92,16 @@ def test_stylesheets_exist_and_are_referenced():
     assert "/static/styles.css" not in html
     assert "/static/app.js" not in html
     assert "/static/views.js" not in html
+
+
+def test_components_have_no_hardcoded_colors():
+    """颜色只能出现在主题令牌层；组件和视图一律用 var(--token)。"""
+    hex_re = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+    for name in ("components.css", "views.css"):
+        src = (WEB_ROOT / "css" / name).read_text(encoding="utf-8")
+        colors = hex_re.findall(src)
+        assert not colors, f"{name} 仍存在硬编码颜色：{sorted(set(colors))[:8]}"
+
+    base = (WEB_ROOT / "css" / "base.css").read_text(encoding="utf-8")
+    assert '[data-theme="slate"]' in base, "base.css 缺少主题覆盖示例"
+    assert "--brand:" in base and "--panel:" in base, "base.css 缺少基础主题令牌"

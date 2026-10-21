@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>流程管理系统 PMS · Logix</title>
+<script>
+  // 在样式表绘制前恢复主题，避免刷新时闪一下默认色
+  try { document.documentElement.dataset.theme = localStorage.getItem('pms_theme') || 'default'; } catch (e) {}
+</script>
 <link rel="stylesheet" href="/static/css/base.css">
 <link rel="stylesheet" href="/static/css/components.css">
 <link rel="stylesheet" href="/static/css/views.css">
@@ -36,6 +40,7 @@
     <div class="topbar">
       <h1 id="pageTitle">管理驾驶舱</h1>
       <div class="search"><input id="searchInput" placeholder="搜索流程 / 项目 / 工具 / 知识…"></div>
+      <select class="sel theme-sel" id="themeSel" title="切换主题" onchange="applyTheme(this.value)"></select>
       <div class="usr">
         <div class="avatar" id="userAvatar">--</div>
         <span id="userName">未登录</span>

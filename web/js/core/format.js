@@ -78,7 +78,10 @@ export const M_ICON = { BPR: '🔴', BPI: '🟡', LEAN: '🟢', HYBRID: '🔵' }
 export const S_COLOR = {
   ACTIVE: 't-blu', PLANNING: 't-yel', ON_HOLD: 't-gry', CLOSED: 't-grn', CANCELLED: 't-red',
 };
-export const HEAT_COLOR = { CRITICAL: '#ef4444', HIGH: '#f59e0b', MEDIUM: '#2f5bea', LOW: '#16a34a' };
+/** 热度统一走 CSS 类，具体色值由主题令牌决定 */
+export const HEAT_CLASS = {
+  CRITICAL: 'heat-critical', HIGH: 'heat-high', MEDIUM: 'heat-medium', LOW: 'heat-low',
+};
 export const HEAT_LABEL = { CRITICAL: '紧急', HIGH: '高', MEDIUM: '中', LOW: '低' };
 export const SEV_COLOR = { CRITICAL: 't-red', HIGH: 't-red', MEDIUM: 't-yel', LOW: 't-grn' };
 export const SEV_LABEL = { CRITICAL: '紧急', HIGH: '高', MEDIUM: '中', LOW: '低' };
@@ -106,9 +109,9 @@ export function statusTag(s, label) {
 
 export function bar(value, color, width) {
   const w = Math.max(0, Math.min(100, Number(value) || 0));
-  const c = color || (w >= 70 ? '#16a34a' : w >= 40 ? '#f59e0b' : '#ef4444');
+  const tone = color || (w >= 70 ? 'ok' : w >= 40 ? 'warn' : 'bad');
   return '<div style="width:' + (width || 80) + 'px"><div class="pipe">' +
-    '<i style="width:' + w + '%;background:' + c + '"></i></div>' +
+    '<i class="fill-' + tone + '" style="width:' + w + '%"></i></div>' +
     '<span class="tiny">' + num(w, 0) + '%</span></div>';
 }
 

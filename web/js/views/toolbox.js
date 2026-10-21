@@ -41,10 +41,10 @@ const renderToolbox = () => renderAsync('toolbox',
       </div>`).join('') || '<div class="empty">没有匹配的工具</div>';
 
     viewEl().innerHTML = `
-      <div class="card">
+      <div class="card page-head">
         <div class="between mb">
-          <div><h2 style="margin:0">方法论工具箱（${total} 个工具）</h2>
-            <div class="desc" style="margin:0">按用途分类，点击卡片查看适用场景、5 步标准操作与常见误用</div></div>
+          <div><h2>方法论工具箱（${total} 个工具）</h2>
+            <div class="desc" style="margin:0">按用途分类；点击卡片查看适用场景、标准操作与常见误用</div></div>
         </div>
         <div class="tabs" style="margin-bottom:0">${tabs}</div>
       </div>
@@ -128,7 +128,7 @@ async function openToolByCode(code) {
 function paintTool(t) {
   const catLabel = { DIAGNOSE: '诊断工具', DESIGN: '设计工具', DEPLOY: '落地工具', MONITOR: '监控工具' };
   openModal(t.name + (t.alias ? ' · ' + t.alias : ''), `
-    <div style="margin-bottom:14px;font-size:13px;color:#3d4759">${esc(t.purpose)}</div>
+    <div style="margin-bottom:14px;font-size:13px;color:var(--text)">${esc(t.purpose)}</div>
     <div class="row3 mb">
       <div class="kpi" style="padding:12px 14px"><div class="num" style="font-size:16px">
         ${CAT_ICON[t.category] || ''} ${esc(catLabel[t.category] || t.category)}</div>
@@ -143,7 +143,7 @@ function paintTool(t) {
     <div class="note mb">${esc(t.when_to_use)}</div>
 
     <h3>标准操作步骤</h3>
-    <ol style="padding-left:20px;font-size:13px;line-height:1.95;color:#3d4759;margin-bottom:14px">
+    <ol style="padding-left:20px;font-size:13px;line-height:1.95;color:var(--text);margin-bottom:14px">
       ${t.steps.map((s) => '<li>' + esc(s) + '</li>').join('')}
     </ol>
 

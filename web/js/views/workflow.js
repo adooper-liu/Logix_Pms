@@ -2,49 +2,52 @@
 import { esc, CAT_ICON, methodTag, skeleton } from '../core/format.js';
 import { openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 3. 五阶段标准工作流 */
 
-const STAGE_COLORS = ['#2f5bea', '#3b82f6', '#8b5cf6', '#f59e0b', '#16a34a'];
+const STAGE_COLORS = [
+  'var(--stage-1)', 'var(--stage-2)', 'var(--stage-3)', 'var(--stage-4)', 'var(--stage-5)',
+];
 
 const renderWorkflow = () => renderAsync('workflow',
   () => GET('/workflow/stages'),
   (stages) => {
     state.wf = stages;
+    const wf = state.workflow || (state.workflow = { tab: 'steps', stage: 1 });
     const total = stages.reduce((a, s) => a + s.steps.length, 0);
+    const current = stages.find((s) => s.stage_no === wf.stage) || stages[0];
+    const stageIndex = stages.indexOf(current);
+    const stageColor = STAGE_COLORS[stageIndex] || STAGE_COLORS[0];
 
-    const canvas = stages.map((s, i) => `
-      <div class="phase">
-        <div class="phase-hd" style="background:${STAGE_COLORS[i]}">
-          <span class="no">阶段${s.stage_no}</span>${esc(s.stage_name)}</div>
-        <div class="phase-bd">
-          ${s.steps.map((st) => `
-            <div class="step" style="border-left-color:${STAGE_COLORS[i]}"
-                 onclick="openWfStep('${st.step_no}')">
-              <b>${esc(st.step_no)} ${esc(st.name)}</b>
-              <span>${esc(st.deliverables)}</span>
-            </div>`).join('')}
-        </div>
-      </div>${i < stages.length - 1 ? '<div class="arrow">›</div>' : ''}`).join('');
+    const pills = stages.map((s, i) => `
+      <button class="stage-pill${s.stage_no === current.stage_no ? ' on' : ''}"
+              style="--pill:${STAGE_COLORS[i]}" onclick="setWfStage(${s.stage_no})">
+        <b>阶段${s.stage_no}</b><span>${esc(s.stage_name)}</span>
+      </button>`).join('');
 
-    viewEl().innerHTML = `
+    const steps = current.steps.map((st) => `
+      <div class="step" style="border-left-color:${stageColor}" onclick="openWfStep('${st.step_no}')">
+        <b>${esc(st.step_no)} ${esc(st.name)}</b>
+        <span>${esc(st.deliverables)}</span>
+      </div>`).join('');
+
+    const stepsPane = `
+      <div class="stage-pills">${pills}</div>
       <div class="card">
         <div class="between mb">
-          <div><h2 style="margin:0">五阶段标准工作流（${total} 个步骤）</h2>
-            <div class="desc" style="margin:0">点击任意步骤查看方法说明、工具、交付物与关键要点</div></div>
+          <div><h3 style="margin:0">阶段${current.stage_no} · ${esc(current.stage_name)}</h3>
+            <div class="desc" style="margin:2px 0 0">${esc(current.stage_goal || '')}</div></div>
+          <span class="tiny">${current.steps.length} 个步骤 · 全流程共 ${total} 步</span>
         </div>
-        <div class="legend">
-          ${stages.map((s, i) => '<span><i style="background:' + STAGE_COLORS[i] + '"></i>' +
-            esc(s.stage_goal || '') + '</span>').join('')}
-        </div>
-      </div>
-      <div class="flow">${canvas}</div>
+        <div class="wf-grid">${steps}</div>
+      </div>`;
 
-      <div class="card mt">
-        <h2>决策门：方法论选择矩阵</h2>
+    const methodPane = `
+      <div class="card">
+        <h3>决策门：方法论选择矩阵</h3>
         <div class="desc">根据流程现状与目标自动推荐适配方法 —— 下面的试算会调用后端真正的匹配引擎</div>
         <table class="tbl mb">
           <thead><tr><th>流程现状</th><th>改善目标</th><th>推荐方法</th><th>典型周期</th><th>风险等级</th></tr></thead>
@@ -89,7 +92,33 @@ const renderWorkflow = () => renderAsync('workflow',
         <button class="btn btn-p" id="rcBtn" onclick="runRecommend('rcResult')">运行匹配引擎</button>
         <div id="rcResult" class="mt"></div>
       </div>`;
+
+    viewEl().innerHTML = `
+      <div class="card page-head">
+        <div class="between">
+          <div><h2>五阶段标准工作流</h2>
+            <div class="desc">${total} 个步骤 · 先按阶段推进，再回到方法论确认路径</div></div>
+          <div class="seg">
+            <button class="${wf.tab === 'steps' ? 'on' : ''}" onclick="setWfTab('steps')">五阶段步骤</button>
+            <button class="${wf.tab === 'method' ? 'on' : ''}" onclick="setWfTab('method')">方法论匹配</button>
+          </div>
+        </div>
+      </div>
+      ${wf.tab === 'method' ? methodPane : stepsPane}`;
   });
+
+function setWfTab(tab) {
+  state.workflow = state.workflow || {};
+  state.workflow.tab = tab;
+  RENDERERS.workflow();
+}
+
+function setWfStage(stage) {
+  state.workflow = state.workflow || {};
+  state.workflow.stage = stage;
+  state.workflow.tab = 'steps';
+  RENDERERS.workflow();
+}
 
 function openWfStep(stepNo) {
   let found = null;
@@ -133,14 +162,14 @@ function renderRecommendation(r) {
     <div class="note mb">
       <b style="font-size:14px">${esc(r.headline)}</b>
       <div style="margin-top:6px">
-        <div class="pipe" style="max-width:280px"><i style="width:${conf}%;background:${
-          conf >= 70 ? '#16a34a' : conf >= 50 ? '#f59e0b' : '#ef4444'}"></i></div>
+        <div class="pipe" style="max-width:280px"><i class="fill-${
+          conf >= 70 ? 'ok' : conf >= 50 ? 'warn' : 'bad'}" style="width:${conf}%"></i></div>
         <span class="tiny">置信度 ${conf}%</span>
       </div>
     </div>
 
     <h3>判断依据</h3>
-    <ol style="padding-left:20px;font-size:13px;line-height:1.9;color:#3d4759">
+    <ol style="padding-left:20px;font-size:13px;line-height:1.9;color:var(--text)">
       ${r.rationale.map((x) => '<li>' + esc(x) + '</li>').join('')}
     </ol>
 
@@ -166,4 +195,4 @@ function renderRecommendation(r) {
 }
 
 
-export { renderWorkflow, openWfStep, renderRecommendation, runRecommend };
+export { renderWorkflow, openWfStep, renderRecommendation, runRecommend, setWfStage, setWfTab };

@@ -40,9 +40,9 @@ const renderKnowledge = () => {
         label + '</button>';
 
       viewEl().innerHTML = `
-        <div class="card">
+        <div class="card page-head">
           <div class="between mb">
-            <div><h2 style="margin:0">流程知识库（${d.page.total} 条）</h2>
+            <div><h2>流程知识库（${d.page.total} 条）</h2>
               <div class="desc" style="margin:0">方法论模板、案例复盘、最佳实践沉淀与复用</div></div>
             <div class="gap">
               ${canManage() ? '<button class="btn btn-p" onclick="newKnowledgeModal()">+ 新建条目</button>' : ''}
@@ -102,7 +102,7 @@ async function openKnowledge(id) {
         ${(it.tags || []).map((t) => '<span class="tag t-gry">' + esc(t) + '</span>').join(' ')}
       </div>
       <div class="note mb">${esc(it.summary)}</div>
-      <div style="white-space:pre-wrap;font-size:13px;line-height:1.85;color:#3d4759">${esc(it.content)}</div>
+      <div style="white-space:pre-wrap;font-size:13px;line-height:1.85;color:var(--text)">${esc(it.content)}</div>
       <div class="tiny mt">作者：${esc(it.author || '—')} · ${fmtDate(it.created_at)}
         · 查阅 ${it.download_count} 次${it.tool_code ? ' · 关联工具 ' + esc(it.tool_code) : ''}</div>`,
       `<button class="btn btn-g" onclick="closeModal()">关闭</button>

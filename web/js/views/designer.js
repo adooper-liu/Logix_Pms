@@ -86,24 +86,61 @@ function paintDesigner() {
             ${bnSet.has(n.node_key) ? '<span class="bnbadge">瓶颈</span>' : ''}
             <b>${esc(n.name)}</b>
             <div class="meta">⏱ ${dur(n.duration_minutes)}${n.wait_minutes > 0
-              ? ' <span style="color:#ef4444">+等 ' + dur(n.wait_minutes) + '</span>' : ''}</div>
+              ? ' <span style="color:var(--bad)">+等 ' + dur(n.wait_minutes) + '</span>' : ''}</div>
             <div class="meta">${NODE_LABEL[n.node_type] || n.node_type}
               ${n.owner_role ? ' · ' + esc(n.owner_role) : ''}
-              ${n.is_value_added ? '' : ' · <span style="color:#f59e0b">非增值</span>'}</div>
+              ${n.is_value_added ? '' : ' · <span style="color:var(--warn)">非增值</span>'}</div>
             ${metricOf[n.node_key] && metricOf[n.node_key].visit_count > 1.001
-              ? '<div class="meta" style="color:#ef4444">↻ 期望执行 '
+              ? '<div class="meta" style="color:var(--bad)">↻ 期望执行 '
                 + num(metricOf[n.node_key].visit_count, 2) + ' 次</div>'
               : ''}
-          </div>${i < l.nodes.length - 1 ? '<span style="color:#c3cbe0;font-size:16px">→</span>' : ''}`).join('')}
+          </div>${i < l.nodes.length - 1 ? '<span style="color:var(--line-strong);font-size:16px">→</span>' : ''}`).join('')}
         <button class="add" onclick="addDesignerNode(${laneIdx})"${editable ? '' : ' disabled style="opacity:.4;cursor:not-allowed"'}>+ 添加活动</button>      </div>
     </div>`).join('') || '<div class="empty">这条流程还没有建模，点击下方「添加泳道节点」开始</div>';
 
-  viewEl().innerHTML = `
+  const tab = st.tab || 'model';
+  const tabBar = `
+    <div class="seg">
+      <button class="${tab === 'model' ? 'on' : ''}" onclick="setDesignerTab('model')">流程模型</button>
+      <button class="${tab === 'analysis' ? 'on' : ''}" onclick="setDesignerTab('analysis')">
+        指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
+    </div>`;
+
+  const modelPane = `
     <div class="card">
-      <div class="between mb">
+      <div class="legend mb">
+        <span><i style="background:var(--ok)"></i>开始</span>
+        <span><i style="background:var(--warn)"></i>审批/判断门</span>
+        <span><i style="background:var(--bad)"></i>结束</span>
+        <span><i style="background:var(--line-strong)"></i>等待</span>
+        <span><i style="background:var(--line)"></i>普通作业</span>
+        <span class="muted">节点右上角「瓶颈」来自测算结果</span>
+      </div>
+      ${laneHtml}
+    </div>`;
+
+  const analysisPane = `
+    <div class="grid g2">
+      <div class="card">
+        <h3>流程指标测算</h3>
+        <div class="desc">全部由当前节点数据算出，不是拍脑袋</div>
+        ${paintMetrics(st.analysis)}
+      </div>
+      <div class="card">
+        <h3>改善建议</h3>
+        <div class="desc">${st.analysis ? st.analysis.suggestions.length : 0} 条 · 按严重度排序，
+          推荐方法论：<b>${esc((state.meta.methodology[st.analysis && st.analysis.recommended_methodology] ||
+            (st.analysis && st.analysis.recommended_methodology) || '—'))}</b></div>
+        ${paintSuggestions(st.analysis)}
+      </div>
+    </div>`;
+
+  viewEl().innerHTML = `
+    <div class="card page-head">
+      <div class="between">
         <div>
-          <h2 style="margin:0">${esc(model.process_name || '')} · 流程设计器</h2>
-          <div class="desc" style="margin:0">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标</div>
+          <h2>${esc(model.process_name || '')} · 流程设计器</h2>
+          <div class="desc">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标</div>
         </div>
         <div class="gap">
           <select class="sel" onchange="switchProcess(this.value)">${opts}</select>
@@ -113,31 +150,14 @@ function paintDesigner() {
           <button class="btn btn-p" onclick="reanalyze()">重新测算</button>
         </div>
       </div>
-      <div class="legend mb">
-        <span><i style="background:#16a34a"></i>开始</span>
-        <span><i style="background:#f59e0b"></i>审批/判断门</span>
-        <span><i style="background:#ef4444"></i>结束</span>
-        <span><i style="background:#c3cbe0"></i>等待</span>
-        <span><i style="background:#e8ecf4"></i>普通作业</span>
-        <span class="muted">节点右上角「瓶颈」来自测算结果</span>
-      </div>
-      ${laneHtml}
+      <div class="mt">${tabBar}</div>
     </div>
+    ${tab === 'analysis' ? analysisPane : modelPane}`;
+}
 
-    <div class="grid g2">
-      <div class="card">
-        <h2>流程指标测算</h2>
-        <div class="desc">全部由当前节点数据算出，不是拍脑袋</div>
-        ${paintMetrics(st.analysis)}
-      </div>
-      <div class="card">
-        <h2>改善建议</h2>
-        <div class="desc">${st.analysis ? st.analysis.suggestions.length : 0} 条 · 按严重度排序，
-          推荐方法论：<b>${esc((state.meta.methodology[st.analysis && st.analysis.recommended_methodology] ||
-            (st.analysis && st.analysis.recommended_methodology) || '—'))}</b></div>
-        ${paintSuggestions(st.analysis)}
-      </div>
-    </div>`;
+function setDesignerTab(tab) {
+  state.designer.tab = tab;
+  RENDERERS.designer();
 }
 
 function paintMetrics(a) {
@@ -153,7 +173,7 @@ function paintMetrics(a) {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <span style="width:104px;font-size:12.5px">${label}</span>
         ${hasBar
-          ? '<span style="flex:1;height:7px;background:#eef1f7;border-radius:4px;overflow:hidden">' +
+          ? '<span style="flex:1;height:7px;background:var(--line-soft);border-radius:4px;overflow:hidden">' +
             '<i style="display:block;height:100%;border-radius:4px;width:' + w + '%;background:' + color + '"></i></span>'
           : '<span style="flex:1"></span>'}
         <span style="width:118px;font-size:12.5px;font-weight:600;text-align:right">${value}
@@ -179,14 +199,14 @@ function paintMetrics(a) {
 
   return warn +
     row('流程周期效率', num(pce, 1) + '%', '增值 / 期望端到端',
-      pce, pce >= 35 ? '#16a34a' : pce >= 15 ? '#f59e0b' : '#ef4444') +
+      pce, pce >= 35 ? 'var(--ok)' : pce >= 15 ? 'var(--warn)' : 'var(--bad)') +
     row('等待占比', num(waitShare, 1) + '%', num(m.wait_minutes, 0) + ' 分钟等待',
-      waitShare, waitShare >= 50 ? '#ef4444' : waitShare >= 30 ? '#f59e0b' : '#16a34a') +
+      waitShare, waitShare >= 50 ? 'var(--bad)' : waitShare >= 30 ? 'var(--warn)' : 'var(--ok)') +
     row('作业时间占比', num(workShare, 1) + '%', num(m.process_time_minutes, 0) + ' 分钟作业',
-      workShare, '#2f5bea') +
+      workShare, 'var(--brand)') +
     row('返工损失', dur(m.rework_loss_minutes),
       '额外作业 ' + dur(m.rework_work_minutes) + ' · 占作业 ' + num(reworkShare, 1) + '%',
-      reworkShare, reworkShare >= 15 ? '#ef4444' : reworkShare > 0 ? '#f59e0b' : '#16a34a') +
+      reworkShare, reworkShare >= 15 ? 'var(--bad)' : reworkShare > 0 ? 'var(--warn)' : 'var(--ok)') +
     row('期望端到端周期', dur(m.lead_time_minutes), cycleHint, null, '') +
     row('跨泳道移交', m.handoff_count + ' 次', m.lane_count + ' 个部门/角色', null, '') +
     row('累计审批层级', m.total_approval_levels + ' 层',
@@ -378,7 +398,7 @@ function editNode(nodeKey) {
     </div>
     <div class="note">节点的「等待时间」是周期效率的主要杀手。真实场景下把它按现场实测填进去，
       右侧测算会立刻反映出来。</div>`,
-    `<button class="btn btn-g" style="margin-right:auto;color:#d14343"
+    `<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"
        onclick="deleteNode('${nodeKey}')">删除节点</button>
      <button class="btn btn-g" onclick="closeModal()">取消</button>
      <button class="btn btn-p" onclick="saveNode('${nodeKey}')">保存</button>`);
@@ -450,4 +470,4 @@ function addLaneNode() {
 }
 
 
-export { renderDesigner, addDesignerNode, addLaneNode, addNode, cloneModel, deleteNode, editNode, openDesigner, openNodeEditor, paintDesigner, paintMetrics, paintSuggestions, persistDesign, reanalyze, reloadDesign, saveNode, switchProcess };
+export { renderDesigner, addDesignerNode, addLaneNode, addNode, cloneModel, deleteNode, editNode, openDesigner, openNodeEditor, paintDesigner, paintMetrics, paintSuggestions, persistDesign, reanalyze, reloadDesign, saveNode, setDesignerTab, switchProcess };

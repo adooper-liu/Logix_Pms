@@ -13,6 +13,7 @@ import {
 } from './core/auth.js';
 import { register, go, onSearch, RENDERERS } from './core/router.js';
 import { state } from './core/state.js';
+import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, tab } from './core/ui.js';
 
 import * as dashboard from './views/dashboard.js';
@@ -33,10 +34,20 @@ register('designer', designerView.renderDesigner);
 register('monitor', monitorView.renderMonitor);
 register('knowledge', knowledgeView.renderKnowledge);
 
+// Canvas 读的是当前主题色，切换主题后要原地重绘，不能等下一次请求
+function applyTheme(code) {
+  setTheme(code);
+  if (state.view === 'monitor' && state.monitorRadar) {
+    monitorView.drawRadar(state.monitorRadar);
+    state.monitorRadar.series.forEach((series) =>
+      monitorView.drawSpark(series.kpi_id, series.points.map((p) => p.value), series.direction));
+  }
+}
+
 // 模板里 onclick/onchange 需要的操作面
 Object.assign(window, {
   // 框架级
-  go, closeModal, tab, state, RENDERERS, logout,
+  applyTheme, go, closeModal, tab, state, RENDERERS, logout,
   // 业务操作
   ...mapView,
   ...workflowView,
@@ -70,6 +81,7 @@ function wireChrome() {
 }
 
 async function boot() {
+  initTheme();
   wireChrome();
 
   if (!isLoggedIn()) {

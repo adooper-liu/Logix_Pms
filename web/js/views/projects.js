@@ -39,14 +39,30 @@ const renderProjects = () => {
       const opt = (v, label, cur) =>
         '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
 
+      const today = new Date().toISOString().slice(0, 10);
+      const activeCount = page.items.filter((p) => p.status === 'ACTIVE').length;
+      const closedCount = page.items.filter((p) => p.status === 'CLOSED').length;
+      const overdueCount = page.items.filter(
+        (p) => p.end_date && p.end_date < today && p.progress < 100).length;
+      const avgProgress = page.items.length
+        ? Math.round(page.items.reduce((a, p) => a + p.progress, 0) / page.items.length) : 0;
+
       viewEl().innerHTML = `
-        <div class="card">
-          <div class="between mb">
-            <div><h2 style="margin:0">流程项目组合管理</h2>
-              <div class="desc" style="margin:0">共 ${page.total} 个项目 · 点击行查看详情、KPI 与下一步动作</div></div>
+        <div class="card page-head">
+          <div class="between">
+            <div><h2>流程项目组合</h2>
+              <div class="desc">共 ${page.total} 个项目 · 点击行查看详情、KPI 与下一步动作</div></div>
             <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
           </div>
-          <div class="gap mb" style="flex-wrap:wrap">
+          <div class="grid g4 stat-row">
+            <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">项目总数</div></div>
+            <div class="kpi stat"><div class="num">${activeCount}</div><div class="lab">进行中</div></div>
+            <div class="kpi stat"><div class="num">${closedCount}</div><div class="lab">已结项</div></div>
+            <div class="kpi stat ${overdueCount ? 'is-risk' : ''}">
+              <div class="num">${avgProgress}<small>%</small></div>
+              <div class="lab">平均进度${overdueCount ? ' · ' + overdueCount + ' 项超期' : ''}</div></div>
+          </div>
+          <div class="gap mt" style="flex-wrap:wrap">
             <select class="sel" onchange="setPFilter('methodology', this.value)">
               ${opt('', '全部方法', f.methodology)}
               ${['BPR', 'BPI', 'LEAN', 'HYBRID'].map((m) =>
@@ -65,6 +81,9 @@ const renderProjects = () => {
             ${(f.methodology || f.stage || f.status || state.projects.keyword)
               ? '<button class="btn-sm" style="align-self:center" onclick="clearPFilter()">清空筛选</button>' : ''}
           </div>
+        </div>
+
+        <div class="card">
           <table class="tbl">
             <thead><tr><th>项目</th><th>方法</th><th>阶段</th><th>Owner</th>
               <th>改善指标</th><th>已用/预算(万)</th><th>整体进度</th><th>状态</th></tr></thead>
@@ -149,10 +168,10 @@ async function openProject(id) {
           <div class="num" style="font-size:22px">阶段${p.current_stage}</div><div class="lab">当前阶段</div></div>
         <div class="kpi" style="padding:13px 15px">
           <div class="num" style="font-size:22px;color:${
-            p.progress >= 70 ? '#16a34a' : p.progress >= 30 ? '#f59e0b' : '#ef4444'}">
+            p.progress >= 70 ? 'var(--ok)' : p.progress >= 30 ? 'var(--warn)' : 'var(--bad)'}">
             ${num(p.progress, 0)}%</div><div class="lab">步骤完成度</div></div>
         <div class="kpi" style="padding:13px 15px">
-          <div class="num" style="font-size:22px;color:#2f5bea">${
+          <div class="num" style="font-size:22px;color:var(--brand)">${
             p.improvement_pct === null ? '—' : num(p.improvement_pct, 0) + '%'}</div>
           <div class="lab">目标改善幅度</div></div>
       </div>
@@ -235,7 +254,7 @@ async function openProject(id) {
 
   openModal(p.name, tabs + overview + kpiPane + wfPane + ganttPane + nextPane, `
     ${canManage()
-      ? '<button class="btn btn-g" style="margin-right:auto;color:#d14343"'
+      ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
         + ' onclick="deleteProject(' + p.id + ', \'' + esc(p.code) + '\')">删除项目</button>'
       : ''}
     <button class="btn btn-g" onclick="closeModal()">关闭</button>
@@ -392,7 +411,7 @@ function paintGantt(s) {
     const left = st.start ? pct(st.start) : 0;
     const right = st.end ? pct(st.end) : 0;
     const width = Math.max(1.5, right - left);
-    const color = st.progress >= 100 ? '#16a34a' : st.progress > 0 ? '#2f5bea' : '#c3cbe0';
+    const color = st.progress >= 100 ? 'var(--ok)' : st.progress > 0 ? 'var(--brand)' : 'var(--line-strong)';
     return `
       <div class="gantt-row">
         <span class="gantt-label">阶段${st.stage_no}<i>${esc(st.stage_name)}</i></span>
@@ -409,7 +428,7 @@ function paintGantt(s) {
 
   const diamonds = s.milestones.map((m) => {
     const left = m.due_date ? pct(m.due_date) : 0;
-    const color = m.status === 'DONE' ? '#16a34a' : m.is_overdue ? '#ef4444' : '#f59e0b';
+    const color = m.status === 'DONE' ? 'var(--ok)' : m.is_overdue ? 'var(--bad)' : 'var(--warn)';
     return `<div class="gantt-ms" style="left:${left}%"
       title="${esc(m.step_no + ' ' + m.name)} · ${m.due_date || ''}">
       <span class="dia" style="background:${color}"></span>
@@ -424,7 +443,7 @@ function paintGantt(s) {
       计划周期 ${esc(s.start_date || '—')} → ${esc(s.end_date || '—')}
       ${s.total_days !== null ? '（' + s.total_days + ' 天）' : ''}
       · 已过 ${s.elapsed_days === null ? '—' : s.elapsed_days} 天
-      ${overdue ? ' · <span style="color:#ef4444">' + overdue + ' 个里程碑逾期</span>' : ''}
+      ${overdue ? ' · <span style="color:var(--bad)">' + overdue + ' 个里程碑逾期</span>' : ''}
       <div class="tiny" style="margin-top:4px">
         绿=已完成 · 蓝=进行中 · 灰=未启动 · 竖线=今天 · ◆=里程碑（阶段决策门）</div>
     </div>

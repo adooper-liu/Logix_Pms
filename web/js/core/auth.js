@@ -124,7 +124,7 @@ export async function loadMeta() {
     document.getElementById('backendState').textContent = '后端已连接';
   } catch (e) {
     document.getElementById('backendState').innerHTML =
-      '<span style="color:#ef4444">后端未连接</span>';
+      '<span style="color:var(--bad)">后端未连接</span>';
     throw e;
   }
 }

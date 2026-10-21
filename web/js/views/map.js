@@ -1,5 +1,5 @@
 /* 视图：map */
-import { esc, num, bar, HEAT_COLOR, HEAT_LABEL, emptyRow } from '../core/format.js';
+import { esc, num, bar, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
@@ -9,59 +9,122 @@ import { openDesigner } from './designer.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
+const LEVEL_LABELS = { 1: 'L1 价值链', 2: 'L2 流程类别', 3: 'L3 流程', 4: 'L4 活动' };
+
+/** 左侧架构导航：只展开当前路径，避免一屏铺开 148 个节点 */
+function renderOutline(list, path) {
+  return (list || []).filter((n) => n.level <= 3).map((n) => {
+    const inPath = path.includes(n.code);
+    const on = path[path.length - 1] === n.code;
+    const kids = inPath && n.level < 3 ? renderOutline(n.children || [], path) : '';
+    return `
+      <div class="tree-item lv${n.level}${inPath ? ' in-path' : ''}${on ? ' on' : ''}"
+           onclick="mapSelect('${n.code}')">
+        <span class="tree-dot${n.is_improvement_target ? ' target' : ''}"></span>
+        <span class="tree-name">${esc(n.name)}</span>
+        <span class="cnt">${(n.children || []).length || ''}</span>
+      </div>${kids}`;
+  }).join('');
+}
+
+function findPathTo(code, list, trail) {
+  const path = trail || [];
+  for (const n of list || []) {
+    if (n.code === code) return path.concat([n.code]);
+    const hit = findPathTo(code, n.children, path.concat([n.code]));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 const renderMap = () => {
   const paint = () => {
     const tree = state.map.tree || [];
     const path = state.map.path;
     let nodes = tree;
+    let current = null;
     for (const code of path) {
       const found = nodes.find((n) => n.code === code);
       if (!found) break;
+      current = found;
       nodes = found.children || [];
     }
+
     const kw = state.mapKeyword || '';
-    const shown = kw ? nodes.filter((n) => (n.name + n.code + (n.owner || '')).includes(kw)) : nodes;
+    const improvementOnly = !!state.map.improvementOnly;
+    let shown = nodes;
+    if (kw) {
+      shown = shown.filter((n) => (n.name + n.code + (n.owner || '')).includes(kw));
+    }
+    if (improvementOnly) shown = shown.filter((n) => n.is_improvement_target);
+
+    const flat = flattenTree(tree);
+    const levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    flat.forEach((n) => { levelCounts[n.level] = (levelCounts[n.level] || 0) + 1; });
+    const targetCount = flat.filter((n) => n.is_improvement_target).length;
+    const healthValues = flat
+      .map((n) => n.health_score)
+      .filter((v) => v !== null && v !== undefined);
+    const avgHealth = healthValues.length
+      ? Math.round(healthValues.reduce((a, b) => a + b, 0) / healthValues.length)
+      : '—';
+
+    const childWord = current && current.level === 3 ? '活动' : '流程';
+    const title = current ? current.name : '全部价值链';
+    const desc = current
+      ? `${LEVEL_LABELS[current.level] || ''} · ${(current.children || []).length} 个${childWord}` +
+        (kw ? ` · 匹配 ${shown.length} 项` : '')
+      : `L1 价值链 · ${tree.length} 条主线，点击任一行逐级下钻` +
+        (kw ? ` · 匹配 ${shown.length} 项` : '');
 
     const crumbs = ['<a onclick="mapGo(-1)">全部价值链</a>']
       .concat(path.map((code, i) =>
         '<span>/</span><a onclick="mapGo(' + i + ')">' + esc(state.map.names[code] || code) + '</a>'));
+    const treeHtml = `
+      <div class="tree-item root${path.length === 0 ? ' on' : ''}" onclick="mapGo(-1)">
+        <span class="tree-dot"></span>
+        <span class="tree-name">全部价值链</span>
+        <span class="cnt">${tree.length}</span>
+      </div>` + renderOutline(tree, path);
 
-    const cards = shown.map((n) => {
+    const rows = shown.map((n) => {
       // 热度由后端统一判定（见 app/api/v1/process_map.py 的阈值），前端不再各算一套
       const heat = n.heat_level || 'LOW';
-      const color = HEAT_COLOR[heat];
+      const heatClass = HEAT_CLASS[heat] || HEAT_CLASS.LOW;
       const hasKids = (n.children || []).length > 0;
       return `
-        <div class="step" style="border-left-color:${color};min-height:auto"
-             onclick="mapClick('${n.code}', ${hasKids})">
-          <div class="between">
-            <b>${esc(n.name)}</b>
-            <span class="tag" style="background:${color}1a;color:${color}">${HEAT_LABEL[heat]}</span>
-          </div>
-          <span>${esc(n.code)} · Owner: ${esc(n.owner || '未指定')}</span>
-          <div class="tiny" style="margin-top:5px">
-            健康度 ${n.health_score === null ? '—' : num(n.health_score, 0)}
-            · 痛点 ${num(n.pain_score, 1)}/5
-            · 战略价值 ${num(n.strategic_importance, 1)}/5
-            ${n.is_improvement_target ? ' · <span style="color:#ef4444">待改善</span>' : ''}
-          </div>
-          <div class="pipe"><i style="width:${Math.min(100, (n.priority_score / 125) * 100)}%;
-            background:${color}"></i></div>
-          ${hasKids ? '<div class="tiny" style="margin-top:6px;color:var(--brand)">' +
-            (n.children || []).length + ' 个下级流程 · 点击下钻 →</div>' : ''}
-        </div>`;
-    }).join('') || '<div class="empty">该层级下没有流程（或没有匹配结果）</div>';
+        <tr class="clk map-row" onclick="mapClick('${n.code}', ${hasKids})">
+          <td>
+            <div class="map-name">
+              <span class="map-code">${esc(n.code)}</span>
+              <b>${esc(n.name)}</b>
+              ${n.is_improvement_target ? '<span class="tag t-red">待改善</span>' : ''}
+            </div>
+            ${n.description ? '<div class="tiny map-desc">' + esc(n.description) + '</div>' : ''}
+          </td>
+          <td><div>Owner: ${esc(n.owner || '未指定')}</div>
+            <div class="tiny">${esc(n.department || '—')}</div></td>
+          <td>${n.health_score === null
+            ? '<span class="muted">未评估</span>' : bar(n.health_score, null, 70)}</td>
+          <td><div>${num(n.pain_score, 1)} / 5</div>
+            <div class="tiny">改善空间 ${num(n.improvement_space, 1)}</div></td>
+          <td><span class="tag ${heatClass}">
+            ${HEAT_LABEL[heat]} ${num(n.priority_score, 0)}</span></td>
+          <td>${hasKids ? (n.children || []).length + ' 项' : '—'}</td>
+          <td class="map-go">${hasKids ? '进入 ›' : '详情 ›'}</td>
+        </tr>`;
+    }).join('') || emptyRow(7, improvementOnly
+      ? '该层级没有待改善流程，点击「显示全部」恢复'
+      : '该层级下没有流程（或没有匹配结果）');
 
-    const heat = (state.map.heat || []).slice(0, 10).map((h) => `
+    const heat = (state.map.heat || []).slice(0, 6).map((h) => `
       <tr class="clk" onclick="mapJump('${h.code}')">
-        <td>${esc(h.code)}</td>
-        <td><b>${esc(h.name)}</b><div class="tiny">${esc(h.owner || '未指定 Owner')}</div></td>
-        <td><span class="tag" style="background:${HEAT_COLOR[h.heat_level]}1a;color:${HEAT_COLOR[h.heat_level]}">
+        <td><b>${esc(h.name)}</b><div class="tiny">${esc(h.code)} · ${esc(h.owner || '未指定 Owner')}</div></td>
+        <td><span class="tag ${HEAT_CLASS[h.heat_level] || HEAT_CLASS.LOW}">
           ${HEAT_LABEL[h.heat_level]}</span></td>
-        <td>${num(h.priority_score, 0)}</td>
+        <td><b>${num(h.priority_score, 0)}</b></td>
         <td>${h.health_score === null ? '—' : num(h.health_score, 0)}</td>
-        <td>${h.project_count}</td>
-      </tr>`).join('') || emptyRow(6, '暂无待改善项');
+      </tr>`).join('') || emptyRow(4, '暂无待改善项');
 
     const bench = state.map.benchmark;
     const frameworkOptions = (state.map.frameworks || []).map((f) =>
@@ -72,35 +135,33 @@ const renderMap = () => {
       <div class="card">
         <div class="between mb">
           <div>
-            <h2 style="margin:0">对标覆盖 · ${esc(bench.framework_name)}${
-              bench.framework_version ? ' ' + esc(bench.framework_version) : ''}</h2>
-            <div class="desc" style="margin:0">L3 流程 ${bench.mapped_processes}/${bench.total_processes}
-              能被该框架覆盖 · 切换框架只换对标视图，不改公司流程架构</div>
+            <h3 style="margin:0">对标覆盖 · ${esc(bench.framework_name)}${
+              bench.framework_version ? ' ' + esc(bench.framework_version) : ''}</h3>
+            <div class="desc" style="margin:2px 0 0">L3 流程 ${bench.mapped_processes}/${bench.total_processes}
+              能被该框架覆盖 · 切换只换对标视图</div>
           </div>
           ${bar(bench.coverage_rate * 100, null, 120)}
         </div>
-        <table class="tbl">
-          <thead><tr><th>标准分类</th><th>覆盖流程数</th><th>包含流程</th></tr></thead>
-          <tbody>${bench.by_top_category.map((c, i) => `
-            <tr class="clk" onclick="openCoverageCategory(${i})">
-              <td><b>${esc(c.code)}</b> ${esc(c.name)}</td>
-              <td>${c.mapped_count}</td>
-              <td class="tiny">${c.processes.slice(0, 5).map((p) => esc(p.code)).join('、') || '—'}</td>
-            </tr>`).join('')}</tbody>
-        </table>
+        <div class="map-bench-pills">${bench.by_top_category.map((c, i) => `
+          <button class="map-bench-pill" onclick="openCoverageCategory(${i})" title="${esc(c.name)}">
+            <b>${esc(c.code)}</b><span>${esc(c.name)}</span><i>${c.mapped_count}</i>
+          </button>`).join('')}</div>
         ${bench.unmapped_processes.length
           ? '<div class="note">未覆盖：' + bench.unmapped_processes
             .map((p) => esc(p.code) + ' ' + esc(p.name)).join('、') +
             '（不在该框架的适用范围）</div>'
           : '<div class="note">所有 L3 流程都能在该框架中找到对应分类。</div>'}
-        <div class="note">覆盖率按后代聚合；当前统计 L3 流程，点击分类行可查看明细。</div>
+        <div class="note">覆盖率按后代聚合；点击分类可查看明细。</div>
       </div>` : '';
 
     viewEl().innerHTML = `
-      <div class="card">
-        <div class="between mb">
-          <div><h2 style="margin:0">企业流程架构（L1 → L4 分层）</h2>
-            <div class="desc" style="margin:0">点击层级节点逐级下钻 · 优先级 = 战略重要性 × 痛点严重度 × 改善空间</div></div>
+      <div class="card map-head">
+        <div class="between map-head-top">
+          <div>
+            <h2 style="margin:0">企业流程地图</h2>
+            <div class="desc" style="margin:4px 0 0">
+              从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
+          </div>
           <div class="gap">
             <select class="sel" onchange="setBenchmarkFramework(this.value)" title="切换对标框架">
               <option value="">不对标</option>
@@ -111,27 +172,64 @@ const renderMap = () => {
               : '<span class="tiny">当前角色只读</span>'}
           </div>
         </div>
-        <div class="crumb">${crumbs.join(' ')}</div>
-        <div class="legend mb">
-          <span><i style="background:#ef4444"></i>紧急</span>
-          <span><i style="background:#f59e0b"></i>高</span>
-          <span><i style="background:#2f5bea"></i>中</span>
-          <span><i style="background:#16a34a"></i>低</span>
-          <span class="muted">条长代表优先级得分</span>
+        <div class="map-stats">
+          <span class="map-stat"><b>${flat.length}</b> 流程资产</span>
+          <button class="map-stat${improvementOnly ? ' on' : ''}" onclick="toggleImprovement()">
+            <b>${targetCount}</b> 待改善</button>
+          <span class="map-stat"><b>${avgHealth}</b> 平均健康度</span>
+          <span class="map-stat">L1 <b>${levelCounts[1]}</b></span>
+          <span class="map-stat">L2 <b>${levelCounts[2]}</b></span>
+          <span class="map-stat">L3 <b>${levelCounts[3]}</b></span>
+          <span class="map-stat">L4 <b>${levelCounts[4]}</b></span>
         </div>
-        <div class="g3">${cards}</div>
       </div>
 
-      ${benchCard}
+      <div class="map-layout">
+        <aside class="map-side card">
+          <div class="map-side-hd">架构导航</div>
+          <div class="map-tree">${treeHtml}</div>
+          <div class="map-side-foot tiny">点击层级展开；L4 活动在右侧列表中查看。</div>
+        </aside>
 
-      <div class="card">
-        <h2>改善优先级热力图（L3 流程层 Top 10）</h2>
-        <div class="desc">点击任意行可直接跳转到该流程所在的层级</div>
-        <table class="tbl">
-          <thead><tr><th>编码</th><th>流程</th><th>优先级</th><th>综合得分</th>
-            <th>健康度</th><th>关联项目</th></tr></thead>
-          <tbody>${heat}</tbody>
-        </table>
+        <div class="map-main">
+          <div class="card">
+            <div class="between mb">
+              <div style="min-width:0">
+                <div class="crumb" style="margin-bottom:6px">${crumbs.join(' ')}</div>
+                <h2 style="margin:0">${esc(title)}</h2>
+                <div class="desc" style="margin:4px 0 0">${esc(desc)}</div>
+              </div>
+              <button class="btn-sm${improvementOnly ? ' on' : ''}" onclick="toggleImprovement()">
+                ${improvementOnly ? '显示全部' : '只看待改善'}</button>
+            </div>
+            <div class="legend mb">
+              <span><i style="background:var(--bad)"></i>紧急</span>
+              <span><i style="background:var(--warn)"></i>高</span>
+              <span><i style="background:var(--brand)"></i>中</span>
+              <span><i style="background:var(--ok)"></i>低</span>
+              <span class="muted">优先级 = 战略 × 痛点 × 改善空间</span>
+            </div>
+            <table class="tbl map-table">
+              <thead><tr><th>流程</th><th>Owner / 部门</th><th>健康度</th>
+                <th>痛点 / 改善空间</th><th>优先级</th><th>下级</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+
+          <div class="map-bottom${benchCard ? '' : ' single'}">
+            <div class="card">
+              <div class="between mb">
+                <div><h3 style="margin:0">改善优先级</h3>
+                  <div class="desc" style="margin:2px 0 0">L3 Top 6 · 按综合得分排序，点击定位</div></div>
+              </div>
+              <table class="tbl">
+                <thead><tr><th>流程</th><th>优先级</th><th>得分</th><th>健康度</th></tr></thead>
+                <tbody>${heat}</tbody>
+              </table>
+            </div>
+            ${benchCard}
+          </div>
+        </div>
       </div>`;
   };
 
@@ -198,7 +296,7 @@ function mapClick(code, hasKids) {
       ${node.description ? '<div class="field"><label>流程说明</label><textarea readonly>' + esc(node.description) + '</textarea></div>' : ''}
       <div class="note">在「流程设计器」里可以对这条流程做泳道建模与周期效率测算。</div>`,
       `${canManage()
-        ? '<button class="btn btn-g" style="margin-right:auto;color:#d14343"'
+        ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
           + ' onclick="deleteProcess(' + node.id + ', \'' + esc(node.code) + '\')">删除</button>'
         : ''}
        <button class="btn btn-g" onclick="closeModal()">关闭</button>
@@ -209,6 +307,22 @@ function mapClick(code, hasKids) {
 
 function mapGo(index) {
   state.map.path = index < 0 ? [] : state.map.path.slice(0, index + 1);
+  RENDERERS.map();
+}
+
+/** 左侧导航入口：选中某层后，主区展示它的下级 */
+function mapSelect(code) {
+  const path = findPathTo(code, state.map.tree || [], []);
+  if (!path) return;
+  state.map.path = path;
+  state.mapKeyword = '';
+  const search = document.getElementById('searchInput');
+  if (search) search.value = '';
+  RENDERERS.map();
+}
+
+function toggleImprovement() {
+  state.map.improvementOnly = !state.map.improvementOnly;
   RENDERERS.map();
 }
 
@@ -447,4 +561,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework };
+export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, toggleImprovement };

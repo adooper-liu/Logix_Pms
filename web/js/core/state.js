@@ -9,13 +9,14 @@ export const state = {
   /** 五个业务枚举的中文标签，首次启动时从后端 meta 接口拉取 */
   meta: { methodology: {}, status: {}, stage: {} },
   map: {
-    code: null, name: null, path: [],
+    code: null, name: null, path: [], improvementOnly: false,
     frameworks: null, benchmarkFramework: '', benchmark: null,
   },
   projects: { filter: { methodology: '', status: '', stage: '' }, keyword: '' },
-  designer: { processId: null, processCode: null, model: null, analysis: null },
+  workflow: { tab: 'steps', stage: 1 },
+  designer: { processId: null, processCode: null, model: null, analysis: null, tab: 'model' },
   knowledge: { type: '', sort: 'recent', keyword: '', tag: '' },
-  monitor: { status: '' },
+  monitor: { status: '', tab: 'overview' },
 };
 
 export const TITLES = {

@@ -4,6 +4,7 @@ import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js'
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
+import { cssVar } from '../core/theme.js';
 import { GET, POST, PATCH } from '../core/api.js';
 
 /* ============================================================ 7. 运营监控与KPI */
@@ -18,47 +19,68 @@ const renderMonitor = () => {
     ]).then(([radar, exceptions, summary]) => ({ radar, exceptions, summary })),
     (d) => {
       state.monitorRadar = d.radar;
-      const dimColor = { EFFICIENCY: '#2f5bea', QUALITY: '#16a34a', COST: '#f59e0b', FLEXIBILITY: '#8b5cf6' };
+      const tab = state.monitor.tab || 'overview';
+      const s = d.summary;
+      const dimColor = {
+        EFFICIENCY: 'var(--brand)', QUALITY: 'var(--ok)',
+        COST: 'var(--warn)', FLEXIBILITY: 'var(--purple)',
+      };
       const dimCards = d.radar.dimensions.map((dim) => `
-        <div class="kpi">
+        <div class="kpi stat">
           <div class="num" style="color:${dimColor[dim.dimension]}">${num(dim.achievement_rate, 0)}<small>%</small></div>
           <div class="lab">${KPI_DIM_ICON[dim.dimension]} ${esc(dim.label)}</div>
           <div class="trend ${dim.status === 'GOOD' ? 'up' : dim.status === 'WATCH' ? '' : 'down'}">
             ${dim.kpi_count} 个指标 · ${dim.status === 'GOOD' ? '达标' : dim.status === 'WATCH' ? '需关注' : '未达标'}</div>
-          <div class="pipe"><i style="width:${Math.min(100, dim.achievement_rate)}%;
-            background:${dim.status === 'GOOD' ? '#16a34a' : dim.status === 'WATCH' ? '#f59e0b' : '#ef4444'}"></i></div>
+          <div class="pipe"><i class="fill-${dim.status === 'GOOD' ? 'ok' : dim.status === 'WATCH' ? 'warn' : 'bad'}"
+            style="width:${Math.min(100, dim.achievement_rate)}%"></i></div>
         </div>`).join('');
 
-      const kpiRows = d.radar.series.map((s) => {
-        const latest = s.points.length ? s.points[s.points.length - 1].value : null;
-        const prev = s.points.length > 1 ? s.points[s.points.length - 2].value : null;
+      const kpiInfo = (series) => {
+        const latest = series.points.length ? series.points[series.points.length - 1].value : null;
+        const prev = series.points.length > 1 ? series.points[series.points.length - 2].value : null;
         const delta = (latest !== null && prev !== null) ? latest - prev : null;
-        // 达成率：目标方向的“好”取决于 direction
         let reach = null;
-        if (latest !== null && s.target_value) {
-          reach = s.direction === 'LOWER_BETTER'
-            ? (latest > 0 ? (s.target_value / latest) * 100 : (latest === 0 ? 100 : null))
-            : (latest / s.target_value) * 100;
+        if (latest !== null && series.target_value) {
+          reach = series.direction === 'LOWER_BETTER'
+            ? (latest > 0 ? (series.target_value / latest) * 100 : (latest === 0 ? 100 : null))
+            : (latest / series.target_value) * 100;
         }
+        return { latest, delta, reach };
+      };
+
+      const kpiRows = d.radar.series.map((series) => {
+        const { latest, delta, reach } = kpiInfo(series);
         return `
           <tr>
-            <td><b>${esc(s.name)}</b><div class="tiny">${esc(s.code)} · ${esc(s.unit || '')}</div></td>
-            <td>${KPI_DIM_ICON[s.dimension] || ''}</td>
+            <td><b>${esc(series.name)}</b><div class="tiny">${esc(series.code)} · ${esc(series.unit || '')}</div></td>
+            <td>${KPI_DIM_ICON[series.dimension] || ''}</td>
             <td><b>${num(latest, 2)}</b></td>
-            <td class="muted">${num(s.target_value, 2)}</td>
+            <td class="muted">${num(series.target_value, 2)}</td>
             <td>${reach === null ? '—' : bar(Math.min(reach, 130), null, 70)}</td>
             <td>${delta === null ? '<span class="muted">—</span>'
-              : '<span class="' + (s.direction === 'LOWER_BETTER'
+              : '<span class="' + (series.direction === 'LOWER_BETTER'
                   ? (delta < 0 ? 'up' : delta > 0 ? 'down' : '')
                   : (delta > 0 ? 'up' : delta < 0 ? 'down' : '')) + '">'
                 + (delta > 0 ? '↑ ' : delta < 0 ? '↓ ' : '→ ') + num(Math.abs(delta), 2) + '</span>'}</td>
-            <td><canvas class="spark" width="110" height="26" data-spark="${s.kpi_id}"></canvas></td>
+            <td><canvas class="spark" width="110" height="26" data-spark="${series.kpi_id}"></canvas></td>
             <td>${canManage()
-              ? '<button class="btn-sm" onclick="addKpiRecordModal(' + s.kpi_id + ', \''
-                + esc(s.name).replace(/'/g, '') + '\')">录入</button>'
+              ? '<button class="btn-sm" onclick="addKpiRecordModal(' + series.kpi_id + ', \''
+                + esc(series.name).replace(/'/g, '') + '\')">录入</button>'
               : ''}</td>
           </tr>`;
       }).join('') || emptyRow(7, '暂无 KPI');
+
+      const quick = d.radar.series.map((series) => ({ series, ...kpiInfo(series) }))
+        .filter((row) => row.reach !== null)
+        .sort((a, b) => a.reach - b.reach)
+        .slice(0, 5);
+      const quickRows = quick.map(({ series, latest, reach }) => `
+        <tr class="clk" onclick="setMonitorTab('kpi')">
+          <td><b>${esc(series.name)}</b><div class="tiny">${esc(series.code)}</div></td>
+          <td>${num(latest, 2)} ${esc(series.unit || '')}</td>
+          <td class="muted">${num(series.target_value, 2)}</td>
+          <td>${bar(Math.min(reach, 130), null, 80)}</td>
+        </tr>`).join('') || emptyRow(4, '暂无达成率数据');
 
       const excRows = d.exceptions.map((e) => {
         const canEdit = canManage()
@@ -67,7 +89,7 @@ const renderMonitor = () => {
         <tr>
           <td class="tiny">${dtShort(e.detected_at)}</td>
           <td>${esc(e.title)}<div class="tiny">${esc(e.code)}${
-            e.is_overdue ? ' · <span style="color:#ef4444">已超期</span>' : ''}</div></td>
+            e.is_overdue ? ' · <span style="color:var(--bad)">已超期</span>' : ''}</div></td>
           <td><span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span></td>
           <td>${e.owner ? esc(e.owner) : '<span class="muted">未指派</span>'}</td>
           <td><span class="tag ${EXC_COLOR[e.status]}">${EXC_LABEL[e.status]}</span></td>
@@ -75,63 +97,81 @@ const renderMonitor = () => {
         </tr>`;
       }).join('') || emptyRow(6, '没有符合条件的异常事件');
 
-      const s = d.summary;
-      viewEl().innerHTML = `
-        <div class="card">
-          <div class="between mb">
-            <div><h2 style="margin:0">运营监控与 KPI 看板</h2>
-              <div class="desc" style="margin:0">四维度流程健康度：效率 / 质量 / 成本 / 灵活性 ·
-                综合达成率 <b>${num(d.radar.overall_achievement, 1)}%</b></div></div>
-            <div class="gap">
-              ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}
-              ${canManage() ? '<button class="btn btn-g" onclick="newKpiModal()">+ 新建 KPI</button>' : ''}
-            </div>
-          </div>
-          <div class="grid g4">${dimCards}</div>
-        </div>
+      const recent = d.exceptions
+        .filter((e) => e.status === 'OPEN' || e.status === 'IN_PROGRESS')
+        .slice(0, 3);
+      const recentRows = recent.map((e) => `
+        <div class="alert-row" onclick="openException(${e.id})">
+          <span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span>
+          <div class="alert-main"><b>${esc(e.title)}</b>
+            <div class="tiny">${esc(e.owner || '未指派')}${e.is_overdue ? ' · 已超期' : ''}</div></div>
+          <span class="alert-go">›</span>
+        </div>`).join('') || '<div class="empty">没有未闭环异常</div>';
 
+      const tabs = `
+        <div class="seg">
+          <button class="${tab === 'overview' ? 'on' : ''}" onclick="setMonitorTab('overview')">概览</button>
+          <button class="${tab === 'kpi' ? 'on' : ''}" onclick="setMonitorTab('kpi')">KPI 明细</button>
+          <button class="${tab === 'exceptions' ? 'on' : ''}" onclick="setMonitorTab('exceptions')">异常台账</button>
+        </div>`;
+
+      const overview = `
+        <div class="grid g4 stat-row">${dimCards}</div>
         <div class="grid g2">
           <div class="card">
-            <h2>流程健康度雷达</h2>
+            <h3>流程健康度雷达</h3>
             <div class="desc">实线为当前达成率，虚线为 100% 目标线</div>
-            <canvas id="radar" width="380" height="310"></canvas>
+            <canvas id="radar" width="380" height="300"></canvas>
+            <div class="legend chart-legend">
+              <span><i style="background:var(--ok)"></i>当前达成率</span>
+              <span><i style="background:var(--brand)"></i>100% 目标线</span>
+            </div>
           </div>
           <div class="card">
-            <h2>异常事件概览</h2>
-            <div class="desc">未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div>
-            <div class="grid g2" style="gap:10px">
-              ${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => `
-                <div class="kpi" style="padding:12px 14px">
-                  <div class="num" style="font-size:20px">${s.by_severity[sev] || 0}</div>
-                  <div class="lab"><span class="tag ${SEV_COLOR[sev]}">${SEV_LABEL[sev]}</span> 未闭环</div>
-                </div>`).join('')}
+            <div class="between mb">
+              <div><h3 style="margin:0">异常概览</h3>
+                <div class="desc" style="margin:2px 0 0">未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
+              <a class="link" onclick="setMonitorTab('exceptions')">全部台账 →</a>
             </div>
-            <table class="tbl mt">
-              <tbody>
-                <tr><td>累计登记</td><td><b>${s.total}</b></td><td>待处理</td><td>${s.open}</td></tr>
-                <tr><td>处理中</td><td>${s.in_progress}</td><td>已解决</td><td>${s.resolved}</td></tr>
-                <tr><td>已闭环</td><td>${s.closed}</td><td>超期未闭环</td>
-                  <td style="color:${s.overdue ? '#ef4444' : 'inherit'}"><b>${s.overdue}</b></td></tr>
-              </tbody>
-            </table>
+            <div class="kpi-strip">
+              <div><b>${s.open + s.in_progress}</b><span>未闭环</span></div>
+              <div><b class="risk">${s.overdue}</b><span>超期</span></div>
+              <div><b>${s.resolved + s.closed}</b><span>已闭环</span></div>
+            </div>
+            ${recentRows}
           </div>
         </div>
-
         <div class="card">
-          <h2>KPI 明细（${d.radar.series.length} 项）</h2>
-          <div class="desc">达成率按指标方向计算：越小越好的指标取目标与实际的比值</div>
+          <div class="between mb">
+            <div><h3 style="margin:0">KPI 速览</h3>
+              <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理最弱的 5 项</div></div>
+            <a class="link" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>指标</th><th>当前值</th><th>目标</th><th>达成率</th></tr></thead>
+            <tbody>${quickRows}</tbody>
+          </table>
+        </div>`;
+
+      const kpiPane = `
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">KPI 明细（${d.radar.series.length} 项）</h3>
+              <div class="desc" style="margin:2px 0 0">越小越好的指标，达成率取目标与实际的比值</div></div>
+          </div>
           <table class="tbl">
             <thead><tr><th>指标</th><th>维度</th><th>当前值</th><th>目标</th>
               <th>达成率</th><th>环比</th><th>6 个月走势</th>${canManage() ? '<th></th>' : ''}</tr></thead>
             <tbody>${kpiRows}</tbody>
           </table>
-        </div>
+        </div>`;
 
+      const excPane = `
         <div class="card">
           <div class="between mb">
-            <div><h2 style="margin:0">异常事件台账</h2>
-              <div class="desc" style="margin:0">闭环管理：登记 → 处理 → 解决 → 关闭</div></div>
-            <select class="sel" onchange="state.monitor.status=this.value;RENDERERS.monitor()">
+            <div><h3 style="margin:0">异常事件台账</h3>
+              <div class="desc" style="margin:2px 0 0">闭环管理：登记 → 处理 → 解决 → 关闭</div></div>
+            <select class="sel" onchange="setMonitorStatus(this.value)">
               <option value="">全部状态</option>
               ${['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((v) =>
                 '<option value="' + v + '"' + (state.monitor.status === v ? ' selected' : '') + '>' +
@@ -144,10 +184,36 @@ const renderMonitor = () => {
           </table>
         </div>`;
 
-      drawRadar(d.radar);
-      d.radar.series.forEach((s) => drawSpark(s.kpi_id, s.points.map((p) => p.value), s.direction));
+      viewEl().innerHTML = `
+        <div class="card page-head">
+          <div class="between">
+            <div><h2>运营监控</h2>
+              <div class="desc">综合达成率 <b>${num(d.radar.overall_achievement, 1)}%</b>
+                · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
+            <div class="gap">
+              ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}
+              ${canManage() ? '<button class="btn btn-g" onclick="newKpiModal()">+ 新建 KPI</button>' : ''}
+            </div>
+          </div>
+          <div class="mt">${tabs}</div>
+        </div>
+        ${tab === 'kpi' ? kpiPane : tab === 'exceptions' ? excPane : overview}`;
+
+      if (tab === 'overview') drawRadar(d.radar);
+      d.radar.series.forEach((series) =>
+        drawSpark(series.kpi_id, series.points.map((p) => p.value), series.direction));
     });
 };
+
+function setMonitorTab(tab) {
+  state.monitor.tab = tab;
+  RENDERERS.monitor();
+}
+
+function setMonitorStatus(status) {
+  state.monitor.status = status;
+  RENDERERS.monitor();
+}
 
 function drawRadar(radar) {
   const c = document.getElementById('radar');
@@ -161,6 +227,10 @@ function drawRadar(radar) {
   ctx.clearRect(0, 0, W, H);
 
   // 网格
+  const gridColor = cssVar('--chart-grid');
+  const subColor = cssVar('--sub');
+  const brandColor = cssVar('--brand');
+  const okColor = cssVar('--ok');
   for (let g = 1; g <= 4; g++) {
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
@@ -169,7 +239,7 @@ function drawRadar(radar) {
       i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
     ctx.closePath();
-    ctx.strokeStyle = '#e8ecf4';
+    ctx.strokeStyle = gridColor;
     ctx.stroke();
   }
   // 轴线 + 标签
@@ -178,9 +248,9 @@ function drawRadar(radar) {
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
-    ctx.strokeStyle = '#e8ecf4';
+    ctx.strokeStyle = gridColor;
     ctx.stroke();
-    ctx.fillStyle = '#6b7688';
+    ctx.fillStyle = subColor;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(d.label + ' ' + num(d.achievement_rate, 0) + '%',
@@ -195,9 +265,11 @@ function drawRadar(radar) {
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = 'rgba(47,91,234,0.07)';
+  ctx.fillStyle = brandColor;
+  ctx.globalAlpha = 0.07;
   ctx.fill();
-  ctx.strokeStyle = '#2f5bea';
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = brandColor;
   ctx.setLineDash([4, 3]);
   ctx.stroke();
   ctx.setLineDash([]);
@@ -211,24 +283,16 @@ function drawRadar(radar) {
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   });
   ctx.closePath();
-  ctx.fillStyle = 'rgba(22,163,74,0.18)';
+  ctx.fillStyle = okColor;
+  ctx.globalAlpha = 0.18;
   ctx.fill();
-  ctx.strokeStyle = '#16a34a';
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = okColor;
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.lineWidth = 1;
 
-  // 图例
-  ctx.fillStyle = '#16a34a';
-  ctx.fillRect(cx - 60, H - 18, 20, 3);
-  ctx.fillStyle = '#6b7688';
-  ctx.font = '11px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('当前达成率', cx - 34, H - 14);
-  ctx.fillStyle = '#2f5bea';
-  ctx.fillRect(cx + 24, H - 18, 20, 3);
-  ctx.fillStyle = '#6b7688';
-  ctx.fillText('100% 目标线', cx + 50, H - 14);
+
 }
 
 function drawSpark(kpiId, values, direction) {
@@ -248,14 +312,14 @@ function drawSpark(kpiId, values, direction) {
     const y = H - 5 - ((v - min) / span) * (H - 10);
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   });
-  ctx.strokeStyle = improved ? '#16a34a' : '#ef4444';
+  ctx.strokeStyle = improved ? cssVar('--ok') : cssVar('--bad');
   ctx.lineWidth = 1.6;
   ctx.stroke();
   const lx = W - 3;
   const ly = H - 5 - ((values[values.length - 1] - min) / span) * (H - 10);
   ctx.beginPath();
   ctx.arc(lx, ly, 2.4, 0, Math.PI * 2);
-  ctx.fillStyle = improved ? '#16a34a' : '#ef4444';
+  ctx.fillStyle = improved ? cssVar('--ok') : cssVar('--bad');
   ctx.fill();
 }
 
@@ -382,6 +446,7 @@ async function submitException() {
     });
     closeModal();
     toast('异常事件已登记');
+    state.monitor.tab = 'exceptions';
     RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);
@@ -496,6 +561,7 @@ async function submitKpiRecord(kpiId) {
     });
     closeModal();
     toast('数据点已保存');
+    state.monitor.tab = 'kpi';
     RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);
@@ -503,4 +569,4 @@ async function submitKpiRecord(kpiId) {
 }
 
 
-export { renderMonitor, addKpiRecordModal, drawRadar, drawSpark, newExceptionModal, newKpiModal, openException, saveException, submitException, submitKpi, submitKpiRecord };
+export { renderMonitor, addKpiRecordModal, drawRadar, drawSpark, newExceptionModal, newKpiModal, openException, saveException, setMonitorStatus, setMonitorTab, submitException, submitKpi, submitKpiRecord };
