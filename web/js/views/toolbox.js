@@ -44,8 +44,9 @@ const renderToolbox = () => renderAsync('toolbox',
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between mb">
-          <div><h2>方法论工具箱（${total} 个工具）</h2>
+          <div><h2>方法论工具箱（${total} 个工具）<span class="module-badge">工具书 · 方法选择</span></h2>
             <div class="desc" style="margin:0">按用途分类；点击卡片查看适用场景、标准操作与常见误用</div></div>
+          <a class="link" onclick="go('workflow')">回到五阶段步骤 →</a>
         </div>
         <div class="tabs" style="margin-bottom:0">${tabs}</div>
       </div>

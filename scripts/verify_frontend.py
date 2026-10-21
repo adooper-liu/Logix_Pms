@@ -372,7 +372,7 @@ def main() -> int:
         # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
         def dashboard_entries() -> None:
             goto("dashboard")
-            page.click('#view .quick-link:has-text("流程地图")')
+            page.click('#view .mainline-step:has-text("流程地图")')
             page.wait_for_timeout(700)
             assert page.inner_text("#pageTitle") == "企业流程地图"
 

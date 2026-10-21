@@ -140,7 +140,7 @@ function paintDesigner() {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>${esc(model.process_name || '')} · 流程设计器</h2>
+          <h2>流程设计器<span class="module-badge">建模与测算</span> · ${esc(model.process_name || '')}</h2>
           <div class="desc">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标；模型用于流程执行（实例使用启动时快照）</div>
         </div>
         <div class="gap">
@@ -150,6 +150,7 @@ function paintDesigner() {
           ${editable
             ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
             : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
+          <a class="link" onclick="go('execution')">去流程执行 →</a>
           <button class="btn btn-p" onclick="reanalyze()">重新测算</button>
         </div>
       </div>

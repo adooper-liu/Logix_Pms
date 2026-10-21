@@ -43,9 +43,10 @@ const renderKnowledge = () => {
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between mb">
-            <div><h2>流程知识库（${d.page.total} 条）</h2>
+            <div><h2>流程知识库（${d.page.total} 条）<span class="module-badge">经验沉淀 · 复用</span></h2>
               <div class="desc" style="margin:0">方法论模板、案例复盘、最佳实践沉淀与复用</div></div>
             <div class="gap">
+              <a class="link" onclick="go('workflow')">方法手册 →</a>
               ${canManage() ? '<button class="btn btn-p" onclick="newKnowledgeModal()">+ 新建条目</button>' : ''}
               <select class="sel" onchange="setK('sort', this.value)">
                 <option value="recent"${k.sort === 'recent' ? ' selected' : ''}>按时间</option>

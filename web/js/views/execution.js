@@ -241,9 +241,10 @@ const renderExecution = () => {
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
-          <div><h2>流程执行</h2>
+          <div><h2>流程执行<span class="module-badge">运行时 · 实例与任务</span></h2>
             <div class="desc">运行已建模流程的实例 · 认领任务 · 推进到下一节点；改善项目进度在「流程项目组合」维护</div></div>
           <div class="gap">
+            <a class="link" onclick="go('projects')">改善项目进度 →</a>
             <button class="btn btn-p" id="execStartBtn"
               onclick="startInstanceModal()"${canWrite() ? '' : ' disabled'}>+ 启动流程</button>
           </div>

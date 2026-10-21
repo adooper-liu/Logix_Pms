@@ -91,17 +91,27 @@ const renderDashboard = () => renderAsync('dashboard',
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
-          <div><h2>管理驾驶舱</h2>
+          <div><h2>管理驾驶舱<span class="module-badge">全局概览</span></h2>
             <div class="desc">先看需要关注的事，再看项目推进</div></div>
-          <div class="quick-links">
-            <a class="quick-link" href="#" onclick="go('map');return false">流程地图</a>
-            <a class="quick-link" href="#" onclick="go('projects');return false">项目组合</a>
-            <a class="quick-link" href="#" onclick="go('monitor');return false">运营监控</a>
-            <a class="quick-link" href="#" onclick="go('knowledge');return false">知识库</a>
-          </div>
+          <a class="link" onclick="go('projects')">项目组合 →</a>
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
+        <div class="mainline">
+          <a class="mainline-step" onclick="go('map')"><b>1</b>流程地图</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('projects')"><b>2</b>项目组合</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('workflow')"><b>3</b>方法手册</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('designer')"><b>4</b>设计器</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('execution')"><b>5</b>流程执行</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('monitor')"><b>6</b>运营监控</a>
+          <span class="mainline-arrow">→</span>
+          <a class="mainline-step" onclick="go('knowledge')"><b>7</b>知识库</a>
+        </div>
       </div>
 
       <div class="grid g2">

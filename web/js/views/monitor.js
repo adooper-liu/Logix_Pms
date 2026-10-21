@@ -217,10 +217,11 @@ const renderMonitor = () => {
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between">
-            <div><h2>运营监控</h2>
+            <div><h2>运营监控<span class="module-badge">运营结果 · KPI 与异常</span></h2>
               <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
                 · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
             <div class="gap">
+              <a class="link" onclick="go('execution')">任务队列 →</a>
               ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}
               ${canManage() ? '<button class="btn btn-g" onclick="newKpiModal()">+ 新建 KPI</button>' : ''}
             </div>

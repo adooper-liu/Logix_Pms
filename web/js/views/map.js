@@ -159,11 +159,12 @@ const renderMap = () => {
       <div class="card map-head">
         <div class="between map-head-top">
           <div>
-            <h2 style="margin:0">企业流程地图</h2>
+            <h2 style="margin:0">企业流程地图<span class="module-badge">流程资产 · 定位与优先级</span></h2>
             <div class="desc" style="margin:4px 0 0">
               从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
           </div>
           <div class="gap">
+            <a class="link" onclick="go('projects')">去立项 →</a>
             <select class="sel" onchange="setBenchmarkFramework(this.value)" title="切换对标框架">
               <option value="">不对标</option>
               ${frameworkOptions}

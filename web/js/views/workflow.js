@@ -96,7 +96,7 @@ const renderWorkflow = () => renderAsync('workflow',
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
-          <div><h2>五阶段标准工作流</h2>
+          <div><h2>五阶段标准工作流<span class="module-badge">方法手册 · 教学引导</span></h2>
             <div class="desc">全公司共用的方法手册 · ${total} 个标准步骤；项目实际进度请在「流程项目组合」里推进</div></div>
           <div class="seg">
             <button class="${wf.tab === 'steps' ? 'on' : ''}" onclick="setWfTab('steps')">五阶段步骤</button>
