@@ -493,6 +493,27 @@ def main() -> int:
             assert "欢迎使用" in page.inner_text("#mBody"), page.inner_text("#mBody")[:120]
             close_modal()
 
+        # 地图 → 立项：带流程进入项目向导
+        def map_to_project() -> None:
+            goto("map")
+            page.click('.crumb a:has-text("全部价值链")')
+            page.wait_for_timeout(500)
+            page.click("#view tr.map-row >> nth=2")
+            page.wait_for_timeout(600)
+            page.click("#view tr.map-row:has-text('L2-003')")
+            page.wait_for_timeout(600)
+            row = page.locator("#view tr.map-row:has-text('L3-032')").first
+            row.locator("a.link:has-text('立项')").click()
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "流程项目组合"
+            page.wait_for_selector("#npName")
+            assert "从流程地图带入" in page.inner_text("#mBody")
+            selected = page.eval_on_selector(
+                "#npProcess", "el => el.options[el.selectedIndex].textContent"
+            )
+            assert "L3-032" in selected, selected
+            close_modal()
+
         check("地图下钻", map_drill)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
@@ -511,6 +532,7 @@ def main() -> int:
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)
         check("流程执行：启动→认领→完成", execution_flow)
+        check("地图→立项", map_to_project)
         check("BPMN 导入导出", bpmn_roundtrip)
 
         # -------------------------------------------------- 收尾：清理自检写入的数据

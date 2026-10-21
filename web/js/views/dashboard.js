@@ -26,13 +26,41 @@ const renderDashboard = () => renderAsync('dashboard',
       open_exceptions: 'openExceptions()',
       avg_improvement: 'openProjects()',
     };
-    const kpis = primary.map((c) => `
+    const kpiInfo = {
+      active_projects: {
+        icon: '▦', tone: 'brand',
+        sub: `今年结项 ${num(byKey.closed_this_year ? byKey.closed_this_year.value : 0, 0)} 个`,
+      },
+      improvement_targets: {
+        icon: '◎', tone: 'warn',
+        sub: `占流程资产 ${byKey.process_total && byKey.process_total.value
+          ? num((byKey.improvement_targets.value / byKey.process_total.value) * 100, 1) : '—'}%`,
+      },
+      open_exceptions: {
+        icon: '!', tone: 'bad',
+        sub: `超期 ${d.exception_summary.overdue} 件`,
+      },
+      avg_improvement: {
+        icon: '✓', tone: 'ok', sub: '在办项目平均目标',
+      },
+    };
+    const kpis = primary.map((c) => {
+      const info = kpiInfo[c.key] || { icon: '·', tone: 'brand', sub: '' };
+      return `
       <a class="kpi stat clickable ${tone[c.status] || ''}" href="#"
          onclick="${kpiAction[c.key] || 'openProjects()'};return false">
-        <div class="num">${num(c.value, 1)}<small>${esc(c.unit || '')}</small></div>
-        <div class="lab">${metricHelp(c.key, c.label)}</div>
+        <div class="glow ${info.tone}"></div>
+        <div class="row">
+          <div class="ico ${info.tone}">${info.icon}</div>
+          <div>
+            <div class="lab">${metricHelp(c.key, c.label)}</div>
+            <div class="num">${num(c.value, 1)}<small>${esc(c.unit || '')}</small></div>
+          </div>
+        </div>
+        <div class="sub">${info.sub}</div>
         <span class="card-go">查看 ›</span>
-      </a>`).join('');
+      </a>`;
+    }).join('');
 
     const stages = d.stage_health.map((s) => {
       const pct = s.project_count ? s.avg_progress : null;
@@ -52,12 +80,22 @@ const renderDashboard = () => renderAsync('dashboard',
 
     const methods = d.methodology_distribution.map((m) => `
       <a class="method-item" href="#" onclick="openMethodology('${m.methodology}');return false">
-        <i style="background:${METHOD_COLOR[m.methodology] || 'var(--brand)'}"></i>
-        ${M_ICON[m.methodology] || ''} ${esc(m.label)} <b>${m.count}</b>
+        <span class="sw" style="background:${METHOD_COLOR[m.methodology] || 'var(--brand)'}"></span>
+        <span>${M_ICON[m.methodology] || ''} ${esc(m.label)}</span>
+        <b>${m.count} · ${num(m.share * 100, 0)}%</b>
       </a>`).join('');
-    const methodBar = d.methodology_distribution.map((m) =>
-      `<i style="width:${num(m.share * 100, 2)}%;background:${
-        METHOD_COLOR[m.methodology] || 'var(--brand)'}" title="${esc(m.label)}"></i>`).join('');
+    const methodTotal = d.methodology_distribution.reduce((a, m) => a + m.count, 0);
+    let methodAcc = 0;
+    const donutStops = d.methodology_distribution.map((m) => {
+      const start = methodAcc;
+      methodAcc += m.share * 100;
+      return `${METHOD_COLOR[m.methodology] || 'var(--brand)'} ${start}% ${methodAcc}%`;
+    }).join(', ');
+    const methodDonut = methodTotal
+      ? `<div class="donut" style="background:conic-gradient(${donutStops})">
+           <div class="donut-hole"><b>${methodTotal}</b><span>项目</span></div></div>`
+      : `<div class="donut" style="background:var(--line)">
+           <div class="donut-hole"><b>0</b><span>项目</span></div></div>`;
 
     const board = d.project_board.map((p) => `
       <tr class="clk" onclick="openProject(${p.id})">
@@ -76,7 +114,7 @@ const renderDashboard = () => renderAsync('dashboard',
       </tr>`).join('') || emptyRow(6, '当前没有在办项目');
 
     const alerts = d.health_alerts.slice(0, 4).map((a) => `
-      <div class="alert-row" onclick="go('map')">
+      <div class="alert-row ${a.level === 'HIGH' ? 'ri-high' : 'ri-medium'}" onclick="go('map')">
         <span class="tag ${a.level === 'HIGH' ? 't-red' : 't-yel'}">
           ${a.health_score === null ? '—' : num(a.health_score, 0)}</span>
         <div class="alert-main"><b>${esc(a.name)}</b>
@@ -128,7 +166,7 @@ const renderDashboard = () => renderAsync('dashboard',
             <a class="link" onclick="go('map')">流程地图 →</a>
           </div>
           ${alerts}
-          <div class="alert-row" onclick="go('monitor')">
+          <div class="alert-row ri-bad" onclick="go('monitor')">
             <span class="tag t-red">${es.open + es.in_progress}</span>
             <div class="alert-main"><b>${metricHelp('open_exceptions', '未闭环异常')}</b>
               <div class="tiny">超期 ${es.overdue} · 已闭环 ${es.resolved + es.closed}</div></div>
@@ -142,8 +180,12 @@ const renderDashboard = () => renderAsync('dashboard',
           <div><h3 style="margin:0">${metricHelp('methodology_share', '方法论分布')}</h3>
             <div class="desc" style="margin:2px 0 0">BPR / BPI / 精益 / 混合 的项目配比</div></div>
         </div>
-        <div class="method-bar">${methodBar || '<i style="width:100%;background:var(--line)"></i>'}</div>
-        <div class="legend">${methods}</div>
+        <div class="donut-wrap">
+          ${methodDonut}
+          <div class="donut-legend">${methods}</div>
+          <div class="donut-note">方法论分布只统计项目当前选择的方法；项目方法变更后自动更新。
+            用它判断团队的方法能力结构与改善路径偏好。</div>
+        </div>
       </div>
 
       <div class="card">

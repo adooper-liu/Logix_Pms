@@ -10,73 +10,77 @@
   /* ---- 表面与文字 ---- */
   --bg:#f4f6fb;
   --panel:#ffffff;
-  --panel-2:#f8fafd;
-  --panel-3:#f2f5fa;
-  --panel-hover:#fafcff;
+  --panel-2:#fafbfe;
+  --panel-3:#f5f7fc;
+  --panel-hover:#f7f9fe;
   --line:#e8ecf4;
-  --line-soft:#eef1f7;
-  --line-strong:#c3cbe0;
-  --text:#1a2233;
-  --text-strong:#111a2e;
-  --sub:#6b7688;
-  --sub-2:#8a94a8;
-  --track:#eef1f7;
+  --line-soft:#f1f4f9;
+  --line-strong:#cbd5e1;
+  --text:#0f172a;
+  --text-strong:#0b1220;
+  --sub:#475569;
+  --sub-2:#94a3b8;
+  --track:#eef2f8;
 
   /* ---- 品牌与状态 ---- */
-  --brand:#2f5bea;
-  --brand-strong:#1f48cc;
+  --brand:#3b6ff6;
+  --brand-strong:#2f5fe0;
+  --brand2:#6366f1;
   --brand-soft:#eaf0ff;
   --brand-softer:#f5f8ff;
-  --brand-line:#c9d7ff;
-  --ok:#16a34a;
-  --ok-strong:#138a45;
-  --ok-soft:#e7f6ec;
-  --warn:#f59e0b;
-  --warn-strong:#c5830c;
-  --warn-soft:#fef4e2;
-  --bad:#ef4444;
-  --bad-strong:#d14343;
-  --bad-soft:#fdeaea;
-  --info:#3b82f6;
-  --info-soft:#eaf0ff;
+  --brand-line:#c7d2fe;
+  --ok:#16a97c;
+  --ok-strong:#0e9b72;
+  --ok-soft:#e7f7f1;
+  --warn:#f5a524;
+  --warn-strong:#b47405;
+  --warn-soft:#fef5e3;
+  --bad:#ef4d5a;
+  --bad-strong:#e23b49;
+  --bad-soft:#fdedef;
+  --info:#22b8cf;
+  --info-soft:#e8f8fb;
+  --cyan:#22b8cf;
   --purple:#8b5cf6;
-  --purple-strong:#7038d6;
+  --purple-strong:#6366f1;
   --purple-soft:#f1ebfe;
 
   /* ---- 侧边栏（与内容区解耦，主题可单独覆盖） ---- */
-  --nav-bg:#111a2e;
-  --nav-bg-2:#1e2f52;
-  --nav-text:#c8d2e6;
-  --nav-sub:#5c6a8c;
-  --nav-sub-2:#7d8ab0;
-  --nav-line:rgba(255,255,255,.08);
-  --nav-hover:rgba(255,255,255,.07);
-  --nav-active-shadow:0 4px 14px rgba(47,91,234,.4);
+  --nav-bg:#101a2e;
+  --nav-bg-2:#0d1524;
+  --nav-text:#cbd5e1;
+  --nav-sub:#64748b;
+  --nav-sub-2:#94a3b8;
+  --nav-line:rgba(148,163,184,.12);
+  --nav-hover:rgba(148,163,184,.10);
+  --nav-active-bg:linear-gradient(90deg,rgba(59,111,246,.22),rgba(59,111,246,.04));
+  --nav-active-bar:linear-gradient(180deg,var(--brand),var(--purple));
+  --nav-active-shadow:0 6px 18px rgba(59,111,246,.25);
 
   /* ---- 五阶段/热力/图表 ---- */
-  --stage-1:#2f5bea;
-  --stage-2:#3b82f6;
+  --stage-1:#3b6ff6;
+  --stage-2:#22b8cf;
   --stage-3:#8b5cf6;
-  --stage-4:#f59e0b;
-  --stage-5:#16a34a;
-  --heat-critical:#ef4444;
-  --heat-high:#f59e0b;
-  --heat-medium:#2f5bea;
-  --heat-low:#16a34a;
-  --chart-grid:#e8ecf4;
+  --stage-4:#f5a524;
+  --stage-5:#16a97c;
+  --heat-critical:#ef4d5a;
+  --heat-high:#f5a524;
+  --heat-medium:#3b6ff6;
+  --heat-low:#16a97c;
+  --chart-grid:#eef2f8;
 
   /* ---- 形状与节奏 ---- */
   --radius:14px;
   --radius-sm:9px;
   --radius-pill:999px;
-  --shadow:0 2px 12px rgba(20,40,100,.06);
-  --shadow-hover:0 4px 14px rgba(47,91,234,.12);
-  --shadow-sm:0 1px 4px rgba(0,0,0,.08);
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 6px 20px rgba(15,23,42,.05);
+  --shadow-hover:0 10px 34px rgba(15,23,42,.12);
+  --shadow-sm:0 1px 4px rgba(15,23,42,.10);
   --shadow-xl:0 20px 60px rgba(0,0,0,.25);
   --shadow-lg:0 24px 70px rgba(0,0,0,.35);
   --overlay:rgba(15,23,42,.45);
-  --focus-ring:0 0 0 3px rgba(47,91,234,.12);
-  --ring-bad:0 0 0 2px rgba(239,68,68,.25);
+  --focus-ring:0 0 0 3px rgba(59,111,246,.10);
+  --ring-bad:0 0 0 2px rgba(239,77,90,.25);
   --space-1:6px;
   --space-2:10px;
   --space-3:14px;
@@ -103,15 +107,21 @@
   --track:#e9ebee;
   --brand:#4b5563;
   --brand-strong:#374151;
+  --brand2:#6b7280;
   --brand-soft:#eceff3;
   --brand-softer:#f6f7f9;
   --brand-line:#d1d5db;
+  --info:#6b7280;
+  --info-soft:#eff1f4;
+  --cyan:#8b919a;
   --nav-bg:#1f2329;
   --nav-bg-2:#2b3037;
   --nav-text:#d1d5db;
   --nav-sub:#6b7280;
   --nav-sub-2:#8b919a;
-  --nav-active-shadow:0 4px 14px rgba(31,35,41,.35);
+  --nav-active-bg:linear-gradient(90deg,rgba(75,85,99,.24),rgba(75,85,99,.04));
+  --nav-active-bar:linear-gradient(180deg,#4b5563,#8b919a);
+  --nav-active-shadow:0 6px 18px rgba(31,35,41,.25);
   --stage-1:#4b5563;
   --stage-2:#6b7280;
   --stage-3:#7c6f9c;
@@ -132,26 +142,37 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text);
 .app{display:flex;min-height:100vh}
 
 /* ===== 侧边栏 ===== */
-.side{width:230px;background:var(--nav-bg);color:var(--nav-text);flex-shrink:0;
-  display:flex;flex-direction:column}
-.side .logo{padding:22px 20px;font-size:17px;font-weight:700;color:#fff;letter-spacing:.5px;
+.side{width:236px;background:linear-gradient(180deg,var(--nav-bg),var(--nav-bg-2));
+  color:var(--nav-text);flex-shrink:0;display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh}
+.side .logo{display:flex;align-items:center;gap:11px;padding:22px 20px 18px;
   border-bottom:1px solid var(--nav-line)}
-.side .logo span{display:block;font-size:11px;font-weight:400;color:var(--nav-sub-2);
-  margin-top:3px;letter-spacing:1px}
+.side .logo .mark{width:36px;height:36px;flex:0 0 36px;border-radius:11px;
+  background:linear-gradient(135deg,var(--brand),var(--purple));
+  display:flex;align-items:center;justify-content:center;color:#fff;
+  box-shadow:0 6px 16px rgba(59,111,246,.40)}
+.side .logo .mark svg{width:19px;height:19px}
+.side .logo .brand b{display:block;color:#fff;font-size:15.5px;font-weight:700;
+  letter-spacing:.3px}
+.side .logo .brand span{display:block;font-size:11px;font-weight:400;
+  color:var(--nav-sub-2);margin-top:3px;letter-spacing:1px}
 .nav{padding:14px 10px;flex:1;overflow-y:auto}
 .nav .grp{font-size:11px;color:var(--nav-sub);padding:14px 12px 6px;letter-spacing:1px}
 .nav a{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;
   color:var(--nav-text);text-decoration:none;font-size:13.5px;margin-bottom:2px;
-  cursor:pointer;transition:var(--transition,.15s)}
+  cursor:pointer;transition:var(--transition,.15s);position:relative}
 .nav a .ic{width:18px;text-align:center;font-size:15px}
 .nav a:hover{background:var(--nav-hover)}
-.nav a.active{background:var(--brand);color:#fff;box-shadow:var(--nav-active-shadow)}
+.nav a.active{background:var(--nav-active-bg);color:#fff;font-weight:600;
+  box-shadow:none}
+.nav a.active::before{content:"";position:absolute;left:-10px;top:9px;bottom:9px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--nav-active-bar)}
 .side .foot{padding:16px 20px;font-size:11px;color:var(--nav-sub);border-top:1px solid var(--nav-line)}
 .side .foot b{color:var(--ok);font-weight:600}
 
 /* ===== 主区 ===== */
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
-.topbar{height:62px;background:var(--panel);border-bottom:1px solid var(--line);
+.topbar{height:64px;background:var(--panel);border-bottom:1px solid var(--line);
   display:flex;align-items:center;padding:0 26px;gap:16px}
 .topbar h1{font-size:17px;font-weight:600;flex:1}
 .search{flex:1;max-width:340px;position:relative}
@@ -162,10 +183,11 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text);
 .search::before{content:"⌕";position:absolute;left:12px;top:7px;font-size:15px;
   opacity:.45;color:var(--sub)}
 .usr{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);white-space:nowrap}
-.avatar{width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;
+.avatar{width:34px;height:34px;border-radius:50%;color:#fff;
+  background:linear-gradient(135deg,var(--cyan),var(--brand));
   display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
 .theme-sel{padding:6px 9px;font-size:12px}
-.view{padding:24px 26px;overflow-y:auto;flex:1}
+.view{padding:22px 26px 34px;overflow-y:auto;flex:1}
 
 /* ===== 登录 ===== */
 .login-mask{position:fixed;inset:0;background:linear-gradient(135deg,var(--nav-bg),var(--nav-bg-2));

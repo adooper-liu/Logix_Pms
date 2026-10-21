@@ -4,7 +4,9 @@ import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
-import { canManage } from '../core/auth.js';
+import { canManage, canWrite } from '../core/auth.js';
+import { go } from '../core/router.js';
+import { newProjectWizard } from './projects.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { openDesigner } from './designer.js';
 
@@ -112,7 +114,12 @@ const renderMap = () => {
           <td><span class="tag ${heatClass}">
             ${HEAT_LABEL[heat]} ${num(n.priority_score, 0)}</span></td>
           <td>${hasKids ? (n.children || []).length + ' 项' : '—'}</td>
-          <td class="map-go">${hasKids ? '进入 ›' : '详情 ›'}</td>
+          <td class="map-go">
+            ${n.level === 3 && canWrite()
+              ? '<a class="link" onclick="event.stopPropagation();startProjectFromProcess('
+                + n.id + ', \'' + esc(n.name) + '\')">立项</a> · ' : ''}
+            ${hasKids ? '进入 ›' : '详情 ›'}
+          </td>
         </tr>`;
     }).join('') || emptyRow(7, improvementOnly
       ? '该层级没有待改善流程，点击「显示全部」恢复'
@@ -304,8 +311,16 @@ function mapClick(code, hasKids) {
         : ''}
        <button class="btn btn-g" onclick="closeModal()">关闭</button>
        ${canManage() ? '<button class="btn btn-g" onclick="editProcessModal(' + node.id + ')">编辑</button>' : ''}
+       ${canWrite() ? '<button class="btn btn-g" onclick="closeModal();startProjectFromProcess('
+         + node.id + ', \'' + esc(node.name) + '\')">以此流程立项</button>' : ''}
        <button class="btn btn-p" onclick="closeModal();openDesigner(${node.id})">去设计器分析</button>`);
   }
+}
+
+/** 地图 → 立项：带着流程进入项目向导 */
+function startProjectFromProcess(processId, processName) {
+  go('projects');
+  newProjectWizard({ processId, name: processName });
 }
 
 function mapGo(index) {
@@ -564,4 +579,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, toggleImprovement };
+export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };

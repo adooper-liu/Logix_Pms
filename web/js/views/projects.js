@@ -501,8 +501,11 @@ async function patchStep(stepId, status, projectId) {
 
 /* -------------------------------------------------- 立项向导 */
 
-function newProjectWizard() {
+function newProjectWizard(prefill) {
+  const pre = prefill || {};
   openModal('新建流程项目 · 立项向导', `
+    ${pre.name ? `<div class="note mb">从流程地图带入：<b>${esc(pre.name)}</b>。
+      请补充 Owner、改善目标与基线数据后立项。</div>` : ''}
     <div class="note mb">
       先描述流程现状与目标，点「匹配方法论」让后端引擎给出推荐（含判断依据与风险提示），
       再确认基本信息提交立项。
@@ -540,7 +543,7 @@ function newProjectWizard() {
     <h3 class="mt">② 基本信息</h3>
     <div class="row2">
       <div class="field"><label>项目名称 *</label>
-        <input id="npName" placeholder="如：采购需求提报流程重组"></div>
+        <input id="npName" value="${esc(pre.name ? pre.name + '流程优化' : '')}" placeholder="如：采购需求提报流程重组"></div>
       <div class="field"><label>方法论 *</label>
         <select id="npMethod">
           <option value="BPR">BPR 阶跃式重组</option>
@@ -592,6 +595,9 @@ function newProjectWizard() {
       o.textContent = 'L' + r.level + ' ' + r.code + ' ' + r.name;
       sel.appendChild(o);
     });
+    if (pre.processId) {
+      sel.value = String(pre.processId);
+    }
   }).catch(() => { /* 下拉拿不到不影响立项 */ });
 }
 

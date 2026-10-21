@@ -26,24 +26,44 @@ const renderWorkflow = () => renderAsync('workflow',
       <button class="stage-pill${s.stage_no === current.stage_no ? ' on' : ''}"
               style="--pill:${STAGE_COLORS[i]}" onclick="setWfStage(${s.stage_no})">
         <b>阶段${s.stage_no}</b><span>${esc(s.stage_name)}</span>
+        <em>${s.steps.length} 步</em>
       </button>`).join('');
 
     const steps = current.steps.map((st) => `
-      <div class="step" style="border-left-color:${stageColor}" onclick="openWfStep('${st.step_no}')">
-        <b>${esc(st.step_no)} ${esc(st.name)}</b>
+      <div class="step wf-step" style="--step-color:${stageColor};border-left-color:${stageColor}"
+           onclick="openWfStep('${st.step_no}')">
+        <div class="wf-step-hd">
+          <span class="wf-step-no" style="background:linear-gradient(135deg,${stageColor},var(--brand2))">
+            ${esc(st.step_no)}</span>
+          <b>${esc(st.name)}</b>
+        </div>
         <span>${esc(st.deliverables)}</span>
+        ${st.tools ? `<div class="wf-step-tools">推荐工具：${esc(st.tools)}</div>` : ''}
       </div>`).join('');
 
     const stepsPane = `
       <div class="stage-pills">${pills}</div>
-      <div class="card">
-        <div class="between mb">
-          <div><h3 style="margin:0">阶段${current.stage_no} · ${esc(current.stage_name)}</h3>
-            <div class="desc" style="margin:2px 0 0">${esc(current.stage_goal || '')}</div></div>
-          <span class="tiny">${current.steps.length} 个步骤 · 全流程共 ${total} 步</span>
+      <div class="wf-hero" style="background:linear-gradient(120deg,${stageColor},var(--brand2))">
+        <div class="wf-hero-ring">${current.stage_no}</div>
+        <div class="wf-hero-tx">
+          <h3>阶段${current.stage_no} · ${esc(current.stage_name)}</h3>
+          <p>${esc(current.stage_goal || '')}</p>
+        </div>
+        <div class="wf-hero-kpis">
+          <div><b>${current.steps.length}</b><span>本阶段步骤</span></div>
+          <div><b>${total}</b><span>全流程步骤</span></div>
+          <div><b>${stages.length}</b><span>阶段数</span></div>
+        </div>
+      </div>
+      <section class="wf-section">
+        <div class="ch">
+          <span class="dot"></span><h3>阶段${current.stage_no} 步骤清单</h3>
+          <div class="sp"></div>
+          <span class="tiny">${current.steps.length} 个步骤 · 点击查看方法、工具与交付物</span>
+          <a class="link" style="margin-left:14px" onclick="setWfTab('method')">方法论匹配 →</a>
         </div>
         <div class="wf-grid">${steps}</div>
-      </div>`;
+      </section>`;
 
     const methodPane = `
       <div class="card">
