@@ -1,0 +1,51 @@
+# 固定项目名：不写的话 compose 会用目录名推导，改一次目录名就会生成新的
+# 网络和卷，数据看起来就"丢了"。写死之后不受目录重命名影响。
+name: logix-pms
+
+services:
+  db:
+    # 用完整版而非 alpine：内网/镜像源拉取更稳，体积差异在这个场景不敏感
+    image: postgres:16
+    container_name: logix-pms-db
+    environment:
+      POSTGRES_DB: logix_pms
+      POSTGRES_USER: psm
+      POSTGRES_PASSWORD: psm_dev_password
+      # 时间戳统一按 UTC 存，容器时区不影响数据
+      TZ: UTC
+    ports:
+      # 宿主机 5432 常被本地安装的 PostgreSQL 占用，默认映射到 5433 避免冲突。
+      # 需要改端口时设 POSTGRES_PORT 环境变量即可。
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # 让 api 服务等到数据库真正可接受连接再启动，避免启动竞态
+      test: ["CMD-SHELL", "pg_isready -U psm -d logix_pms"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  # 只有显式加 --profile full 才会构建并启动整个应用
+  # 日常开发推荐：docker compose up -d db，然后在宿主机跑 uvicorn（带热重载）
+  api:
+    profiles: ["full"]
+    build: .
+    container_name: logix-pms-api
+    environment:
+      DATABASE_URL: postgresql+psycopg://psm:psm_dev_password@db:5432/logix_pms
+      SEED_ON_STARTUP: "true"
+      CORS_ORIGINS: "*"
+      # 生产环境务必替换
+      SECRET_KEY: ${SECRET_KEY:-logix-pms-dev-secret-change-me}
+    ports:
+      - "8123:8123"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

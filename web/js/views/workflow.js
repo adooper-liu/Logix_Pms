@@ -1,0 +1,169 @@
+/* 视图：workflow */
+import { esc, CAT_ICON, methodTag, skeleton } from '../core/format.js';
+import { openModal, closeModal, viewEl } from '../core/ui.js';
+import { state } from '../core/state.js';
+import { renderAsync, go } from '../core/router.js';
+import { GET, POST } from '../core/api.js';
+import { openToolByCode } from './toolbox.js';
+
+/* ============================================================ 3. 五阶段标准工作流 */
+
+const STAGE_COLORS = ['#2f5bea', '#3b82f6', '#8b5cf6', '#f59e0b', '#16a34a'];
+
+const renderWorkflow = () => renderAsync('workflow',
+  () => GET('/workflow/stages'),
+  (stages) => {
+    state.wf = stages;
+    const total = stages.reduce((a, s) => a + s.steps.length, 0);
+
+    const canvas = stages.map((s, i) => `
+      <div class="phase">
+        <div class="phase-hd" style="background:${STAGE_COLORS[i]}">
+          <span class="no">阶段${s.stage_no}</span>${esc(s.stage_name)}</div>
+        <div class="phase-bd">
+          ${s.steps.map((st) => `
+            <div class="step" style="border-left-color:${STAGE_COLORS[i]}"
+                 onclick="openWfStep('${st.step_no}')">
+              <b>${esc(st.step_no)} ${esc(st.name)}</b>
+              <span>${esc(st.deliverables)}</span>
+            </div>`).join('')}
+        </div>
+      </div>${i < stages.length - 1 ? '<div class="arrow">›</div>' : ''}`).join('');
+
+    viewEl().innerHTML = `
+      <div class="card">
+        <div class="between mb">
+          <div><h2 style="margin:0">五阶段标准工作流（${total} 个步骤）</h2>
+            <div class="desc" style="margin:0">点击任意步骤查看方法说明、工具、交付物与关键要点</div></div>
+        </div>
+        <div class="legend">
+          ${stages.map((s, i) => '<span><i style="background:' + STAGE_COLORS[i] + '"></i>' +
+            esc(s.stage_goal || '') + '</span>').join('')}
+        </div>
+      </div>
+      <div class="flow">${canvas}</div>
+
+      <div class="card mt">
+        <h2>决策门：方法论选择矩阵</h2>
+        <div class="desc">根据流程现状与目标自动推荐适配方法 —— 下面的试算会调用后端真正的匹配引擎</div>
+        <table class="tbl mb">
+          <thead><tr><th>流程现状</th><th>改善目标</th><th>推荐方法</th><th>典型周期</th><th>风险等级</th></tr></thead>
+          <tbody>
+            <tr><td>流程严重过时、断裂、与战略脱节</td><td>阶跃式突破（≥50%）</td>
+              <td>${methodTag('BPR', 'BPR 重组')}</td><td>6–18 个月</td><td><span class="tag t-red">高</span></td></tr>
+            <tr><td>流程基本合理但局部堵点</td><td>渐进改善（10–30%）</td>
+              <td>${methodTag('BPI', 'BPI 优化')}</td><td>1–3 个月</td><td><span class="tag t-yel">中低</span></td></tr>
+            <tr><td>现场/操作层浪费明显</td><td>持续流动、消除浪费</td>
+              <td>${methodTag('LEAN', '精益改善')}</td><td>持续改善</td><td><span class="tag t-grn">低</span></td></tr>
+            <tr><td>混合状态（多数实际情况）</td><td>架构 + 执行 + 操作分层改善</td>
+              <td>${methodTag('HYBRID', '组合拳')}</td><td>持续</td><td><span class="tag t-yel">中</span></td></tr>
+          </tbody>
+        </table>
+
+        <h3>实时试算</h3>
+        <div class="row3">
+          <div class="field"><label>流程现状</label>
+            <select id="rcState">
+              <option value="SEVERE_OUTDATED">严重过时、断裂、与战略脱节</option>
+              <option value="SOUND_BUT_INEFFICIENT">基本合理但效率不足、局部堵点</option>
+              <option value="SHOPFLOOR_WASTE">现场/操作层浪费明显、波动大</option>
+              <option value="MIXED">混合状态</option>
+            </select></div>
+          <div class="field"><label>目标改善幅度（%）</label>
+            <input id="rcPct" type="number" value="30" min="0" max="100"></div>
+          <div class="field"><label>范围</label>
+            <select id="rcScope">
+              <option value="END_TO_END">端到端跨职能</option>
+              <option value="LOCAL" selected>单一部门内部</option>
+              <option value="SHOPFLOOR">现场/操作层</option>
+            </select></div>
+        </div>
+        <div class="row3">
+          <div class="field"><label>是否涉及组织/权责调整</label>
+            <select id="rcOrg"><option value="false">否</option><option value="true">是</option></select></div>
+          <div class="field"><label>是否有流程数据/日志</label>
+            <select id="rcData"><option value="true">是</option><option value="false">否</option></select></div>
+          <div class="field"><label>计划周期（月）</label>
+            <input id="rcDur" type="number" value="6" min="1" max="36"></div>
+        </div>
+        <button class="btn btn-p" id="rcBtn" onclick="runRecommend('rcResult')">运行匹配引擎</button>
+        <div id="rcResult" class="mt"></div>
+      </div>`;
+  });
+
+function openWfStep(stepNo) {
+  let found = null;
+  (state.wf || []).forEach((s) => s.steps.forEach((st) => { if (st.step_no === stepNo) found = st; }));
+  if (!found) return;
+  openModal(found.step_no + ' ' + found.name + ' · 方法说明', `
+    <div class="field"><label>标准动作</label><textarea readonly>${esc(found.action)}</textarea></div>
+    <div class="row2">
+      <div class="field"><label>推荐工具</label><input value="${esc(found.tools)}" readonly></div>
+      <div class="field"><label>关键交付物</label><input value="${esc(found.deliverables)}" readonly></div>
+    </div>
+    <div class="field"><label>关键要点 / 踩坑提示</label><textarea readonly>${esc(found.key_points)}</textarea></div>
+    <div class="field"><label>所属阶段</label>
+      <input value="阶段${found.stage_no}" readonly></div>`,
+    `<button class="btn btn-g" onclick="closeModal()">关闭</button>
+     <button class="btn btn-p" onclick="closeModal();go('toolbox')">去工具箱看具体工具</button>`);
+}
+
+/** 方法论匹配试算：复用后端引擎，前端只负责收集参数与呈现 */
+async function runRecommend(targetId) {
+  const box = document.getElementById(targetId);
+  box.innerHTML = skeleton(3);
+  try {
+    const r = await POST('/projects/recommend-methodology', {
+      process_state: document.getElementById('rcState').value,
+      target_improvement_pct: Number(document.getElementById('rcPct').value || 0),
+      scope: document.getElementById('rcScope').value,
+      involves_org_change: document.getElementById('rcOrg').value === 'true',
+      data_available: document.getElementById('rcData').value === 'true',
+      duration_target_months: Number(document.getElementById('rcDur').value || 6),
+    });
+    box.innerHTML = renderRecommendation(r);
+  } catch (e) {
+    box.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
+  }
+}
+
+function renderRecommendation(r) {
+  const conf = Math.round(r.confidence * 100);
+  return `
+    <div class="note mb">
+      <b style="font-size:14px">${esc(r.headline)}</b>
+      <div style="margin-top:6px">
+        <div class="pipe" style="max-width:280px"><i style="width:${conf}%;background:${
+          conf >= 70 ? '#16a34a' : conf >= 50 ? '#f59e0b' : '#ef4444'}"></i></div>
+        <span class="tiny">置信度 ${conf}%</span>
+      </div>
+    </div>
+
+    <h3>判断依据</h3>
+    <ol style="padding-left:20px;font-size:13px;line-height:1.9;color:#3d4759">
+      ${r.rationale.map((x) => '<li>' + esc(x) + '</li>').join('')}
+    </ol>
+
+    <h3 class="mt">分层推进建议</h3>
+    <table class="tbl">
+      <thead><tr><th style="width:90px">层次</th><th>动作</th></tr></thead>
+      <tbody>${r.phase_plan.map((p) => '<tr><td><b>' + esc(p.layer) + '</b></td><td>' +
+        esc(p.action) + '</td></tr>').join('')}</tbody>
+    </table>
+
+    <h3 class="mt">推荐工具链（${r.recommended_tools.length} 个）</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${r.recommended_tools.map((t) => '<span class="tag ' +
+        ({ DIAGNOSE: 't-blu', DESIGN: 't-red', DEPLOY: 't-yel', MONITOR: 't-grn' }[t.category] || 't-blu') +
+        '" style="cursor:pointer" onclick="openToolByCode(\'' + t.code + '\')">' +
+        (CAT_ICON[t.category] || '') + ' ' + esc(t.name) + '</span>').join('')}
+    </div>
+
+    <h3 class="mt">风险提示</h3>
+    <div class="${r.risks.length && r.risks[0].indexOf('未识别') < 0 ? 'warnbox' : 'note'}">
+      ${r.risks.map((x) => '· ' + esc(x)).join('<br>')}
+    </div>`;
+}
+
+
+export { renderWorkflow, openWfStep, renderRecommendation, runRecommend };

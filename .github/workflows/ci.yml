@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sqlite
+            test-database-url: ""
+          - name: postgres
+            test-database-url: postgresql+psycopg://psm:psm_dev_password@localhost:5432/logix_pms_test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: logix_pms_test
+          POSTGRES_USER: psm
+          POSTGRES_PASSWORD: psm_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psm -d logix_pms_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: ${{ matrix.test-database-url }}
+      AUTO_MIGRATE: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+
+      - name: 格式检查
+        run: ruff format --check .
+
+      - name: 静态检查
+        run: ruff check .
+
+      - name: 测试（${{ matrix.name }}）
+        run: pytest -q

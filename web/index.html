@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流程管理系统 PMS · Logix</title>
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/views.css">
+</head>
+<body>
+<div class="app">
+  <!-- 侧边栏 -->
+  <aside class="side">
+    <div class="logo">流程管理系统 PMS<span>PROCESS MANAGEMENT SYSTEM</span></div>
+    <nav class="nav">
+      <div class="grp">总览</div>
+      <a class="active" data-view="dashboard"><span class="ic">▦</span>管理驾驶舱</a>
+      <a data-view="map"><span class="ic">◈</span>企业流程地图</a>
+      <div class="grp">工作流</div>
+      <a data-view="workflow"><span class="ic">⏣</span>五阶段标准工作流</a>
+      <a data-view="projects"><span class="ic">▤</span>流程项目组合</a>
+      <div class="grp">工具与方法</div>
+      <a data-view="toolbox"><span class="ic">⚒</span>方法论工具箱</a>
+      <a data-view="designer"><span class="ic">⌗</span>流程设计器</a>
+      <div class="grp">运营</div>
+      <a data-view="monitor"><span class="ic">◔</span>运营监控与KPI</a>
+      <a data-view="knowledge"><span class="ic">⎙</span>流程知识库</a>
+    </nav>
+    <div class="foot">v1.0 · BPR / 优化 / 精益 一体化<br>
+      <span id="backendState">连接后端中…</span></div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">管理驾驶舱</h1>
+      <div class="search"><input id="searchInput" placeholder="搜索流程 / 项目 / 工具 / 知识…"></div>
+      <div class="usr">
+        <div class="avatar" id="userAvatar">--</div>
+        <span id="userName">未登录</span>
+        <span class="tag t-gry" id="userRole"></span>
+        <button class="btn-sm" onclick="logout()">退出</button>
+      </div>
+    </div>
+    <div class="view" id="view"></div>
+  </div>
+</div>
+
+<!-- 通用模态框 -->
+<div class="mask" id="mask">
+  <div class="modal" id="modal">
+    <div class="modal-hd"><span id="mTitle">标题</span><span class="x" onclick="closeModal()">✕</span></div>
+    <div class="modal-bd" id="mBody"></div>
+    <div class="modal-ft" id="mFoot"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- 登录 -->
+<div class="login-mask" id="loginMask">
+  <div class="login-card">
+    <div class="login-logo">流程管理系统 PMS</div>
+    <div class="login-sub">PROCESS MANAGEMENT SYSTEM</div>
+    <div class="field"><label>用户名</label>
+      <input id="loginUser" autocomplete="username" placeholder="admin"></div>
+    <div class="field"><label>口令</label>
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••"></div>
+    <div class="errbar hide" id="loginErr"></div>
+    <button class="btn btn-p" id="loginBtn" style="width:100%">登录</button>
+    <div class="login-hint">
+      演示账号：admin / admin123（管理员）· manager / manager123（流程管理科）<br>
+      chen / chen123（流程 Owner）· viewer / viewer123（只读）
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

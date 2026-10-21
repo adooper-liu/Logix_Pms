@@ -1,0 +1,55 @@
+/* 基础层：设计变量、页面骨架、登录页。
+   这里不放任何业务组件——组件的样式在 components.css。 */
+
+:root{
+  --bg:#f4f6fb; --panel:#ffffff; --line:#e8ecf4; --text:#1a2233; --sub:#6b7688;
+  --brand:#2f5bea; --brand-soft:#eaf0ff; --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444;
+  --purple:#8b5cf6;
+  --radius:14px; --shadow:0 2px 12px rgba(20,40,100,.06);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei","WenQuanYi Micro Hei",sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+.app{display:flex;min-height:100vh}
+
+/* ===== 侧边栏 ===== */
+.side{width:230px;background:#111a2e;color:#c8d2e6;flex-shrink:0;display:flex;flex-direction:column}
+.side .logo{padding:22px 20px;font-size:17px;font-weight:700;color:#fff;letter-spacing:.5px;
+  border-bottom:1px solid rgba(255,255,255,.08)}
+.side .logo span{display:block;font-size:11px;font-weight:400;color:#7d8ab0;margin-top:3px;letter-spacing:1px}
+.nav{padding:14px 10px;flex:1;overflow-y:auto}
+.nav .grp{font-size:11px;color:#5c6a8c;padding:14px 12px 6px;letter-spacing:1px}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;
+  color:#c8d2e6;text-decoration:none;font-size:13.5px;margin-bottom:2px;cursor:pointer;transition:.15s}
+.nav a .ic{width:18px;text-align:center;font-size:15px}
+.nav a:hover{background:rgba(255,255,255,.07)}
+.nav a.active{background:var(--brand);color:#fff;box-shadow:0 4px 14px rgba(47,91,234,.4)}
+.side .foot{padding:16px 20px;font-size:11px;color:#5c6a8c;border-top:1px solid rgba(255,255,255,.08)}
+.side .foot b{color:#16a34a;font-weight:600}
+
+/* ===== 主区 ===== */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{height:62px;background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 26px;gap:16px}
+.topbar h1{font-size:17px;font-weight:600;flex:1}
+.search{flex:1;max-width:340px;position:relative}
+.search input{width:100%;padding:9px 14px 9px 34px;border:1px solid var(--line);border-radius:9px;
+  background:#f8fafd;font-size:13px;outline:none;font-family:inherit}
+.search input:focus{border-color:var(--brand);background:#fff}
+.search::before{content:"⌕";position:absolute;left:12px;top:7px;font-size:15px;opacity:.45;color:var(--sub)}
+.usr{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);white-space:nowrap}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
+.view{padding:24px 26px;overflow-y:auto;flex:1}
+
+/* ===== 登录 ===== */
+.login-mask{position:fixed;inset:0;background:linear-gradient(135deg,#111a2e,#1e2f52);
+  display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+.login-mask.hide{display:none}
+.login-card{background:#fff;border-radius:18px;padding:34px 36px;width:100%;max-width:380px;
+  box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.login-logo{font-size:20px;font-weight:700;color:#111a2e;text-align:center}
+.login-sub{font-size:11px;color:var(--sub);letter-spacing:1.5px;text-align:center;margin:4px 0 24px}
+.login-hint{margin-top:16px;font-size:11px;color:var(--sub);line-height:1.8;
+  background:#f8fafd;border-radius:8px;padding:10px 12px}
+.role-tag{font-size:11px;padding:2px 8px;border-radius:20px;background:#f2f5fa;color:var(--sub)}

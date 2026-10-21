@@ -1,0 +1,519 @@
+# Logix PMS · 流程管理系统
+
+把 **BPR / BPI / 精益** 三大方法论整合成一套可落地的标准工作流，覆盖「识别问题 → 诊断 → 设计 → 落地 → 运营」的全生命周期。
+
+这是后端服务（第一阶段交付物）：数据库模型 + REST API + 内容底稿。前端原型见 `index-sample.html`。
+
+---
+
+## 三层体系 × 五阶段标准工作流
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  战略层：流程规划与治理（What & Why）                              │
+│  ├── 流程架构设计（L1–L4 分层）                                   │
+│  ├── 流程 Owner 机制                                              │
+│  └── 流程 KPI 体系（效率/质量/成本/灵活性）                        │
+├─────────────────────────────────────────────────────────────────┤
+│  执行层：五阶段标准工作流（How）—— 共 24 个步骤                    │
+│  ├── 阶段1 识别与优先级排序（4 步）                                │
+│  ├── 阶段2 诊断与根因分析（4 步）                                  │
+│  ├── 阶段3 方案设计与选择（5 步）                                  │
+│  ├── 阶段4 试点与推广落地（6 步）                                  │
+│  └── 阶段5 运营监控与持续改进（5 步）                              │
+├─────────────────────────────────────────────────────────────────┤
+│  支撑层：工具箱 & 能力底座（With What）—— 共 33 个工具             │
+│  ├── 诊断 9 / 设计 9 / 落地 7 / 监控 8                            │
+│  └── 流程设计器 · 知识库                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 快速开始
+
+### 1. 启动 PostgreSQL（Docker）
+
+```bash
+docker compose up -d db
+```
+
+镜像 `postgres:16`，数据落在命名卷 `pgdata` 里，`docker compose down` 不会丢数据
+（要清空加 `-v`）。
+
+**宿主机端口是 5433，不是 5432**——本机 5432 常已被单独安装的 PostgreSQL 占用，
+两者会同时监听、`localhost` 优先命中本地那个，导致「密码明明对却认证失败」。
+需要换端口时：
+
+```bash
+POSTGRES_PORT=55432 docker compose up -d db
+# 并同步修改 DATABASE_URL 里的端口
+```
+
+### 2. 启动应用
+
+```bash
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8123
+```
+
+首次启动会自动建表并灌入种子数据。
+
+> Windows 上如果 `--port 8000` 报 `WinError 10013`，是 8000 落在系统保留的 TCP 端口区间里
+> （Hyper-V / WSL 常见），换端口即可。用 `netsh interface ipv4 show excludedportrange protocol=tcp`
+> 查看被排除的区间。
+
+### 或者：整栈容器化
+
+```bash
+docker compose --profile full up -d --build
+```
+
+应用与数据库都在容器里。`api` 会等 `db` 健康检查通过再启动，启动时自动执行
+`alembic upgrade head`，宿主机访问 8123 即可。
+
+首次构建要拉基础镜像 `python:3.12-slim`，网络不好时会等一会儿；之后有层缓存就很快。
+
+> ⚠️ **端口优先级坑**：容器把 8123 发布到 `0.0.0.0`，而本地 `uvicorn` 默认绑 `127.0.0.1:8123`。
+> 两者同时存在时，`localhost` 会命中本地的 uvicorn，容器的请求根本进不来（排查时看
+> `docker logs logix-pms-api` 有没有你自己的请求就知道了）。用整栈模式时先停掉本地 uvicorn，
+> 或者临时 `docker compose stop api` 只保留数据库容器。
+
+只想要数据库时：
+
+```bash
+docker compose up -d db          # 只起 PostgreSQL
+docker compose stop api          # 停掉应用容器，回到本地 uvicorn 开发
+```
+
+### 不想用 Docker？
+
+```bash
+DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
+```
+
+代码里没有 PostgreSQL 专有写法，退回单文件 SQLite 也能跑（测试默认就用 SQLite）。
+
+| 地址 | 内容 |
+|---|---|
+| <http://127.0.0.1:8123/> | 前端应用（已接后端 API，需登录） |
+| <http://127.0.0.1:8123/docs> | 交互式 API 文档 |
+| <http://127.0.0.1:8123/sample> | 最初那份纯静态原型，保留作为设计对照 |
+| <http://127.0.0.1:8123/health> | 健康检查（无需登录），会返回当前数据库类型 |
+
+**演示账号**（首次登录后请立即改口令）：
+
+| 账号 | 口令 | 角色 | 能做什么 |
+|---|---|---|---|
+| `admin` | `admin123` | ADMIN | 全部权限，含用户管理与审计日志 |
+| `manager` | `manager123` | MANAGER | 全部业务写权限，可看审计日志，不能管用户 |
+| `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
+| `viewer` | `viewer123` | VIEWER | 只读 |
+
+种子数据：8 个流程项目、48 个流程节点、33 个工具、24 个标准步骤、15 个 KPI × 6 个月时序、
+8 条异常事件、9 篇知识条目、4 个演示用户。
+
+手动重灌：
+
+```bash
+python -m scripts.seed            # 库为空时才灌，非空会提示并跳过
+python -m scripts.seed --reset    # 清空重灌
+```
+
+跑测试：
+
+```bash
+pytest -v                                              # 默认临时 SQLite，无需 Docker
+TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logix_pms_test" \
+  pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
+```
+
+前端联调自检（无头浏览器跑两段：8 个视图渲染 + 12 条交互路径，收集 JS 报错与失败请求，并截图）：
+
+```bash
+uvicorn app.main:app --port 8123      # 另开一个终端
+python scripts/verify_frontend.py http://127.0.0.1:8123 _screenshots
+```
+
+交互段覆盖：登录、地图下钻、工作流步骤详情、方法论匹配引擎、项目详情四页签与步骤改状态、
+立项向导（真实入库后自动清理）、工具箱详情与按问题找工具、设计器改节点并重算、
+异常处理弹窗、知识库详情、甘特图与里程碑、新建流程、登记异常、退出登录。
+
+---
+
+## 配置
+
+优先级：环境变量 > 项目根目录 `.env` > 默认值。项目内置了一个极简的 `.env` 加载器
+（不引入 python-dotenv）。见 `.env.example`。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+psycopg://psm:psm_dev_password@localhost:5433/logix_pms` | 指向 Docker 里的 PostgreSQL |
+| `POSTGRES_PORT` | `5433` | docker compose 的宿主机端口，改的话要同步改 `DATABASE_URL` |
+| `SECRET_KEY` | 开发用默认值 | **生产必须替换**，`/auth/security-check` 会提示 |
+| `TOKEN_TTL_SECONDS` | `43200`（12 小时） | 令牌有效期 |
+| `SEED_ON_STARTUP` | `true` | 启动时库为空则自动灌种子数据 |
+| `CORS_ORIGINS` | `*` | 逗号分隔；生产请收紧 |
+| `SQL_ECHO` | `false` | 打印 SQL |
+| `AUTO_MIGRATE` | `true` | 启动时执行 `alembic upgrade head`；设为 `false` 则直接 `create_all`（测试用） |
+| `TEST_DATABASE_URL` | 空 | 设了就让 pytest 针对该库跑 |
+
+---
+
+## 数据库迁移
+
+schema 演进走 Alembic，**不再依赖 `create_all`**。应用启动时会自动 `upgrade head`，
+已是最新版本时是空操作。
+
+```bash
+# 改了模型之后生成迁移
+alembic revision --autogenerate -m "add xxx field"
+
+# 检查模型与迁移是否一致（有未生成的改动会报错退出）
+alembic check
+
+# 手动升降级
+alembic upgrade head
+alembic downgrade -1
+```
+
+`alembic.ini` 里**不写数据库地址**，由 `alembic/env.py` 从 `app.core.config.settings` 读取，
+避免 `.env` 和 `alembic.ini` 两处配置各自漂移。
+
+> 注意：`alembic.ini` 必须保持**纯 ASCII**。configparser 在 Windows 下按系统 locale
+> （中文机器是 GBK）读取该文件，写中文注释会直接抛 `UnicodeDecodeError`。
+
+迁移链的正确性由 [tests/test_migrations.py](tests/test_migrations.py) 守着，核心断言只有一条：
+**迁移建出来的 schema 必须和 ORM 模型完全一致**。在此基础上还验证了幂等升级、`downgrade base`
+能干净回退、以及 `current_revision` 助手。
+
+多副本部署时建议把 `AUTO_MIGRATE` 设为 `false`，在发布流程里单独跑一次 `alembic upgrade head`，
+避免多个实例同时执行迁移。
+
+---
+
+## 目录结构
+
+```text
+app/
+  core/         配置与数据库引擎、会话
+  models/       SQLAlchemy ORM（流程域 / 项目域 / 工具 / 监控 / 知识库）
+  schemas/      Pydantic 出入参契约
+  services/     业务逻辑
+    methodology.py  立项向导：BPR / BPI / 精益 / 混合 自动匹配
+    designer.py     流程设计器：周期效率测算 + 9 条改善建议规则
+    workflow.py     标准工作流的项目实例化与进度回算
+    tool_finder.py  「按问题找工具」语义匹配
+    dashboard.py    驾驶舱聚合
+  api/v1/       REST 路由
+  seed/         内容底稿与灌库逻辑
+web/            前端（原生 ES 模块，无构建步骤）
+  index.html    页面骨架
+  css/
+    base.css        设计变量、页面骨架、登录页
+    components.css  卡片/表格/标签/按钮/表单/模态框/反馈等通用组件
+    views.css       仅单个视图使用的样式（流程画布、泳道、甘特图…）
+  js/
+    core/
+      api.js        请求封装、鉴权头、错误类型
+      auth.js       身份状态、登录界面、用户信息
+      format.js     格式化与配色（纯函数）
+      router.js     视图注册表、页面切换、搜索派发
+      state.js      全局界面状态
+      ui.js         模态框、提示条、视图容器
+    views/
+      dashboard.js  map.js  workflow.js  projects.js
+      toolbox.js    designer.js  monitor.js  knowledge.js
+    main.js       注册视图、接线 DOM、暴露模板所需函数、启动
+scripts/
+  seed.py             命令行灌库
+  verify_frontend.py  无头浏览器联调自检（8 个视图 + 12 条交互 + 截图）
+tests/          接口测试、迁移一致性测试、前端模块结构守卫
+alembic/        数据库迁移脚本（env.py + versions/）
+alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
+docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
+Dockerfile          应用镜像
+index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 /sample）
+```
+
+---
+
+## 前端
+
+原生 ES 模块，无构建步骤、无框架依赖。`web/index.html` 由 FastAPI 直接托管，
+浏览器按 `<script type="module">` 原生加载。
+
+**分层**（依赖单向，无循环）：
+
+```text
+main.js
+  └─ views/*        八个视图，各自 import 需要的 core
+       └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
+            └─ core/{api, auth, state, ui, format}.js
+```
+
+`core/router.js` 刻意不 import 视图，视图由 `main.js` 注册 ——
+否则 router → views → auth → router 会绕成环。`api.js` 的 401 处理也是通过
+`setUnauthorizedHandler()` 回调注入，避免 api ↔ auth 互相依赖。
+
+**为什么 `main.js` 往 `window` 上挂函数**：模板里的 `onclick="openProject(3)"`
+在全局作用域求值，模块作用域隔离，不挂 window 就点不动。这段挂载是**唯一**的对外操作面，
+集中在一个 `Object.assign(window, …)` 里；将来改成事件委托时，删掉它即可，不用动各视图模块。
+
+**数据来源**：全部走 `/api/v1/*`，前端不含任何演示数据。枚举的中文标签
+（`methodology_label` / `status_label` / `stage_name` / `heat_level`）由后端下发，
+前端不维护映射表，避免「后端加了新枚举、前端忘了同步」。
+
+**测试守卫**：[tests/test_frontend_structure.py](tests/test_frontend_structure.py) 会在
+pytest 里检查 import 路径是否存在、八个视图是否都注册且有 renderer、样式表是否被引用，
+把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
+
+**八个模块与对应接口**：
+
+| 视图 | 主要接口 | 能做什么 |
+|---|---|---|
+| 管理驾驶舱 | `/dashboard/overview` | 指标卡、五阶段健康度、方法论分布、项目看板、健康度预警、异常概览 |
+| 企业流程地图 | `/process-map/tree`、`/heatmap` | L1→L4 逐级下钻、改善优先级热力图、点热力图行可跳转定位 |
+| 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
+| 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
+| 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配 |
+| 流程设计器 | `/processes/{id}/design` | 泳道建模、节点增删改、改动即时保存并重算指标与建议 |
+| 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
+| 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
+
+**两处值得说明的取舍**：
+
+- 设计器的指标条只给「有明确目标或天然 0–100% 区间」的指标画进度条（PCE、等待占比、
+  作业时间占比、返工占比）。端到端周期、成本、移交次数这些没有目标值，
+  画条只能是编出来的百分比，所以只显示数字。
+- 流程地图的热度分档由后端判定并下发（阈值见 `app/api/v1/process_map.py`）。
+  综合得分区间是 0–125，阈值必须按这个量级标定——早期用 ≥50 判「紧急」，
+  结果 28 条 L3 流程里 10 条全被标成紧急，热力图完全失去区分度。
+
+
+---
+
+## 数据模型
+
+| 表 | 说明 |
+|---|---|
+| `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分（战略重要性 × 痛点 × 改善空间） |
+| `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
+| `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
+| `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
+| `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
+| `kpi_definition` / `kpi_record` | KPI 定义与月度时序 |
+| `exception_event` | 异常事件闭环台账 |
+| `knowledge_item` | 案例 / 模板 / 最佳实践 / 标准 |
+
+---
+
+## API 一览
+
+所有接口前缀 `/api/v1`。
+
+### 管理驾驶舱
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/dashboard/overview` | 首页一次拉齐：指标卡、五阶段健康度、方法论分布、项目看板、健康度预警、异常概览 |
+
+### 企业流程地图
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/process-map/tree` | L1→L4 架构树，支持 `root_code` / `max_level` / `improvement_only` |
+| GET | `/process-map/flat` | 扁平清单，支持 `level` / `keyword` |
+| GET | `/process-map/heatmap` | 改善优先级热力图（CRITICAL / HIGH / MEDIUM / LOW） |
+| GET/POST/PATCH/DELETE | `/process-map[/{id}]` | 流程节点 CRUD |
+
+### 标准工作流
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/workflow/stages` | 五阶段 × 24 步骤，含工具、交付物、关键要点 |
+| GET | `/workflow/stages/{stage_no}` | 单阶段 |
+
+### 流程项目组合
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/projects` | 多维筛选：methodology / status / stage / priority / owner / keyword，分页 |
+| POST | `/projects` | 新建项目，自动生成绩效编码并按模板生成 24 个步骤 |
+| GET | `/projects/{id}` | 项目详情：五阶段进度、当前待办、下一步建议、KPI 趋势 |
+| PATCH | `/projects/{id}` | 更新项目 |
+| GET | `/projects/{id}/steps` | 步骤清单 |
+| PATCH | `/projects/steps/{id}` | 更新步骤状态；阶段完成自动推进，进度自动回算 |
+| GET | `/projects/meta/summary` | 组合汇总 |
+| **POST** | **`/projects/recommend-methodology`** | **立项向导：自动匹配方法论** |
+
+### 方法论工具箱
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/tools/grouped` | 按诊断/设计/落地/监控分组 |
+| GET | `/tools/{code}` | 工具详情（含 5 步标准操作、模板、常见误用） |
+| **POST** | **`/tools/match`** | **按问题找工具：输入「审批太多周期太长」返回匹配工具** |
+
+### 流程设计器
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/processes/{id}/design` | 读取泳道模型 |
+| PUT | `/processes/{id}/design` | 覆盖式保存（校验 node_key 唯一、连线不悬空） |
+| POST | `/processes/{id}/design/analyze` | 测算已保存模型 |
+| POST | `/design/analyze` | 边改边算，不落库 |
+
+### 运营监控
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/monitor/kpi-radar` | 四维度雷达 + 各指标时序 |
+| GET/POST | `/monitor/kpis` | KPI 定义 |
+| GET/POST | `/monitor/kpis/{id}/records` | 时序数据（同期同项目重复提交自动覆盖） |
+| GET | `/monitor/exceptions/summary` | 异常概览（含超期数、按严重度分布） |
+| GET/POST/PATCH/DELETE | `/monitor/exceptions[/{id}]` | 异常事件闭环 |
+
+### 流程知识库
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/knowledge` | 检索：type / methodology / tag / keyword / sort=recent\|hot |
+| GET | `/knowledge/meta/tags` | 标签云 |
+| POST | `/knowledge/{id}/read` | 记录查阅/下载 |
+| GET/POST/PATCH/DELETE | `/knowledge[/{id}]` | CRUD |
+
+---
+
+## 两个核心算法
+
+### 1. 立项向导：方法论自动匹配
+
+输入流程现状、目标改善幅度、范围与约束，输出推荐方法论 + 置信度 + 判断依据 + 工具链 + 风险提示。
+
+基础映射（方法论选择矩阵）：
+
+| 流程现状 | 目标 | 推荐 |
+|---|---|---|
+| 严重过时、断裂、与战略脱节 | 阶跃式突破（≥50%） | 🔴 BPR |
+| 基本合理但效率不足、局部堵点 | 渐进改善（10–30%） | 🟡 BPI |
+| 现场/操作层浪费明显、波动大 | 持续流动、消除浪费 | 🟢 精益 |
+| 混合状态 | 先 BPR 定架构，再 BPI/精益细化 | 组合拳 |
+
+再按目标幅度、范围、是否涉及组织调整、有无数据基础、周期约束做校正，并给出反直觉的预警。例如：
+
+```bash
+curl -X POST localhost:8000/api/v1/projects/recommend-methodology \
+  -H 'Content-Type: application/json' \
+  -d '{"process_state":"SEVERE_OUTDATED","target_improvement_pct":8,"scope":"LOCAL"}'
+```
+
+→ 目标只有 8% 却判定现状严重过时：返回 RISK 级别的风险提示「以现有流程框架做局部改善，大概率改善后仍然过时」，并下调置信度。
+
+### 2. 流程设计器：周期效率测算
+
+对泳道模型逐节点测算，核心指标：
+
+- **端到端周期** = Σ(作业时间 + 等待时间)
+- **PCE（流程周期效率）** = 增值作业时间 ÷ 端到端周期
+- **等待占比**、**跨泳道移交次数**、**累计审批层级**、**返工损失**、**单次执行成本**
+
+然后跑 9 条建议规则，每条都给出量化依据、相关节点和应调用的工具：
+
+| 规则 | 触发条件 | 建议工具 |
+|---|---|---|
+| `LOW_PCE` | PCE < 15% | BPR 六原则 |
+| `WAIT_DOMINANT` | 等待占比 ≥ 50% | 产能与排队模型 |
+| `TOO_MANY_APPROVALS` | 累计审批层级 > 3 | RACI |
+| `MANY_HANDOFFS` | 跨泳道移交 > 3 次 | 跨职能泳道图 |
+| `REWORK_LOSS` | 存在返工率 ≥ 10% 的节点 | 5 Why |
+| `SERIAL_TO_PARALLEL` | 发现可并行的串行环节 | To-Be 蓝图 |
+| `NON_VALUE_ADDED_TASKS` | 非增值作业 ≥ 30% | 精益七大浪费 |
+| `MISSING_OWNER` | 有节点未指定负责人 | RACI |
+| `COST_CONCENTRATION` | 单节点占 > 40% 执行成本 | 加权决策矩阵 |
+
+最后根据测算结果反推方法论。以种子数据里的「采购需求提报」为例：
+
+```text
+线性合计 6720 分钟（14.0 天）
+期望端到端 9459 分钟（19.7 天，含 30% 驳回回路与节点返工）  +41%
+PCE 6.8%   等待占比 87.6%
+跨泳道移交 5 次   累计审批 4 层   返工让周期多出 3315 分钟
+→ 触发 6 类建议，推荐 BPR
+```
+
+> 注意分母和分子的口径：**增值时间只算「一次通过」**，返工是同一个步骤的重复执行，
+> 按精益定义属于浪费，不能计入增值——否则 PCE 会虚高。
+
+**瓶颈怎么判定**（这是个容易做错的地方）：不能拿「等待占比高」当判据——在等待主导的流程里，
+几乎每个节点的等待占比都高，那样会得出「全是瓶颈」的结论，等于没结论。
+实际用的是**相对时长**加硬伤：端到端时长超过均值 1.5 倍、或审批层级 ≥3 层、或返工率 ≥10%。
+同一个流程用这两套判据的差别是 6 个瓶颈 vs 3 个瓶颈。
+
+**并行候选怎么找**：以连线为准，而不是按声明顺序猜。这样能自动排除「驳回」这类分支边
+（它们带条件或发生概率小于 1，本来就不该进并行化讨论）。
+
+---
+
+## 权限与审计
+
+**认证**：除 `/auth/login` 和 `/health` 外，所有接口都要求 `Authorization: Bearer <token>`。
+令牌是 HMAC-SHA256 签名的无状态票据（标准库实现，不引入 PyJWT / passlib），口令用
+PBKDF2-HMAC-SHA256 加盐存储，默认 12 小时过期。
+
+> 生产上线前**必须**设置环境变量 `SECRET_KEY`（默认值只用于本地开发，`/auth/security-check`
+> 会提示当前是否仍在使用默认密钥）。
+
+**角色与权限边界**：
+
+| 能力 | ADMIN | MANAGER | OWNER | VIEWER |
+|---|---|---|---|---|
+| 读全部数据 | ✅ | ✅ | ✅ | ✅ |
+| 项目 / 异常 / 流程模型 | ✅ | ✅ | 仅自己名下 | ❌ |
+| 流程架构 / KPI 定义 / 知识库 | ✅ | ✅ | ❌ | ❌ |
+| 用户管理 | ✅ | ❌ | ❌ | ❌ |
+| 审计日志 | ✅ | ✅ | ❌ | ❌ |
+
+OWNER 的归属判断目前按**姓名文本**匹配（`user.display_name == project.owner`），
+这是接入企业账号体系前的简化，之后应改成 `owner_user_id` 外键。
+
+**审计**：所有写操作都会落 `audit_log`（谁、什么时候、对哪个对象、做了什么），
+`GET /audit` 可按实体类型 / 动作 / 操作人筛选。
+
+---
+
+## 写入口一览（前端）
+
+早期版本前端只能改状态、不能建数据，现在补齐了：
+
+| 位置 | 能做什么 | 角色要求 |
+|---|---|---|
+| 流程地图 | 新建 / 编辑 / 删除流程架构 | MANAGER+ |
+| 项目组合 | 新建（含立项向导）、编辑属性、删除项目 | OWNER 仅自己名下；删除需 MANAGER+ |
+| 项目详情 | 改步骤状态、甘特图与里程碑 | OWNER 仅自己名下 |
+| 流程设计器 | 节点增删改、泳道建模 | OWNER 仅自己负责的流程 |
+| 运营监控 | 登记异常、处理异常、新建 KPI、录入数据点 | 异常 OWNER+；KPI 需 MANAGER+ |
+| 知识库 | 新建知识条目 | MANAGER+ |
+
+无权限时按钮直接隐藏或禁用，后端仍会独立校验（前端隐藏不等于后端放行）。
+
+---
+
+## 两个工程性保障
+
+**流程模型的并发控制**：`PUT /processes/{id}/design` 是整份覆盖保存。请求体可带
+`expected_version`，与服务端版本不一致时返回 **409**，前端会自动载入最新版本而不是覆盖别人的改动。
+`GET` 返回的 `version` 每保存一次 +1。
+
+**甘特图与里程碑**：每个阶段的最后一步（决策门）标为里程碑，`GET /projects/{id}/schedule`
+返回按阶段聚合的时间轴。种子数据会按项目计划窗口自动铺开每个步骤的 `due_date`，
+所以甘特图开箱就有内容。逾期里程碑会标红。
+
+---
+
+## 第二阶段待办
+
+已完成：前端接后端、用户与权限、甘特图与里程碑、流程模型并发控制、时间语义统一、
+周期测算改为按图求期望值、切换 Docker PostgreSQL、引入 Alembic 迁移、前端模块化。还剩：
+
+1. **流程挖掘对接**：接入 ERP/OA 日志，自动发现真实路径（`PROCESS-MINING` 工具已就位，缺数据管道）。
+2. **权限细化**：OWNER 的归属目前按姓名字符串匹配，接入企业账号体系后应改为 `owner_user_id` 外键；
+   另外还没有字段级的可见性控制。
+3. **通知与提醒**：里程碑逾期、异常超期目前只能靠人看板子，没有推送。
+4. **导入导出**：BPMN 导出、Excel 导入流程清单都还没有。
+5. **生产部署**：镜像里用 uvicorn 单进程起服务，上生产需要加 gunicorn/多副本 + 反向代理 + HTTPS；
+   数据库连接的 SSL 与备份策略也还没配。
+6. **前端事件委托**：模板仍用 `onclick` 内联属性，`main.js` 因此要把几十个函数挂到 `window`。
+   改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。

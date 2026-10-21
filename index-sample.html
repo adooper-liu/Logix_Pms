@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流程管理系统 PMS</title>
+<style>
+:root{
+  --bg:#f4f6fb; --panel:#ffffff; --line:#e8ecf4; --text:#1a2233; --sub:#6b7688;
+  --brand:#2f5bea; --brand-soft:#eaf0ff; --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444;
+  --radius:14px; --shadow:0 2px 12px rgba(20,40,100,.06);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei","WenQuanYi Micro Hei",sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+.app{display:flex;min-height:100vh}
+
+/* ===== 侧边栏 ===== */
+.side{width:230px;background:#111a2e;color:#c8d2e6;flex-shrink:0;display:flex;flex-direction:column}
+.side .logo{padding:22px 20px;font-size:17px;font-weight:700;color:#fff;letter-spacing:.5px;
+  border-bottom:1px solid rgba(255,255,255,.08)}
+.side .logo span{display:block;font-size:11px;font-weight:400;color:#7d8ab0;margin-top:3px;letter-spacing:1px}
+.nav{padding:14px 10px;flex:1;overflow-y:auto}
+.nav .grp{font-size:11px;color:#5c6a8c;padding:14px 12px 6px;letter-spacing:1px}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;
+  color:#c8d2e6;text-decoration:none;font-size:13.5px;margin-bottom:2px;cursor:pointer;transition:.15s}
+.nav a .ic{width:18px;text-align:center;font-size:15px}
+.nav a:hover{background:rgba(255,255,255,.07)}
+.nav a.active{background:var(--brand);color:#fff;box-shadow:0 4px 14px rgba(47,91,234,.4)}
+.side .foot{padding:16px 20px;font-size:11px;color:#5c6a8c;border-top:1px solid rgba(255,255,255,.08)}
+
+/* ===== 主区 ===== */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{height:62px;background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 26px;gap:16px}
+.topbar h1{font-size:17px;font-weight:600;flex:1}
+.search{flex:1;max-width:320px;position:relative}
+.search input{width:100%;padding:9px 14px 9px 34px;border:1px solid var(--line);border-radius:9px;
+  background:#f8fafd;font-size:13px;outline:none}
+.search::before{content:"🔍";position:absolute;left:11px;top:8px;font-size:12px;opacity:.5}
+.usr{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub)}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
+.view{padding:24px 26px;overflow-y:auto;flex:1}
+
+/* ===== 通用卡片 ===== */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:20px;margin-bottom:20px}
+.card h2{font-size:15px;font-weight:600;margin-bottom:4px}
+.card .desc{font-size:12.5px;color:var(--sub);margin-bottom:16px}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1100px){.g4{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(2,1fr)}}
+
+/* ===== 仪表盘 ===== */
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:18px 20px}
+.kpi .num{font-size:27px;font-weight:700;letter-spacing:-.5px}
+.kpi .lab{font-size:12.5px;color:var(--sub);margin-top:2px}
+.kpi .trend{font-size:12px;margin-top:6px;font-weight:500}
+.up{color:var(--ok)}.down{color:var(--bad)}
+.pipe{height:5px;background:#eef1f7;border-radius:3px;margin-top:10px;overflow:hidden}
+.pipe i{display:block;height:100%;border-radius:3px}
+.stagebar{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.stagebar .nm{width:74px;font-size:13px;color:var(--sub)}
+.stagebar .bar{flex:1;height:8px;background:#eef1f7;border-radius:4px;overflow:hidden}
+.stagebar .bar i{display:block;height:100%;border-radius:4px;background:var(--brand)}
+.stagebar .pc{width:40px;text-align:right;font-size:12.5px;font-weight:600}
+
+/* ===== 表格 ===== */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:10px 12px;font-size:12px;color:var(--sub);
+  font-weight:600;background:#f8fafd;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #f2f5fa;vertical-align:middle}
+.tbl tr:hover td{background:#fafcff}
+.tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-red{background:#fdeaea;color:#d14343}.t-yel{background:#fef4e2;color:#c5830c}
+.t-grn{background:#e7f6ec;color:#138a45}.t-blu{background:#eaf0ff;color:#2f5bea}
+.pill{display:inline-flex;align-items:center;gap:5px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--brand);display:inline-block}
+.btn{padding:8px 16px;border:none;border-radius:9px;font-size:13px;cursor:pointer;
+  font-family:inherit;font-weight:500;transition:.15s}
+.btn-p{background:var(--brand);color:#fff}
+.btn-p:hover{background:#1f48cc}
+.btn-g{background:#f2f5fa;color:var(--text)}
+.btn-sm{padding:5px 11px;font-size:12px;border-radius:7px;border:1px solid var(--line);background:#fff}
+.mt{margin-top:16px}.mb{margin-bottom:16px}.flex{display:flex}.gap{display:flex;gap:10px}
+.between{display:flex;justify-content:space-between;align-items:center}
+.link{color:var(--brand);cursor:pointer;text-decoration:none}
+.link:hover{text-decoration:underline}
+
+/* ===== 工作流画布 ===== */
+.flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 2px}
+.phase{flex:1;min-width:196px;position:relative}
+.phase-hd{font-size:13px;font-weight:600;padding:9px 14px;border-radius:9px 9px 0 0;color:#fff}
+.phase-bd{background:#f8fafd;border:1px solid var(--line);border-top:none;
+  border-radius:0 0 9px 9px;padding:12px;min-height:230px}
+.step{background:#fff;border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:8px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;cursor:pointer;transition:.15s}
+.step:hover{box-shadow:0 3px 10px rgba(20,40,100,.09);transform:translateX(2px)}
+.step b{display:block;font-size:12.5px;margin-bottom:2px}
+.step span{color:var(--sub);font-size:11.5px}
+.arrow{display:flex;align-items:center;color:#c3cbe0;font-size:18px;padding:0 6px}
+
+/* ===== 工具箱 ===== */
+.tool{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:#fff}
+.tool:hover{border-color:var(--brand);box-shadow:0 4px 14px rgba(47,91,234,.1);transform:translateY(-2px)}
+.tool .ico{font-size:22px;margin-bottom:8px}
+.tool h4{font-size:13.5px;margin-bottom:4px}
+.tool p{font-size:11.5px;color:var(--sub);line-height:1.5}
+.tool .tag{margin-top:8px}
+
+/* ===== 画布（泳道） ===== */
+.lane{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.lane-hd{background:#f8fafd;padding:10px 16px;font-weight:600;font-size:13px;
+  display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+.lane-bd{display:flex;padding:14px;gap:10px;overflow-x:auto;min-height:66px;align-items:center;background:#fff}
+.node{min-width:150px;max-width:190px;border:1px solid var(--line);border-radius:9px;
+  padding:10px 12px;font-size:12.5px;background:#fff;cursor:pointer;position:relative}
+.node:hover{border-color:var(--brand);box-shadow:0 3px 10px rgba(47,91,234,.12)}
+.node b{display:block;font-size:12.5px}
+.node .meta{font-size:11px;color:var(--sub);margin-top:3px}
+.node.start{border-left:3px solid var(--ok);background:#f5fbf7}
+.node.end{border-left:3px solid var(--bad);background:#fdf6f6}
+.node.gate{border-left:3px solid var(--warn);background:#fffbf2}
+.add{border:1.5px dashed #cfd8ea;border-radius:9px;padding:10px 18px;color:var(--sub);
+  font-size:12px;cursor:pointer;background:#fbfcff}
+.add:hover{border-color:var(--brand);color:var(--brand)}
+.legend{display:flex;gap:18px;font-size:12px;color:var(--sub);flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+/* ===== 模态框 ===== */
+.mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;
+  justify-content:center;z-index:50;padding:20px}
+.mask.show{display:flex}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:560px;max-height:86vh;
+  overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.modal-hd{padding:18px 22px;border-bottom:1px solid var(--line);font-size:16px;font-weight:600;
+  display:flex;justify-content:space-between;align-items:center}
+.modal-hd .x{cursor:pointer;color:var(--sub);font-size:20px;line-height:1}
+.modal-bd{padding:20px 22px}
+.modal-ft{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12.5px;color:var(--sub);margin-bottom:5px;font-weight:500}
+.field input,.field select,.field textarea{width:100%;padding:9px 12px;border:1px solid var(--line);
+  border-radius:9px;font-size:13px;font-family:inherit;outline:none;background:#fff}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(47,91,234,.12)}
+.field textarea{resize:vertical;min-height:64px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tabs{display:flex;gap:4px;background:#f2f5fa;padding:4px;border-radius:10px;margin-bottom:16px}
+.tabs button{flex:1;border:none;background:none;padding:8px;font-size:13px;border-radius:7px;cursor:pointer;font-family:inherit;color:var(--sub)}
+.tabs button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.hide{display:none}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#111a2e;color:#fff;
+  padding:11px 22px;border-radius:10px;font-size:13px;z-index:60;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+.empty{text-align:center;color:var(--sub);padding:40px;font-size:13px}
+.mtr{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.mtr .k{width:96px;font-size:12.5px}
+.mtr .track{flex:1;height:7px;background:#eef1f7;border-radius:4px;overflow:hidden}
+.mtr .track i{display:block;height:100%;border-radius:4px}
+.mtr .v{width:44px;text-align:right;font-size:12.5px;font-weight:600}
+canvas{max-width:100%}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 侧边栏 -->
+  <aside class="side">
+    <div class="logo">流程管理系统 PMS<span>PROCESS MANAGEMENT SYSTEM</span></div>
+    <nav class="nav">
+      <div class="grp">总览</div>
+      <a class="active" data-view="dashboard"><span class="ic">▦</span>管理驾驶舱</a>
+      <a data-view="map"><span class="ic">◈</span>企业流程地图</a>
+      <div class="grp">工作流</div>
+      <a data-view="workflow"><span class="ic">⏣</span>五阶段标准工作流</a>
+      <a data-view="projects"><span class="ic">▤</span>流程项目组合</a>
+      <div class="grp">工具与方法</div>
+      <a data-view="toolbox"><span class="ic">⚒</span>方法论工具箱</a>
+      <a data-view="designer"><span class="ic">⌗</span>流程设计器</a>
+      <div class="grp">运营</div>
+      <a data-view="monitor"><span class="ic">◔</span>运营监控与KPI</a>
+      <a data-view="knowledge"><span class="ic">⎙</span>流程知识库</a>
+    </nav>
+    <div class="foot">v1.0 · 流程重组 / 优化 / 精益一体化</div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">管理驾驶舱</h1>
+      <div class="search"><input placeholder="搜索流程 / 项目 / 工具…"></div>
+      <div class="usr"><div class="avatar">PM</div>流程管理科</div>
+    </div>
+    <div class="view" id="view"></div>
+  </div>
+</div>
+
+<!-- 通用模态框 -->
+<div class="mask" id="mask">
+  <div class="modal">
+    <div class="modal-hd"><span id="mTitle">标题</span><span class="x" onclick="closeModal()">✕</span></div>
+    <div class="modal-bd" id="mBody"></div>
+    <div class="modal-ft" id="mFoot"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 数据层 ============ */
+const DB = {
+  // L1-L4 流程架构
+  map: [
+    {lvl:'L1 价值链', items:[
+      {name:'战略规划', owner:'战略部-王总', process:0, child:'L2-001'},
+      {name:'研发设计', owner:'研发中心-李经理', process:8, child:'L2-002'},
+      {name:'采购供应', owner:'采购部-陈经理', process:6, child:'L2-003'},
+      {name:'生产制造', owner:'制造部-赵厂长', process:14, child:'L2-004'},
+      {name:'订单交付', owner:'销售运营-周经理', process:9, child:'L2-005'},
+      {name:'客户服务', owner:'客服中心-吴主管', process:4, child:'L2-006'},
+    ]},
+    {lvl:'L2 采购供应（展开）', items:[
+      {name:'供应商准入', owner:'采购部-陈经理', process:12, child:'L3-031'},
+      {name:'采购需求提报', owner:'各部门', process:38, child:'L3-032'},
+      {name:'询比价与招标', owner:'采购部-采购员', process:22, child:'L3-033'},
+      {name:'采购订单执行', owner:'采购部-采购员', process:31, child:'L3-034'},
+      {name:'到货与验收', owner:'仓储部-QC', process:17, child:'L3-035'},
+      {name:'对账与付款', owner:'财务部', process:26, child:'L3-036'},
+    ]},
+    {lvl:'L3 采购需求提报（展开）', items:[
+      {name:'需求发起与归集', owner:'需求部门', process:0, child:'L4-201'},
+      {name:'需求汇总与归并', owner:'采购部', process:0, child:'L4-202'},
+      {name:'预算占用校验', owner:'财务部', process:0, child:'L4-203'},
+      {name:'需求审批', owner:'部门负责人', process:0, child:'L4-204'},
+      {name:'采购计划生成', owner:'采购计划员', process:0, child:'L4-205'},
+    ]},
+  ],
+  // 项目组合
+  projects: [
+    {id:'PR-2026-018', name:'采购需求提报流程重组（BPR）', method:'BPR', stage:3,
+      value:95, pain:88, owner:'陈经理', team:5, budget:42, spent:28, start:'2026-07-01',
+      target:'周期 14天→5天', status:'running', level:'L3', impact:'成本降低30%，周期缩短64%',
+      kpi:[
+        {n:'端到端周期', v:'8.2', u:'天', g:64, c:'#2f5bea'},
+        {n:'审批节点', v:'4', u:'个', g:55, c:'#f59e0b'},
+        {n:'自动化率', v:'72', u:'%', g:72, c:'#16a34a'},
+        {n:'业务满意度', v:'4.1', u:'/5', g:82, c:'#2f5bea'},
+      ]},
+    {id:'PR-2026-021', name:'订单交付周期优化（BPI）', method:'BPI', stage:4,
+      value:82, pain:79, owner:'周经理', team:4, budget:28, spent:24, start:'2026-06-10',
+      target:'交付 9.5天→7天', status:'running', level:'L2', impact:'OTD提升12个百分点',
+      kpi:[
+        {n:'平均交付周期', v:'7.6', u:'天', g:70, c:'#2f5bea'},
+        {n:'准时交付率', v:'88', u:'%', g:88, c:'#16a34a'},
+        {n:'紧急插单率', v:'11', u:'%', g:45, c:'#ef4444'},
+        {n:'客户投诉', v:'3', u:'件/月', g:60, c:'#f59e0b'},
+      ]},
+    {id:'PR-2026-024', name:'生产现场换线改善（精益）', method:'精益', stage:2,
+      value:70, pain:85, owner:'赵厂长', team:6, budget:18, spent:9, start:'2026-08-01',
+      target:'换线 45min→20min', status:'running', level:'L4', impact:'设备稼动率+9%',
+      kpi:[
+        {n:'平均换线时间', v:'32', u:'min', g:52, c:'#f59e0b'},
+        {n:'稼动率', v:'81', u:'%', g:81, c:'#16a34a'},
+        {n:'在制品库存', v:'156', u:'件', g:48, c:'#ef4444'},
+        {n:'一次合格率', v:'97.2', u:'%', g:97, c:'#16a34a'},
+      ]},
+    {id:'PR-2026-026', name:'客户投诉闭环优化（BPI）', method:'BPI', stage:5,
+      value:60, pain:66, owner:'吴主管', team:3, budget:15, spent:15, start:'2026-05-20',
+      target:'闭环 72h→24h', status:'done', level:'L2', impact:'已推广至全公司',
+      kpi:[
+        {n:'平均闭环时间', v:'21', u:'h', g:91, c:'#16a34a'},
+        {n:'一次解决率', v:'94', u:'%', g:94, c:'#16a34a'},
+        {n:'重复投诉率', v:'3', u:'%', g:85, c:'#16a34a'},
+        {n:'满意度评分', v:'4.6', u:'/5', g:92, c:'#2f5bea'},
+      ]},
+    {id:'PR-2026-029', name:'财务报销流程重组（BPR）', method:'BPR', stage:1,
+      value:88, pain:92, owner:'财务部-孙经理', team:4, budget:35, spent:6, start:'2026-09-15',
+      target:'报销 10天→2天', status:'pending', level:'L2', impact:'员工体验+效率双升',
+      kpi:[
+        {n:'平均处理周期', v:'10.0', u:'天', g:20, c:'#ef4444'},
+        {n:'电子发票占比', v:'68', u:'%', g:68, c:'#2f5bea'},
+        {n:'退单率', v:'18', u:'%', g:30, c:'#ef4444'},
+        {n:'员工满意度', v:'3.2', u:'/5', g:40, c:'#f59e0b'},
+      ]},
+    {id:'PR-2026-031', name:'仓储拣货路径优化（精益）', method:'精益', stage:1,
+      value:65, pain:74, owner:'仓储部-郑主管', team:3, budget:12, spent:2, start:'2026-09-20',
+      target:'拣货 35min→22min', status:'pending', level:'L4', impact:'人均效能+37%',
+      kpi:[
+        {n:'单票拣货时长', v:'35', u:'min', g:15, c:'#ef4444'},
+        {n:'拣货差错率', v:'0.8', u:'%', g:50, c:'#f59e0b'},
+        {n:'行走距离', v:'1.2', u:'km', g:25, c:'#ef4444'},
+        {n:'人均日单量', v:'86', u:'单', g:45, c:'#2f5bea'},
+      ]},
+  ],
+  // 方法论工具箱
+  tools: [
+    {cat:'诊断', ico:'🔍', name:'SIPOC 宏观流程图', desc:'从供应商-输入-流程-输出-客户五个维度定义流程边界', method:'BPR/BPI/精益'},
+    {cat:'诊断', ico:'🔍', name:'跨职能泳道流程图', desc:'还原跨部门端到端 As-Is 流程，暴露交接与等待', method:'BPR/BPI'},
+    {cat:'诊断', ico:'🔍', name:'价值流图 VSM', desc:'区分增值与非增值活动，计算周期效率与浪费占比', method:'BPR/精益'},
+    {cat:'诊断', ico:'🔍', name:'5 Why 根因分析', desc:'连续追问直至找到问题的根本原因，而非表象', method:'BPR/BPI/精益'},
+    {cat:'诊断', ico:'🔍', name:'鱼骨图', desc:'从人机料法环测多维度系统归因', method:'BPI/精益'},
+    {cat:'诊断', ico:'🔍', name:'帕累托分析', desc:'聚焦 80% 问题来自 20% 原因的少数关键', method:'BPI/精益'},
+    {cat:'诊断', ico:'🔍', name:'流程挖掘 Process Mining', desc:'基于系统日志自动发现真实流程路径与偏差', method:'BPR/BPI'},
+    {cat:'诊断', ico:'🔍', name:'客户旅程地图 CJM', desc:'从客户视角还原体验断点与情绪曲线', method:'BPR'},
+    {cat:'设计', ico:'🎨', name:'BPR 六大设计原则', desc:'端到端整合、决策下沉、并行化、去中介化、源头一次取数、IT使能', method:'BPR'},
+    {cat:'设计', ico:'🎨', name:'To-Be 流程蓝图', desc:'从零构建目标流程，输出未来状态泳道图', method:'BPR/BPI'},
+    {cat:'设计', ico:'🎨', name:'RACI 权责矩阵', desc:'明确谁负责(R)/批准(A)/咨询(C)/知会(I)', method:'BPR/BPI'},
+    {cat:'设计', ico:'🎨', name:'FMEA 失效模式分析', desc:'预判新流程失效模式、严重度与探测措施', method:'BPR/BPI'},
+    {cat:'设计', ico:'🎨', name:'决策矩阵', desc:'多方案按成本/收益/风险/可行性加权打分选优', method:'BPR/BPI'},
+    {cat:'设计', ico:'🎨', name:'精益七大浪费', desc:'识别过量生产/等待/搬运/加工/库存/动作/不良', method:'精益'},
+    {cat:'设计', ico:'🎨', name:'看板与单件流', desc:'限制在制品、拉动式生产、连续流动', method:'精益'},
+    {cat:'落地', ico:'🚀', name:'ADKAR 变革管理', desc:'意识-欲望-知识-能力-巩固，个人层面推动变革', method:'BPR/BPI'},
+    {cat:'落地', ico:'🚀', name:'权力-利益矩阵', desc:'区分需重点管理的利益相关者群体', method:'BPR/BPI'},
+    {cat:'落地', ico:'🚀', name:'试点设计模板', desc:'定义试点范围、成功标准与回滚预案', method:'BPR/BPI/精益'},
+    {cat:'落地', ico:'🚀', name:'培训矩阵', desc:'规划谁、学什么、何时、以何种方式掌握', method:'BPR/BPI'},
+    {cat:'落地', ico:'🚀', name:'上线 Checklist', desc:'系统/制度上线的条件确认与风险兜底', method:'BPR/BPI'},
+    {cat:'监控', ico:'📊', name:'流程平衡计分卡', desc:'从效率/质量/成本/灵活性四维度衡量流程健康度', method:'BPR/BPI/精益'},
+    {cat:'监控', ico:'📊', name:'BI 流程仪表盘', desc:'KPI 实时可视化监控与异常预警', method:'BPR/BPI/精益'},
+    {cat:'监控', ico:'📊', name:'控制图', desc:'监控流程稳定性，识别特殊原因波动', method:'精益'},
+    {cat:'监控', ico:'📊', name:'PDCA / DMAIC', desc:'日常改进循环与数据驱动的深度改善路径', method:'BPI/精益'},
+    {cat:'监控', ico:'📊', name:'改善周 Kaizen Event', desc:'短期集中突破，5天内出成果', method:'精益'},
+  ],
+  // 监控 KPI
+  monitor: [
+    {proc:'采购需求提报', owner:'陈经理', cycle:'8.2天', base:'14天', eff:64, quality:92, cost:'¥3.2万/月', flex:78, trend:'up'},
+    {proc:'订单交付', owner:'周经理', cycle:'7.6天', base:'9.5天', eff:70, quality:88, cost:'¥5.1万/月', flex:65, trend:'up'},
+    {proc:'生产换线', owner:'赵厂长', cycle:'32min', base:'45min', eff:52, quality:97, cost:'¥1.8万/月', flex:81, trend:'up'},
+    {proc:'客户投诉闭环', owner:'吴主管', cycle:'21h', base:'72h', eff:91, quality:94, cost:'¥0.9万/月', flex:88, trend:'up'},
+    {proc:'财务报销', owner:'孙经理', cycle:'10.0天', base:'10天', eff:20, quality:82, cost:'¥4.5万/月', flex:40, trend:'down'},
+    {proc:'仓储拣货', owner:'郑主管', cycle:'35min', base:'35min', eff:15, quality:99, cost:'¥2.2万/月', flex:45, trend:'flat'},
+  ],
+  // 知识库
+  kb: [
+    {t:'BPR 实施七步法标准模板', c:'BPR', d:'适用于流程根本性重组项目，含立项章程、目标设定、配套方案模板', date:'2026-09-10', dl:128},
+    {t:'价值流图 VSM 绘制与解读手册', c:'诊断', d:'手把手教你画现状/未来状态价值流图，附制造业实例', date:'2026-08-22', dl:96},
+    {t:'采购需求提报重组项目复盘', c:'案例', d:'周期从14天压缩至8.2天，含方案选择过程与踩坑记录', date:'2026-09-18', dl:74},
+    {t:'RACI 权责矩阵模板（含示例）', c:'设计', d:'可直接套用的 RACI 模板，含跨部门权责冲突处理建议', date:'2026-07-30', dl:211},
+    {t:'ADKAR 变革管理推进指南', c:'变革', d:'中层抵触如何化解、沟通节奏如何设计、采纳率如何度量', date:'2026-08-05', dl:63},
+    {t:'精益改善周 Kaizen 操作手册', c:'精益', d:'5天改善周的日程安排、人员配置、产出物清单', date:'2026-09-01', dl:52},
+  ],
+  // 设计器中的流程定义
+  design: {
+    'L3-033': {name:'询比价与招标', lanes:[
+      {name:'需求部门', nodes:[{t:'确认技术规格', m:'2h', ty:'start'},{t:'参与评标', m:'4h'}]},
+      {name:'采购部', nodes:[{t:'发布询价/招标公告', m:'1天'},{t:'供应商筛选', m:'2天', ty:'gate'},{t:'商务谈判', m:'2天'},{t:'定标审批', m:'1天', ty:'gate'}]},
+      {name:'财务部', nodes:[{t:'预算校验', m:'4h', ty:'gate'},{t:'价格合理性审核', m:'4h'}]},
+      {name:'法务/合规', nodes:[{t:'合同条款审核', m:'1天'},{t:'合规备案', m:'2h', ty:'end'}]},
+    ]},
+  },
+};
+const STAGES = ['识别与优先级','诊断与根因','方案设计与选择','试点与推广','运营与持续改进'];
+const METHOD = {BPR:['t-red','阶跃式重组'], BPI:['t-yel','渐进式优化'], '精益':['t-grn','消除浪费']};
+const STATUS = {running:['t-blu','进行中'], done:['t-grn','已完成'], pending:['t-yel','待启动']};
+
+/* ============ 视图渲染 ============ */
+const view = document.getElementById('view');
+const titles = {
+  dashboard:'管理驾驶舱', map:'企业流程地图', workflow:'五阶段标准工作流',
+  projects:'流程项目组合', toolbox:'方法论工具箱', designer:'流程设计器',
+  monitor:'运营监控与KPI', knowledge:'流程知识库',
+};
+document.querySelectorAll('.nav a').forEach(a=>a.onclick=()=>{
+  document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active'));
+  a.classList.add('active');
+  document.getElementById('pageTitle').textContent = titles[a.dataset.view];
+  render(a.dataset.view);
+});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function methodTag(m){const [c,n]=METHOD[m]||['t-blu',m];return `<span class="tag ${c}">${n}</span>`}
+function statusTag(s){const [c,n]=STATUS[s]||['t-blu',s];return `<span class="tag ${c}">${n}</span>`}
+
+function render(v){
+  if(v==='dashboard') return renderDashboard();
+  if(v==='map') return renderMap();
+  if(v==='workflow') return renderWorkflow();
+  if(v==='projects') return renderProjects();
+  if(v==='toolbox') return renderToolbox();
+  if(v==='designer') return renderDesigner();
+  if(v==='monitor') return renderMonitor();
+  if(v==='knowledge') return renderKnowledge();
+}
+
+/* ---------- 仪表盘 ---------- */
+function renderDashboard(){
+  const p = DB.projects;
+  const total = p.length, run = p.filter(x=>x.status==='running').length;
+  const budget = p.reduce((s,x)=>s+x.budget,0), spent = p.reduce((s,x)=>s+x.spent,0);
+  const cycle = (p.reduce((s,x)=>s+x.kpi[0].g,0)/p.length).toFixed(0);
+  const html = `
+  <div class="g4 mb">
+    ${kpi('进行中项目','up',run+' / '+total,'较上月 +1','#2f5bea')}
+    ${kpi('流程周期效率','up',cycle+'%','目标 ≥70%','#16a34a')}
+    ${kpi('年度投入','',spent+' 万','预算 '+budget+' 万','#f59e0b')}
+    ${kpi('待启动项目','',p.filter(x=>x.status==='pending').length+' 个','筹备中','#6b7688')}
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>五阶段推进健康度</h2>
+      <div class="desc">各阶段项目覆盖与完成度</div>
+      ${STAGES.map((s,i)=>{const n=p.filter(x=>x.stage>i).length, c=p.filter(x=>x.stage===i+1).length;
+        const pc=Math.round(((i)*total+c*0.5)/total/5*100);
+        return `<div class="stagebar"><span class="nm">阶段${i+1}</span><span class="bar"><i style="width:${Math.max(pc,8)}%;background:${i<4?'#2f5bea':'#16a34a'}"></i></span><span class="pc">${pc}%</span></div>`}).join('')}
+      <div class="between" style="margin-top:10px;font-size:12px;color:var(--sub)">
+        <span>覆盖项目 ${total} 个</span><span>完成率 ${Math.round(p.filter(x=>x.stage===5).length/total*100)}%</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>方法论分布</h2>
+      <div class="desc">BPR / BPI / 精益 项目配比</div>
+      ${['BPR','BPI','精益'].map(m=>{const n=p.filter(x=>x.method===m).length;
+        const w=Math.round(n/total*100);
+        return `<div class="mtr"><span class="k">${METHOD[m][1]}</span><span class="track"><i style="width:${w}%;background:${['#d14343','#c5830c','#138a45'][['BPR','BPI','精益'].indexOf(m)]}"></i></span><span class="v">${w}%</span></div>`}).join('')}
+      <div class="legend" style="margin-top:6px">
+        <span><i style="background:#d14343"></i>BPR 根本性重组</span>
+        <span><i style="background:#c5830c"></i>BPI 渐进优化</span>
+        <span><i style="background:#138a45"></i>精益 消除浪费</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="between mb"><h2 style="margin:0">重点流程项目看板</h2><a class="link" onclick="render('projects')">查看全部 →</a></div>
+    <table class="tbl">
+      <thead><tr><th>项目编号</th><th>项目名称</th><th>方法</th><th>当前阶段</th><th>目标</th><th>周期效率</th><th>状态</th><th></th></tr></thead>
+      <tbody>
+      ${p.slice(0,5).map(x=>`
+        <tr>
+          <td style="color:var(--sub);font-size:12px">${x.id}</td>
+          <td><b>${esc(x.name)}</b><div style="font-size:11.5px;color:var(--sub)">Owner: ${x.owner} · ${x.team}人团队</div></td>
+          <td>${methodTag(x.method)}</td>
+          <td><span class="dot"></span> 阶段${x.stage} ${STAGES[x.stage-1].slice(0,4)}</td>
+          <td style="font-size:12.5px">${esc(x.target)}</td>
+          <td><div style="width:80px"><div class="pipe"><i style="width:${x.kpi[0].g}%;background:${x.kpi[0].g>=70?'#16a34a':x.kpi[0].g>=40?'#f59e0b':'#ef4444'}"></i></div><span style="font-size:11px;color:var(--sub)">${x.kpi[0].g}%</span></div></td>
+          <td>${statusTag(x.status)}</td>
+          <td><button class="btn-sm" onclick="openProject('${x.id}')">详情</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+  view.innerHTML = html;
+}
+function kpi(lab,cls,num,trend,color){return `<div class="kpi"><div class="num" style="color:${color}">${num}</div><div class="lab">${lab}</div><div class="trend ${cls}">${trend}</div></div>`}
+
+/* ---------- 流程地图 ---------- */
+function renderMap(){
+  let body = `<div class="card">
+    <h2>企业流程架构（L1 → L4 分层）</h2>
+    <div class="desc">点击层级节点可逐级展开下钻，查看流程 Owner 与待改善项</div>
+    <div class="legend mb">
+      <span><i style="background:#2f5bea"></i>流程节点</span>
+      <span><i style="background:#ef4444"></i>待改善项（痛点）</span>
+      <span><i style="background:#16a34a"></i>已完成优化</span>
+      <span style="color:var(--sub)">条长代表该层流程数量</span>
+    </div>
+  </div>`;
+  DB.map.forEach(group=>{
+    body += `<div class="card">
+      <div class="between mb"><h2 style="margin:0">${group.lvl}</h2><span style="font-size:12px;color:var(--sub)">${group.items.length} 个流程</span></div>
+      <div class="g3">${group.items.map(it=>{
+        const heat = it.process>30?'#ef4444':it.process>15?'#f59e0b':it.process>0?'#2f5bea':'#16a34a';
+        return `<div class="step" style="border-left-color:${heat};min-height:auto" onclick="drill('${it.child}','${esc(it.name)}')">
+          <b>${esc(it.name)}</b>
+          <span>Owner: ${esc(it.owner)}</span><br>
+          <span>待改善项: <b style="color:${heat}">${it.process}</b> 个</span>
+          <div class="pipe"><i style="width:${Math.max(it.process*2.2,6)}%;background:${heat}"></i></div>
+        </div>`}).join('')}
+      </div>
+    </div>`;
+  });
+  view.innerHTML = body;
+}
+function drill(id,name){
+  toast('已下钻：'+name+'（演示模式仅展开预置层级）');
+  document.querySelector('[data-view="designer"]').click();
+}
+
+/* ---------- 五阶段工作流 ---------- */
+function renderWorkflow(){
+  const phases = [
+    {n:'阶段1 识别与优先级', c:'#2f5bea', steps:[
+      {t:'流程盘点与架构梳理', d:'建立 L1-L4 流程清单，标注 Owner 与频率'},
+      {t:'价值-痛点评估', d:'战略重要性 × 痛点严重度 双维度打分'},
+      {t:'项目立项与组合管理', d:'选定年度项目，估算 ROI 与资源'},
+      {t:'方法论匹配决策', d:'BPR / BPI / 精益 选择矩阵'},
+    ]},
+    {n:'阶段2 诊断与根因', c:'#3b82f6', steps:[
+      {t:'As-Is 流程还原', d:'SIPOC + 跨职能泳道图还原现状'},
+      {t:'价值流分析 VSM', d:'区分增值/非增值，计算周期效率'},
+      {t:'根因挖掘', d:'5 Why + 鱼骨图 + 帕累托'},
+      {t:'瓶颈量化', d:'产能模型 + 热点热力图'},
+    ]},
+    {n:'阶段3 方案设计与选择', c:'#8b5cf6', steps:[
+      {t:'设计原则设定', d:'BPR 6 原则 + 精益 7 大浪费'},
+      {t:'To-Be 蓝图设计', d:'目标流程 + RACI 权责矩阵'},
+      {t:'配套方案', d:'组织 / IT / KPI / 制度同步设计'},
+      {t:'方案评估选优', d:'决策矩阵 + FMEA 风险预判'},
+    ]},
+    {n:'阶段4 试点与推广', c:'#f59e0b', steps:[
+      {t:'变革准备度评估', d:'ADKAR + 利益相关者地图'},
+      {t:'试点设计执行', d:'试点方案 + 成功标准 + 回滚预案'},
+      {t:'全面推广', d:'培训矩阵 + 上线 Checklist'},
+      {t:'阻力管理', d:'沟通计划 + 采纳率追踪'},
+    ]},
+    {n:'阶段5 运营与持续改进', c:'#16a34a', steps:[
+      {t:'运营移交', d:'移交流程 Owner，定义 SLA'},
+      {t:'KPI 监控', d:'平衡计分卡 + BI 仪表盘'},
+      {t:'异常管理', d:'控制图告警 + 升级机制'},
+      {t:'定期评审', d:'季度评审 → 触发新一轮改善'},
+    ]},
+  ];
+  let body = `<div class="card">
+    <h2>五阶段标准工作流</h2>
+    <div class="desc">点击任意步骤查看方法说明、工具与交付物模板</div>
+  </div>
+  <div class="flow">`;
+  phases.forEach((p,i)=>{
+    body += `<div class="phase">
+      <div class="phase-hd" style="background:${p.c}">${p.n}</div>
+      <div class="phase-bd">${p.steps.map((s,j)=>`<div class="step" style="border-left-color:${p.c}" onclick="stepDetail(${i},${j})"><b>${s.t}</b><span>${s.d}</span></div>`).join('')}</div>
+    </div>${i<4?'<div class="arrow">›</div>':''}`;
+  });
+  body += `</div>
+  <div class="card">
+    <h2>决策门：方法论选择矩阵</h2>
+    <div class="desc">根据流程现状与目标自动推荐适配方法</div>
+    <table class="tbl">
+      <thead><tr><th>流程现状</th><th>改善目标</th><th>推荐方法</th><th>典型周期</th><th>风险等级</th></tr></thead>
+      <tbody>
+        <tr><td>流程严重过时、断裂、与战略脱节</td><td>阶跃式突破（≥50%）</td><td>${methodTag('BPR')}</td><td>6-18 个月</td><td><span class="tag t-red">高</span></td></tr>
+        <tr><td>流程基本合理但局部堵点</td><td>渐进改善（10-30%）</td><td>${methodTag('BPI')}</td><td>1-3 个月</td><td><span class="tag t-yel">中低</span></td></tr>
+        <tr><td>现场/操作层浪费明显</td><td>持续流动、零浪费</td><td>${methodTag('精益')}</td><td>持续改善</td><td><span class="tag t-grn">低</span></td></tr>
+        <tr><td>混合状态（多数实际情况）</td><td>架构+执行+操作分层改善</td><td><span class="tag t-blu">组合拳</span></td><td>持续</td><td><span class="tag t-yel">中</span></td></tr>
+      </tbody>
+    </table>
+  </div>`;
+  view.innerHTML = body;
+}
+function stepDetail(pi,si){
+  const all = [
+    {t:'流程盘点与架构梳理',tool:'流程架构图 / SCOR·PCF 参考模型',out:'企业流程地图（L1-L4）',key:'先对齐 L1 价值链，再逐级拆解，避免漏流程'},
+    {t:'价值-痛点评估',tool:'价值-痛点矩阵（2×2）',out:'优先级排序结果',key:'优先处理"高价值 × 高痛点"象限'},
+    {t:'项目立项与组合管理',tool:'PPM 项目组合管理 / ROI 估算',out:'年度流程项目组合看板',key:'资源有限时先做高 ROI 项目，平衡短中长期'},
+    {t:'方法论匹配决策',tool:'方法论选择矩阵',out:'每个项目的 BPR/BPI/精益标签',key:'不追求"纯"方法，按问题性质选'},
+    {t:'As-Is 流程还原',tool:'SIPOC / 跨职能泳道图',out:'现状流程图',key:'必须还原真实流程，而非"应该的流程"'},
+    {t:'价值流分析 VSM',tool:'价值流图 / 时间观测',out:'周期效率报告',key:'关注"加工时间 vs 等待时间"的悬殊差距'},
+    {t:'根因挖掘',tool:'5 Why / 鱼骨图 / 帕累托',out:'根因分析报告',key:'追到"制度/组织/系统"根因，不停在表象'},
+    {t:'瓶颈量化',tool:'产能模型 / 热点热力图',out:'瓶颈清单与影响量化',key:'用数据说话，把"感觉慢"变成"慢多少"'},
+    {t:'设计原则设定',tool:'BPR 6 原则 / 精益 7 大浪费',out:'设计原则清单',key:'先立规矩再画图，避免被现状绑架'},
+    {t:'To-Be 蓝图设计',tool:'To-Be 流程图 / RACI 矩阵',out:'目标流程方案',key:'从客户/用户视角出发，而非部门视角'},
+    {t:'配套方案',tool:'平衡计分卡 / 系统需求规格',out:'组织+IT+KPI+制度方案包',key:'流程、组织、系统、绩效必须同步改'},
+    {t:'方案评估选优',tool:'加权决策矩阵 / FMEA',out:'选定方案与风险评估',key:'多方案比选，不做"唯一方案"'},
+    {t:'变革准备度评估',tool:'ADKAR / 利益相关者地图',out:'变革风险地图',key:'识别最会抵制的群体，提前沟通'},
+    {t:'试点设计执行',tool:'试点设计模板 / PDCA',out:'试点报告与修正方案',key:'小范围跑通再放大，保留回滚能力'},
+    {t:'全面推广',tool:'培训矩阵 / 上线 Checklist',out:'推广计划与落地确认',key:'培训不到位等于没上线'},
+    {t:'阻力管理',tool:'沟通计划表 / 采纳率追踪',out:'变革采纳率指标',key:'持续沟通频率 > 一次大会宣贯'},
+    {t:'运营移交',tool:'移交 Checklist / SLA 定义',out:'运营移交确认书',key:'Owner 必须对端到端结果负责'},
+    {t:'KPI 监控',tool:'流程平衡计分卡 / BI 仪表盘',out:'流程健康报告',key:'KPI 要覆盖效率+质量+成本+灵活性'},
+    {t:'异常管理',tool:'控制图 / 告警规则',out:'异常事件记录与闭环',key:'异常必须有人认领，不能只报警'},
+    {t:'定期评审',tool:'流程评审会 / VSM 重绘',out:'评审报告 → 新改善立项',key:'半年重画一次 VSM，防止流程漂移'},
+  ];
+  const d = all[pi*4+si];
+  openModal(d.t+' · 方法说明',`
+    <div class="field"><label>推荐工具</label><input value="${d.tool}" readonly></div>
+    <div class="field"><label>关键交付物</label><input value="${d.out}" readonly></div>
+    <div class="field"><label>关键要点</label><textarea readonly>${d.key}</textarea></div>
+    <div class="field"><label>关联工具（工具箱）</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        ${DB.tools.filter(t=>t.cat==='诊断'||t.cat==='设计').slice(0,4).map(t=>`<span class="tag t-blu">${t.ico} ${t.name}</span>`).join('')}
+      </div>
+    </div>`);
+}
+
+/* ---------- 项目组合 ---------- */
+function renderProjects(){
+  view.innerHTML = `
+  <div class="card">
+    <div class="between mb"><h2 style="margin:0">流程项目组合管理</h2>
+      <button class="btn btn-p" onclick="newProject()">+ 新建流程项目</button>
+    </div>
+    <div class="desc">按方法论与阶段筛选，点击行查看项目详情、KPI 与下一步动作</div>
+    <div class="gap mb" style="flex-wrap:wrap">
+      <select id="fMethod" onchange="fProject()" style="padding:7px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit">
+        <option value="">全部方法</option><option>BPR</option><option>BPI</option><option>精益</option>
+      </select>
+      <select id="fStage" onchange="fProject()" style="padding:7px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit">
+        <option value="">全部阶段</option>${STAGES.map((s,i)=>`<option value="${i+1}">阶段${i+1}</option>`).join('')}
+      </select>
+      <select id="fStatus" onchange="fProject()" style="padding:7px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit">
+        <option value="">全部状态</option><option value="running">进行中</option><option value="pending">待启动</option><option value="done">已完成</option>
+      </select>
+      <span style="font-size:12.5px;color:var(--sub);align-self:center" id="pCount"></span>
+    </div>
+    <table class="tbl">
+      <thead><tr><th>项目</th><th>方法</th><th>阶段</th><th>Owner</th><th>目标</th><th>预算/已用(万)</th><th>KPI 完成度</th><th>状态</th><th></th></tr></thead>
+      <tbody id="pBody"></tbody>
+    </table>
+  </div>`;
+  fProject();
+}
+function fProject(){
+  const fm=document.getElementById('fMethod').value, fs=document.getElementById('fStage').value,
+        fst=document.getElementById('fStatus').value;
+  const list = DB.projects.filter(x=>(!fm||x.method===fm)&&(!fs||x.stage==fs)&&(!fst||x.status===fst));
+  document.getElementById('pCount').textContent = `共 ${list.length} 个项目`;
+  document.getElementById('pBody').innerHTML = list.length?list.map(x=>`
+    <tr onclick="openProject('${x.id}')" style="cursor:pointer">
+      <td><b>${esc(x.name)}</b><div style="font-size:11.5px;color:var(--sub)">${x.id} · ${x.level}</div></td>
+      <td>${methodTag(x.method)}</td>
+      <td>阶段${x.stage}<div style="font-size:11px;color:var(--sub)">${STAGES[x.stage-1]}</div></td>
+      <td>${esc(x.owner)}<div style="font-size:11.5px;color:var(--sub)">${x.team}人</div></td>
+      <td style="font-size:12.5px">${esc(x.target)}</td>
+      <td style="font-size:12.5px">${x.spent} / ${x.budget}</td>
+      <td><div style="width:90px"><div class="pipe"><i style="width:${avgK(x)}%;background:${avgK(x)>=70?'#16a34a':'#f59e0b'}"></i></div><span style="font-size:11px;color:var(--sub)">${avgK(x)}%</span></div></td>
+      <td>${statusTag(x.status)}</td>
+      <td><button class="btn-sm">详情</button></td>
+    </tr>`).join(''):'<tr><td colspan="9" class="empty">没有符合条件的项目</td></tr>';
+}
+function avgK(x){return Math.round(x.kpi.reduce((s,k)=>s+k.g,0)/x.kpi.length)}
+function newProject(){
+  openModal('新建流程项目',`
+    <div class="tabs"><button class="on">基本信息</button><button>方法论匹配</button><button>KPI 设定</button></div>
+    <div class="row2">
+      <div class="field"><label>项目名称</label><input placeholder="如：XX流程优化"></div>
+      <div class="field"><label>所属流程层级</label><select><option>L1 价值链</option><option>L2 流程类别</option><option>L3 流程</option><option>L4 活动</option></select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>流程 Owner</label><input placeholder="选择负责人"></div>
+      <div class="field"><label>团队规模</label><input type="number" placeholder="人数"></div>
+    </div>
+    <div class="field"><label>改善目标</label><input placeholder="如：端到端周期 14天 → 5天"></div>
+    <div class="row2">
+      <div class="field"><label>战略价值评分 (0-100)</label><input type="number" value="80"></div>
+      <div class="field"><label>痛点严重度 (0-100)</label><input type="number" value="85"></div>
+    </div>
+    <div class="field"><label>推荐方法（基于价值-痛点）</div>
+    <div style="padding:12px;background:#f8fafd;border-radius:9px;font-size:12.5px;border:1px dashed var(--line)">
+      <b style="color:#d14343">BPR（根本性重组）</b> — 价值≥85 且 痛点≥80，建议采用阶跃式重组路径<br>
+      <span style="color:var(--sub)">预估周期 6-18 个月 · 风险等级：高</span>
+    </div></div>
+    <div class="row2">
+      <div class="field"><label>预算 (万元)</label><input type="number" placeholder="预算"></div>
+      <div class="field"><label>计划启动</label><input type="date"></div>
+    </div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveProject()">立项</button>`);
+}
+function saveProject(){closeModal();toast('项目已立项，已加入项目组合看板');}
+
+function openProject(id){
+  const x = DB.projects.find(p=>p.id===id);
+  openModal(x.name,`
+    <div class="tabs">
+      <button class="on" onclick="tab(this,'ov')">概览</button>
+      <button onclick="tab(this,'kp')">KPI 追踪</button>
+      <button onclick="tab(this,'wk')">工作流推进</button>
+      <button onclick="tab(this,'nx')">下一步</button>
+    </div>
+    <div id="ov">
+      <div class="row2">
+        <div class="field"><label>项目编号</label><input value="${x.id}" readonly></div>
+        <div class="field"><label>方法论</label><input value="${METHOD[x.method][1]}" readonly></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>流程 Owner</label><input value="${esc(x.owner)}" readonly></div>
+        <div class="field"><label>团队 / 预算</label><input value="${x.team}人 · ${x.spent}/${x.budget} 万" readonly></div>
+      </div>
+      <div class="field"><label>改善目标</label><input value="${esc(x.target)}" readonly></div>
+      <div class="field"><label>预期收益</label><input value="${esc(x.impact)}" readonly></div>
+      <div class="g3">
+        <div class="kpi"><div class="num" style="font-size:22px">${x.value}</div><div class="lab">战略价值分</div></div>
+        <div class="kpi"><div class="num" style="font-size:22px">${x.pain}</div><div class="lab">痛点严重度</div></div>
+        <div class="kpi"><div class="num" style="font-size:22px;color:${avgK(x)>=70?'#16a34a':'#f59e0b'}">${avgK(x)}%</div><div class="lab">整体完成度</div></div>
+      </div>
+    </div>
+    <div id="kp" class="hide">
+      <table class="tbl">
+        <thead><tr><th>指标</th><th>当前值</th><th>单位</th><th>完成度</th></tr></thead>
+        <tbody>${x.kpi.map(k=>`
+          <tr><td><b>${k.n}</b></td><td>${k.v}</td><td style="color:var(--sub)">${k.u}</td>
+          <td><div style="width:100px"><div class="pipe"><i style="width:${k.g}%;background:${k.c}"></i></div><span style="font-size:11px;color:var(--sub)">${k.g}%</span></div></td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div id="wk" class="hide">
+      <div style="position:relative;padding-left:28px">
+        ${STAGES.map((s,i)=>{
+          const done = i<x.stage-1, cur=i===x.stage-1;
+          return `<div style="position:relative;padding-bottom:16px">
+            <div style="position:absolute;left:-22px;top:4px;width:12px;height:12px;border-radius:50%;background:${done?'#16a34a':cur?'#2f5bea':'#e2e8f2'};border:2px solid #fff;box-shadow:0 0 0 2px ${done?'#16a34a':cur?'#2f5bea':'#e2e8f2'}"></div>
+            <div style="font-size:13.5px;font-weight:600;color:${cur?'#2f5bea':'#1a2233'}">${s} ${cur?'<span class="tag t-blu">进行中</span>':done?'<span class="tag t-grn">已完成</span>':''}</div>
+            <div style="font-size:12px;color:var(--sub);margin-top:2px">${cur?stageAction(x):done?'关键交付物已归档':'待启动'}</div>
+          </div>`}).join('')}
+      </div>
+    </div>
+    <div id="nx" class="hide">
+      <div class="field"><label>当前阶段关键任务</label><textarea readonly>${nextAction(x)}</textarea></div>
+      <div class="field"><label>风险与依赖</label><textarea readonly>${riskNote(x)}</textarea></div>
+      <button class="btn btn-p" onclick="closeModal();toast('任务已下发至 ${esc(x.owner)}')">下发任务</button>
+    </div>`,
+    `<button class="btn btn-g" onclick="closeModal()">关闭</button>`);
+}
+function tab(btn,id){
+  document.querySelectorAll('#mBody>div').forEach(d=>d.classList.add('hide'));
+  document.getElementById(id).classList.remove('hide');
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+}
+function stageAction(x){const a={1:'完成流程盘点与价值-痛点打分，输出项目立项章程',2:'还原 As-Is 流程，完成 VSM 与根因分析',3:'设计 To-Be 方案，完成 RACI 与 FMEA',4:'选定试点单元，制定推广与培训计划',5:'移交 Owner，搭建 KPI 看板'};return a[x.stage]}
+function nextAction(x){return STAGES[x.stage-1]+'：\n1. 输出本阶段关键交付物\n2. 召开阶段评审会，确认里程碑\n3. 更新项目看板与风险清单\n4. 进入下一阶段前完成决策门评估'}
+function riskNote(x){return x.status==='pending'?'尚未启动，需先完成 Owner 任命与资源到位':'需重点关注：跨部门协同阻力、IT 系统改造周期、流程 Owner 时间投入'}
+
+/* ---------- 工具箱 ---------- */
+function renderToolbox(){
+  const cats = ['诊断','设计','落地','监控'];
+  view.innerHTML = `
+  <div class="card">
+    <h2>方法论工具箱（${DB.tools.length} 个工具）</h2>
+    <div class="desc">按用途分类，点击卡片查看适用场景、操作步骤与产出模板</div>
+    <div class="tabs" style="margin-bottom:0">
+      ${cats.map((c,i)=>`<button class="${i===0?'on':''}" onclick="fTool(this,'${c}')">${c}（${DB.tools.filter(t=>t.cat===c).length}）</button>`).join('')}
+    </div>
+  </div>
+  <div class="grid g3" id="toolBox"></div>`;
+  fTool(document.querySelector('.tabs button'),'诊断');
+}
+function fTool(btn,cat){
+  if(btn) btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
+  document.getElementById('toolBox').innerHTML = DB.tools.filter(t=>t.cat===cat).map((t,i)=>`
+    <div class="tool" onclick="toolDetail('${t.cat}','${t.name}','${esc(t.desc)}','${t.method}')">
+      <div class="ico">${t.ico}</div>
+      <h4>${t.name}</h4>
+      <p>${esc(t.desc)}</p>
+      <span class="tag ${t.cat==='诊断'?'t-blu':t.cat==='设计'?'t-red':t.cat==='落地'?'t-yel':'t-grn'}">${t.method}</span>
+    </div>`).join('');
+}
+function toolDetail(cat,name,desc,method){
+  const steps = {
+    'SIPOC 宏观流程图':['界定流程起点与终点','列出供应商(S)与输入(I)','还原流程步骤(P，建议5-7步)','明确输出(O)与客户(C)','标注关键控制点与风险'],
+    '价值流图 VSM':['选定产品族/流程边界','现场时间观测每个环节','绘制信息流与物流','计算增值时间/等待时间','计算周期效率 = 加工/总周期','绘制未来状态图并对比差距'],
+ '5 Why 根因分析':['清晰定义问题现象','连续追问"为什么"5层','每层证据验证不跳跃','找到可干预的根因','制定针对根因的纠正措施'],
+    '跨职能泳道流程图':['确定流程边界与角色','绘制横向泳道（部门/岗位）','按时间顺序放置活动节点','标注交接、等待、审批节点','识别非增值活动并标记'],
+    'RACI 权责矩阵':['列出所有流程活动','列出所有参与角色','为每个活动分配 R/A/C/I','检查每项活动有且仅有1个A','识别无人负责的"黑洞"环节'],
+    'ADKAR 变革管理':['建立变革必要性认知(Awareness)','激发参与变革的意愿(Desire)','提供所需知识与技能(Knowledge)','通过培训辅导强化能力(Ability)','固化新行为并防止回退(Reinforcement)'],
+  };
+  const tmpl = steps[name]||['1. 明确适用场景与目标','2. 组织相关人员工作坊','3. 按标准步骤执行分析','4. 输出可视化结果','5. 归档至流程知识库'];
+  openModal(name,`
+    <div style="margin-bottom:12px">${desc}</div>
+    <div class="g3 mb">
+      <div class="kpi"><div class="num" style="font-size:18px">${cat}</div><div class="lab">用途分类</div></div>
+      <div class="kpi"><div class="num" style="font-size:18px">${method}</div><div class="lab">适用方法</div></div>
+      <div class="kpi"><div class="num" style="font-size:18px">${tmpl.length}步</div><div class="lab">标准步骤</div></div>
+    </div>
+    <h3 style="font-size:13.5px;margin-bottom:10px">标准操作步骤</h3>
+    <ol style="padding-left:20px;color:var(--sub);font-size:13px;line-height:2">${tmpl.map(s=>`<li>${s}</li>`).join('')}</ol>
+    <div class="field" style="margin-top:14px"><label>关键交付物</label>
+      <input value="${name} 输出成果文档（可导出为 Word/Excel 模板）" readonly></div>`,
+    `<button class="btn btn-g" onclick="closeModal()">关闭</button><button class="btn btn-p" onclick="closeModal();toast('已生成 ${name} 模板，可下载使用')">下载模板</button>`);
+}
+
+/* ---------- 流程设计器 ---------- */
+function renderDesigner(){
+  const id = 'L3-033';
+  const d = DB.design[id];
+  view.innerHTML = `
+  <div class="card">
+    <div class="between mb">
+      <div><h2 style="margin:0">${d.name} · 流程设计器</h2>
+      <div class="desc" style="margin:0">泳道式建模 · 点击节点编辑 · 支持导出</div></div>
+      <div class="gap">
+        <button class="btn btn-g" onclick="addNode()">+ 新增节点</button>
+        <button class="btn btn-p" onclick="exportFlow()">导出 BPMN</button>
+      </div>
+    </div>
+    <div class="legend mb">
+      <span><i style="background:#16a34a"></i>开始节点</span>
+      <span><i style="background:#f59e0b"></i>判断/审批门</span>
+      <span><i style="background:#ef4444"></i>结束节点</span>
+      <span><i style="background:#e8ecf4"></i>普通活动</span>
+    </div>
+    ${d.lanes.map(l=>`
+      <div class="lane">
+        <div class="lane-hd"><span>${esc(l.name)}</span><span style="font-size:11.5px;color:var(--sub);font-weight:400">${l.nodes.length} 个活动</span></div>
+        <div class="lane-bd">${l.nodes.map((n,i)=>`
+          <div class="node ${n.ty||''}" onclick="editNode('${id}','${esc(l.name)}',${i})">
+            <b>${n.t}</b><div class="meta">⏱ ${n.m}</div>
+          </div>${i<l.nodes.length-1?'<span style="color:#c3cbe0;font-size:16px">→</span>':''}`).join('')}
+          <div class="add" onclick="addNode('${esc(l.name)}')">+ 添加活动</div>
+        </div>
+      </div>`).join('')}
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>流程指标测算</h2><div class="desc">基于当前节点自动汇总</div>
+      ${metric('端到端周期','6.5 工作日','目标 ≤5 工作日','60','#f59e0b')}
+      ${metric('交接次数','5 次','目标 ≤3 次','50','#ef4444')}
+      ${metric('审批门数量','3 个','目标 ≤2 个','60','#f59e0b')}
+      ${metric('增值活动占比','31%','目标 ≥50%','31','#ef4444')}
+    </div>
+    <div class="card"><h2>改善建议</h2><div class="desc">基于 BPR 原则自动识别</div>
+      <div style="font-size:13px;line-height:2">
+        <div>🔴 <b>决策点未下沉</b>：定标审批仍由高层集中处理，建议授权采购经理在额度内直接决策</div>
+        <div>🟡 <b>串行等待</b>：财务预算校验与供应商筛选串行，可并行启动</div>
+        <div>🟢 <b>信息重复录入</b>：技术规格在需求部门与采购部各录一次，建议一次录入全链路共享</div>
+        <div style="margin-top:12px"><button class="btn btn-p" onclick="toast('已生成 To-Be 优化方案')">生成 To-Be 方案</button></div>
+      </div>
+    </div>
+  </div>`;
+}
+function metric(n,v,t,g,c){return `<div class="mtr"><span class="k">${n}</span><span class="track"><i style="width:${g}%;background:${c}"></i></span><span class="v" style="width:auto;text-align:left">${v}<br><span style="font-size:10.5px;color:var(--sub);font-weight:400">${t}</span></span></div>`}
+function addNode(lane){toast('已在「'+(lane||'新泳道')+'」添加活动节点');}
+function editNode(id,lane,idx){
+  const n = DB.design[id].lanes.find(l=>l.name===lane).nodes[idx];
+  openModal('编辑活动节点',`
+    <div class="row2">
+      <div class="field"><label>活动名称</label><input value="${esc(n.t)}"></div>
+      <div class="field"><label>耗时</label><input value="${n.m}"></div>
+    </div>
+    <div class="field"><label>所属泳道</label><input value="${esc(lane)}" readonly></div>
+    <div class="field"><label>节点类型</label>
+      <select><option value="">普通活动</option><option ${n.ty==='start'?'selected':''}>开始节点</option><option ${n.ty==='gate'?'selected':''}>判断/审批门</option><option ${n.ty==='end'?'selected':''}>结束节点</option></select>
+    </div>
+    <div class="field"><label>负责人 / 岗位</label><input placeholder="如：采购员-张三"></div>
+    <div class="field"><label>输入输出与系统</label><input placeholder="如：输入询价单 / 输出定标报告 · ERP"></div>
+    <div class="field"><label>是否为增值活动</label>
+      <select><option>增值（VA）</option><option>必要非增值（BNVA）</option><option>纯浪费（NVA）</option></select>
+    </div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="closeModal();toast('节点已保存')">保存</button>`);
+}
+function exportFlow(){toast('已导出 BPMN 2.0 文件，可导入 Camunda / Flowable 等引擎');}
+
+/* ---------- 监控 ---------- */
+function renderMonitor(){
+  view.innerHTML = `
+  <div class="card">
+    <h2>运营监控与 KPI 看板</h2>
+    <div class="desc">四维度流程健康度追踪：效率 / 质量 / 成本 / 灵活性</div>
+    <div class="g4 mb">
+      <div class="kpi"><div class="num" style="color:#2f5bea">58<span style="font-size:14px">%</span></div><div class="lab">平均周期效率</div><div class="trend up">↑ 较上月 +6%</div></div>
+      <div class="kpi"><div class="num" style="color:#16a34a">92<span style="font-size:14px">%</span></div><div class="lab">平均质量合规率</div><div class="trend up">↑ 较上月 +2%</div></div>
+      <div class="kpi"><div class="num" style="color:#f59e0b">¥17.7<span style="font-size:14px">万/月</span></div><div class="lab">流程运营成本</div><div class="trend down">↓ 较上月 -8%</div></div>
+      <div class="kpi"><div class="num" style="color:#8b5cf6">66<span style="font-size:14px">%</span></div><div class="lab">平均灵活性</div><div class="trend">→ 持平</div></div>
+    </div>
+    <table class="tbl">
+      <thead><tr><th>流程</th><th>Owner</th><th>当前周期</th><th>基线</th><th>周期效率</th><th>质量合规</th><th>月度成本</th><th>灵活性</th><th>趋势</th><th>预警</th></tr></thead>
+      <tbody>${DB.monitor.map(m=>{
+        const eff=m.eff;const worst = [m.eff,m.quality,m.flex].sort((a,b)=>a-b)[0];
+        return `<tr>
+          <td><b>${esc(m.proc)}</b></td>
+          <td style="font-size:12.5px">${esc(m.owner)}</td>
+          <td><b>${m.cycle}</b></td>
+          <td style="color:var(--sub);font-size:12.5px">${m.base}</td>
+          <td><div style="width:70px"><div class="pipe"><i style="width:${m.eff}%;background:${m.eff>=70?'#16a34a':m.eff>=40?'#f59e0b':'#ef4444'}"></i></div><span style="font-size:11px;color:var(--sub)">${m.eff}%</span></div></td>
+          <td><div style="width:70px"><div class="pipe"><i style="width:${m.quality}%;background:#16a34a"></i></div><span style="font-size:11px;color:var(--sub)">${m.quality}%</span></div></td>
+          <td style="font-size:12.5px">${m.cost}</td>
+          <td><div style="width:70px"><div class="pipe"><i style="width:${m.flex}%;background:#8b5cf6"></i></div><span style="font-size:11px;color:var(--sub)">${m.flex}%</span></div></td>
+          <td>${m.trend==='up'?'<span style="color:#16a34a">↑</span>':m.trend==='down'?'<span style="color:#ef4444">↓</span>':'<span style="color:#c3cbe0">→</span>'}</td>
+          <td>${worst<40?'<span class="tag t-red">需改善</span>':worst<60?'<span class="tag t-yel">关注</span>':'<span class="tag t-grn">健康</span>'}</td>
+        </tr>`}).join('')}
+      </tbody>
+    </table>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>异常事件记录</h2><div class="desc">自动告警与闭环追踪</div>
+      <table class="tbl">
+        <thead><tr><th>时间</th><th>流程</th><th>异常描述</th><th>级别</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td style="font-size:12px;color:var(--sub)">09-20 14:32</td><td>财务报销</td><td>单笔处理超 15 天</td><td><span class="tag t-red">高</span></td><td><span class="tag t-yel">处理中</span></td></tr>
+          <tr><td style="font-size:12px;color:var(--sub)">09-19 09:15</td><td>仓储拣货</td><td>拣货差错率超阈值 0.8%</td><td><span class="tag t-yel">中</span></td><td><span class="tag t-blu">已指派</span></td></tr>
+          <tr><td style="font-size:12px;color:var(--sub)">09-18 16:40</td><td>生产换线</td><td>换线时间反弹至 38min</td><td><span class="tag t-yel">中</span></td><td><span class="tag t-grn">已闭环</span></td></tr>
+          <tr><td style="font-size:12px;color:var(--sub)">09-17 11:20</td><td>采购需求提报</td><td>预算校验环节等待超 2 天</td><td><span class="tag t-red">高</span></td><td><span class="tag t-grn">已闭环</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card"><h2>流程健康度雷达</h2><div class="desc">四维度综合评估（示意）</div>
+      <canvas id="radar" width="360" height="300"></canvas>
+    </div>
+  </div>`;
+  setTimeout(drawRadar,50);
+}
+function drawRadar(){
+  const c = document.getElementById('radar'); if(!c) return;
+  const ctx = c.getContext('2d'); const cx=180, cy=150, r=100;
+  const dims = ['效率','质量','成本','灵活性'];
+  const cur = [58,92,75,66], tgt = [70,95,85,80];
+  ctx.clearRect(0,0,360,300);
+  // 网格
+  for(let g=1;g<=4;g++){ctx.beginPath();
+    [0,1,2,3].forEach(i=>{const a=-Math.PI/2+i*Math.PI/2;const rr=r*g/4;
+      const x=cx+rr*Math.cos(a),y=cy+rr*Math.sin(a);
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.closePath();ctx.strokeStyle='#e8ecf4';ctx.stroke();}
+  // 轴线 + 标签
+  dims.forEach((d,i)=>{const a=-Math.PI/2+i*Math.PI/2;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));
+    ctx.strokeStyle='#e8ecf4';ctx.stroke();
+    ctx.fillStyle='#6b7688';ctx.font='12px sans-serif';
+    ctx.fillText(d,cx+(r+18)*Math.cos(a)-10,cy+(r+18)*Math.sin(a)+4);});
+  // 目标
+  ctx.beginPath();tgt.forEach((v,i)=>{const a=-Math.PI/2+i*Math.PI/2;const rr=r*v/100;
+    const x=cx+rr*Math.cos(a),y=cy+rr*Math.sin(a);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.closePath();ctx.fillStyle='rgba(47,91,234,0.08)';ctx.fill();
+  ctx.strokeStyle='#2f5bea';ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+  // 当前
+  ctx.beginPath();cur.forEach((v,i)=>{const a=-Math.PI/2+i*Math.PI/2;const rr=r*v/100;
+    const x=cx+rr*Math.cos(a),y=cy+rr*Math.sin(a);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.closePath();ctx.fillStyle='rgba(22,163,74,0.18)';ctx.fill();
+  ctx.strokeStyle='#16a34a';ctx.lineWidth=2;ctx.stroke();ctx.lineWidth=1;
+  // 图例
+  ctx.fillStyle='#16a34a';ctx.fillRect(20,278,20,3);
+  ctx.fillStyle='#6b7688';ctx.font='11px sans-serif';ctx.fillText('当前',44,282);
+  ctx.fillStyle='#2f5bea';ctx.fillRect(90,278,20,3);ctx.fillStyle='#6b7688';ctx.fillText('目标',114,282);
+}
+
+/* ---------- 知识库 ---------- */
+function renderKnowledge(){
+  view.innerHTML = `
+  <div class="card">
+    <div class="between mb">
+      <div><h2 style="margin:0">流程知识库</h2><div class="desc" style="margin:0">方法论模板、案例复盘、最佳实践沉淀与复用</div></div>
+      <button class="btn btn-p" onclick="toast('上传功能演示：可上传 SOP / VSM / RACI 等文档')">📎 上传文档</button>
+    </div>
+    <div class="g3">${DB.kb.map(k=>`
+      <div class="tool" onclick="toast('已打开：${esc(k.t)}')">
+        <div class="ico">📄</div>
+        <h4>${esc(k.t)}</h4>
+        <p>${esc(k.d)}</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+          <span class="tag ${k.c==='案例'?'t-red':k.c==='变革'?'t-yel':k.c==='精益'?'t-grn':'t-blu'}">${k.c}</span>
+          <span style="font-size:11px;color:var(--sub)">⬇ ${k.dl} 次下载 · ${k.date}</span>
+        </div>
+      </div>`).join('')}
+    </div>
+  </div>
+  <div class="card">
+    <h2>快速检索</h2>
+    <div class="desc">按场景找方法：遇到什么问题，用什么工具</div>
+    <table class="tbl">
+      <thead><tr><th>常见问题</th><th>推荐工具</th><th>所属阶段</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr><td>流程太长、审批太多</td><td><span class="tag t-red">VSM + BPR 6 原则</span></td><td>阶段2-3</td><td><button class="btn-sm" onclick="render('workflow')">查看</button></td></tr>
+        <tr><td>跨部门互相推诿、权责不清</td><td><span class="tag t-blu">RACI 矩阵</span></td><td>阶段3</td><td><button class="btn-sm" onclick="render('toolbox')">查看</button></td></tr>
+        <tr><td>方案推行遇到阻力</td><td><span class="tag t-yel">ADKAR + 利益相关者矩阵</span></td><td>阶段4</td><td><button class="btn-sm" onclick="render('toolbox')">查看</button></td></tr>
+        <tr><td>不知道问题出在哪个环节</td><td><span class="tag t-blu">5 Why + 鱼骨图 + 流程挖掘</span></td><td>阶段2</td><td><button class="btn-sm" onclick="render('toolbox')">查看</button></td></tr>
+        <tr><td>优化完又退回老样子</td><td><span class="tag t-grn">KPI 监控 + 流程 Owner 机制</span></td><td>阶段5</td><td><button class="btn-sm" onclick="render('monitor')">查看</button></td></tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ============ 模态框 ============ */
+function openModal(title,body,foot){
+  document.getElementById('mTitle').textContent = title;
+  document.getElementById('mBody').innerHTML = body;
+  document.getElementById('mFoot').innerHTML = foot||'<button class="btn btn-g" onclick="closeModal()">关闭</button>';
+  document.getElementById('mask').classList.add('show');
+}
+function closeModal(){document.getElementById('mask').classList.remove('show')}
+document.getElementById('mask').onclick = e=>{if(e.target.id==='mask')closeModal()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+/* 启动 */
+render('dashboard');
+</script>
+</body>
+</html>

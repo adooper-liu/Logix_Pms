@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+*.db
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+_screenshots/
+.git/
+.gitignore
+tests/
+README.md
+index-sample.html

@@ -1,0 +1,60 @@
+[project]
+name = "logix-pms"
+version = "0.1.0"
+description = "流程管理系统（Process Management System）后端"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+# 生成的迁移脚本不参与格式化和检查
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+# 只选抓真问题的规则，不做风格现代化。
+# 之所以不选 UP（pyupgrade），是因为它会把 Optional[X] 改成 X | None、
+# Dict 改成 dict，一次改动三百多处，收益全在"好看"，风险却不小。
+# 等有独立提交窗口时再单独做一轮。
+select = [
+    "E",   # pycodestyle 错误（缩进、语法级问题）
+    "F",   # pyflakes：未使用的导入/变量、未定义名称
+    "I",   # import 排序
+    "B",   # bugbear：容易写出 bug 的惯用法
+]
+ignore = [
+    "E501",   # 行宽交给 ruff format；中文注释和长字符串没法按字符数硬切
+    "B008",   # FastAPI 的依赖注入就是写在默认参数里的 Depends(...)，这是惯用法
+]
+
+[tool.ruff.lint.isort]
+# 不配这一项的话，isort 会把 app 当成第三方包，import 分组会乱
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "B011",   # 测试里用 assert False 判断落空是常见写法
+    "S101",   # 断言
+]
+"app/seed/corpus*.py" = [
+    "E501",   # 内容底稿是长中文句子
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/seed/corpus.py", "app/seed/corpus_data.py"]
+
+[tool.coverage.report]
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

@@ -1,0 +1,29 @@
+# 提交前自动检查。
+#
+# 全部使用 local hook（language: system），不依赖从 GitHub 拉取 hook 仓库 ——
+# 内网或网络受限环境下，远端 hook 会让每一次 git commit 都卡住。
+# 前置条件：pip install -r requirements-dev.txt
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+        exclude: ^alembic/versions/
+
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --fix
+        language: system
+        types: [python]
+        exclude: ^alembic/versions/
+
+      - id: frontend-modules
+        name: 前端模块结构检查
+        entry: python -m pytest tests/test_frontend_structure.py
+        language: system
+        pass_filenames: false
+        files: ^web/.*\.(js|css|html)$
