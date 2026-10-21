@@ -51,10 +51,14 @@
 .btn-sm:hover{border-color:var(--brand);color:var(--brand)}
 
 /* ===== 布局工具类 ===== */
-.mt{margin-top:16px}.mb{margin-bottom:16px}.flex{display:flex}.gap{display:flex;gap:10px}
+.mt{margin-top:16px}.mb{margin-bottom:16px}.flex{display:flex}.gap{display:flex;gap:10px;align-items:center}
 .between{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .link{color:var(--brand);cursor:pointer;text-decoration:none}
 .link:hover{text-decoration:underline}
+.link-btn{display:inline-flex;align-items:center;gap:4px;padding:7px 13px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel);color:var(--brand);font-size:12.5px;font-weight:600;
+  line-height:1;text-decoration:none;cursor:pointer;white-space:nowrap;transition:.15s}
+.link-btn:hover{border-color:var(--brand);background:var(--brand-soft);text-decoration:none}
 .muted{color:var(--sub);font-size:12.5px}
 .tiny{color:var(--sub);font-size:11.5px}
 

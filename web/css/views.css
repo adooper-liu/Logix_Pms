@@ -109,9 +109,6 @@ button.map-stat{cursor:pointer}
 .map-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .map-go{color:var(--brand);font-size:12px;font-weight:600;white-space:nowrap}
 .map-row:hover .map-go{text-decoration:underline}
-.map-bottom{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
-.map-bottom.single{grid-template-columns:1fr}
-.map-bottom .card{margin-bottom:0}
 .map-bench-pills{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
 .map-bench-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
   border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:pointer;
@@ -125,7 +122,6 @@ button.map-stat{cursor:pointer}
   .map-layout{grid-template-columns:1fr}
   .map-side{position:static}
   .map-tree{max-height:none}
-  .map-bottom{grid-template-columns:1fr}
 }
 
 /* ===== 管理驾驶舱：阶段行 ===== */

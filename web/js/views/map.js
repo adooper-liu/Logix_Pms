@@ -125,15 +125,6 @@ const renderMap = () => {
       ? '该层级没有待改善流程，点击「显示全部」恢复'
       : '该层级下没有流程（或没有匹配结果）');
 
-    const heat = (state.map.heat || []).slice(0, 6).map((h) => `
-      <tr class="clk" onclick="mapJump('${h.code}')">
-        <td><b>${esc(h.name)}</b><div class="tiny">${esc(h.code)} · ${esc(h.owner || '未指定 Owner')}</div></td>
-        <td><span class="tag ${HEAT_CLASS[h.heat_level] || HEAT_CLASS.LOW}">
-          ${HEAT_LABEL[h.heat_level]}</span></td>
-        <td><b>${num(h.priority_score, 0)}</b></td>
-        <td>${h.health_score === null ? '—' : num(h.health_score, 0)}</td>
-      </tr>`).join('') || emptyRow(4, '暂无待改善项');
-
     const bench = state.map.benchmark;
     const frameworkOptions = (state.map.frameworks || []).map((f) =>
       '<option value="' + f.code + '"' +
@@ -171,7 +162,7 @@ const renderMap = () => {
               从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
           </div>
           <div class="gap">
-            <a class="link" onclick="go('projects')">去立项 →</a>
+            <a class="link-btn" onclick="go('projects')">去立项 →</a>
             <select class="sel" onchange="setBenchmarkFramework(this.value)" title="切换对标框架">
               <option value="">不对标</option>
               ${frameworkOptions}
@@ -225,20 +216,7 @@ const renderMap = () => {
               <tbody>${rows}</tbody>
             </table>
           </div>
-
-          <div class="map-bottom${benchCard ? '' : ' single'}">
-            <div class="card">
-              <div class="between mb">
-                <div><h3 style="margin:0">改善优先级</h3>
-                  <div class="desc" style="margin:2px 0 0">L3 Top 6 · 按综合得分排序，点击定位</div></div>
-              </div>
-              <table class="tbl">
-                <thead><tr><th>流程</th><th>优先级</th><th>得分</th><th>健康度</th></tr></thead>
-                <tbody>${heat}</tbody>
-              </table>
-            </div>
-            ${benchCard}
-          </div>
+          ${benchCard}
         </div>
       </div>`;
   };
@@ -248,12 +226,8 @@ const renderMap = () => {
       state.map.frameworks = await GET('/benchmark/frameworks');
     }
     if (!state.map.tree) {
-      const [tree, heat] = await Promise.all([
-        GET('/process-map/tree'),
-        GET('/process-map/heatmap?level=3&limit=12'),
-      ]);
+      const tree = await GET('/process-map/tree');
       state.map.tree = tree;
-      state.map.heat = heat;
       state.map.names = {};
       const walk = (list) => list.forEach((n) => {
         state.map.names[n.code] = n.name;
@@ -264,6 +238,17 @@ const renderMap = () => {
     if (state.map.benchmarkFramework && !state.map.benchmark) {
       state.map.benchmark = await GET(
         '/benchmark/frameworks/' + state.map.benchmarkFramework + '/coverage?process_level=3');
+    }
+    const pending = state.map.pendingJump;
+    state.map.pendingJump = null;
+    if (pending) {
+      const path = findPathTo(pending, state.map.tree || []);
+      if (path) {
+        state.map.path = path.slice(0, -1);
+        paint();
+        setTimeout(() => mapClick(pending, false), 30);
+        return;
+      }
     }
     paint();
   };
@@ -375,35 +360,11 @@ function openCoverageCategory(index) {
     '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
 }
 
-/** 从热力图跳转：逐级展开到该编码所在层级 */
-function mapJump(code) {
-  const path = [];
-  let nodes = state.map.tree || [];
-  let guard = 0;
-  while (guard++ < 8) {
-    const hit = nodes.find((n) => n.code === code);
-    if (hit) {
-      state.map.path = path;
-      state.mapKeyword = '';
-      document.getElementById('searchInput').value = '';
-      RENDERERS.map();
-      setTimeout(() => mapClick(code, false), 30);
-      return;
-    }
-    const parent = nodes.find((n) => (n.children || []).some((c) => c.code === code));
-    if (!parent) break;
-    path.push(parent.code);
-    nodes = parent.children;
-  }
-  toast('未在地图中定位到 ' + code, true);
-}
-
 /* -------------------------------------------------- 流程架构的写入口 */
 
 /** 写操作会让地图树、设计器下拉的缓存失效 */
 function invalidateProcessCaches() {
   state.map.tree = null;
-  state.map.heat = null;
   state.map.benchmark = null;
   state.designer.processes = null;
   state.designer.model = null;
@@ -579,4 +540,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapJump, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };
+export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };

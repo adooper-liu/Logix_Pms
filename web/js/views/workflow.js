@@ -60,7 +60,7 @@ const renderWorkflow = () => renderAsync('workflow',
           <span class="dot"></span><h3>阶段${current.stage_no} 步骤清单</h3>
           <div class="sp"></div>
           <span class="tiny">${current.steps.length} 个步骤 · 点击查看方法、工具与交付物</span>
-          <a class="link" style="margin-left:14px" onclick="setWfTab('method')">方法论匹配 →</a>
+          <a class="link-btn" style="margin-left:10px" onclick="setWfTab('method')">方法论匹配 →</a>
         </div>
         <div class="wf-grid">${steps}</div>
       </section>`;

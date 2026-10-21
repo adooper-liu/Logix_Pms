@@ -389,6 +389,14 @@ def main() -> int:
             assert page.locator("#view select").nth(1).input_value() == "1"
 
             goto("dashboard")
+            page.click("#view .card:has(h3:has-text('改善优先级')) tbody tr >> nth=0")
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "企业流程地图"
+            page.wait_for_selector("#mask.show")
+            assert "综合优先级得分" in page.inner_text("#mask")
+            close_modal()
+
+            goto("dashboard")
             page.click("#view a.kpi.stat >> nth=2")
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "运营监控与KPI"

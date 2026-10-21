@@ -150,7 +150,7 @@ function paintDesigner() {
           ${editable
             ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
             : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
-          <a class="link" onclick="go('execution')">去流程执行 →</a>
+          <a class="link-btn" onclick="go('execution')">去流程执行 →</a>
           <button class="btn btn-p" onclick="reanalyze()">重新测算</button>
         </div>
       </div>

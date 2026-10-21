@@ -1,5 +1,5 @@
 /* 视图：dashboard */
-import { esc, num, M_ICON, methodTag, statusTag, bar, emptyRow } from '../core/format.js';
+import { esc, num, M_ICON, methodTag, statusTag, bar, emptyRow, HEAT_CLASS, HEAT_LABEL } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
 import { viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
@@ -14,8 +14,13 @@ const METHOD_COLOR = {
 };
 
 const renderDashboard = () => renderAsync('dashboard',
-  () => GET('/dashboard/overview?board_limit=5'),
-  (d) => {
+  () => Promise.all([
+    GET('/dashboard/overview?board_limit=5'),
+    GET('/process-map/heatmap?level=3&limit=5'),
+  ]).then(([overview, priority]) => ({ overview, priority })),
+  (payload) => {
+    const d = payload.overview;
+    const priority = payload.priority;
     const byKey = Object.fromEntries(d.cards.map((c) => [c.key, c]));
     const primary = ['active_projects', 'improvement_targets', 'open_exceptions', 'avg_improvement']
       .map((key) => byKey[key]).filter(Boolean);
@@ -105,13 +110,20 @@ const renderDashboard = () => renderAsync('dashboard',
         <td>${methodTag(p.methodology, state.meta.methodology[p.methodology])}</td>
         <td><span class="dot"></span> 阶段${p.current_stage}
           <div class="tiny">${esc(p.stage_name || '')}</div></td>
-        <td style="font-size:12.5px">${p.metric_name
-          ? esc(p.metric_name) + '<div class="tiny">' + num(p.current_value, 1) + ' → ' +
-            num(p.target_value, 1) + ' ' + esc(p.metric_unit || '') + '</div>'
-          : '—'}</td>
         <td>${bar(p.progress)}</td>
         <td>${statusTag(p.status, p.status_label)}</td>
-      </tr>`).join('') || emptyRow(6, '当前没有在办项目');
+      </tr>`).join('') || emptyRow(5, '当前没有在办项目');
+
+    const priorityRows = priority.map((p) => `
+      <tr class="clk" onclick="openProcessOnMap('${esc(p.code)}')">
+        <td><b>${esc(p.name)}</b>
+          <div class="tiny">${esc(p.code)} · Owner: ${esc(p.owner || '未指定')}</div></td>
+        <td><span class="tag ${HEAT_CLASS[p.heat_level] || 'heat-low'}">
+          ${HEAT_LABEL[p.heat_level] || p.heat_level} ${num(p.priority_score, 0)}</span></td>
+        <td>${p.health_score === null ? '<span class="muted">未评估</span>'
+          : bar(p.health_score, null, 66)}</td>
+        <td>${p.project_count}</td>
+      </tr>`).join('') || emptyRow(4, '暂无待改善流程');
 
     const alerts = d.health_alerts.slice(0, 4).map((a) => `
       <div class="alert-row ${a.level === 'HIGH' ? 'ri-high' : 'ri-medium'}" onclick="go('map')">
@@ -131,7 +143,7 @@ const renderDashboard = () => renderAsync('dashboard',
         <div class="between">
           <div><h2>管理驾驶舱<span class="module-badge">全局概览</span></h2>
             <div class="desc">先看需要关注的事，再看项目推进</div></div>
-          <a class="link" onclick="go('projects')">项目组合 →</a>
+          <a class="link-btn" onclick="go('projects')">项目组合 →</a>
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
@@ -163,7 +175,7 @@ const renderDashboard = () => renderAsync('dashboard',
           <div class="between mb">
             <div><h3 style="margin:0">${metricHelp('health_alert', '风险提醒')}</h3>
               <div class="desc" style="margin:2px 0 0">健康度低于 70 分或痛点 ≥ 4</div></div>
-            <a class="link" onclick="go('map')">流程地图 →</a>
+            <a class="link-btn" onclick="go('map')">流程地图 →</a>
           </div>
           ${alerts}
           <div class="alert-row ri-bad" onclick="go('monitor')">
@@ -188,16 +200,31 @@ const renderDashboard = () => renderAsync('dashboard',
         </div>
       </div>
 
-      <div class="card">
-        <div class="between mb">
-          <h3 style="margin:0">重点项目</h3>
-          <a class="link" onclick="go('projects')">查看全部 →</a>
+      <div class="grid g2">
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">改善优先级</h3>
+              <div class="desc" style="margin:2px 0 0">该改什么 · L3 流程综合得分 Top 5</div></div>
+            <a class="link-btn" onclick="openImprovementMap()">进入地图 →</a>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>流程</th><th>优先级</th><th>${metricHelp('health_score', '健康度')}</th><th>项目</th></tr></thead>
+            <tbody>${priorityRows}</tbody>
+          </table>
         </div>
-        <table class="tbl">
-          <thead><tr><th>项目</th><th>方法</th><th>当前阶段</th>
-            <th>改善指标</th><th>${metricHelp('project_progress', '整体进度')}</th><th>状态</th></tr></thead>
-          <tbody>${board}</tbody>
-        </table>
+
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">重点项目</h3>
+              <div class="desc" style="margin:2px 0 0">正在改什么 · 在办项目推进情况</div></div>
+            <a class="link-btn" onclick="go('projects')">查看全部 →</a>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>项目</th><th>方法</th><th>当前阶段</th>
+              <th>${metricHelp('project_progress', '整体进度')}</th><th>状态</th></tr></thead>
+            <tbody>${board}</tbody>
+          </table>
+        </div>
       </div>`;
   });
 
@@ -228,4 +255,11 @@ function openImprovementMap() {
   go('map');
 }
 
-export { renderDashboard, openExceptions, openImprovementMap, openMethodology, openProjects, openStage };
+/** 驾驶舱优先级 → 地图：定位到该流程并打开详情 */
+function openProcessOnMap(code) {
+  state.map.improvementOnly = false;
+  state.map.pendingJump = code;
+  go('map');
+}
+
+export { renderDashboard, openExceptions, openImprovementMap, openMethodology, openProcessOnMap, openProjects, openStage };

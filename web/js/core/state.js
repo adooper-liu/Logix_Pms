@@ -10,6 +10,7 @@ export const state = {
   meta: { methodology: {}, status: {}, stage: {} },
   map: {
     code: null, name: null, path: [], improvementOnly: false,
+    pendingJump: null,
     frameworks: null, benchmarkFramework: '', benchmark: null,
   },
   projects: { filter: { methodology: '', status: '', stage: '' }, keyword: '' },

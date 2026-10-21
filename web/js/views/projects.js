@@ -54,8 +54,8 @@ const renderProjects = () => {
             <div><h2>流程项目组合<span class="module-badge">改善项目 · 推进循环</span></h2>
               <div class="desc">共 ${page.total} 个项目 · 每个项目按 24 步标准工作流推进；点击行查看详情与下一步动作</div></div>
             <div class="gap">
-              <a class="link" onclick="go('workflow')">查看方法手册</a>
-              <a class="link" onclick="go('execution')">流程执行 →</a>
+              <a class="link-btn" onclick="go('workflow')">查看方法手册</a>
+              <a class="link-btn" onclick="go('execution')">流程执行 →</a>
               <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
             </div>
           </div>

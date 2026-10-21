@@ -154,7 +154,7 @@ const renderMonitor = () => {
             <div class="between mb">
               <div><h3 style="margin:0">异常概览</h3>
                 <div class="desc" style="margin:2px 0 0">未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
-              <a class="link" onclick="setMonitorTab('exceptions')">全部台账 →</a>
+              <a class="link-btn" onclick="setMonitorTab('exceptions')">全部台账 →</a>
             </div>
             <div class="kpi-strip">
               <div><b>${s.open + s.in_progress}</b><span>${metricHelp('open_exceptions', '未闭环')}</span></div>
@@ -174,7 +174,7 @@ const renderMonitor = () => {
             <div class="between mb">
               <div><h3 style="margin:0">${metricHelp('achievement_rate', '最弱 5 项')}</h3>
                 <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理</div></div>
-              <a class="link" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
+              <a class="link-btn" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
             </div>
             <table class="tbl">
               <thead><tr><th>指标</th><th>${metricHelp('latest_value', '当前值')}</th><th>${metricHelp('target_value', '目标')}</th><th>${metricHelp('achievement_rate', '达成率')}</th></tr></thead>
@@ -221,7 +221,7 @@ const renderMonitor = () => {
               <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
                 · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
             <div class="gap">
-              <a class="link" onclick="go('execution')">任务队列 →</a>
+              <a class="link-btn" onclick="go('execution')">任务队列 →</a>
               ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}
               ${canManage() ? '<button class="btn btn-g" onclick="newKpiModal()">+ 新建 KPI</button>' : ''}
             </div>
