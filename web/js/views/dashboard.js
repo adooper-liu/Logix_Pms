@@ -216,7 +216,7 @@ const renderDashboard = () => renderAsync('dashboard',
         <div class="card">
           <div class="between mb">
             <div><h3 style="margin:0">重点项目</h3>
-              <div class="desc" style="margin:2px 0 0">正在改什么 · 在办项目推进情况</div></div>
+              <div class="desc" style="margin:2px 0 0">正在做什么 · 在办项目推进情况</div></div>
             <a class="link-btn" onclick="go('projects')">查看全部 →</a>
           </div>
           <table class="tbl">

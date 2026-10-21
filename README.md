@@ -327,7 +327,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
-| 管理驾驶舱 | `/dashboard/overview`、`/process-map/heatmap` | 指标卡、五阶段健康度、方法论分布、改善优先级（该改什么）与重点项目（正在改什么）、健康度预警、异常概览；优先级行可定位到地图 |
+| 管理驾驶舱 | `/dashboard/overview`、`/process-map/heatmap` | 指标卡、五阶段健康度、方法论分布、改善优先级（该改什么）与重点项目（正在做什么）、健康度预警、异常概览；优先级行可定位到地图 |
 | 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC 对标切换与覆盖率；跨层优先级排序统一在驾驶舱查看 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
