@@ -465,13 +465,36 @@ def main() -> int:
             goto("designer")
             before = page.inner_text("#view")
             assert "流程模型" in before
+            page.wait_for_selector("#designerCanvas")
+            assert page.locator("#view .designer-node").count() >= 6, "画布没有渲染节点"
+            assert page.locator("#view .designer-edge").count() >= 5, "画布没有渲染连线"
+            edge_point = page.locator("#view .designer-edge-hit").first.evaluate(
+                """el => {
+                  const p = el.getPointAtLength(el.getTotalLength() / 2);
+                  const pt = new DOMPoint(p.x, p.y).matrixTransform(el.getScreenCTM());
+                  return { x: pt.x, y: pt.y };
+                }"""
+            )
+            page.mouse.click(edge_point["x"], edge_point["y"])
+            page.wait_for_selector("#mask.show")
+            assert "编辑连线" in page.inner_text("#mTitle")
+            page.click('#mFoot button:has-text("取消")')
+            page.wait_for_timeout(300)
             page.click("#view .node >> nth=0")
             page.wait_for_selector("#mask.show")
             assert "编辑活动节点" in page.inner_text("#mTitle")
+            original_wait = page.input_value("#edWait")
             page.fill("#edWait", "0")
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(1800)
             assert "指标已重算" in page.inner_text("#toast"), page.inner_text("#toast")
+
+            # 还原演示数据，避免自检反复改写种子模型
+            page.click("#view .node >> nth=0")
+            page.wait_for_selector("#mask.show")
+            page.fill("#edWait", original_wait)
+            page.click("#mFoot .btn-p")
+            page.wait_for_timeout(1500)
             page.click('#view .seg button:has-text("指标与建议")')
             page.wait_for_timeout(800)
             assert "流程周期效率" in page.inner_text("#view")
@@ -679,6 +702,7 @@ def main() -> int:
 
                 page.click("#view .exec-task-row >> nth=0 >> button")
                 page.wait_for_selector("#exf_applicant")
+                assert "任务历史" in page.inner_text("#mBody"), "任务弹窗缺少任务历史"
                 page.fill("#exf_applicant", "自检用户")
                 page.fill("#exf_amount", "1000")
                 page.click("#mFoot .btn-p")
@@ -837,7 +861,13 @@ def main() -> int:
             assert "通知中心" in page.inner_text("#mTitle")
             body = page.inner_text("#mBody")
             # 演示库可能已经被读过，通知中心仍应能打开并展示列表/空态
-            assert "欢迎使用" in body or "暂无" in body, body[:120]
+            assert any(marker in body for marker in ("欢迎使用", "暂无", "条未读", "全部已读")), (
+                body[:120]
+            )
+            mark_all = page.locator("#mBody button:has-text('全部已读')")
+            if mark_all.count():
+                mark_all.first.click()
+                page.wait_for_timeout(400)
             close_modal()
 
         # 地图 → 立项：带流程进入项目向导

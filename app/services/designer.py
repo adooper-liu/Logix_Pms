@@ -223,6 +223,51 @@ def _aggregate(
 # ------------------------------------------------------------------ 主流程
 
 
+# ------------------------------------------------------------------ 模型校验
+
+
+def validate_model(nodes: Sequence[ProcessNode], edges: Sequence[ProcessEdge]) -> dict:
+    """返回 errors / warnings。
+
+    errors 会阻止保存；warnings 只是提醒，允许保存未完成的草稿模型
+    （例如正在搭建、还没加结束节点）。
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+    keys: Set[str] = set()
+    for node in nodes:
+        if node.node_key in keys:
+            errors.append(f"节点 key 重复：{node.node_key}")
+        keys.add(node.node_key)
+
+    pairs: Set[Tuple[str, str]] = set()
+    for edge in edges:
+        if edge.source_key not in keys or edge.target_key not in keys:
+            errors.append(f"连线 {edge.source_key} → {edge.target_key} 引用了不存在的节点")
+        if edge.source_key == edge.target_key:
+            errors.append(f"连线 {edge.source_key} → {edge.target_key} 是自环")
+        pair = (edge.source_key, edge.target_key)
+        if pair in pairs:
+            errors.append(f"重复连线：{edge.source_key} → {edge.target_key}")
+        pairs.add(pair)
+        if not 0 <= edge.probability <= 1:
+            errors.append(f"连线 {edge.source_key} → {edge.target_key} 的概率必须在 0–1")
+
+    starts = [n for n in nodes if n.node_type == NodeType.START.value]
+    if len(starts) > 1:
+        warnings.append(f"有多个开始节点（{len(starts)} 个），运行时会拒绝启动")
+    if not starts:
+        warnings.append("没有开始节点，运行时将按唯一入口推断")
+    if not any(n.node_type == NodeType.END.value for n in nodes):
+        warnings.append("没有结束节点，末端任务完成后实例结束")
+
+    targets = {e.target_key for e in edges}
+    for node in nodes:
+        if node.node_type != NodeType.START.value and node.node_key not in targets:
+            warnings.append(f"节点「{node.name}」没有入边，可能是不可达节点")
+    return {"errors": errors, "warnings": warnings}
+
+
 def analyze(
     process_id: int,
     nodes: Sequence[ProcessNode],

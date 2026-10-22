@@ -35,6 +35,9 @@ const renderDesigner = () => {
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
       state.designer.analysis = analysis;
+      state.designer.history = [];
+      state.designer.future = [];
+      state.designer.fitted = false;
       state.designer.processCode = (list.find((r) => r.id === id) || {}).code;
     }
   };
@@ -75,29 +78,10 @@ function paintDesigner() {
     .map((n) => n.node_key));
   const metricOf = {};
   (st.analysis ? st.analysis.nodes : []).forEach((n) => { metricOf[n.node_key] = n; });
-
-  const laneHtml = lanes.map((l, laneIdx) => `
-    <div class="lane">
-      <div class="lane-hd"><span>${esc(l.name)}</span>
-        <span class="tiny">${l.nodes.length} 个活动</span></div>
-      <div class="lane-bd">
-        ${l.nodes.map((n, i) => `
-          <div class="node ${NODE_CLASS[n.node_type] || ''} ${bnSet.has(n.node_key) ? 'bn' : ''}"
-               onclick="openNodeEditor('${n.node_key}')">
-            ${bnSet.has(n.node_key) ? '<span class="bnbadge">瓶颈</span>' : ''}
-            <b>${esc(n.name)}</b>
-            <div class="meta">⏱ ${dur(n.duration_minutes)}${n.wait_minutes > 0
-              ? ' <span style="color:var(--bad)">+等 ' + dur(n.wait_minutes) + '</span>' : ''}</div>
-            <div class="meta">${NODE_LABEL[n.node_type] || n.node_type}
-              ${n.owner_role ? ' · ' + esc(n.owner_role) : ''}
-              ${n.is_value_added ? '' : ' · <span style="color:var(--warn)">非增值</span>'}</div>
-            ${metricOf[n.node_key] && metricOf[n.node_key].visit_count > 1.001
-              ? '<div class="meta" style="color:var(--bad)">↻ 期望执行 '
-                + num(metricOf[n.node_key].visit_count, 2) + ' 次</div>'
-              : ''}
-          </div>${i < l.nodes.length - 1 ? '<span style="color:var(--line-strong);font-size:16px">→</span>' : ''}`).join('')}
-        <button class="add" onclick="addDesignerNode(${laneIdx})"${editable ? '' : ' disabled style="opacity:.4;cursor:not-allowed"'}>+ 添加活动</button>      </div>
-    </div>`).join('') || '<div class="empty">这条流程还没有建模，点击下方「添加泳道节点」开始</div>';
+  st.editable = editable;
+  st.bnSet = bnSet;
+  st.metricOf = metricOf;
+  normalizeLayout(st);
 
   const tab = st.tab || 'model';
   const tabBar = `
@@ -108,16 +92,30 @@ function paintDesigner() {
     </div>`;
 
   const modelPane = `
-    <div class="card">
-      <div class="legend mb">
-        <span><i style="background:var(--ok)"></i>开始</span>
-        <span><i style="background:var(--warn)"></i>审批/判断门</span>
-        <span><i style="background:var(--bad)"></i>结束</span>
-        <span><i style="background:var(--line-strong)"></i>等待</span>
-        <span><i style="background:var(--line)"></i>普通作业</span>
-        <span class="muted">节点右上角「瓶颈」来自测算结果</span>
+    <div class="card designer-card">
+      <div class="between mb designer-toolbar">
+        <div class="gap">
+          <span class="tiny">添加：</span>
+          ${Object.keys(NODE_LABEL).map((t) =>
+            `<button class="btn-sm" onclick="addNodeAtCenter('${t}')"${
+              editable ? '' : ' disabled'}>${NODE_LABEL[t]}</button>`).join('')}
+          <button class="btn-sm" onclick="addLane()"${editable ? '' : ' disabled'}>+ 泳道</button>
+          <span class="designer-sep"></span>
+          <button class="btn-sm" onclick="undoDesigner()" title="撤销">撤销</button>
+          <button class="btn-sm" onclick="redoDesigner()" title="重做">重做</button>
+          <button class="btn-sm" onclick="fitDesigner()">适应画布</button>
+          <span class="tiny" id="designerZoom">100%</span>
+        </div>
+        <div class="tiny">拖拽移动 · 从节点右侧圆点拉线 · 点击连线编辑 · 滚轮缩放 · 拖空白平移</div>
       </div>
-      ${laneHtml}
+      <div class="designer-canvas" id="designerCanvas">
+        <div class="designer-world" id="designerWorld">
+          <div class="designer-lanes" id="designerLanes"></div>
+          <svg class="designer-edge-layer" id="designerEdges"></svg>
+          <div class="designer-node-layer" id="designerNodes"></div>
+        </div>
+      </div>
+      ${validationHtml(st.model)}
     </div>`;
 
   const analysisPane = `
@@ -157,6 +155,462 @@ function paintDesigner() {
       <div class="mt">${tabBar}</div>
     </div>
     ${tab === 'analysis' ? analysisPane : modelPane}`;
+  if (tab !== 'analysis') renderCanvas();
+}
+
+/* -------------------------------------------------- 画布 */
+
+const DW = { laneH: 140, nodeW: 170, nodeH: 60, x0: 120, step: 200, top: 40 };
+
+function normalizeLayout(st) {
+  const ordered = st.model.nodes.slice().sort(
+    (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+  const lanes = [];
+  ordered.forEach((n) => { if (!lanes.includes(n.lane)) lanes.push(n.lane); });
+  st.lanes = lanes;
+  const laneIdx = {};
+  lanes.forEach((l, i) => { laneIdx[l] = i; });
+  const counters = {};
+  st.model.nodes.forEach((n) => {
+    const i = laneIdx[n.lane] === undefined ? 0 : laneIdx[n.lane];
+    counters[n.lane] = (counters[n.lane] || 0) + 1;
+    if (!n.position_x || n.position_x < 20) {
+      n.position_x = DW.x0 + (counters[n.lane] - 1) * DW.step;
+    }
+    n.position_y = DW.top + i * DW.laneH + 40;
+  });
+}
+
+function validateModel(model) {
+  const errors = [];
+  const warnings = [];
+  const keys = new Set();
+  (model.nodes || []).forEach((n) => {
+    if (keys.has(n.node_key)) errors.push(`节点 key 重复：${n.node_key}`);
+    keys.add(n.node_key);
+  });
+  const pairs = new Set();
+  (model.edges || []).forEach((e) => {
+    if (!keys.has(e.source_key) || !keys.has(e.target_key)) {
+      errors.push(`连线 ${e.source_key} → ${e.target_key} 引用了不存在的节点`);
+    }
+    if (e.source_key === e.target_key) {
+      errors.push(`连线 ${e.source_key} → ${e.target_key} 是自环`);
+    }
+    const pair = e.source_key + '→' + e.target_key;
+    if (pairs.has(pair)) errors.push(`重复连线：${pair}`);
+    pairs.add(pair);
+    if (e.probability < 0 || e.probability > 1) {
+      errors.push(`连线 ${pair} 的概率必须在 0–1`);
+    }
+  });
+  const starts = (model.nodes || []).filter((n) => n.node_type === 'START');
+  if (starts.length > 1) errors.push(`只能有一个开始节点，当前有 ${starts.length} 个`);
+  if (!starts.length) warnings.push('没有开始节点，运行时将按唯一入口推断');
+  if (!(model.nodes || []).some((n) => n.node_type === 'END')) {
+    warnings.push('没有结束节点，末端任务完成后实例结束');
+  }
+  const targets = new Set((model.edges || []).map((e) => e.target_key));
+  (model.nodes || []).forEach((n) => {
+    if (n.node_type !== 'START' && !targets.has(n.node_key)) {
+      warnings.push(`节点「${n.name}」没有入边，可能是不可达节点`);
+    }
+  });
+  return { errors, warnings };
+}
+
+function validationHtml(model) {
+  const v = validateModel(model);
+  if (!v.errors.length && !v.warnings.length) return '';
+  const items = [
+    ...v.errors.map((m) => `<div class="designer-issue error">✕ ${esc(m)}</div>`),
+    ...v.warnings.map((m) => `<div class="designer-issue warn">! ${esc(m)}</div>`),
+  ].join('');
+  return `<div class="designer-validation">${items}</div>`;
+}
+
+function renderCanvas() {
+  const st = state.designer;
+  const world = document.getElementById('designerWorld');
+  if (!world || !st.model) return;
+  const lanesEl = document.getElementById('designerLanes');
+  const edgesEl = document.getElementById('designerEdges');
+  const nodesEl = document.getElementById('designerNodes');
+  const zoomEl = document.getElementById('designerZoom');
+  const zoom = st.zoom || 1;
+  const pan = st.pan || { x: 0, y: 0 };
+  const laneCount = Math.max(1, (st.lanes || []).length);
+  const maxX = Math.max(900, ...st.model.nodes.map((n) => (n.position_x || 0) + 360));
+  const height = DW.top + laneCount * DW.laneH + 80;
+  world.style.width = maxX + 'px';
+  world.style.height = height + 'px';
+  world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
+  if (zoomEl) zoomEl.textContent = Math.round(zoom * 100) + '%';
+
+  lanesEl.innerHTML = (st.lanes || []).map((name, i) => `
+    <div class="designer-lane" style="top:${DW.top + i * DW.laneH}px;
+      height:${DW.laneH}px;width:${maxX}px">
+      <span>${esc(name)}</span>
+    </div>`).join('');
+
+  const byKey = {};
+  st.model.nodes.forEach((n) => { byKey[n.node_key] = n; });
+  edgesEl.setAttribute('width', maxX);
+  edgesEl.setAttribute('height', height);
+  edgesEl.setAttribute('viewBox', `0 0 ${maxX} ${height}`);
+  edgesEl.innerHTML = `
+    <defs>
+      <marker id="dArrow" viewBox="0 0 10 10" refX="9" refY="5"
+        markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line-strong)"></path>
+      </marker>
+      <marker id="dArrowSel" viewBox="0 0 10 10" refX="9" refY="5"
+        markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--brand)"></path>
+      </marker>
+    </defs>
+    ${(st.model.edges || []).map((e, i) => {
+      const s = byKey[e.source_key];
+      const t = byKey[e.target_key];
+      if (!s || !t) return '';
+      const sx = (s.position_x || 0) + DW.nodeW;
+      const sy = (s.position_y || 0) + DW.nodeH / 2;
+      const tx = t.position_x || 0;
+      const ty = (t.position_y || 0) + DW.nodeH / 2;
+      const bend = Math.max(50, Math.abs(tx - sx) / 2);
+      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`;
+      const label = e.label || e.condition || '';
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2 - 6;
+      return `<path class="designer-edge-hit" data-edge="${i}" d="${d}"></path>
+        <path class="designer-edge" data-edge="${i}" d="${d}"
+          marker-end="url(#dArrow)"></path>${
+        label ? `<text class="designer-edge-label" x="${mx}" y="${my}">${
+          esc(label.length > 18 ? label.slice(0, 18) + '…' : label)}</text>` : ''}`;
+    }).join('')}`;
+
+  nodesEl.innerHTML = st.model.nodes.map((n) => {
+    const bn = st.bnSet && st.bnSet.has(n.node_key);
+    const m = st.metricOf ? st.metricOf[n.node_key] : null;
+    return `<div class="node designer-node ${NODE_CLASS[n.node_type] || ''}${bn ? ' bn' : ''}"
+        data-key="${esc(n.node_key)}"
+        style="left:${n.position_x || 0}px;top:${n.position_y || 0}px;
+          width:${DW.nodeW}px;height:${DW.nodeH}px">
+      ${bn ? '<span class="bnbadge">瓶颈</span>' : ''}
+      <b>${esc(n.name)}</b>
+      <span class="designer-node-meta">${NODE_LABEL[n.node_type] || n.node_type} · ${
+        dur(n.duration_minutes)}${n.wait_minutes > 0 ? ' +等 ' + dur(n.wait_minutes) : ''}${
+        m && m.visit_count > 1.001 ? ' · ↻' + num(m.visit_count, 2) + '次' : ''}</span>
+      <span class="designer-port" data-port="out" data-key="${esc(n.node_key)}"></span>
+    </div>`;
+  }).join('');
+
+  attachCanvasInteractions();
+  if (!st.fitted && st.model.nodes.length) {
+    st.fitted = true;
+    setTimeout(fitDesigner, 0);
+  }
+}
+
+function canvasPoint(clientX, clientY) {
+  const canvas = document.getElementById('designerCanvas');
+  const st = state.designer;
+  const rect = canvas.getBoundingClientRect();
+  const pan = st.pan || { x: 0, y: 0 };
+  const zoom = st.zoom || 1;
+  return {
+    x: (clientX - rect.left - pan.x) / zoom,
+    y: (clientY - rect.top - pan.y) / zoom,
+  };
+}
+
+function attachCanvasInteractions() {
+  const st = state.designer;
+  const canvas = document.getElementById('designerCanvas');
+  if (!canvas) return;
+  const editable = !!st.editable;
+
+  document.querySelectorAll('.designer-edge-hit').forEach((el) => {
+    el.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      openEdgeEditor(Number(el.dataset.edge));
+    });
+  });
+
+  document.querySelectorAll('.designer-node').forEach((el) => {
+    if (!editable) {
+      el.addEventListener('click', () => openNodeEditor(el.dataset.key));
+      return;
+    }
+    let drag = null;
+    el.addEventListener('pointerdown', (evt) => {
+      if (evt.target.classList.contains('designer-port')) return;
+      evt.stopPropagation();
+      const p = canvasPoint(evt.clientX, evt.clientY);
+      drag = {
+        key: el.dataset.key,
+        startX: p.x,
+        startY: p.y,
+        nodeX: Number(el.style.left.replace('px', '')),
+        nodeY: Number(el.style.top.replace('px', '')),
+        moved: false,
+        history: cloneModel(st.model),
+      };
+      el.setPointerCapture(evt.pointerId);
+    });
+    el.addEventListener('pointermove', (evt) => {
+      if (!drag) return;
+      const p = canvasPoint(evt.clientX, evt.clientY);
+      const dx = p.x - drag.startX;
+      const dy = p.y - drag.startY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
+      el.style.left = Math.max(20, drag.nodeX + dx) + 'px';
+      el.style.top = Math.max(20, drag.nodeY + dy) + 'px';
+    });
+    el.addEventListener('pointerup', () => {
+      if (!drag) return;
+      const node = st.model.nodes.find((n) => n.node_key === drag.key);
+      const left = Number(el.style.left.replace('px', ''));
+      const top = Number(el.style.top.replace('px', ''));
+      if (drag.moved && node) {
+        st.history.push(drag.history);
+        st.history = st.history.slice(-60);
+        st.future = [];
+        node.position_x = left;
+        node.lane = laneAt(top, st);
+        persistDesign('节点位置已保存');
+      } else if (!drag.moved) {
+        openNodeEditor(drag.key);
+      }
+      drag = null;
+    });
+  });
+
+  document.querySelectorAll('.designer-port').forEach((port) => {
+    if (!editable) return;
+    port.addEventListener('pointerdown', (evt) => {
+      evt.stopPropagation();
+      evt.preventDefault();
+      const node = st.model.nodes.find((n) => n.node_key === port.dataset.key);
+      if (!node) return;
+      const sx = (node.position_x || 0) + DW.nodeW;
+      const sy = (node.position_y || 0) + DW.nodeH / 2;
+      const edgeLayer = document.getElementById('designerEdges');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('class', 'designer-edge draft');
+      path.setAttribute('d', `M ${sx} ${sy} L ${sx} ${sy}`);
+      path.setAttribute('marker-end', 'url(#dArrowSel)');
+      edgeLayer.appendChild(path);
+      const move = (e) => {
+        const p = canvasPoint(e.clientX, e.clientY);
+        const b = Math.max(40, Math.abs(p.x - sx) / 2);
+        path.setAttribute('d',
+          `M ${sx} ${sy} C ${sx + b} ${sy}, ${p.x - b} ${p.y}, ${p.x} ${p.y}`);
+      };
+      const up = (e) => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+        const target = targetEl && targetEl.closest('.designer-node');
+        const targetKey = target && target.dataset.key;
+        path.remove();
+        if (!targetKey || targetKey === node.node_key) return;
+        if (st.model.edges.some((x) =>
+          x.source_key === node.node_key && x.target_key === targetKey)) {
+          return toast('这两个节点之间已有连线', true);
+        }
+        pushHistory();
+        st.model.edges.push({
+          source_key: node.node_key, target_key: targetKey,
+          label: null, condition: null, probability: 1,
+        });
+        persistDesign('连线已创建');
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+  });
+
+  // 空白拖拽平移
+  let panState = null;
+  canvas.addEventListener('pointerdown', (evt) => {
+    if (evt.target.closest('.designer-node') || evt.target.closest('.designer-edge')
+      || evt.target.closest('.designer-edge-hit')) return;
+    evt.preventDefault();
+    panState = {
+      x: evt.clientX, y: evt.clientY,
+      panX: (st.pan || { x: 0, y: 0 }).x,
+      panY: (st.pan || { x: 0, y: 0 }).y,
+    };
+    canvas.setPointerCapture(evt.pointerId);
+  });
+  canvas.addEventListener('pointermove', (evt) => {
+    if (!panState) return;
+    st.pan = {
+      x: panState.panX + evt.clientX - panState.x,
+      y: panState.panY + evt.clientY - panState.y,
+    };
+    const world = document.getElementById('designerWorld');
+    if (world) {
+      world.style.transform = `translate(${st.pan.x}px, ${st.pan.y}px) scale(${st.zoom || 1})`;
+    }
+  });
+  canvas.addEventListener('pointerup', () => { panState = null; });
+  canvas.addEventListener('wheel', (evt) => {
+    evt.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const cx = evt.clientX - rect.left;
+    const cy = evt.clientY - rect.top;
+    const zoom = st.zoom || 1;
+    const next = Math.min(2, Math.max(0.35, zoom * (evt.deltaY < 0 ? 1.1 : 0.9)));
+    const m = canvasPoint(evt.clientX, evt.clientY);
+    st.pan = { x: cx - m.x * next, y: cy - m.y * next };
+    st.zoom = next;
+    renderCanvas();
+  }, { passive: false });
+}
+
+function laneAt(y, st) {
+  const idx = Math.floor((y - DW.top) / DW.laneH);
+  return (st.lanes && st.lanes[idx]) || (st.lanes && st.lanes[0]) || '主流程';
+}
+
+function pushHistory() {
+  const st = state.designer;
+  st.history = st.history || [];
+  st.history.push(cloneModel(st.model));
+  st.history = st.history.slice(-60);
+  st.future = [];
+}
+
+function undoDesigner() {
+  const st = state.designer;
+  if (!st.history || !st.history.length) return toast('没有可撤销的操作');
+  st.future = st.future || [];
+  st.future.push(cloneModel(st.model));
+  st.model = st.history.pop();
+  normalizeLayout(st);
+  paintDesigner();
+  persistDesign('已撤销');
+}
+
+function redoDesigner() {
+  const st = state.designer;
+  if (!st.future || !st.future.length) return toast('没有可重做的操作');
+  st.history = st.history || [];
+  st.history.push(cloneModel(st.model));
+  st.model = st.future.pop();
+  normalizeLayout(st);
+  paintDesigner();
+  persistDesign('已重做');
+}
+
+function fitDesigner() {
+  const st = state.designer;
+  const canvas = document.getElementById('designerCanvas');
+  if (!canvas || !st.model.nodes.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const maxX = Math.max(...st.model.nodes.map((n) => (n.position_x || 0) + DW.nodeW)) + 80;
+  const maxY = Math.max(...st.model.nodes.map((n) => (n.position_y || 0) + DW.nodeH)) + 80;
+  const zoom = Math.min(1.2, Math.max(0.35,
+    Math.min((rect.width - 40) / maxX, (rect.height - 40) / maxY)));
+  st.zoom = zoom;
+  st.pan = { x: 20, y: 20 };
+  renderCanvas();
+}
+
+function addNodeAtCenter(type, lane, name) {
+  const st = state.designer;
+  const canvas = document.getElementById('designerCanvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const p = canvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  let seq = 1;
+  st.model.nodes.forEach((n) => { seq = Math.max(seq, n.sequence_order + 1); });
+  let key = 'new_' + seq;
+  while (st.model.nodes.some((n) => n.node_key === key)) key = 'new_' + (++seq);
+  const laneName = lane || laneAt(p.y, st);
+  const laneNodes = st.model.nodes.filter((n) => n.lane === laneName);
+  const maxX = laneNodes.length
+    ? Math.max(...laneNodes.map((n) => n.position_x || 0)) : 0;
+  let x = Math.max(20, p.x);
+  if (laneNodes.length && x <= maxX + 40) x = maxX + DW.step;
+  pushHistory();
+  st.model.nodes.push({
+    node_key: key,
+    name: name || NODE_LABEL[type] || '新节点',
+    node_type: type,
+    lane: laneName,
+    owner_role: null,
+    duration_minutes: 30,
+    wait_minutes: 0,
+    cost: 0,
+    rework_rate: 0,
+    approval_levels: 0,
+    is_value_added: type !== 'DECISION' && type !== 'END',
+    sequence_order: seq,
+    position_x: x,
+    position_y: Math.max(20, p.y),
+  });
+  normalizeLayout(st);
+  paintDesigner();
+  persistDesign('节点已添加');
+}
+
+function addLane() {
+  const name = prompt('输入泳道名称（部门 / 角色）：', '新泳道');
+  if (name === null) return;
+  const lane = name.trim() || '新泳道';
+  if (state.designer.lanes.includes(lane)) return toast('泳道已存在', true);
+  addNodeAtCenter('TASK', lane, '新活动');
+}
+
+async function openEdgeEditor(index) {
+  const st = state.designer;
+  const e = st.model.edges[index];
+  if (!e) return;
+  openModal('编辑连线', `
+    <div class="field"><label>起点 → 终点</label>
+      <input value="${esc(e.source_key)} → ${esc(e.target_key)}" readonly></div>
+    <div class="row2">
+      <div class="field"><label>标签</label>
+        <input id="edgeLabel" value="${esc(e.label || '')}" placeholder="通过 / 驳回"></div>
+      <div class="field"><label>概率</label>
+        <input id="edgeProb" type="number" min="0" max="1" step="0.05"
+          value="${e.probability}"></div>
+    </div>
+    <div class="field"><label>条件说明</label>
+      <input id="edgeCond" value="${esc(e.condition || '')}"
+        placeholder="预算与需求均合规"></div>`,
+    `<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"
+       onclick="deleteEdge(${index})">删除连线</button>
+     <button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="saveEdge(${index})">保存</button>`);
+}
+
+function saveEdge(index) {
+  const st = state.designer;
+  const e = st.model.edges[index];
+  if (!e) return;
+  const prob = Number(document.getElementById('edgeProb').value);
+  if (!Number.isFinite(prob) || prob < 0 || prob > 1) {
+    return toast('概率必须在 0–1 之间', true);
+  }
+  pushHistory();
+  e.label = document.getElementById('edgeLabel').value.trim() || null;
+  e.condition = document.getElementById('edgeCond').value.trim() || null;
+  e.probability = prob;
+  closeModal();
+  persistDesign('连线已保存');
+}
+
+function deleteEdge(index) {
+  const st = state.designer;
+  if (!st.model.edges[index]) return;
+  pushHistory();
+  st.model.edges.splice(index, 1);
+  closeModal();
+  persistDesign('连线已删除');
 }
 
 function setDesignerTab(tab) {
@@ -220,6 +674,11 @@ function importBpmn() {
       state.designer.savedModel = cloneModel(body);
       state.designer.analysis = await POST(
         '/processes/' + id + '/design/analyze', {});
+      state.designer.history = [];
+      state.designer.future = [];
+      state.designer.zoom = 1;
+      state.designer.pan = { x: 0, y: 0 };
+      state.designer.fitted = false;
       toast('BPMN 已导入并更新模型');
       RENDERERS.designer();
     } catch (e) {
@@ -310,6 +769,11 @@ function paintSuggestions(a) {
 function switchProcess(id) {
   state.designer.processId = Number(id);
   state.designer.processCode = (state.designer.processes.find((p) => p.id === Number(id)) || {}).code;
+  state.designer.zoom = 1;
+  state.designer.pan = { x: 0, y: 0 };
+  state.designer.fitted = false;
+  state.designer.history = [];
+  state.designer.future = [];
   RENDERERS.designer();
 }
 
@@ -335,6 +799,13 @@ function cloneModel(model) {
  */
 async function persistDesign(successMsg) {
   const st = state.designer;
+  const validation = validateModel(st.model);
+  if (validation.errors.length) {
+    toast('模型有错误：' + validation.errors[0], true);
+    paintDesigner();
+    return;
+  }
+  normalizeLayout(st);
   const payload = {
     nodes: st.model.nodes.map((n) => ({
       node_key: n.node_key, name: n.name, node_type: n.node_type, lane: n.lane,
@@ -380,6 +851,8 @@ async function reloadDesign() {
     st.model = model;
     st.savedModel = cloneModel(model);
     st.analysis = analysis;
+    st.history = [];
+    st.future = [];
     paintDesigner();
   } catch (e) {
     toast(e.message, true);
@@ -477,6 +950,7 @@ function saveNode(nodeKey) {
   const n = state.designer.model.nodes.find((x) => x.node_key === nodeKey);
   if (!n) return;
   const g = (id) => document.getElementById(id).value;
+  pushHistory();
   n.name = g('edName').trim() || n.name;
   n.node_type = g('edType');
   n.lane = g('edLane').trim() || n.lane;
@@ -493,6 +967,7 @@ function saveNode(nodeKey) {
 
 function deleteNode(nodeKey) {
   const st = state.designer;
+  pushHistory();
   st.model.nodes = st.model.nodes.filter((x) => x.node_key !== nodeKey);
   // 连线引用已删节点会导致后端校验失败，这里一并清掉
   st.model.edges = st.model.edges.filter((e) => e.source_key !== nodeKey && e.target_key !== nodeKey);
@@ -501,42 +976,22 @@ function deleteNode(nodeKey) {
 }
 
 function addNode(lane) {
-  const st = state.designer;
-  let seq = 1;
-  st.model.nodes.forEach((n) => { seq = Math.max(seq, n.sequence_order + 1); });
-  // node_key 只需在流程内唯一，用一个不会被手写数据撞到的前缀
-  let key = 'new_' + seq;
-  while (st.model.nodes.some((n) => n.node_key === key)) key = 'new_' + (++seq);
-  const node = {
-    node_key: key, name: '新活动', node_type: 'TASK', lane: lane || '新泳道',
-    owner_role: null, duration_minutes: 30, wait_minutes: 0, cost: 0, rework_rate: 0,
-    approval_levels: 0, is_value_added: true, sequence_order: seq, position_x: 0, position_y: 0,
-  };
-  st.model.nodes.push(node);
-  // 自动接在同泳道最后一个节点后面，省得新节点悬空
-  const inLane = st.model.nodes
-    .filter((n) => n.lane === node.lane && n.node_key !== key)
-    .sort((a, b) => a.sequence_order - b.sequence_order);
-  if (inLane.length) {
-    st.model.edges.push({
-      source_key: inLane[inLane.length - 1].node_key, target_key: key,
-      label: null, condition: null, probability: 1,
-    });
-  }
-  persistDesign('已添加节点「新活动」，点它可以修改');
-  setTimeout(() => editNode(key), 260);
+  addNodeAtCenter('TASK', lane, '新活动');
 }
 
 function addDesignerNode(laneIdx) {
-  const lane = (state.designer.lanes || [])[laneIdx];
-  addNode(lane);
+  addNode((state.designer.lanes || [])[laneIdx]);
 }
 
 function addLaneNode() {
-  const lane = prompt('输入泳道名称（部门 / 角色）：', '新泳道');
-  if (lane === null) return;
-  addNode(lane.trim() || '新泳道');
+  addLane();
 }
 
 
-export { renderDesigner, addDesignerNode, addLaneNode, addNode, cloneModel, deleteNode, editNode, exportBpmn, importBpmn, openDesigner, openNodeEditor, paintDesigner, paintMetrics, paintSuggestions, persistDesign, reanalyze, reloadDesign, saveNode, setDesignerTab, switchProcess };
+export {
+  addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, cloneModel,
+  deleteEdge, deleteNode, editNode, exportBpmn, fitDesigner, importBpmn,
+  openDesigner, openEdgeEditor, openNodeEditor, paintDesigner, paintMetrics,
+  paintSuggestions, persistDesign, reanalyze, redoDesigner, reloadDesign,
+  renderDesigner, saveEdge, saveNode, setDesignerTab, switchProcess, undoDesigner,
+};

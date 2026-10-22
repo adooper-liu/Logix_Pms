@@ -87,6 +87,17 @@ def _add_extension(parent: ET.Element, node: ProcessNode) -> None:
     ET.SubElement(ext, _q(PMS_NS, "nodeType")).text = node.node_type
     if node.owner_role:
         ET.SubElement(ext, _q(PMS_NS, "ownerRole")).text = node.owner_role
+    # 这些是 PMS 的测算字段，标准 BPMN 没有对应元素；放在扩展里保证往返不丢数据。
+    metrics = {
+        "durationMinutes": node.duration_minutes,
+        "waitMinutes": node.wait_minutes,
+        "cost": node.cost,
+        "reworkRate": node.rework_rate,
+        "approvalLevels": node.approval_levels,
+        "valueAdded": "true" if node.is_value_added else "false",
+    }
+    for name, value in metrics.items():
+        ET.SubElement(ext, _q(PMS_NS, name)).text = str(value)
 
 
 def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[ProcessEdge]) -> str:
@@ -222,9 +233,10 @@ def _parse_bpmn(xml_text: str) -> ET.Element:
         raise HTTPException(status_code=400, detail=f"BPMN XML 解析失败：{exc}") from exc
 
 
-def _parse_extension(element: ET.Element) -> Tuple[Optional[str], Optional[str]]:
+def _parse_extension(element: ET.Element) -> Tuple[Optional[str], Optional[str], Dict]:
     node_type = None
     owner_role = None
+    metrics: Dict = {}
     for ext in element:
         if _local(ext.tag) != "extensionElements":
             continue
@@ -234,7 +246,41 @@ def _parse_extension(element: ET.Element) -> Tuple[Optional[str], Optional[str]]
                 node_type = child.text.strip()
             elif name == "ownerRole" and child.text:
                 owner_role = child.text.strip()
-    return node_type, owner_role
+            elif (
+                name
+                in {
+                    "durationMinutes",
+                    "waitMinutes",
+                    "cost",
+                    "reworkRate",
+                    "approvalLevels",
+                    "valueAdded",
+                }
+                and child.text
+            ):
+                metrics[name] = child.text.strip()
+    return node_type, owner_role, metrics
+
+
+def _metric_number(
+    metrics: Dict,
+    key: str,
+    default: float,
+    *,
+    minimum: float = 0.0,
+    maximum: Optional[float] = None,
+) -> float:
+    raw = metrics.get(key)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
 
 
 def _parse_bounds(root: ET.Element) -> Dict[str, Tuple[float, float]]:
@@ -292,9 +338,18 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
         if element_id in node_ids:
             raise HTTPException(status_code=400, detail=f"BPMN 元素 id 重复：{element_id}")
         node_ids.add(element_id)
-        override, owner_role = _parse_extension(el)
+        override, owner_role, metrics = _parse_extension(el)
         node_type = override if override in {n.value for n in NodeType} else BPMN_TO_NODE[tag]
         x, y = positions.get(element_id, (180.0 * (index + 1), 120.0))
+        value_added_raw = metrics.get("valueAdded")
+        if value_added_raw is None:
+            is_value_added = node_type in (
+                NodeType.TASK.value,
+                NodeType.START.value,
+                NodeType.END.value,
+            )
+        else:
+            is_value_added = value_added_raw.strip().lower() not in ("false", "0", "no")
         nodes.append(
             {
                 "node_key": element_id,
@@ -302,13 +357,19 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
                 "node_type": node_type,
                 "lane": lane_of.get(element_id, "主流程")[:64],
                 "owner_role": owner_role,
-                "duration_minutes": 0.0,
-                "wait_minutes": 0.0,
-                "cost": 0.0,
-                "rework_rate": 0.0,
-                "approval_levels": 1 if node_type == NodeType.APPROVAL.value else 0,
-                "is_value_added": node_type
-                in (NodeType.TASK.value, NodeType.START.value, NodeType.END.value),
+                "duration_minutes": _metric_number(metrics, "durationMinutes", 0.0),
+                "wait_minutes": _metric_number(metrics, "waitMinutes", 0.0),
+                "cost": _metric_number(metrics, "cost", 0.0),
+                "rework_rate": _metric_number(metrics, "reworkRate", 0.0, maximum=1.0),
+                "approval_levels": int(
+                    _metric_number(
+                        metrics,
+                        "approvalLevels",
+                        1.0 if node_type == NodeType.APPROVAL.value else 0.0,
+                        maximum=10.0,
+                    )
+                ),
+                "is_value_added": is_value_added,
                 "sequence_order": len(nodes) + 1,
                 "position_x": x,
                 "position_y": y,

@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.timeutil import utcnow
@@ -24,6 +24,7 @@ from app.models.execution import (
     ProcessExecutionConfig,
     ProcessInstance,
     ProcessTask,
+    ProcessTaskEvent,
 )
 from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -36,6 +37,7 @@ from app.schemas.execution import (
     InstanceStartRequest,
     NextOption,
     TaskCompleteRequest,
+    TaskEventOut,
     TaskOut,
 )
 from app.services import forms as forms_service
@@ -63,6 +65,17 @@ TASK_TYPE_LABELS = {
     NodeType.WAIT.value: "等待",
     NodeType.DECISION.value: "判断",
     NodeType.HANDOFF.value: "移交",
+}
+
+TASK_EVENT_LABELS = {
+    "CREATED": "创建",
+    "CLAIMED": "认领",
+    "RELEASED": "退回队列",
+    "ASSIGNED": "改派",
+    "ESCALATED": "升级",
+    "SLA_SHIFTED": "SLA 顺延",
+    "COMPLETED": "完成",
+    "CANCELLED": "取消",
 }
 
 OPEN_STATUSES = (TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)
@@ -232,11 +245,79 @@ def _assign_user(db: Session, assignee_user_id: Optional[int]) -> Optional[User]
     return user
 
 
+def lock_instance(db: Session, instance_id: int) -> None:
+    """锁住实例行，串行化同一实例上的任务动作与实例控制。"""
+    db.execute(
+        select(ProcessInstance.id).where(ProcessInstance.id == instance_id).with_for_update()
+    )
+
+
+def record_task_event(
+    db: Session,
+    task: ProcessTask,
+    event_type: str,
+    from_status: Optional[str],
+    to_status: Optional[str],
+    actor: Optional[User],
+    detail: Optional[dict] = None,
+) -> ProcessTaskEvent:
+    event = ProcessTaskEvent(
+        task_id=task.id,
+        instance_id=task.instance_id,
+        event_type=event_type,
+        from_status=from_status,
+        to_status=to_status,
+        actor_user_id=actor.id if actor else None,
+        actor_name=actor.display_name if actor else "系统",
+        detail=detail or {},
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def _claim_update(
+    db: Session,
+    task: ProcessTask,
+    *,
+    assignee: Optional[User],
+    status: str,
+    claimed_at,
+    extra: Optional[dict] = None,
+) -> bool:
+    """条件更新任务，防止并发覆盖；返回是否更新成功。"""
+    values = {
+        "assignee_user_id": assignee.id if assignee else None,
+        "assignee_name": assignee.display_name if assignee else None,
+        "status": status,
+        "claimed_at": claimed_at,
+        "row_version": ProcessTask.row_version + 1,
+    }
+    if extra:
+        values.update(extra)
+    result = db.execute(
+        update(ProcessTask)
+        .where(
+            ProcessTask.id == task.id,
+            ProcessTask.status.in_(OPEN_STATUSES),
+            ProcessTask.row_version == task.row_version,
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        return False
+    db.flush()
+    db.refresh(task)
+    return True
+
+
 def _create_task(
     db: Session,
     instance: ProcessInstance,
     node: dict,
     assignee_user_id: Optional[int],
+    actor: Optional[User] = None,
 ) -> ProcessTask:
     assignment = (instance.snapshot.get("assignments") or {}).get(node["key"], {})
     assignee = _assign_user(db, assignee_user_id) if assignee_user_id else None
@@ -273,6 +354,20 @@ def _create_task(
     instance.current_node_name = node["name"]
     instance.status = InstanceStatus.RUNNING.value
     db.flush()
+    record_task_event(
+        db,
+        task,
+        "CREATED",
+        None,
+        task.status,
+        actor,
+        {
+            "node_key": task.node_key,
+            "assignee_user_id": task.assignee_user_id,
+            "assignee_name": task.assignee_name,
+            "due_at": task.due_at.isoformat() if task.due_at else None,
+        },
+    )
     return task
 
 
@@ -288,6 +383,7 @@ def _advance(
     instance: ProcessInstance,
     node_key: str,
     assignments: Optional[Dict[str, int]] = None,
+    actor: Optional[User] = None,
 ) -> Optional[ProcessTask]:
     """从 node_key 开始推进，直到创建任务或实例结束。"""
     nodes = _node_map(instance.snapshot)
@@ -315,7 +411,7 @@ def _advance(
                 )
             current = outgoing[0]["dst"]
             continue
-        return _create_task(db, instance, node, (assignments or {}).get(current))
+        return _create_task(db, instance, node, (assignments or {}).get(current), actor=actor)
     raise HTTPException(status_code=400, detail="流程疑似存在无法退出的自动节点环路")
 
 
@@ -343,7 +439,7 @@ def start_instance(
     )
     db.add(instance)
     db.flush()
-    _advance(db, instance, start["key"], payload.assignments)
+    _advance(db, instance, start["key"], payload.assignments, actor=user)
     return instance
 
 
@@ -394,12 +490,36 @@ def _ensure_task_action(db: Session, task: ProcessTask, user: User) -> None:
 
 
 def claim_task(db: Session, task: ProcessTask, user: User) -> ProcessTask:
+    lock_instance(db, task.instance_id)
+    db.refresh(task)
     _ensure_task_action(db, task, user)
-    task.assignee_user_id = user.id
-    task.assignee_name = user.display_name
-    task.status = TaskStatus.CLAIMED.value
-    task.claimed_at = task.claimed_at or utcnow()
-    db.flush()
+    if task.status == TaskStatus.CLAIMED.value and task.assignee_user_id == user.id:
+        return task
+
+    previous_status = task.status
+    previous_assignee = task.assignee_name
+    updated = _claim_update(
+        db,
+        task,
+        assignee=user,
+        status=TaskStatus.CLAIMED.value,
+        claimed_at=task.claimed_at or utcnow(),
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="任务已被他人处理，请刷新后重试")
+    record_task_event(
+        db,
+        task,
+        "CLAIMED",
+        previous_status,
+        TaskStatus.CLAIMED.value,
+        user,
+        {
+            "assignee_user_id": user.id,
+            "assignee_name": user.display_name,
+            "previous_assignee": previous_assignee,
+        },
+    )
     return task
 
 
@@ -409,15 +529,12 @@ def complete_task(
     user: User,
     payload: TaskCompleteRequest,
 ) -> ProcessTask:
+    lock_instance(db, task.instance_id)
+    db.refresh(task)
     _ensure_task_action(db, task, user)
     instance = task.instance
     if instance.status != InstanceStatus.RUNNING.value:
         raise HTTPException(status_code=409, detail="流程实例已结束，不能再处理任务")
-
-    if task.assignee_user_id is None:
-        task.assignee_user_id = user.id
-        task.assignee_name = user.display_name
-        task.claimed_at = utcnow()
 
     outgoing = _outgoing(instance.snapshot, task.node_key)
     form = forms_service.form_for_snapshot(instance.snapshot, task.node_key)
@@ -454,61 +571,123 @@ def complete_task(
                 detail=f"该节点有多个分支，请用 next_node_key 指定下一步（可选：{options}）",
             )
 
-    task.status = TaskStatus.COMPLETED.value
-    task.completed_at = utcnow()
-    task.completed_by_id = user.id
-    task.completed_by_name = user.display_name
-    task.form_data = form_data
-    task.comment = payload.comment
     # 表单值是流程上下文的一部分：后续节点的规则必须能读到上游填写的数据。
     # 采用扁平合并，后填的字段覆盖先前的；显式传入的 variables 优先级最高。
     merged_variables = {**(instance.variables or {}), **form_data}
     if payload.variables:
         merged_variables.update(payload.variables)
+
+    now = utcnow()
+    previous_status = task.status
+    updated = _claim_update(
+        db,
+        task,
+        assignee=_assign_user(db, task.assignee_user_id or user.id),
+        status=TaskStatus.COMPLETED.value,
+        claimed_at=task.claimed_at or now,
+        extra={
+            "completed_at": now,
+            "completed_by_id": user.id,
+            "completed_by_name": user.display_name,
+            "form_data": form_data,
+            "comment": payload.comment,
+        },
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="任务已被他人处理，请刷新后重试")
+
     instance.variables = merged_variables
-    db.flush()
+    record_task_event(
+        db,
+        task,
+        "COMPLETED",
+        previous_status,
+        TaskStatus.COMPLETED.value,
+        user,
+        {
+            "comment": payload.comment,
+            "next_node_key": next_key,
+            "form_data": form_data,
+        },
+    )
 
     if next_key is None:
         _complete_instance(instance)
         db.flush()
     else:
-        _advance(db, instance, next_key)
+        _advance(db, instance, next_key, actor=user)
     return task
 
 
-def assign_task(db: Session, task: ProcessTask, assignee_user_id: Optional[int]) -> ProcessTask:
+def assign_task(
+    db: Session,
+    task: ProcessTask,
+    assignee_user_id: Optional[int],
+    actor: Optional[User] = None,
+) -> ProcessTask:
+    lock_instance(db, task.instance_id)
+    db.refresh(task)
     if task.status not in OPEN_STATUSES:
         raise HTTPException(status_code=409, detail="任务已结束，不能改派")
-    if assignee_user_id is None:
-        task.assignee_user_id = None
-        task.assignee_name = None
-        task.status = TaskStatus.PENDING.value
-        task.claimed_at = None
-    else:
-        assignee = _assign_user(db, assignee_user_id)
-        assert assignee is not None
-        task.assignee_user_id = assignee.id
-        task.assignee_name = assignee.display_name
-        task.status = TaskStatus.CLAIMED.value
-        task.claimed_at = task.claimed_at or utcnow()
-    db.flush()
+    assignee = _assign_user(db, assignee_user_id) if assignee_user_id is not None else None
+    previous_status = task.status
+    previous_assignee = task.assignee_name
+    target_status = TaskStatus.CLAIMED.value if assignee else TaskStatus.PENDING.value
+    updated = _claim_update(
+        db,
+        task,
+        assignee=assignee,
+        status=target_status,
+        claimed_at=(task.claimed_at or utcnow()) if assignee else None,
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="任务已被他人处理，请刷新后重试")
+    record_task_event(
+        db,
+        task,
+        "ASSIGNED" if assignee else "RELEASED",
+        previous_status,
+        target_status,
+        actor,
+        {
+            "previous_assignee": previous_assignee,
+            "assignee_user_id": assignee.id if assignee else None,
+            "assignee_name": assignee.display_name if assignee else None,
+        },
+    )
     return task
 
 
-def cancel_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
+def cancel_instance(
+    db: Session, instance: ProcessInstance, actor: Optional[User] = None
+) -> ProcessInstance:
+    lock_instance(db, instance.id)
+    db.refresh(instance)
     if instance.status not in (
         InstanceStatus.RUNNING.value,
         InstanceStatus.SUSPENDED.value,
     ):
         raise HTTPException(status_code=409, detail="只有运行中或已挂起的实例可以取消")
+    now = utcnow()
     instance.status = InstanceStatus.CANCELLED.value
-    instance.completed_at = utcnow()
+    instance.completed_at = now
     instance.current_node_key = None
     instance.current_node_name = None
     for task in instance.tasks:
         if task.status in OPEN_STATUSES:
+            previous_status = task.status
             task.status = TaskStatus.CANCELLED.value
-            task.completed_at = utcnow()
+            task.completed_at = now
+            task.row_version = (task.row_version or 0) + 1
+            record_task_event(
+                db,
+                task,
+                "CANCELLED",
+                previous_status,
+                TaskStatus.CANCELLED.value,
+                actor,
+                {"reason": "instance_cancelled"},
+            )
     db.flush()
     return instance
 
@@ -516,6 +695,8 @@ def cancel_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
 def suspend_instance(
     db: Session, instance: ProcessInstance, reason: Optional[str] = None
 ) -> ProcessInstance:
+    lock_instance(db, instance.id)
+    db.refresh(instance)
     if instance.status != InstanceStatus.RUNNING.value:
         raise HTTPException(status_code=409, detail="只有运行中的实例可以挂起")
     instance.status = InstanceStatus.SUSPENDED.value
@@ -525,12 +706,38 @@ def suspend_instance(
     return instance
 
 
-def resume_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
+def resume_instance(
+    db: Session, instance: ProcessInstance, actor: Optional[User] = None
+) -> ProcessInstance:
+    lock_instance(db, instance.id)
+    db.refresh(instance)
     if instance.status != InstanceStatus.SUSPENDED.value:
         raise HTTPException(status_code=409, detail="只有已挂起的实例可以恢复")
+    now = utcnow()
+    paused = now - instance.suspended_at if instance.suspended_at else timedelta(0)
     instance.status = InstanceStatus.RUNNING.value
     instance.suspended_at = None
     instance.suspend_reason = None
+    # 挂起期间不消耗 SLA：恢复时把未完成任务的到期时间整体顺延。
+    if paused.total_seconds() > 0:
+        for task in instance.tasks:
+            if task.status in OPEN_STATUSES and task.due_at is not None:
+                previous_due = task.due_at
+                task.due_at = task.due_at + paused
+                task.row_version = (task.row_version or 0) + 1
+                record_task_event(
+                    db,
+                    task,
+                    "SLA_SHIFTED",
+                    task.status,
+                    task.status,
+                    actor,
+                    {
+                        "previous_due_at": previous_due.isoformat(),
+                        "due_at": task.due_at.isoformat(),
+                        "paused_seconds": round(paused.total_seconds(), 3),
+                    },
+                )
     db.flush()
     return instance
 
@@ -669,6 +876,34 @@ def task_out(task: ProcessTask) -> TaskOut:
         comment=task.comment,
         next_options=options,
     )
+
+
+def list_task_events(db: Session, task_id: int) -> List[TaskEventOut]:
+    rows = db.scalars(
+        select(ProcessTaskEvent)
+        .where(ProcessTaskEvent.task_id == task_id)
+        .order_by(ProcessTaskEvent.id)
+    ).all()
+    return [
+        TaskEventOut(
+            id=row.id,
+            task_id=row.task_id,
+            event_type=row.event_type,
+            event_label=TASK_EVENT_LABELS.get(row.event_type, row.event_type),
+            from_status=row.from_status,
+            from_status_label=(
+                TASK_LABELS.get(row.from_status, row.from_status) if row.from_status else None
+            ),
+            to_status=row.to_status,
+            to_status_label=(
+                TASK_LABELS.get(row.to_status, row.to_status) if row.to_status else None
+            ),
+            actor_name=row.actor_name,
+            detail=row.detail or {},
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 def instance_out(instance: ProcessInstance) -> InstanceOut:

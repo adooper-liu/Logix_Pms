@@ -13,6 +13,7 @@ from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.schemas.process import (
     BpmnImportRequest,
     DesignAnalysis,
+    DesignValidation,
     ProcessEdgeOut,
     ProcessModelIn,
     ProcessModelOut,
@@ -81,6 +82,10 @@ def save_design(process_id: int, payload: ProcessModelIn, db: DbSession, user: W
     if dangling:
         bad = ", ".join(f"{e.source_key}→{e.target_key}" for e in dangling[:3])
         raise HTTPException(status_code=400, detail=f"连线引用了不存在的节点：{bad}")
+
+    validation = designer.validate_model(payload.nodes, payload.edges)
+    if validation["errors"]:
+        raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
 
     # 覆盖式保存：先清空再插入，前端一次提交整张图
     for node in db.scalars(select(ProcessNode).where(ProcessNode.process_id == process_id)).all():
@@ -201,6 +206,28 @@ def analyze_saved(process_id: int, db: DbSession):
     nodes = db.scalars(select(ProcessNode).where(ProcessNode.process_id == process_id)).all()
     edges = db.scalars(select(ProcessEdge).where(ProcessEdge.process_id == process_id)).all()
     return designer.analyze(process_id, nodes, edges)
+
+
+@router.post(
+    "/processes/{process_id}/design/validate",
+    response_model=DesignValidation,
+    summary="校验已保存的流程模型",
+)
+def validate_saved(process_id: int, db: DbSession):
+    if db.get(ProcessArch, process_id) is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    nodes = db.scalars(select(ProcessNode).where(ProcessNode.process_id == process_id)).all()
+    edges = db.scalars(select(ProcessEdge).where(ProcessEdge.process_id == process_id)).all()
+    return designer.validate_model(nodes, edges)
+
+
+@router.post(
+    "/design/validate",
+    response_model=DesignValidation,
+    summary="校验前端提交的模型（不落库）",
+)
+def validate_inline(payload: ProcessModelIn):
+    return designer.validate_model(payload.nodes, payload.edges)
 
 
 @router.post(

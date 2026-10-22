@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -101,6 +102,7 @@ class ProcessTask(Base):
     )
 
     status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    row_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     assignee_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -129,11 +131,93 @@ class ProcessTask(Base):
     completed_by_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     instance: Mapped["ProcessInstance"] = relationship("ProcessInstance", back_populates="tasks")
+    events: Mapped[List["ProcessTaskEvent"]] = relationship(
+        "ProcessTaskEvent",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="ProcessTaskEvent.id",
+    )
 
     __table_args__ = (
         Index("ix_process_task_status_assignee", "status", "assignee_user_id"),
         Index("ix_process_task_instance_status", "instance_id", "status"),
+        # 单令牌语义的数据库兜底：一个实例同一时刻最多一个 OPEN 任务。
+        # 并行网关上线时需要删除这个索引，改为按令牌约束。
+        Index(
+            "uq_process_task_one_open",
+            "instance_id",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING','CLAIMED')"),
+            sqlite_where=text("status IN ('PENDING','CLAIMED')"),
+        ),
     )
+
+
+class ProcessTaskEvent(Base):
+    """任务生命周期事件，append-only。
+
+    与审计日志的区别：审计日志面向「谁改了什么」，任务事件面向「这个任务经历了什么」，
+    可以直接在任务详情里回放，不受其他业务日志淹没。
+    """
+
+    __tablename__ = "process_task_event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "process_task.id",
+            ondelete="CASCADE",
+            name="fk_process_task_event_task",
+        ),
+        index=True,
+    )
+    instance_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "process_instance.id",
+            ondelete="CASCADE",
+            name="fk_process_task_event_instance",
+        ),
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(20), index=True)
+    from_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_task_event_actor",
+        ),
+        nullable=True,
+    )
+    actor_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    task: Mapped["ProcessTask"] = relationship("ProcessTask", back_populates="events")
+
+    __table_args__ = (Index("ix_process_task_event_task_created", "task_id", "created_at"),)
+
+
+class IdempotencyRecord(Base):
+    """写命令幂等记录。
+
+    `(scope, key)` 唯一；请求先插入 PENDING 占位，成功后写回响应。
+    并发重复请求会在唯一索引上排队，后到者读取首次结果。
+    """
+
+    __tablename__ = "idempotency_record"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(32), index=True)
+    key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    response: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (UniqueConstraint("scope", "key", name="uq_idempotency_scope_key"),)
 
 
 class FormDefinition(Base):

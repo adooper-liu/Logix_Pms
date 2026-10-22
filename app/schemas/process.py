@@ -238,3 +238,8 @@ class DesignAnalysis(BaseModel):
     nodes: List[NodeMetric]
     suggestions: List[Suggestion]
     recommended_methodology: str = Field(description="基于测算结果给出的方法论建议")
+
+
+class DesignValidation(BaseModel):
+    errors: List[str] = []
+    warnings: List[str] = []

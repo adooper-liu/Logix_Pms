@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
@@ -34,6 +34,7 @@ from app.schemas.execution import (
     ProcessRuleUpdate,
     TaskAssignRequest,
     TaskCompleteRequest,
+    TaskEventOut,
     TaskOut,
 )
 from app.services import audit as audit_service
@@ -41,6 +42,7 @@ from app.services import escalation as escalation_service
 from app.services import execution as execution_service
 from app.services import execution_flow as flow_service
 from app.services import forms as forms_service
+from app.services import idempotency as idempotency_service
 from app.services import integrations as integration_service
 from app.services import notifications as notification_service
 from app.services import org_unit as org_service
@@ -518,7 +520,17 @@ def list_instances(
     status_code=status.HTTP_201_CREATED,
     summary="启动流程实例",
 )
-def start_instance(payload: InstanceStartRequest, db: DbSession, user: WriteUser):
+def start_instance(
+    payload: InstanceStartRequest,
+    db: DbSession,
+    user: WriteUser,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    digest = idempotency_service.request_hash(payload)
+    record = idempotency_service.begin(db, "instance.start", idempotency_key, digest)
+    if record is not None and record.status == "SUCCESS":
+        return InstanceOut.model_validate(record.response)
+
     process = db.get(ProcessArch, payload.process_id)
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
@@ -531,9 +543,11 @@ def start_instance(payload: InstanceStartRequest, db: DbSession, user: WriteUser
         instance.id,
         f"启动流程 {instance.code}：{instance.process_name}",
     )
+    out = execution_service.instance_out(instance)
+    idempotency_service.finish(record, out.model_dump(mode="json"))
     db.commit()
     db.refresh(instance)
-    return execution_service.instance_out(instance)
+    return out
 
 
 @router.get(
@@ -588,7 +602,7 @@ def suspend_instance(
 )
 def resume_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
-    execution_service.resume_instance(db, instance)
+    execution_service.resume_instance(db, instance, user)
     integration_service.enqueue(db, "instance.resumed", flow_service.instance_event(instance))
     notification_service.notify(
         db,
@@ -620,7 +634,7 @@ def resume_instance(instance_id: int, db: DbSession, user: ManagerUser):
 )
 def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
-    execution_service.cancel_instance(db, instance)
+    execution_service.cancel_instance(db, instance, user)
     integration_service.enqueue(db, "instance.cancelled", flow_service.instance_event(instance))
     notification_service.notify(
         db,
@@ -702,6 +716,16 @@ def get_task(task_id: int, db: DbSession):
     return execution_service.task_out(execution_service.get_task(db, task_id))
 
 
+@router.get(
+    "/tasks/{task_id}/events",
+    response_model=List[TaskEventOut],
+    summary="任务生命周期事件",
+)
+def list_task_events(task_id: int, db: DbSession, user: CurrentUser):
+    execution_service.get_task(db, task_id)
+    return execution_service.list_task_events(db, task_id)
+
+
 @router.post("/tasks/{task_id}/claim", response_model=TaskOut, summary="认领任务")
 def claim_task(task_id: int, db: DbSession, user: WriteUser):
     task = execution_service.get_task(db, task_id)
@@ -716,7 +740,18 @@ def claim_task(task_id: int, db: DbSession, user: WriteUser):
 
 
 @router.post("/tasks/{task_id}/complete", response_model=TaskOut, summary="完成任务并推进流程")
-def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, user: WriteUser):
+def complete_task(
+    task_id: int,
+    payload: TaskCompleteRequest,
+    db: DbSession,
+    user: WriteUser,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    digest = idempotency_service.request_hash(payload)
+    record = idempotency_service.begin(db, "task.complete", idempotency_key, digest)
+    if record is not None and record.status == "SUCCESS":
+        return TaskOut.model_validate(record.response)
+
     task = execution_service.get_task(db, task_id)
     instance_code = task.instance.code
     flow_service.complete_task(db, task, user, payload)
@@ -728,9 +763,11 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
         task.id,
         f"完成任务 {task.name}（{instance_code}）",
     )
+    out = execution_service.task_out(task)
+    idempotency_service.finish(record, out.model_dump(mode="json"))
     db.commit()
     db.refresh(task)
-    return execution_service.task_out(task)
+    return out
 
 
 @router.patch(
@@ -740,7 +777,7 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
 )
 def assign_task(task_id: int, payload: TaskAssignRequest, db: DbSession, user: ManagerUser):
     task = execution_service.get_task(db, task_id)
-    execution_service.assign_task(db, task, payload.assignee_user_id)
+    execution_service.assign_task(db, task, payload.assignee_user_id, user)
     integration_service.enqueue(db, "task.assigned", flow_service.task_event(task))
     if task.assignee_user_id is not None:
         notification_service.notify(

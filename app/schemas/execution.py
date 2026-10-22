@@ -129,6 +129,20 @@ class TaskOut(BaseModel):
     next_options: List[NextOption] = []
 
 
+class TaskEventOut(BaseModel):
+    id: int
+    task_id: int
+    event_type: str
+    event_label: str
+    from_status: Optional[str] = None
+    from_status_label: Optional[str] = None
+    to_status: Optional[str] = None
+    to_status_label: Optional[str] = None
+    actor_name: Optional[str] = None
+    detail: Dict = {}
+    created_at: UtcDateTime
+
+
 class InstanceOut(BaseModel):
     id: int
     code: str

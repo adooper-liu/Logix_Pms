@@ -139,6 +139,52 @@ def test_import_rejects_malformed_and_unsafe_xml(client):
         client.delete(f"{API}/process-map/{pid}")
 
 
+def test_round_trip_preserves_pms_metrics(client):
+    source = _create_process(client, "L3-BPMN-MET")
+    target = None
+    try:
+        saved = client.put(
+            f"{API}/processes/{source}/design",
+            json={
+                "nodes": [
+                    {
+                        "node_key": "a",
+                        "name": "测算节点",
+                        "node_type": "TASK",
+                        "lane": "L",
+                        "duration_minutes": 12.5,
+                        "wait_minutes": 3,
+                        "cost": 4.5,
+                        "rework_rate": 0.2,
+                        "approval_levels": 2,
+                        "is_value_added": False,
+                    }
+                ],
+                "edges": [],
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        xml = client.get(f"{API}/processes/{source}/bpmn").text
+        assert "pms:durationMinutes" in xml
+
+        target = _create_process(client, "L3-BPMN-MET2")
+        imported = client.post(
+            f"{API}/processes/{target}/bpmn", json={"xml": xml, "expected_version": 0}
+        )
+        assert imported.status_code == 200, imported.text
+        node = imported.json()["nodes"][0]
+        assert node["duration_minutes"] == 12.5
+        assert node["wait_minutes"] == 3
+        assert node["cost"] == 4.5
+        assert node["rework_rate"] == 0.2
+        assert node["approval_levels"] == 2
+        assert node["is_value_added"] is False
+    finally:
+        client.delete(f"{API}/process-map/{source}")
+        if target is not None:
+            client.delete(f"{API}/process-map/{target}")
+
+
 def test_import_version_conflict(client):
     pid = _create_process(client, "L3-BPMN-VER")
     try:

@@ -23,11 +23,13 @@ from app.models.deliverable import (
 from app.models.enums import Role, TaskStatus
 from app.models.execution import (
     FormDefinition,
+    IdempotencyRecord,
     NodeAssignment,
     ProcessExecutionConfig,
     ProcessInstance,
     ProcessRule,
     ProcessTask,
+    ProcessTaskEvent,
 )
 from app.models.governance import GovernanceFinding
 from app.models.integration import (
@@ -765,6 +767,8 @@ def _wipe(db: Session) -> None:
         NodeAssignment,
         ProcessTask,
         ProcessInstance,
+        ProcessTaskEvent,
+        IdempotencyRecord,
         ProcessBenchmarkMap,
         ProcessEdge,
         ProcessNode,

@@ -1029,8 +1029,12 @@ function renderFormFields(fields) {
 async function openTask(taskId, forceManual) {
   const gen = openModal('加载中…', skeleton(4));
   let task;
+  let events = [];
   try {
-    task = await GET('/execution/tasks/' + taskId);
+    [task, events] = await Promise.all([
+      GET('/execution/tasks/' + taskId),
+      GET('/execution/tasks/' + taskId + '/events'),
+    ]);
   } catch (e) {
     if (modalAlive(gen)) {
       openModal('加载失败', `<div class="errbar"><div>${esc(e.message)}</div></div>`);
@@ -1038,6 +1042,14 @@ async function openTask(taskId, forceManual) {
     return;
   }
   if (!modalAlive(gen)) return;
+  const eventRows = (events || []).map((evt) => `
+    <tr><td class="tiny">${dtShort(evt.created_at)}</td>
+      <td>${esc(evt.event_label)}</td>
+      <td class="tiny">${evt.from_status_label
+        ? esc(evt.from_status_label) + ' → ' : ''}${esc(evt.to_status_label || '')}</td>
+      <td>${esc(evt.actor_name || '系统')}</td>
+      <td class="tiny">${esc((evt.detail && evt.detail.comment) || '')}</td></tr>`).join('')
+    || emptyRow(5, '暂无任务事件');
   const me = AUTH.user ? AUTH.user.id : null;
   const manualMode = !!forceManual || manualBranchTask === task.id;
   const overdue = task.due_at && new Date(task.due_at).getTime() < Date.now();
@@ -1090,6 +1102,11 @@ async function openTask(taskId, forceManual) {
             <textarea id="exForm" placeholder='{"审批意见":"同意","金额":10000}'>{}</textarea></div>`}
       <div class="field"><label>处理意见 / 备注</label>
         <input id="exComment" placeholder="处理结论或说明"></div>` : ''}
+    <h3 class="mt">任务历史</h3>
+    <table class="tbl">
+      <thead><tr><th>时间</th><th>事件</th><th>状态</th><th>处理人</th><th>说明</th></tr></thead>
+      <tbody>${eventRows}</tbody>
+    </table>
     ${canAct && task.status !== 'COMPLETED'
       ? '<div class="note">完成后流程会自动推进到下一节点；没有后续节点时实例结束。</div>'
       : suspended

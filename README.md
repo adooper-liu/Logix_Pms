@@ -350,7 +350,7 @@ scripts/
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
   verify_frontend.py  无头浏览器联调自检（11 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
-docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件与集成说明
+docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件、执行与设计器差距分析
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
@@ -407,6 +407,8 @@ BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实�
 [docs/bpmn-editor-and-attachments.md](docs/bpmn-editor-and-attachments.md)；
 步骤契约、工具预制模板、交付物版本与集团/分公司继承见
 [docs/process-deliverable-versioning.md](docs/process-deliverable-versioning.md)。
+流程执行与设计器的行业最佳实践、差距矩阵与专业化路线见
+[docs/process-execution-gap-analysis.md](docs/process-execution-gap-analysis.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
@@ -429,10 +431,10 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC 对标切换与覆盖率；流程详情含标准配套文件（含上级继承）与管理入口 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
-| 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
+| 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
 | 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
-| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道建模、节点增删改、改动即时保存并重算指标与建议；BPMN 2.0 导入/导出 |
+| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道画布：节点拖拽、连线绘制/编辑、缩放平移、撤销重做、模型校验、节点/连线属性、改动即时保存并重算指标与建议；BPMN 2.0 导入/导出 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 | 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
@@ -595,7 +597,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET/PUT | `/execution/assignments` | 节点分派：角色 / 组织范围 / 默认处理人 / 节点时限 / 升级策略（MANAGER+ 写入；随实例启动冻结） |
 | POST | `/execution/escalations/scan` | 扫描已到升级时限的任务并改派（MANAGER+；支持 process_id / limit） |
 | GET | `/execution/instances` | 实例列表，支持 status / process_id |
-| POST | `/execution/instances` | 启动实例；可传 variables 与按节点指派 assignments |
+| POST | `/execution/instances` | 启动实例；可传 variables 与按节点指派 assignments；支持 `Idempotency-Key` |
 | GET | `/execution/instances/{id}` | 实例详情、任务时间线与变量 |
 | POST | `/execution/instances/{id}/cancel` | 取消运行中/已挂起的实例（MANAGER+），未完成任务一并取消 |
 | POST | `/execution/instances/{id}/suspend` | 挂起运行中的实例（MANAGER+，可带原因）；挂起期间任务不可认领/完成 |
@@ -603,8 +605,9 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | DELETE | `/execution/instances/{id}` | 删除实例及任务（MANAGER+，用于清理） |
 | GET | `/execution/tasks` | 任务队列：status / assignee=me\|id / instance_id / process_id / only_open |
 | GET | `/execution/tasks/{id}` | 任务详情（含可选下一步节点） |
-| POST | `/execution/tasks/{id}/claim` | 认领任务 |
-| POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边默认按规则自动路由，未命中时传 `next_node_key` |
+| GET | `/execution/tasks/{id}/events` | 任务生命周期事件（创建/认领/改派/升级/顺延/完成/取消） |
+| POST | `/execution/tasks/{id}/claim` | 认领任务（条件更新，防并发覆盖） |
+| POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边默认按规则自动路由，未命中时传 `next_node_key`；支持 `Idempotency-Key` |
 | PATCH | `/execution/tasks/{id}/assignee` | 改派或退回公共队列（MANAGER+） |
 | GET/POST | `/execution/forms` | 节点表单定义查询 / 新建（写入需 MANAGER+） |
 | PATCH/DELETE | `/execution/forms/{id}` | 修改 / 删除表单定义（MANAGER+） |
@@ -661,8 +664,10 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/processes/{id}/design` | 读取泳道模型 |
-| PUT | `/processes/{id}/design` | 覆盖式保存（校验 node_key 唯一、连线不悬空） |
+| PUT | `/processes/{id}/design` | 覆盖式保存（node_key 唯一、连线不悬空、自环/重复连线拦截） |
 | POST | `/processes/{id}/design/analyze` | 测算已保存模型 |
+| POST | `/processes/{id}/design/validate` | 校验已保存模型（errors / warnings） |
+| POST | `/design/validate` | 校验前端提交的模型，不落库 |
 | GET | `/processes/{id}/bpmn` | 导出 BPMN 2.0 XML |
 | POST | `/processes/{id}/bpmn` | 导入 BPMN 2.0 并替换设计模型（支持 expected_version） |
 | POST | `/design/analyze` | 边改边算，不落库 |
@@ -912,9 +917,9 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
 8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、分支按规则自动路由、上游表单数据进入
    后续判断、启动按节点指派、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限
-   与超期升级（扫描后自动改派）、实例挂起/恢复、BPMN 2.0 导入导出、站内通知、
-   ERP/OA 出站 Webhook 与 HMAC 入站 Webhook；下一步补并行网关与子流程、ERP 拉取接口、
-   定时投递 worker。
+   与超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成与条件更新、
+   BPMN 2.0 导入导出、站内通知、ERP/OA 出站 Webhook 与 HMAC 入站 Webhook；下一步补并行
+   网关与子流程、ERP 拉取接口、定时投递 worker。
 9. **交付物与标准文件**：本地卷存储、上传/下载、SHA-256、扩展名/魔数校验、
    项目交付物（定义/实例/版本/审批）、流程标准文件（L1–L4 唯一源、复制到项目、
    项目成果晋升、流程详情配套文件入口）、工具模板库与前端三页签均已完成；

@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.timeutil import utcnow
@@ -23,6 +23,7 @@ from app.models.execution import ProcessInstance, ProcessTask
 from app.models.user import User
 from app.schemas.execution import EscalationScanResult
 from app.services import audit as audit_service
+from app.services import execution as execution_service
 from app.services import execution_flow as flow_service
 from app.services import integrations as integration_service
 from app.services import notifications as notification_service
@@ -97,14 +98,46 @@ def scan_escalations(
 
         previous_id = task.assignee_user_id
         previous_name = task.assignee_name
+        previous_status = task.status
         instance = task.instance
-        task.assignee_user_id = target.id
-        task.assignee_name = target.display_name
-        task.status = TaskStatus.CLAIMED.value
-        task.claimed_at = task.claimed_at or now
-        task.escalated_at = now
-        task.escalated_to_user_id = target.id
-        task.escalated_to_name = target.display_name
+        result_update = db.execute(
+            update(ProcessTask)
+            .where(
+                ProcessTask.id == task.id,
+                ProcessTask.status.in_(OPEN_STATUSES),
+                ProcessTask.escalated_at.is_(None),
+                ProcessTask.row_version == task.row_version,
+            )
+            .values(
+                assignee_user_id=target.id,
+                assignee_name=target.display_name,
+                status=TaskStatus.CLAIMED.value,
+                claimed_at=task.claimed_at or now,
+                escalated_at=now,
+                escalated_to_user_id=target.id,
+                escalated_to_name=target.display_name,
+                row_version=ProcessTask.row_version + 1,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result_update.rowcount != 1:
+            result.skipped += 1
+            continue
+        db.flush()
+        db.refresh(task)
+        execution_service.record_task_event(
+            db,
+            task,
+            "ESCALATED",
+            previous_status,
+            TaskStatus.CLAIMED.value,
+            actor,
+            {
+                "previous_assignee": previous_name,
+                "assignee_user_id": target.id,
+                "assignee_name": target.display_name,
+            },
+        )
 
         notification_service.notify(
             db,
