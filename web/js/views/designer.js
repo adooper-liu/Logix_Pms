@@ -1,5 +1,5 @@
 /* 视图：designer */
-import { esc, num, dur, NODE_LABEL, NODE_CLASS } from '../core/format.js';
+import { esc, num, dur, dtShort, emptyRow, NODE_LABEL, NODE_CLASS } from '../core/format.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
@@ -71,7 +71,8 @@ function paintDesigner() {
   st.lanes = lanes.map((l) => l.name);
 
   const proc = (st.processes || []).find((p) => p.id === st.processId) || {};
-  const editable = canWrite() && (canManage()
+  const inReview = model.status === 'IN_REVIEW';
+  const editable = !inReview && canWrite() && (canManage()
     || (AUTH.user && proc.owner_user_id === AUTH.user.id));
 
   const bnSet = new Set((st.analysis ? st.analysis.nodes : []).filter((n) => n.is_bottleneck)
@@ -134,20 +135,40 @@ function paintDesigner() {
       </div>
     </div>`;
 
+  const statusTone = {
+    DRAFT: 't-gry', IN_REVIEW: 't-yel', PUBLISHED: 't-grn', SUPERSEDED: 't-gry',
+  };
+  const statusBadge = model.status
+    ? `<span class="tag ${statusTone[model.status] || 't-blu'}">${
+      esc(model.status_label || model.status)} · v${model.draft_version || model.version}</span>`
+    : '';
+  const publishable = canManage() && (model.status === 'DRAFT' || model.status === 'IN_REVIEW');
+
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
         <div>
           <h2>流程设计器<span class="module-badge">建模与测算</span> · ${esc(model.process_name || '')}</h2>
-          <div class="desc">泳道式建模 · 点击节点编辑 · 改动即时保存并重算指标；模型用于流程执行（实例使用启动时快照）</div>
+          <div class="desc">${statusBadge}
+            运行时版本 ${model.published_version ? 'v' + model.published_version : '尚未发布'} ·
+            泳道式建模 · 改动保存为草稿，发布后才影响新实例</div>
         </div>
         <div class="gap">
           <select class="sel" onchange="switchProcess(this.value)">${opts}</select>
+          <button class="btn btn-g" onclick="openVersionHistory()">版本历史</button>
+          ${model.status === 'DRAFT' && editable
+            ? '<button class="btn btn-g" onclick="submitReview()">提交评审</button>' : ''}
+          ${model.status === 'IN_REVIEW' && canManage()
+            ? '<button class="btn btn-g" onclick="rejectReview()">驳回</button>' : ''}
+          ${publishable
+            ? '<button class="btn btn-p" onclick="publishDesign()">发布到运行时</button>' : ''}
           <button class="btn btn-g" onclick="exportBpmn()">导出 BPMN</button>
           ${editable ? '<button class="btn btn-g" onclick="importBpmn()">导入 BPMN</button>' : ''}
-          ${editable
-            ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
-            : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
+          ${inReview
+            ? '<span class="tiny" style="align-self:center">评审中，暂不可编辑</span>'
+            : editable
+              ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
+              : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
           <a class="link-btn" onclick="go('execution')">去流程执行 →</a>
           <button class="btn btn-p" onclick="reanalyze()">重新测算</button>
         </div>
@@ -613,6 +634,126 @@ function deleteEdge(index) {
   persistDesign('连线已删除');
 }
 
+async function submitReview() {
+  const note = window.prompt('评审说明（可选；取消则不提交）', '');
+  if (note === null) return;
+  try {
+    await POST('/processes/' + state.designer.processId + '/design/submit-review', {
+      note: note.trim() || null,
+    });
+    toast('已提交评审');
+    await reloadDesign();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function rejectReview() {
+  const note = window.prompt('驳回原因（可选）', '');
+  if (note === null) return;
+  try {
+    await POST('/processes/' + state.designer.processId + '/design/reject', {
+      note: note.trim() || null,
+    });
+    toast('已驳回，草稿可继续修改');
+    await reloadDesign();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function publishDesign() {
+  if (!confirm('发布后，新启动的流程实例将使用这个模型；运行中的实例仍用启动时快照。确定发布？')) {
+    return;
+  }
+  try {
+    await POST('/processes/' + state.designer.processId + '/design/publish', {
+      expected_version: state.designer.model.version,
+      change_note: null,
+    });
+    toast('模型已发布到运行时');
+    await reloadDesign();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function openVersionHistory() {
+  const pid = state.designer.processId;
+  let rows = [];
+  try {
+    rows = await GET('/processes/' + pid + '/design/versions');
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const current = state.designer.model || {};
+  const tone = { DRAFT: 't-gry', IN_REVIEW: 't-yel', PUBLISHED: 't-grn', SUPERSEDED: 't-gry' };
+  const body = rows.map((v) => `
+    <tr>
+      <td><b>v${v.version}</b></td>
+      <td><span class="tag ${tone[v.status] || 't-blu'}">${esc(v.status_label)}</span></td>
+      <td class="tiny">${esc(v.change_note || '—')}</td>
+      <td class="tiny">${esc(v.created_by_name || '—')}<div>${dtShort(v.created_at)}</div></td>
+      <td class="tiny">${v.published_at ? dtShort(v.published_at) : '—'}</td>
+      <td>
+        ${v.id !== current.version_id
+          ? `<button class="btn-sm" onclick="diffVersion(${v.id})">对比当前</button>` : ''}
+        ${v.version !== current.version
+          ? `<button class="btn-sm" onclick="rollbackVersion(${v.id})">回滚到此版</button>` : ''}
+      </td>
+    </tr>`).join('') || emptyRow(6, '还没有模型版本');
+  openModal('模型版本历史', `
+    <div class="note">草稿会覆盖；已发布版本保留。回滚会生成新草稿，发布后才影响运行时。</div>
+    <table class="tbl">
+      <thead><tr><th>版本</th><th>状态</th><th>说明</th><th>创建人</th><th>发布时间</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>`,
+    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+}
+
+async function diffVersion(versionId) {
+  const currentId = state.designer.model && state.designer.model.version_id;
+  if (!currentId) return toast('当前模型还没有版本记录', true);
+  try {
+    const d = await GET(
+      '/processes/' + state.designer.processId + '/design/diff?from_version_id=' +
+      versionId + '&to_version_id=' + currentId,
+    );
+    const line = (label, items, format) => items.length
+      ? `<div class="diff-block"><b>${label}（${items.length}）</b>${
+        items.map((item) => `<div class="tiny">${esc(format(item))}</div>`).join('')}</div>`
+      : '';
+    const content = [
+      line('新增节点', d.nodes_added, (x) => x.node_key + ' ' + (x.name || '')),
+      line('删除节点', d.nodes_removed, (x) => x.node_key + ' ' + (x.name || '')),
+      line('修改节点', d.nodes_changed,
+        (x) => x.node_key + '：' + x.fields.join('、')),
+      line('新增连线', d.edges_added, (x) => x.source_key + ' → ' + x.target_key),
+      line('删除连线', d.edges_removed, (x) => x.source_key + ' → ' + x.target_key),
+      line('修改连线', d.edges_changed,
+        (x) => x.source_key + ' → ' + x.target_key + '：' + x.fields.join('、')),
+    ].join('') || '<div class="empty">两个版本没有差异</div>';
+    openModal(`版本差异 · v${d.from_version} → v${d.to_version}`, content,
+      '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function rollbackVersion(versionId) {
+  if (!confirm('回滚会在当前模型上创建一个新草稿，发布后才影响运行时。继续？')) return;
+  try {
+    await POST(
+      '/processes/' + state.designer.processId + '/design/versions/' +
+      versionId + '/rollback', { note: null });
+    toast('已从历史版本创建草稿');
+    closeModal();
+    await reloadDesign();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 function setDesignerTab(tab) {
   state.designer.tab = tab;
   RENDERERS.designer();
@@ -769,6 +910,7 @@ function paintSuggestions(a) {
 function switchProcess(id) {
   state.designer.processId = Number(id);
   state.designer.processCode = (state.designer.processes.find((p) => p.id === Number(id)) || {}).code;
+  state.designer.tab = 'model';
   state.designer.zoom = 1;
   state.designer.pan = { x: 0, y: 0 };
   state.designer.fitted = false;
@@ -898,10 +1040,75 @@ function openNodeEditor(nodeKey) {
     '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
 }
 
-function editNode(nodeKey) {
+async function editNode(nodeKey) {
   const n = state.designer.model.nodes.find((x) => x.node_key === nodeKey);
   if (!n) return;
   const laneList = [...new Set(state.designer.model.nodes.map((x) => x.lane))];
+  const pid = state.designer.processId;
+
+  let assignment = null;
+  let users = [];
+  let orgs = [];
+  let roles = [];
+  let executionBlock = '';
+  if (canManage()) {
+    try {
+      const [assignments, assignees, orgRows, meta] = await Promise.all([
+        GET('/execution/assignments?process_id=' + pid),
+        GET('/execution/assignees'),
+        GET('/org-units'),
+        GET('/auth/meta'),
+      ]);
+      assignment = assignments.find((x) => x.node_key === nodeKey) || {};
+      users = assignees;
+      orgs = orgRows;
+      roles = meta.roles || [];
+      const roleOpts = roles.map((r) =>
+        `<option value="${esc(r.value)}"${assignment.role === r.value ? ' selected' : ''}>${
+          esc(r.label)}</option>`).join('');
+      const orgOpts = orgs.map((o) =>
+        `<option value="${o.id}"${assignment.org_unit_id === o.id ? ' selected' : ''}>${
+          esc(o.name)}</option>`).join('');
+      const userOpts = users.map((u) =>
+        `<option value="${u.id}"${assignment.default_assignee_user_id === u.id
+          ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
+      ).join('');
+      const escUserOpts = users.map((u) =>
+        `<option value="${u.id}"${assignment.escalation_user_id === u.id
+          ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
+      ).join('');
+      executionBlock = `
+        <div class="designer-exec-config">
+          <div class="between mb"><h3 style="margin:0">执行配置</h3>
+            <button class="btn-sm btn-p" onclick="saveNodeAssignment('${esc(nodeKey)}')">
+              保存执行配置</button></div>
+          <div class="desc" style="margin:0 0 8px">只影响发布后的新实例；运行中实例使用启动快照</div>
+          <div class="row2">
+            <div class="field"><label>候选角色</label>
+              <select id="edRole"><option value="">不限</option>${roleOpts}</select></div>
+            <div class="field"><label>限定组织</label>
+              <select id="edOrg"><option value="">不限</option>${orgOpts}</select></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>默认处理人</label>
+              <select id="edAssignee"><option value="">公共队列</option>${userOpts}</select></div>
+            <div class="field"><label>节点时限（小时）</label>
+              <input id="edDue" type="number" min="0" max="8760"
+                value="${assignment.due_hours ?? ''}" placeholder="跟随流程"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>升级时限（小时）</label>
+              <input id="edEscHours" type="number" min="0" max="8760"
+                value="${assignment.escalation_hours ?? ''}" placeholder="跟随流程"></div>
+            <div class="field"><label>升级处理人</label>
+              <select id="edEscUser"><option value="">跟随流程</option>${escUserOpts}</select></div>
+          </div>
+        </div>`;
+    } catch (e) {
+      executionBlock = `<div class="note mb">执行配置加载失败：${esc(e.message)}</div>`;
+    }
+  }
+
   openModal('编辑活动节点 · ' + n.name, `
     <div class="row2">
       <div class="field"><label>活动名称</label><input id="edName" value="${esc(n.name)}"></div>
@@ -938,12 +1145,45 @@ function editNode(nodeKey) {
           <option value="false"${!n.is_value_added ? ' selected' : ''}>非增值（NVA）</option>
         </select></div>
     </div>
+    ${executionBlock}
     <div class="note">节点的「等待时间」是周期效率的主要杀手。真实场景下把它按现场实测填进去，
       右侧测算会立刻反映出来。</div>`,
     `<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"
        onclick="deleteNode('${nodeKey}')">删除节点</button>
      <button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveNode('${nodeKey}')">保存</button>`);
+     <button class="btn btn-p" onclick="saveNode('${nodeKey}')">保存节点</button>`);
+}
+
+async function saveNodeAssignment(nodeKey) {
+  const pid = state.designer.processId;
+  const numOrNull = (id) => {
+    const raw = document.getElementById(id).value.trim();
+    if (raw === '') return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0 || value > 8760) {
+      throw new Error('时限应为 0–8760 小时');
+    }
+    return value;
+  };
+  try {
+    const role = document.getElementById('edRole').value || null;
+    const org = document.getElementById('edOrg').value;
+    const assignee = document.getElementById('edAssignee').value;
+    const escUser = document.getElementById('edEscUser').value;
+    await PUT('/execution/assignments', {
+      process_id: pid,
+      node_key: nodeKey,
+      role,
+      org_unit_id: org ? Number(org) : null,
+      default_assignee_user_id: assignee ? Number(assignee) : null,
+      due_hours: numOrNull('edDue'),
+      escalation_hours: numOrNull('edEscHours'),
+      escalation_user_id: escUser ? Number(escUser) : null,
+    });
+    toast('节点执行配置已保存');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function saveNode(nodeKey) {
@@ -990,8 +1230,10 @@ function addLaneNode() {
 
 export {
   addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, cloneModel,
-  deleteEdge, deleteNode, editNode, exportBpmn, fitDesigner, importBpmn,
-  openDesigner, openEdgeEditor, openNodeEditor, paintDesigner, paintMetrics,
-  paintSuggestions, persistDesign, reanalyze, redoDesigner, reloadDesign,
-  renderDesigner, saveEdge, saveNode, setDesignerTab, switchProcess, undoDesigner,
+  deleteEdge, deleteNode, diffVersion, editNode, exportBpmn, fitDesigner, importBpmn,
+  openDesigner, openEdgeEditor, openNodeEditor, openVersionHistory, paintDesigner,
+  paintMetrics, paintSuggestions, persistDesign, publishDesign, reanalyze,
+  redoDesigner, rejectReview, reloadDesign, renderDesigner, rollbackVersion,
+  saveEdge, saveNode, saveNodeAssignment, setDesignerTab, submitReview, switchProcess,
+  undoDesigner,
 };

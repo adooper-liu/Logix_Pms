@@ -351,6 +351,9 @@ class NodeAssignment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821
+    process: Mapped["ProcessArch"] = relationship(  # noqa: F821
+        "ProcessArch", back_populates="node_assignments"
+    )
     default_assignee: Mapped[Optional["User"]] = relationship(  # noqa: F821
         "User", foreign_keys=[default_assignee_user_id]
     )

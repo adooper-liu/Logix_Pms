@@ -42,7 +42,12 @@ from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit
-from app.models.process import ProcessArch, ProcessEdge, ProcessNode
+from app.models.process import (
+    ProcessArch,
+    ProcessEdge,
+    ProcessModelVersion,
+    ProcessNode,
+)
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
@@ -770,6 +775,7 @@ def _wipe(db: Session) -> None:
         ProcessTaskEvent,
         IdempotencyRecord,
         ProcessBenchmarkMap,
+        ProcessModelVersion,
         ProcessEdge,
         ProcessNode,
         ProjectStep,

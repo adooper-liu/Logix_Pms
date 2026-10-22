@@ -46,6 +46,7 @@ from app.services import idempotency as idempotency_service
 from app.services import integrations as integration_service
 from app.services import notifications as notification_service
 from app.services import org_unit as org_service
+from app.services import process_model as model_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
 
@@ -166,11 +167,7 @@ def scan_escalations(
 )
 def list_assignments(db: DbSession, user: CurrentUser, process_id: int):
     _ensure_process(db, process_id)
-    nodes = db.scalars(
-        select(ProcessNode)
-        .where(ProcessNode.process_id == process_id)
-        .order_by(ProcessNode.sequence_order, ProcessNode.id)
-    ).all()
+    nodes = _model_nodes(db, process_id)
     rows = {
         row.node_key: row
         for row in db.scalars(
@@ -218,11 +215,13 @@ def save_assignment(payload: NodeAssignmentUpdate, db: DbSession, user: ManagerU
             "escalation_user_id": payload.escalation_user_id,
         },
     )
-    node = db.scalar(
-        select(ProcessNode).where(
-            ProcessNode.process_id == payload.process_id,
-            ProcessNode.node_key == payload.node_key,
-        )
+    node = next(
+        (
+            item
+            for item in _model_nodes(db, payload.process_id)
+            if item.node_key == payload.node_key
+        ),
+        None,
     )
     audit_service.record(
         db,
@@ -302,15 +301,17 @@ def _ensure_process(db, process_id: int) -> ProcessArch:
     return process
 
 
+def _model_nodes(db, process_id: int):
+    nodes, _edges = model_service.rows_from_snapshot(
+        process_id, model_service.current_snapshot(db, process_id)
+    )
+    return nodes
+
+
 def _ensure_node(db, process_id: int, node_key: str) -> None:
     if not node_key:
         return
-    exists = db.scalar(
-        select(ProcessNode.id).where(
-            ProcessNode.process_id == process_id, ProcessNode.node_key == node_key
-        )
-    )
-    if exists is None:
+    if not any(node.node_key == node_key for node in _model_nodes(db, process_id)):
         raise HTTPException(status_code=400, detail=f"节点 {node_key} 不存在于该流程")
 
 

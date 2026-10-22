@@ -431,7 +431,7 @@ def start_instance(
         process_name=process.name,
         project_id=payload.project_id,
         status=InstanceStatus.RUNNING.value,
-        definition_version=process.model_version,
+        definition_version=process.published_model_version or process.model_version,
         snapshot=snapshot,
         variables=payload.variables or {},
         started_by_id=user.id,
@@ -822,7 +822,7 @@ def executable_processes(db: Session) -> List[ExecutableProcessOut]:
             name=p.name,
             level=p.level,
             node_count=counts.get(p.id, 0),
-            model_version=p.model_version,
+            model_version=p.published_model_version or p.model_version,
         )
         for p in rows
     ]

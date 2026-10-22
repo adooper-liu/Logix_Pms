@@ -434,7 +434,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
 | 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
-| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道画布：节点拖拽、连线绘制/编辑、缩放平移、撤销重做、模型校验、节点/连线属性、改动即时保存并重算指标与建议；BPMN 2.0 导入/导出 |
+| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道画布：节点拖拽、连线绘制/编辑、缩放平移、撤销重做、模型校验、节点/连线属性；草稿 → 评审 → 发布、版本历史/差异/回滚；BPMN 2.0 导入/导出 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 | 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
@@ -664,8 +664,15 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/processes/{id}/design` | 读取泳道模型 |
-| PUT | `/processes/{id}/design` | 覆盖式保存（node_key 唯一、连线不悬空、自环/重复连线拦截） |
-| POST | `/processes/{id}/design/analyze` | 测算已保存模型 |
+| PUT | `/processes/{id}/design` | 保存草稿（node_key 唯一、连线不悬空、自环/重复连线拦截；不直接影响运行时） |
+| POST | `/processes/{id}/design/submit-review` | 提交模型评审 |
+| POST | `/processes/{id}/design/reject` | 驳回模型评审（MANAGER+） |
+| POST | `/processes/{id}/design/publish` | 发布草稿到运行时（MANAGER+，原子替换已发布模型） |
+| GET | `/processes/{id}/design/versions` | 模型版本历史 |
+| GET | `/processes/{id}/design/versions/{version_id}` | 版本详情（快照节点/连线） |
+| POST | `/processes/{id}/design/versions/{version_id}/rollback` | 从历史版本创建新草稿 |
+| GET | `/processes/{id}/design/diff` | 比较两个版本（from_version_id / to_version_id） |
+| POST | `/processes/{id}/design/analyze` | 测算当前草稿/已发布模型 |
 | POST | `/processes/{id}/design/validate` | 校验已保存模型（errors / warnings） |
 | POST | `/design/validate` | 校验前端提交的模型，不落库 |
 | GET | `/processes/{id}/bpmn` | 导出 BPMN 2.0 XML |

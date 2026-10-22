@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.timeutil import utcnow
 
 
 class ProcessArch(Base):
@@ -48,6 +49,8 @@ class ProcessArch(Base):
 
     # 流程模型的并发控制：每次整份保存 +1，客户端提交时带上自己看到的版本
     model_version: Mapped[int] = mapped_column(Integer, default=0)
+    # 最近一次发布到运行时的版本；新实例按这个版本快照
+    published_model_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     model_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     children: Mapped[List["ProcessArch"]] = relationship(
@@ -58,6 +61,28 @@ class ProcessArch(Base):
     )
     parent: Mapped[Optional["ProcessArch"]] = relationship(
         "ProcessArch", back_populates="children", remote_side="ProcessArch.id"
+    )
+    nodes: Mapped[List["ProcessNode"]] = relationship(
+        "ProcessNode",
+        back_populates="process",
+        cascade="all, delete-orphan",
+        order_by="ProcessNode.sequence_order",
+    )
+    edges: Mapped[List["ProcessEdge"]] = relationship(
+        "ProcessEdge",
+        back_populates="process",
+        cascade="all, delete-orphan",
+    )
+    model_versions: Mapped[List["ProcessModelVersion"]] = relationship(
+        "ProcessModelVersion",
+        back_populates="process",
+        cascade="all, delete-orphan",
+        order_by="ProcessModelVersion.version",
+    )
+    node_assignments: Mapped[List["NodeAssignment"]] = relationship(  # noqa: F821
+        "NodeAssignment",
+        back_populates="process",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (Index("ix_process_arch_level_parent", "level", "parent_id"),)
@@ -99,6 +124,8 @@ class ProcessNode(Base):
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)
 
+    process: Mapped["ProcessArch"] = relationship("ProcessArch", back_populates="nodes")
+
     __table_args__ = (Index("ix_process_node_process_key", "process_id", "node_key", unique=True),)
 
 
@@ -118,4 +145,74 @@ class ProcessEdge(Base):
     condition: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     probability: Mapped[float] = mapped_column(Float, default=1.0)  # 分支发生概率 0–1
 
+    process: Mapped["ProcessArch"] = relationship("ProcessArch", back_populates="edges")
+
     __table_args__ = (Index("ix_process_edge_process", "process_id"),)
+
+
+class ProcessModelVersion(Base):
+    """流程模型版本：草稿、评审、发布与回滚。
+
+    `snapshot` 是整张图（节点 + 连线）的不可变副本；`process_node/process_edge`
+    只保存**已发布**模型，执行引擎只读它们。这样草稿编辑不会影响运行中的实例。
+    """
+
+    __tablename__ = "process_model_version"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "process_arch.id",
+            ondelete="CASCADE",
+            name="fk_process_model_version_process",
+        ),
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    change_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    created_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_model_version_created_by",
+        ),
+        nullable=True,
+    )
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    reviewed_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_model_version_reviewed_by",
+        ),
+        nullable=True,
+    )
+    reviewed_by_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    published_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_model_version_published_by",
+        ),
+        nullable=True,
+    )
+    published_by_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    process: Mapped["ProcessArch"] = relationship("ProcessArch", back_populates="model_versions")
+
+    __table_args__ = (
+        Index(
+            "uq_process_model_version_process_version",
+            "process_id",
+            "version",
+            unique=True,
+        ),
+    )

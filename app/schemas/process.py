@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -167,9 +167,61 @@ class ProcessModelOut(BaseModel):
     process_id: int
     process_name: Optional[str] = None
     version: int = 0
+    draft_version: int = 0
+    status: Optional[str] = None
+    status_label: Optional[str] = None
+    version_id: Optional[int] = None
+    published_version: int = 0
     updated_at: Optional[UtcDateTime] = None
     nodes: List[ProcessNodeOut] = []
     edges: List[ProcessEdgeOut] = []
+
+
+class ProcessModelVersionOut(BaseModel):
+    id: int
+    version: int
+    status: str
+    status_label: str
+    change_note: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: UtcDateTime
+    reviewed_by_name: Optional[str] = None
+    reviewed_at: Optional[UtcDateTime] = None
+    published_by_name: Optional[str] = None
+    published_at: Optional[UtcDateTime] = None
+    node_count: int = 0
+    edge_count: int = 0
+
+
+class ProcessModelVersionDetail(ProcessModelVersionOut):
+    nodes: List[ProcessNodeOut] = []
+    edges: List[ProcessEdgeOut] = []
+
+
+class PublishModelRequest(BaseModel):
+    expected_version: Optional[int] = Field(
+        default=None, description="客户端看到的版本；不一致时拒绝发布"
+    )
+    change_note: Optional[str] = Field(default=None, max_length=200)
+
+
+class ReviewModelRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class RollbackModelRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class ProcessModelDiffOut(BaseModel):
+    from_version: int
+    to_version: int
+    nodes_added: List[Dict] = []
+    nodes_removed: List[Dict] = []
+    nodes_changed: List[Dict] = []
+    edges_added: List[Dict] = []
+    edges_removed: List[Dict] = []
+    edges_changed: List[Dict] = []
 
 
 class BpmnImportRequest(BaseModel):

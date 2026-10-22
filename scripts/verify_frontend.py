@@ -500,6 +500,82 @@ def main() -> int:
             assert "流程周期效率" in page.inner_text("#view")
             page.screenshot(path=str(out_dir / "interaction-designer.png"), full_page=True)
 
+        # 设计器：草稿 → 评审 → 发布，版本历史可打开
+        def designer_version_governance() -> None:
+            created = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const code = 'L3-VER-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+                  const r = await fetch('/api/v1/process-map', {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, name: '版本治理自检', level: 3 })
+                  });
+                  return await r.json();
+                }"""
+            )
+            pid = created["id"]
+            fallback = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const rows = await fetch('/api/v1/process-map/flat',
+                    { headers: { Authorization: 'Bearer ' + t } }).then(r => r.json());
+                  return rows.find(r => r.code === 'L3-032').id;
+                }"""
+            )
+            try:
+                page.evaluate(f"switchProcess({pid})")
+                page.wait_for_timeout(500)
+                if page.locator('#view .seg button:has-text("流程模型")').count():
+                    page.click('#view .seg button:has-text("流程模型")')
+                page.wait_for_selector("#designerCanvas")
+                page.wait_for_timeout(500)
+                for label in ("开始", "作业", "结束"):
+                    page.click(f'#view .designer-toolbar button:has-text("{label}")')
+                    page.wait_for_timeout(700)
+                assert "草稿" in page.inner_text("#view"), page.inner_text("#view")[:200]
+
+                # 节点级执行配置：设计器内直接设时限
+                page.click("#view .designer-node >> nth=0")
+                page.wait_for_selector("#edDue")
+                assert "执行配置" in page.inner_text("#mBody")
+                page.fill("#edDue", "2")
+                page.click('#mBody button:has-text("保存执行配置")')
+                page.wait_for_timeout(700)
+                assert "节点执行配置已保存" in page.inner_text("#toast")
+                page.click('#mFoot button:has-text("取消")')
+
+                page.click('#view button:has-text("版本历史")')
+                page.wait_for_selector("#mask.show")
+                assert "模型版本历史" in page.inner_text("#mTitle")
+                assert "草稿" in page.inner_text("#mBody")
+                close_modal()
+
+                page.once("dialog", lambda dialog: dialog.accept("E2E 评审"))
+                page.click('#view button:has-text("提交评审")')
+                page.wait_for_timeout(1400)
+                assert "待评审" in page.inner_text("#view"), page.inner_text("#view")[:200]
+
+                page.once("dialog", lambda dialog: dialog.accept())
+                page.click('#view button:has-text("发布到运行时")')
+                page.wait_for_timeout(1600)
+                view_text = page.inner_text("#view")
+                assert "已发布" in view_text and "运行时版本 v" in view_text, view_text[:200]
+                page.screenshot(
+                    path=str(out_dir / "interaction-designer-version.png"), full_page=True
+                )
+            finally:
+                page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      await fetch('/api/v1/process-map/' + pid,
+                        { method: 'DELETE', headers: { Authorization: 'Bearer ' + t } });
+                    }""",
+                    pid,
+                )
+                page.evaluate(f"switchProcess({fallback})")
+                page.wait_for_timeout(700)
+
         # 运营监控：KPI 明细 + 异常处理弹窗
         def monitor() -> None:
             goto("monitor")
@@ -910,6 +986,7 @@ def main() -> int:
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
         check("设计器改节点并重算", designer_edit_node)
+        check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
         check("监控异常处理弹窗", monitor)
         check("知识库详情 + 快速找工具", knowledge)
         check("项目甘特图与里程碑", project_gantt)

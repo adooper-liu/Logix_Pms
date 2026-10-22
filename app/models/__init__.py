@@ -59,7 +59,7 @@ from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit
-from app.models.process import ProcessArch, ProcessEdge, ProcessNode
+from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
@@ -69,6 +69,7 @@ from app.models.user import AuditLog, User
 __all__ = [
     # 模型
     "ProcessArch",
+    "ProcessModelVersion",
     "ProcessNode",
     "ProcessEdge",
     "ProcessDocument",
