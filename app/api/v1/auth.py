@@ -11,7 +11,7 @@ from app.api.deps import AdminUser, CurrentUser, DbSession, ManagerUser
 from app.core.security import create_token, hash_password, using_dev_secret, verify_password
 from app.core.timeutil import utcnow
 from app.models.enums import Role
-from app.models.user import AuditLog, User
+from app.models.user import ROLE_LABELS, AuditLog, User
 from app.schemas.user import (
     AuditOut,
     AuditPage,
@@ -23,6 +23,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import audit as audit_service
+from app.services import org_unit as org_service
 from app.services import ownership as ownership_service
 
 router = APIRouter(prefix="/auth", tags=["认证与权限"])
@@ -60,9 +61,36 @@ def change_password(payload: ChangePasswordRequest, user: CurrentUser, db: DbSes
     return {"detail": "口令已更新，请用新口令重新登录"}
 
 
+@router.get("/meta", summary="角色标签与可选角色")
+def auth_meta(user: CurrentUser):
+    return {
+        "role_labels": ROLE_LABELS,
+        "roles": [{"value": role.value, "label": ROLE_LABELS[role.value]} for role in Role],
+    }
+
+
 @router.get("/users", response_model=List[UserOut], summary="用户列表（管理员）")
-def list_users(user: AdminUser, db: DbSession):
-    rows = db.scalars(select(User).order_by(User.id)).all()
+def list_users(
+    user: AdminUser,
+    db: DbSession,
+    keyword: Optional[str] = None,
+    org_unit_id: Optional[int] = None,
+    role: Optional[Role] = None,
+    active_only: bool = False,
+):
+    stmt = select(User)
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            or_(User.username.like(like), User.display_name.like(like), User.department.like(like))
+        )
+    if org_unit_id is not None:
+        stmt = stmt.where(User.org_unit_id == org_unit_id)
+    if role is not None:
+        stmt = stmt.where(User.role == role.value)
+    if active_only:
+        stmt = stmt.where(User.is_active.is_(True))
+    rows = db.scalars(stmt.order_by(User.org_unit_id, User.username)).all()
     return [UserOut.model_validate(u) for u in rows]
 
 
@@ -75,12 +103,18 @@ def list_users(user: AdminUser, db: DbSession):
 def create_user(payload: UserCreate, admin: AdminUser, db: DbSession):
     if db.scalar(select(User).where(User.username == payload.username)):
         raise HTTPException(status_code=409, detail=f"用户名 {payload.username} 已存在")
+    if payload.org_unit_id is not None:
+        try:
+            org_service.require_org(db, payload.org_unit_id)
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     obj = User(
         username=payload.username.strip(),
         display_name=payload.display_name.strip(),
         password_hash=hash_password(payload.password),
         role=payload.role.value,
         department=payload.department,
+        org_unit_id=payload.org_unit_id,
     )
     db.add(obj)
     db.flush()
@@ -101,6 +135,32 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
     password = data.pop("password", None)
     if "role" in data and data["role"] is not None:
         data["role"] = data["role"].value
+    if data.get("org_unit_id") is not None:
+        try:
+            org_service.require_org(db, data["org_unit_id"])
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    new_role = data.get("role", obj.role)
+    new_active = data.get("is_active", obj.is_active)
+    if obj.id == admin.id and (new_role != Role.ADMIN.value or not new_active):
+        raise HTTPException(status_code=400, detail="不能停用或降级当前登录的管理员账号")
+    if obj.role == Role.ADMIN.value and (new_role != Role.ADMIN.value or not new_active):
+        others = (
+            db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    User.role == Role.ADMIN.value,
+                    User.is_active.is_(True),
+                    User.id != obj.id,
+                )
+            )
+            or 0
+        )
+        if others == 0:
+            raise HTTPException(status_code=400, detail="至少保留一个启用的管理员账号")
+
     old_display_name = obj.display_name
     for field, value in data.items():
         setattr(obj, field, value)

@@ -7,12 +7,38 @@ import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { go } from '../core/router.js';
 import { newProjectWizard } from './projects.js';
-import { GET, POST, PATCH, DEL } from '../core/api.js';
+import { GET, POST, PATCH, DEL, download } from '../core/api.js';
 import { openDesigner } from './designer.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
 const LEVEL_LABELS = { 1: 'L1 价值链', 2: 'L2 流程类别', 3: 'L3 流程', 4: 'L4 活动' };
+
+/** 统计一个节点的全部下级（不含自身），按层级拆分；树的计数取 L4 活动数 */
+function subtreeStats(node) {
+  const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const walk = (current) => {
+    (current.children || []).forEach((child) => {
+      counts[child.level] = (counts[child.level] || 0) + 1;
+      walk(child);
+    });
+  };
+  walk(node);
+  return {
+    total: counts[1] + counts[2] + counts[3] + counts[4],
+    leaves: counts[4],
+    counts,
+  };
+}
+
+function subtreeTitle(stats) {
+  const parts = [
+    stats.counts[2] ? `L2 ${stats.counts[2]}` : '',
+    stats.counts[3] ? `L3 ${stats.counts[3]}` : '',
+    stats.counts[4] ? `L4 ${stats.counts[4]}` : '',
+  ].filter(Boolean);
+  return `含 ${stats.leaves} 个 L4 活动${parts.length ? '（' + parts.join(' / ') + '）' : ''}`;
+}
 
 /** 左侧架构导航：只展开当前路径，避免一屏铺开 148 个节点 */
 function renderOutline(list, path) {
@@ -20,12 +46,14 @@ function renderOutline(list, path) {
     const inPath = path.includes(n.code);
     const on = path[path.length - 1] === n.code;
     const kids = inPath && n.level < 3 ? renderOutline(n.children || [], path) : '';
+    const stats = subtreeStats(n);
     return `
       <div class="tree-item lv${n.level}${inPath ? ' in-path' : ''}${on ? ' on' : ''}"
            onclick="mapSelect('${n.code}')">
         <span class="tree-dot${n.is_improvement_target ? ' target' : ''}"></span>
         <span class="tree-name">${esc(n.name)}</span>
-        <span class="cnt">${(n.children || []).length || ''}</span>
+        <span class="cnt has-tip" tabindex="0"
+              data-tip="${esc(subtreeTitle(stats))}">${stats.leaves || ''}</span>
       </div>${kids}`;
   }).join('');
 }
@@ -188,7 +216,7 @@ const renderMap = () => {
         <aside class="map-side card">
           <div class="map-side-hd">架构导航</div>
           <div class="map-tree">${treeHtml}</div>
-          <div class="map-side-foot tiny">点击层级展开；L4 活动在右侧列表中查看。</div>
+          <div class="map-side-foot tiny">点击层级展开；数字为本分支 L4 活动数；L4 活动在右侧列表中查看。</div>
         </aside>
 
         <div class="map-main">
@@ -289,6 +317,7 @@ function mapClick(code, hasKids) {
         <div class="field"><label>流程健康度</label><input value="${node.health_score === null ? '未评估' : num(node.health_score, 0) + ' 分'}" readonly></div>
       </div>
       ${node.description ? '<div class="field"><label>流程说明</label><textarea readonly>' + esc(node.description) + '</textarea></div>' : ''}
+      <div id="mapDocs"></div>
       <div class="note">在「流程设计器」里可以对这条流程做泳道建模与周期效率测算。</div>`,
       `${canManage()
         ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
@@ -299,6 +328,75 @@ function mapClick(code, hasKids) {
        ${canWrite() ? '<button class="btn btn-g" onclick="closeModal();startProjectFromProcess('
          + node.id + ', \'' + esc(node.name) + '\')">以此流程立项</button>' : ''}
        <button class="btn btn-p" onclick="closeModal();openDesigner(${node.id})">去设计器分析</button>`);
+    loadProcessDocs(node.id);
+  }
+}
+
+/** 详情弹窗里的「配套文件」：本节点 + 上级继承，只读查看/下载，管理入口跳到标准文件页签 */
+async function loadProcessDocs(processId) {
+  const box = document.getElementById('mapDocs');
+  if (!box) return;
+  box.innerHTML = '<div class="tiny mt">加载配套文件…</div>';
+  try {
+    const rows = await GET(
+      '/process-documents?process_id=' + processId + '&include_ancestors=true');
+    if (!box.isConnected) return;
+    const header = `<div class="between mt mb">
+      <h3 style="margin:0">配套文件（标准）</h3>
+      <button class="btn-sm" onclick="openDocManager(${processId})">管理配套文件 →</button></div>`;
+    if (!rows.length) {
+      box.innerHTML = header + `<div class="note">该流程及其上级还没有标准文件。
+        可以在「交付物与模板库 → 流程标准文件」创建并审批，生效后这里会出现复制入口。</div>`;
+      return;
+    }
+    box.innerHTML = header + `
+      <table class="tbl">
+        <thead><tr><th>文件</th><th>类型</th><th>现行版本</th><th>归属流程</th><th>操作</th></tr></thead>
+        <tbody>${rows.map((doc) => {
+          const v = doc.effective_version;
+          return `<tr>
+            <td><b>${esc(doc.title)}</b><div class="tiny">${esc(doc.code)}</div></td>
+            <td><span class="tag t-gry">${esc(doc.category_label || doc.category)}</span></td>
+            <td>${v
+              ? `<b>${esc(v.version_display)}</b> <span class="tag t-grn">${esc(v.status_label)}</span>`
+              : '<span class="tag t-gry">无生效版本</span>'}</td>
+            <td>${esc(doc.process_code || '')} ${esc(doc.process_name || '')}
+              ${doc.process_id !== processId ? '<div class="tiny">上级继承</div>' : ''}</td>
+            <td>${v && v.has_file
+              ? `<span class="gap" style="gap:6px">
+                  <button class="btn-sm" onclick="dlMapDocument(${doc.id}, ${v.id}, '${esc(v.version_display)}')">下载</button>
+                  ${canWrite()
+                    ? `<button class="btn-sm" onclick="closeModal();openDocumentCopy(${doc.id})">复制到项目</button>`
+                    : ''}
+                </span>`
+              : '—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+      <div class="tiny mt">「复制到项目」会固定当前生效版本；只对已生效且有文件的版本开放。</div>`;
+  } catch (e) {
+    if (box.isConnected) {
+      box.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
+    }
+  }
+}
+
+function openDocManager(processId) {
+  state.deliverables.tab = 'document';
+  state.deliverables.documentProcessId = processId;
+  closeModal();
+  go('deliverables');
+}
+
+async function dlMapDocument(documentId, versionId, label) {
+  try {
+    await download(
+      '/process-documents/' + documentId + '/versions/' + versionId + '/download',
+      '标准文件' + (label || ''),
+    );
+    toast('已开始下载');
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 
@@ -540,4 +638,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };
+export { renderMap, deleteProcess, dlMapDocument, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, openDocManager, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };

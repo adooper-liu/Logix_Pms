@@ -17,6 +17,7 @@ from app.api.deps import (
     resolve_owner,
 )
 from app.core.timeutil import utcnow
+from app.models.deliverable import DeliverableInstance, DeliverableVersion
 from app.models.enums import Methodology, ProjectStatus, Role, StepStatus
 from app.models.monitor import ExceptionEvent, KpiRecord
 from app.models.process import ProcessArch
@@ -40,7 +41,9 @@ from app.schemas.project import (
     StageProgress,
 )
 from app.services import audit as audit_service
+from app.services import deliverable as deliverable_service
 from app.services import methodology as methodology_service
+from app.services import storage as storage_service
 from app.services.workflow import STAGE_NAMES, recompute_progress, seed_project_steps
 
 router = APIRouter(prefix="/projects", tags=["流程项目组合"])
@@ -211,6 +214,9 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     db.flush()
     if payload.seed_workflow:
         seed_project_steps(db, project)
+        db.flush()
+        # 按交付物定义给每个步骤生成实例，之后产出的文件挂到实例的版本上
+        deliverable_service.sync_project_instances(db, project)
     audit_service.record(
         db,
         user,
@@ -338,11 +344,30 @@ def delete_project(project_id: int, db: DbSession, user: ManagerUser):
         {ExceptionEvent.project_id: None}, synchronize_session=False
     )
 
+    # 交付物实例与版本随步骤级联删除；文件不在数据库里，提交后再清理
+    attachment_keys = db.scalars(
+        select(DeliverableVersion.storage_key)
+        .join(DeliverableInstance, DeliverableInstance.id == DeliverableVersion.instance_id)
+        .where(
+            DeliverableInstance.project_id == project_id,
+            DeliverableVersion.storage_key.is_not(None),
+        )
+    ).all()
+
     audit_service.record(
         db, user, "DELETE", "project", project_id, f"删除项目 {code} {name}（含步骤）"
     )
     db.delete(project)
     db.commit()
+
+    # 尽力清理；失败不改变业务删除结果，残留文件需人工清理
+    if attachment_keys:
+        storage = storage_service.get_storage()
+        for key in attachment_keys:
+            try:
+                storage.delete(key)
+            except (storage_service.StorageError, OSError):
+                continue
     return DeleteResult(deleted=1)
 
 

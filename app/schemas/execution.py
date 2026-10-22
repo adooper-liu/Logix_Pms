@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime
+from app.models.enums import Role
 
 
 class ExecutableProcessOut(BaseModel):
@@ -16,6 +17,73 @@ class ExecutableProcessOut(BaseModel):
     level: int
     node_count: int
     model_version: int = 0
+
+
+class AssigneeOut(BaseModel):
+    id: int
+    display_name: str
+    role: str
+    role_label: Optional[str] = None
+    department: Optional[str] = None
+    org_unit_name: Optional[str] = None
+
+
+class ExecutionConfigOut(BaseModel):
+    process_id: int
+    default_task_due_hours: Optional[int] = None
+    default_escalation_hours: Optional[int] = None
+    default_escalation_user_id: Optional[int] = None
+    default_escalation_user_name: Optional[str] = None
+    updated_at: Optional[UtcDateTime] = None
+
+
+class ExecutionConfigUpdate(BaseModel):
+    default_task_due_hours: Optional[int] = Field(
+        default=None, ge=0, le=8760, description="新任务时限（小时）；null 表示不设时限"
+    )
+    default_escalation_hours: Optional[int] = Field(
+        default=None, ge=0, le=8760, description="到期后再过多少小时升级；null 表示不升级"
+    )
+    default_escalation_user_id: Optional[int] = Field(
+        default=None, description="默认升级处理人；null 表示不自动升级"
+    )
+
+
+class NodeAssignmentOut(BaseModel):
+    process_id: int
+    node_key: str
+    name: str
+    node_type: str
+    lane: Optional[str] = None
+    owner_role: Optional[str] = None
+    role: Optional[str] = None
+    role_label: Optional[str] = None
+    org_unit_id: Optional[int] = None
+    org_unit_name: Optional[str] = None
+    default_assignee_user_id: Optional[int] = None
+    default_assignee_name: Optional[str] = None
+    due_hours: Optional[int] = None
+    escalation_hours: Optional[int] = None
+    escalation_user_id: Optional[int] = None
+    escalation_user_name: Optional[str] = None
+
+
+class NodeAssignmentUpdate(BaseModel):
+    process_id: int
+    node_key: str
+    role: Optional[Role] = None
+    org_unit_id: Optional[int] = None
+    default_assignee_user_id: Optional[int] = None
+    due_hours: Optional[int] = Field(default=None, ge=0, le=8760)
+    escalation_hours: Optional[int] = Field(default=None, ge=0, le=8760)
+    escalation_user_id: Optional[int] = None
+
+
+class EscalationScanResult(BaseModel):
+    scanned: int = 0
+    escalated: int = 0
+    skipped: int = 0
+    task_ids: List[int] = []
 
 
 class NextOption(BaseModel):
@@ -38,13 +106,20 @@ class TaskOut(BaseModel):
     task_type_label: str
     lane: Optional[str] = None
     candidate_role: Optional[str] = None
+    candidate_role_code: Optional[str] = None
+    candidate_org_unit_id: Optional[int] = None
     status: str
     status_label: str
+    instance_status: Optional[str] = None
+    instance_status_label: Optional[str] = None
     assignee_user_id: Optional[int] = None
     assignee_name: Optional[str] = None
     created_at: UtcDateTime
     claimed_at: Optional[UtcDateTime] = None
     due_at: Optional[UtcDateTime] = None
+    escalated_at: Optional[UtcDateTime] = None
+    escalated_to_user_id: Optional[int] = None
+    escalated_to_name: Optional[str] = None
     completed_at: Optional[UtcDateTime] = None
     completed_by_name: Optional[str] = None
     form_data: Optional[Dict] = None
@@ -67,9 +142,15 @@ class InstanceOut(BaseModel):
     definition_version: int = 0
     started_by_name: Optional[str] = None
     started_at: UtcDateTime
+    suspended_at: Optional[UtcDateTime] = None
+    suspend_reason: Optional[str] = None
     completed_at: Optional[UtcDateTime] = None
     task_count: int = 0
     open_task_count: int = 0
+
+
+class InstanceSuspendRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=200)
 
 
 class InstanceDetail(BaseModel):

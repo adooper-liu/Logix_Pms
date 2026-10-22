@@ -1,5 +1,5 @@
 /* 视图：toolbox */
-import { esc, num, CAT_ICON, skeleton } from '../core/format.js';
+import { esc, num, CAT_ICON, skeleton, TOOL_LEVEL_TONE } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
@@ -12,24 +12,47 @@ const renderToolbox = () => renderAsync('toolbox',
   () => GET('/tools/grouped'),
   (groups) => {
     state.toolGroups = groups;
-    const active = state.toolboxCat || (groups[0] && groups[0].category);
-    state.toolboxCat = active;
-    const total = groups.reduce((a, g) => a + g.count, 0);
 
-    const tabs = groups.map((g) => `
+    // 从步骤页进来时只保留该步骤契约里的工具；进入侧栏「方法论工具箱」会清空这个状态
+    const filter = state.toolboxFilter;
+    const allowed = filter ? new Set(filter.codes) : null;
+    const visibleGroups = groups
+      .map((g) => ({
+        ...g,
+        tools: allowed ? g.tools.filter((t) => allowed.has(t.code)) : g.tools,
+      }))
+      .filter((g) => !allowed || g.tools.length);
+
+    const active = (visibleGroups.find((g) => g.category === state.toolboxCat)
+      || visibleGroups[0] || {}).category;
+    state.toolboxCat = active;
+    const total = visibleGroups.reduce((a, g) => a + g.tools.length, 0);
+
+    const tabs = visibleGroups.map((g) => `
       <button class="${g.category === active ? 'on' : ''}"
         onclick="state.toolboxCat='${g.category}';RENDERERS.toolbox()">
-        ${CAT_ICON[g.category]} ${esc(g.label)}（${g.count}）
+        ${CAT_ICON[g.category]} ${esc(g.label)}（${g.tools.length}）
       </button>`).join('');
 
-    const g = groups.find((x) => x.category === active) || { tools: [] };
+    const g = visibleGroups.find((x) => x.category === active) || { tools: [] };
     const kw = state.toolboxKeyword || '';
-    const tools = kw
+    let tools = kw
       ? g.tools.filter((t) => (t.name + t.code + t.purpose + (t.alias || '')).toLowerCase()
           .includes(kw.toLowerCase()))
       : g.tools;
+    if (filter) {
+      const rank = { REQUIRED: 0, RECOMMENDED: 1, OPTIONAL: 2 };
+      tools = [...tools].sort((a, b) =>
+        (rank[(filter.meta[a.code] || {}).level] ?? 9)
+        - (rank[(filter.meta[b.code] || {}).level] ?? 9));
+    }
 
-    const cards = tools.map((t) => `
+    const cards = tools.map((t) => {
+      const meta = filter && filter.meta[t.code];
+      const levelTag = meta
+        ? `<span class="tag ${TOOL_LEVEL_TONE[meta.level] || 't-gry'}">${esc(meta.level_label)}</span>`
+        : '';
+      return `
       <div class="tool" onclick="openToolByCode('${t.code}')">
         <div class="ico">${CAT_ICON[t.category] || '⚒'}</div>
         <h4>${esc(t.name)}</h4>
@@ -37,18 +60,30 @@ const renderToolbox = () => renderAsync('toolbox',
         <div class="between" style="margin-top:8px">
           <span class="tag ${{ DIAGNOSE: 't-blu', DESIGN: 't-red', DEPLOY: 't-yel', MONITOR: 't-grn' }[t.category]}">
             阶段${t.stage_no}</span>
-          <span class="tiny">${t.steps.length} 步</span>
+          <span class="gap" style="gap:6px">${levelTag}<span class="tiny">${t.steps.length} 步</span></span>
         </div>
-      </div>`).join('') || '<div class="empty">没有匹配的工具</div>';
+      </div>`;
+    }).join('') || '<div class="empty">没有匹配的工具</div>';
+
+    const filterBanner = filter
+      ? `<div class="note mb between">
+          <div>只显示 <b>${esc(filter.label)}</b> 的推荐工具（${total} 个），已按「必用 → 推荐 → 可选」排序</div>
+          <button class="btn-sm" onclick="clearToolboxFilter()">显示全部工具</button>
+        </div>`
+      : '';
 
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between mb">
-          <div><h2>方法论工具箱（${total} 个工具）<span class="module-badge">工具书 · 方法选择</span></h2>
-            <div class="desc" style="margin:0">按用途分类；点击卡片查看适用场景、标准操作与常见误用</div></div>
+          <div><h2>方法论工具箱（${total} 个工具）
+            <span class="module-badge">${filter ? '本步骤推荐' : '工具书 · 方法选择'}</span></h2>
+            <div class="desc" style="margin:0">${filter
+              ? '当前只展示步骤契约中配置的工具；点击卡片查看适用场景与标准操作'
+              : '按用途分类；点击卡片查看适用场景、标准操作与常见误用'}</div></div>
           <a class="link-btn" onclick="go('workflow')">回到五阶段步骤 →</a>
         </div>
-        <div class="tabs" style="margin-bottom:0">${tabs}</div>
+        ${filterBanner}
+        <div class="tabs" style="margin-bottom:0">${tabs || '<span class="tiny">没有匹配的工具</span>'}</div>
       </div>
 
       <div class="card">
@@ -73,6 +108,11 @@ const renderToolbox = () => renderAsync('toolbox',
 
     if (state.toolMatch) paintToolMatch(state.toolMatch);
   });
+
+function clearToolboxFilter() {
+  state.toolboxFilter = null;
+  RENDERERS.toolbox();
+}
 
 function quickMatch(q) {
   document.getElementById('toolQ').value = q;
@@ -157,4 +197,7 @@ function paintTool(t) {
 }
 
 
-export { renderToolbox, matchTools, openToolByCode, paintTool, paintToolMatch, quickMatch };
+export {
+  renderToolbox, clearToolboxFilter, matchTools, openToolByCode, paintTool,
+  paintToolMatch, quickMatch,
+};

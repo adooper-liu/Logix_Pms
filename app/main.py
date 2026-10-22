@@ -11,7 +11,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +26,20 @@ from app.core.migrations import upgrade_head
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
 SAMPLE_HTML = PROJECT_ROOT / "index-sample.html"
+# 允许直接用 /orgs、/projects 这类路径打开前端；视图名与 web/js/main.js 的注册保持一致
+SPA_VIEWS = {
+    "dashboard",
+    "map",
+    "workflow",
+    "projects",
+    "execution",
+    "toolbox",
+    "designer",
+    "monitor",
+    "knowledge",
+    "deliverables",
+    "orgs",
+}
 
 
 @asynccontextmanager
@@ -99,3 +113,12 @@ def sample():
     if SAMPLE_HTML.exists():
         return FileResponse(SAMPLE_HTML)
     return HTMLResponse("<p>未找到 index-sample.html。</p>", status_code=404)
+
+
+@app.get("/{view_name}", include_in_schema=False)
+def spa_view(view_name: str):
+    """已知视图路径直接返回前端入口，前端启动后按路径/hash 选择视图。"""
+    index = WEB_DIR / "index.html"
+    if view_name in SPA_VIEWS and index.exists():
+        return FileResponse(index)
+    raise HTTPException(status_code=404, detail="Not Found")

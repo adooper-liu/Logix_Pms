@@ -435,3 +435,55 @@ template_usage
 - **所有差异都禁止**：分公司搞影子流程，系统里看不到真实做法。
 - **模板升级后自动替换进行中项目的文件**：破坏可追溯性。
 - **把 Git 分支模型直接给业务用户**：学习成本高，且业务需要的是生效日期与审批，不是 commit。
+
+---
+
+## 十一、落地进度（2026-10-22）
+
+第一轮已按第九节顺序落地「步骤契约 + 交付物定义/实例/版本」，随后补齐了文件存储、
+工具模板库、流程标准文件与项目成果晋升。
+
+| 已实现 | 位置 |
+|---|---|
+| 步骤契约表（输入、工具引用、验收标准、责任人角色、决策门） | `step_contract`，24 步种子数据 |
+| 交付物定义（32 条，绑定步骤、类型、是否必需、模板指引） | `deliverable_definition` |
+| 项目实例化（新建项目自动生成，支持按最新定义补齐缺失） | `deliverable_instance` + `POST /projects/{id}/deliverables/sync` |
+| 不可变版本（R1/R2…、SHA-256、基版本、文件引用） | `deliverable_version` |
+| 文件存储（本地卷、服务端 SHA-256、扩展名白名单 + 魔数校验、上传/下载） | `app/services/storage.py`，`POST /deliverables/{id}/versions/upload` |
+| 工具模板库（工具 → 模板 → 版本，语义化版本、默认模板、复审日期） | `tool_template` / `tool_template_version`，`/tool-templates` |
+| 流程标准文件（L1–L4 的 SOP / 表单 / 检查表，唯一标准源） | `process_document` / `process_document_version`，`/process-documents` |
+| 项目交付物记录来源标准版本 | `deliverable_version.source_document_version_id`，复制时自动写入 |
+| 项目成果晋升为标准文件草稿（保留来源项目/步骤/版本） | `POST /process-documents/{id}/promote`，晋升后仍需审批 |
+| 模板调用与复制（下载、引用查看、复制到项目并固定来源版本、使用记录） | `template_usage`，`POST /tool-templates/{id}/copy` |
+| 占位符上下文解析（项目/流程/步骤/交付物字段，缺失必填项可解释） | `GET /tool-templates/{id}/versions/{vid}/context` |
+| 前端入口（项目交付物 / 流程标准文件 / 工具模板库三个页签） | `web/js/views/deliverables.js`，侧栏「交付物与模板库」 |
+| 组织单元与资产范围（集团通用 + 本级 + 上级继承） | `org_unit` + `process_document/tool_template.org_unit_id`，`/org-units` |
+| 组织与人员管理界面（组织树、人员账号、角色、归属组织、启停/口令） | `web/js/views/orgs.js`；`/org-units` + `/auth/users`，仅 ADMIN |
+| 标准文件变体策略（锁定/参数可调/可扩展/可选/仅本地）与变体 lineage | `process_document.variation_policy` + `variant_of_document_id` |
+| 按「组织 + 流程 + 日期」解析有效版本，并解释来源 | `GET /process-documents/effective`，同族优先本地变体，否则向上继承 |
+| 升级影响分析（落后变体 + 仍固定旧版的项目交付物） | `GET /process-documents/{id}/upgrade-impact` |
+| 变体变基（生成草稿、重新审批；major 需显式确认） | `POST /process-documents/{id}/rebase`，`source_base_version_id` 记录依据 |
+| 资产基线快照（全部 / 单流程 / 组织视角） | `asset_baseline`，`POST /baselines`，记录版本指针不复制文件 |
+| 基线与当前有效版本差异 | `GET /baselines/{id}/diff`：已变更 / 新增 / 已移除 / 未变 |
+| 治理概览（有效性、落后变体、固定旧版、基线覆盖、模板使用） | `GET /baselines/governance`，前端「基线与审计」页签顶部 |
+| 前端入口（项目交付物 / 流程标准文件 / 工具模板库 / 基线与审计） | `web/js/views/deliverables.js`，侧栏「交付物与模板库」 |
+| 审批状态机与恢复指针 | `DRAFT → IN_REVIEW → APPROVED → EFFECTIVE → SUPERSEDED/RETIRED`，`restore` 只移动指针 |
+| 权限与审计 | 定义/契约/标准文件/模板 MANAGER+；组织主数据 ADMIN；版本操作与复制跟随项目 Owner；下载与晋升留痕 |
+
+尚未实现（按第九节顺序）：
+
+1. S3/对象存储实现、孤儿文件巡检与保留期策略（接口已按 `AttachmentStorage` 协议抽象）；
+2. 服务端占位符生成（DOCX/XLSX/PPTX 填充）；当前只做上下文解析与文件原样复制；
+3. 字段级覆盖：`PARAMETERIZED` 目前落到「整份文件变体」，尚未拆到具体参数/字段；
+4. 自动冲突判定与三方内容对比：当前只比较元数据与版本/校验值，二进制文件不做内容 diff；
+5. 定期一致性审计、治理趋势/告警与导出（当前治理概览是实时快照）；
+6. 五阶段步骤页按项目流程展示「本步骤标准文件」（需要项目/流程上下文；流程地图详情已提供配套文件入口）；
+7. 工具模板复用同一套变体策略、有效版本解析与变基（当前模板只有组织范围 + 上级继承）。
+
+**治理边界（当前实现）**：组织编码由系统管理员维护；流程标准文件与模板由 MANAGER+
+（流程管理科 / 管理员）维护；流程 Owner 可在项目侧复制与提交晋升，但不能直接改标准；
+晋升只生成草稿，仍需审批生效。标准文件的 `LOCKED` 策略禁止本地变体；
+`LOCAL_ONLY` 只对所属组织可见、不向下级继承。字段级覆盖与流程 Owner 的细分权限留待下一阶段。
+
+模板库刻意不预置演示模板：模板是组织资产，格式与口径应由流程管理科维护；
+`deliverable_definition.template_ref` 仍是文本，接入模板库后可替换为外键。

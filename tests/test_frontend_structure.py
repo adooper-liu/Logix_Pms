@@ -32,7 +32,7 @@ def test_frontend_has_modules():
         "theme.js",
         "ui.js",
     } <= names
-    # 八个视图
+    # 各业务视图
     assert {
         "dashboard.js",
         "map.js",
@@ -43,6 +43,8 @@ def test_frontend_has_modules():
         "monitor.js",
         "knowledge.js",
         "execution.js",
+        "deliverables.js",
+        "orgs.js",
     } <= names
     assert "main.js" in names
 
@@ -61,7 +63,7 @@ def test_all_relative_imports_resolve():
 
 
 def test_view_modules_are_registered():
-    """main.js 必须注册全部八个视图，否则对应页面会是空白。"""
+    """main.js 必须注册全部业务视图，否则对应页面会是空白。"""
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     for view in (
         "dashboard",
@@ -73,6 +75,8 @@ def test_view_modules_are_registered():
         "monitor",
         "knowledge",
         "execution",
+        "deliverables",
+        "orgs",
     ):
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
 
@@ -88,6 +92,8 @@ def test_every_view_module_exports_a_renderer():
         "monitor.js": "renderMonitor",
         "knowledge.js": "renderKnowledge",
         "execution.js": "renderExecution",
+        "deliverables.js": "renderDeliverables",
+        "orgs.js": "renderOrgs",
     }
     for filename, symbol in renderers.items():
         src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")

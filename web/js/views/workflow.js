@@ -1,5 +1,5 @@
 /* 视图：workflow */
-import { esc, CAT_ICON, methodTag, skeleton } from '../core/format.js';
+import { esc, CAT_ICON, methodTag, skeleton, TOOL_LEVEL_TONE } from '../core/format.js';
 import { openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
@@ -149,14 +149,94 @@ function openWfStep(stepNo) {
   openModal(found.step_no + ' ' + found.name + ' · 方法说明', `
     <div class="field"><label>标准动作</label><textarea readonly>${esc(found.action)}</textarea></div>
     <div class="row2">
-      <div class="field"><label>推荐工具</label><input value="${esc(found.tools)}" readonly></div>
+      <div class="field"><label>方法手册里的工具</label><input value="${esc(found.tools)}" readonly></div>
       <div class="field"><label>关键交付物</label><input value="${esc(found.deliverables)}" readonly></div>
     </div>
     <div class="field"><label>关键要点 / 踩坑提示</label><textarea readonly>${esc(found.key_points)}</textarea></div>
     <div class="field"><label>所属阶段</label>
-      <input value="阶段${found.stage_no}" readonly></div>`,
+      <input value="阶段${found.stage_no}" readonly></div>
+    <div id="wfRec">${skeleton(3)}</div>`,
     `<button class="btn btn-g" onclick="closeModal()">关闭</button>
-     <button class="btn btn-p" onclick="closeModal();go('toolbox')">去工具箱看具体工具</button>`);
+     <button class="btn btn-g" onclick="closeModal();openToolboxForStep()">去工具箱看推荐工具</button>
+     <button class="btn btn-p" onclick="closeModal();go('deliverables')">去模板库</button>`, true);
+  paintStepRecommendations(stepNo);
+}
+
+/** 从步骤弹窗进入工具箱：只显示本步骤契约里的工具，并标注使用要求 */
+function openToolboxForStep() {
+  const rec = state.wfStepRec;
+  if (!rec || !rec.tools.length) {
+    state.toolboxFilter = null;
+    go('toolbox');
+    return;
+  }
+  state.toolboxFilter = {
+    label: rec.step_no + ' ' + rec.step_name,
+    codes: rec.tools.map((t) => t.code),
+    meta: Object.fromEntries(rec.tools.map((t) => [t.code, t])),
+  };
+  go('toolbox');
+}
+
+async function paintStepRecommendations(stepNo) {
+  const box = document.getElementById('wfRec');
+  if (!box) return;
+  try {
+    const rec = await GET('/workflow/steps/' + encodeURIComponent(stepNo) + '/recommendations');
+    if (!box.isConnected) return;
+    state.wfStepRec = rec;
+    box.innerHTML = renderStepRecommendations(rec);
+    const foot = document.getElementById('mFoot');
+    if (foot && rec.tools.length) {
+      foot.innerHTML = `<button class="btn btn-g" onclick="closeModal()">关闭</button>
+        <button class="btn btn-g" onclick="closeModal();openToolboxForStep()">
+          去工具箱（只看本步骤 ${rec.tools.length} 个推荐工具）</button>
+        <button class="btn btn-p" onclick="closeModal();go('deliverables')">去模板库</button>`;
+    }
+  } catch (e) {
+    if (box.isConnected) {
+      box.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
+    }
+  }
+}
+
+function renderTemplateChips(templates) {
+  if (!templates.length) return '<span class="tiny">暂无预制模板</span>';
+  return templates.map((t) => `
+    <div class="between" style="gap:8px;margin-bottom:6px">
+      <span>${esc(t.name)} <span class="tag t-gry">${esc(t.format_label)}</span>
+        ${t.effective_version
+          ? '<span class="tag t-grn">现行 ' + esc(t.effective_version.version_label) + '</span>'
+          : '<span class="tag t-gry">无生效版本</span>'}</span>
+      <span>${t.effective_version
+        ? `<button class="btn-sm" onclick="closeModal();openTemplateCopy(${t.id})">复制到项目</button>`
+        : ''}</span>
+    </div>`).join('');
+}
+
+function renderStepRecommendations(rec) {
+  const rows = rec.tools.map((t) => `
+    <tr>
+      <td><a class="link" onclick="closeModal();openToolByCode('${esc(t.code)}')"><b>${esc(t.name)}</b></a>
+        <div class="tiny">${esc(t.code)} · ${esc(t.category_label || '')}</div></td>
+      <td><span class="tag ${TOOL_LEVEL_TONE[t.level] || 't-gry'}">${esc(t.level_label)}</span></td>
+      <td>${renderTemplateChips(t.templates)}</td>
+    </tr>`).join('');
+
+  const extras = rec.deliverable_templates.length
+    ? `<h3 class="mt">本步骤交付物可用模板</h3>${renderTemplateChips(rec.deliverable_templates)}`
+    : '';
+
+  return `
+    <h3 class="mt">推荐工具与预制模板</h3>
+    <div class="desc">使用要求来自步骤契约；模板由流程管理科维护，复制到项目后会固定来源版本</div>
+    ${rec.tools.length
+      ? `<table class="tbl">
+          <thead><tr><th>工具</th><th>使用要求</th><th>预制模板</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<div class="note">该步骤还没有配置工具。流程管理科可以在步骤契约里补充工具与使用要求。</div>'}
+    ${extras}`;
 }
 
 /** 方法论匹配试算：复用后端引擎，前端只负责收集参数与呈现 */
@@ -217,4 +297,7 @@ function renderRecommendation(r) {
 }
 
 
-export { renderWorkflow, openWfStep, renderRecommendation, runRecommend, setWfStage, setWfTab };
+export {
+  renderWorkflow, openWfStep, openToolboxForStep, renderStepRecommendations,
+  renderRecommendation, runRecommend, setWfStage, setWfTab,
+};

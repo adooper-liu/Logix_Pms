@@ -22,6 +22,8 @@ else:
 os.environ["SEED_ON_STARTUP"] = "true"
 # 测试直接建表，不跑迁移链：每个用例集都要快，且迁移本身有专门的用例验证
 os.environ["AUTO_MIGRATE"] = "false"
+# 附件落临时目录，禁止测试往仓库 var/ 里写文件
+os.environ["ATTACHMENT_DIR"] = str(Path(tempfile.mkdtemp(prefix="logix_pms_attachments_")))
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

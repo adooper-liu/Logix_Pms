@@ -77,6 +77,22 @@ class Settings:
         )
     )
 
+    # 附件存储：数据库只存元数据，文件落本地卷；生产可换 S3 实现而不改接口。
+    attachment_dir: str = field(
+        default_factory=lambda: _env("ATTACHMENT_DIR", str(PROJECT_ROOT / "var" / "attachments"))
+    )
+    attachment_max_mb: int = field(default_factory=lambda: int(_env("ATTACHMENT_MAX_MB", "50")))
+    attachment_allowed_extensions: Tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            ext.strip().lower()
+            for ext in _env(
+                "ATTACHMENT_ALLOWED_EXTENSIONS",
+                ".xlsx,.xlsm,.docx,.pptx,.pdf,.bpmn,.xml,.csv,.txt,.png,.jpg,.jpeg,.vsdx,.zip",
+            ).split(",")
+            if ext.strip()
+        )
+    )
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")

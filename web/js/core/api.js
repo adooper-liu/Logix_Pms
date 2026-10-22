@@ -22,9 +22,14 @@ export function setUnauthorizedHandler(fn) {
   unauthorizedHandler = fn;
 }
 
-export async function api(path, options) {
+/**
+ * 统一请求：raw=true 时返回 Response（下载用），否则解析 JSON。
+ * multipart 由调用方传 FormData，此时不能手动设置 Content-Type。
+ */
+async function request(path, options, raw) {
   const opts = Object.assign({ headers: {} }, options || {});
-  if (opts.body !== undefined && typeof opts.body !== 'string') {
+  const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  if (!raw && !isForm && opts.body !== undefined && typeof opts.body !== 'string') {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
   }
@@ -58,11 +63,36 @@ export async function api(path, options) {
     err.status = res.status;    // 调用方需要区分 409（版本冲突）等情况
     throw err;
   }
+  if (raw) return res;
   return res.status === 204 ? null : res.json();
 }
 
+export const api = (path, options) => request(path, options, false);
 export const GET = (p) => api(p);
 export const POST = (p, body) => api(p, { method: 'POST', body: body === undefined ? {} : body });
 export const PATCH = (p, body) => api(p, { method: 'PATCH', body });
 export const PUT = (p, body) => api(p, { method: 'PUT', body });
 export const DEL = (p) => api(p, { method: 'DELETE' });
+/** multipart 上传：body 必须是 FormData */
+export const POST_FORM = (p, formData) =>
+  request(p, { method: 'POST', body: formData }, false);
+
+/** 带鉴权下载并触发浏览器保存；文件名优先取响应头，其次用 fallback */
+export async function download(path, fallback) {
+  const res = await request(path, {}, true);
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  let name = fallback || 'download';
+  if (matched) {
+    try { name = decodeURIComponent(matched[1]); } catch (_) { /* 保持 fallback */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

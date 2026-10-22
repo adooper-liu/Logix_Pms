@@ -35,9 +35,12 @@ STATUS_LABELS = {"PENDING": "待发送", "SUCCESS": "已送达", "FAILED": "失�
 
 EVENT_LABELS = {
     "instance.started": "流程启动",
+    "instance.suspended": "流程挂起",
+    "instance.resumed": "流程恢复",
     "task.created": "任务创建",
     "task.assigned": "任务改派",
     "task.claimed": "任务认领",
+    "task.escalated": "任务升级",
     "task.completed": "任务完成",
     "instance.completed": "流程完成",
     "instance.cancelled": "流程取消",

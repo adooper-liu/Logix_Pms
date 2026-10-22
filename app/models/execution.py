@@ -48,6 +48,8 @@ class ProcessInstance(Base):
     current_node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     current_node_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     definition_version: Mapped[int] = mapped_column(Integer, default=0)
+    suspended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    suspend_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     variables: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -84,6 +86,19 @@ class ProcessTask(Base):
     task_type: Mapped[str] = mapped_column(String(16), default="TASK")
     lane: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     candidate_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 结构化分派：角色编码与组织范围；candidate_role 保留展示文本
+    candidate_role_code: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True, index=True
+    )
+    candidate_org_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "org_unit.id",
+            ondelete="SET NULL",
+            name="fk_process_task_candidate_org_unit",
+        ),
+        nullable=True,
+        index=True,
+    )
 
     status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
     assignee_user_id: Mapped[Optional[int]] = mapped_column(
@@ -97,6 +112,16 @@ class ProcessTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    escalated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    escalated_to_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_task_escalated_to",
+        ),
+        nullable=True,
+    )
+    escalated_to_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_by_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
@@ -164,3 +189,91 @@ class ProcessRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (Index("ix_process_rule_process_node", "process_id", "node_key", "priority"),)
+
+
+class ProcessExecutionConfig(Base):
+    """流程级执行配置：默认任务时限与超期升级。"""
+
+    __tablename__ = "process_execution_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    # 新任务到期时间 = 创建时间 + 小时数；NULL 表示不设时限
+    default_task_due_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # 到期后再过多少小时升级；NULL 表示不自动升级
+    default_escalation_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    default_escalation_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_process_execution_config_escalation_user",
+        ),
+        nullable=True,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    default_escalation_user: Mapped[Optional["User"]] = relationship("User")  # noqa: F821
+
+
+class NodeAssignment(Base):
+    """节点级分派配置：角色 / 组织 / 默认处理人 / 节点时限 / 升级。"""
+
+    __tablename__ = "node_assignment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "process_arch.id",
+            ondelete="CASCADE",
+            name="fk_node_assignment_process",
+        ),
+        index=True,
+    )
+    node_key: Mapped[str] = mapped_column(String(64))
+    role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # Role
+    org_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "org_unit.id",
+            ondelete="SET NULL",
+            name="fk_node_assignment_org_unit",
+        ),
+        nullable=True,
+        index=True,
+    )
+    default_assignee_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_node_assignment_default_assignee",
+        ),
+        nullable=True,
+        index=True,
+    )
+    due_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    escalation_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    escalation_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "app_user.id",
+            ondelete="SET NULL",
+            name="fk_node_assignment_escalation_user",
+        ),
+        nullable=True,
+        index=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821
+    default_assignee: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[default_assignee_user_id]
+    )
+    escalation_user: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[escalation_user_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint("process_id", "node_key", name="uq_node_assignment_process_node"),
+    )

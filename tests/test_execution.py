@@ -48,6 +48,9 @@ def test_executable_processes(client):
 def test_start_requires_login(anon_client):
     assert anon_client.get(f"{API}/execution/processes").status_code == 401
     assert anon_client.get(f"{API}/execution/tasks").status_code == 401
+    assert (
+        anon_client.get(f"{API}/execution/assignments", params={"process_id": 1}).status_code == 401
+    )
 
 
 def test_seeded_instances_and_queue(client):
@@ -256,3 +259,291 @@ def test_execution_writes_are_audited(client):
         f"{API}/audit", params={"entity_type": "process_instance", "limit": 100}
     ).json()
     assert any(i["entity_id"] == iid for i in instance_logs["items"])
+
+
+# ------------------------------------------------------------------ 上下文与分派
+
+
+def test_form_data_merges_into_instance_variables(client):
+    instance = _start(client)
+    iid = instance["id"]
+    try:
+        task = _open_task(client, iid)
+        done = _complete(
+            client,
+            task["id"],
+            form_data={"applicant": "合并测试", "amount": 12345, "description": "上游填写"},
+        )
+        assert done.status_code == 200, done.text
+        detail = client.get(f"{API}/execution/instances/{iid}").json()
+        assert detail["variables"]["case"] == "test"
+        assert detail["variables"]["applicant"] == "合并测试"
+        assert float(detail["variables"]["amount"]) == 12345
+        assert detail["variables"]["description"] == "上游填写"
+    finally:
+        client.delete(f"{API}/execution/instances/{iid}")
+
+
+def test_assignees_endpoint_excludes_readonly(client, viewer_client):
+    rows = client.get(f"{API}/execution/assignees").json()
+    assert rows
+    assert all(row["role"] != "VIEWER" for row in rows)
+    assert any(row["display_name"] == "系统管理员" for row in rows)
+    # 只读用户可读取候选人员，但自己不会出现在可指派列表里
+    assert viewer_client.get(f"{API}/execution/assignees").status_code == 200
+    assert all(
+        row["role"] != "VIEWER" for row in viewer_client.get(f"{API}/execution/assignees").json()
+    )
+
+
+def test_candidate_matching_uses_roles_departments_and_orgs():
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    from app.services.execution import _candidate_matches
+
+    with SessionLocal() as db:
+        chen = db.scalar(select(User).where(User.username == "chen"))
+        assert chen is not None
+        # 陈经理属于采购部，可以认领采购部泳道的任务
+        assert _candidate_matches(db, chen, "采购部") is True
+        # 其他部门的 OWNER 不能认领
+        outsider = SimpleNamespace(role="OWNER", department="财务部", org_unit=None)
+        assert _candidate_matches(db, outsider, "采购部") is False
+        # 角色标签按角色匹配
+        assert _candidate_matches(db, outsider, "MANAGER") is False
+        assert _candidate_matches(db, outsider, "流程 Owner") is True
+        # 无法识别的自由文本不硬拦，交给管理者改派
+        assert _candidate_matches(db, outsider, "不存在的泳道") is True
+
+
+# ------------------------------------------------------------------ 时限与超期
+
+
+def test_task_due_config_and_overdue_scan(manager_client):
+    process_id = _process_id(manager_client, "L3-032")
+    original = manager_client.get(
+        f"{API}/execution/config", params={"process_id": process_id}
+    ).json()["default_task_due_hours"]
+    instance = None
+    try:
+        saved = manager_client.put(
+            f"{API}/execution/config",
+            params={"process_id": process_id},
+            json={"default_task_due_hours": 0},
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["default_task_due_hours"] == 0
+
+        instance = _start(manager_client)
+        iid = instance["id"]
+        task = _open_task(manager_client, iid)
+        assert task["due_at"] is not None, "配置时限后新任务应有到期时间"
+
+        manager_client.post(f"{API}/notifications/scan")
+        summary = manager_client.get(f"{API}/notifications/summary").json()
+        assert summary["by_type"].get("TASK_OVERDUE", 0) >= 1
+
+        # 同一任务不应每次扫描都新增未读提醒
+        again = manager_client.post(f"{API}/notifications/scan")
+        assert again.json()["created"] == 0
+    finally:
+        if instance is not None:
+            manager_client.delete(f"{API}/execution/instances/{instance['id']}")
+        manager_client.put(
+            f"{API}/execution/config",
+            params={"process_id": process_id},
+            json={"default_task_due_hours": original},
+        )
+
+
+def test_viewer_cannot_save_execution_config(viewer_client):
+    process_id = _process_id(viewer_client, "L3-032")
+    assert (
+        viewer_client.get(f"{API}/execution/config", params={"process_id": process_id}).status_code
+        == 200
+    )
+    assert (
+        viewer_client.put(
+            f"{API}/execution/config",
+            params={"process_id": process_id},
+            json={"default_task_due_hours": 24},
+        ).status_code
+        == 403
+    )
+
+
+# ------------------------------------------------------------------ 结构化节点分派
+
+
+def _org_id(client, name: str) -> int:
+    rows = client.get(f"{API}/org-units").json()
+    return next(row["id"] for row in rows if row["name"] == name)
+
+
+def _user_id(client, display_name: str) -> int:
+    rows = client.get(f"{API}/execution/assignees").json()
+    return next(row["id"] for row in rows if row["display_name"] == display_name)
+
+
+def _clear_assignment(client, process_id: int, node_key: str) -> None:
+    client.put(
+        f"{API}/execution/assignments",
+        json={
+            "process_id": process_id,
+            "node_key": node_key,
+            "role": None,
+            "org_unit_id": None,
+            "default_assignee_user_id": None,
+            "due_hours": None,
+        },
+    )
+
+
+def test_node_assignment_role_and_due_hours(manager_client, owner_client):
+    process_id = _process_id(manager_client, "L3-032")
+    instance = None
+    try:
+        rows = manager_client.get(
+            f"{API}/execution/assignments", params={"process_id": process_id}
+        ).json()
+        assert {row["node_key"] for row in rows} == {"n1", "n2", "n3", "n4", "n5", "n6"}
+        assert all(row["role"] is None for row in rows)
+
+        saved = manager_client.put(
+            f"{API}/execution/assignments",
+            json={
+                "process_id": process_id,
+                "node_key": "n1",
+                "role": "MANAGER",
+                "due_hours": 5,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["role_label"] == "流程管理科"
+        assert saved.json()["due_hours"] == 5
+
+        instance = _start(manager_client)
+        task = _open_task(manager_client, instance["id"])
+        assert task["node_key"] == "n1"
+        assert task["candidate_role_code"] == "MANAGER"
+        assert task["due_at"] is not None, "节点时限应覆盖流程默认时限"
+        assert task["assignee_user_id"] is None
+
+        # 角色不匹配：流程 Owner 也不能认领
+        denied = owner_client.post(f"{API}/execution/tasks/{task['id']}/claim")
+        assert denied.status_code == 403, denied.text
+        assert "角色" in denied.json()["detail"]
+
+        allowed = manager_client.post(f"{API}/execution/tasks/{task['id']}/claim")
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["assignee_user_id"] is not None
+    finally:
+        if instance is not None:
+            manager_client.delete(f"{API}/execution/instances/{instance['id']}")
+        _clear_assignment(manager_client, process_id, "n1")
+
+    cleaned = manager_client.get(
+        f"{API}/execution/assignments", params={"process_id": process_id}
+    ).json()
+    assert next(row for row in cleaned if row["node_key"] == "n1")["role"] is None
+
+
+def test_node_assignment_org_scope(manager_client, owner_client):
+    process_id = _process_id(manager_client, "L3-032")
+    org_id = _org_id(manager_client, "华东制造部")
+    instance = None
+    try:
+        saved = manager_client.put(
+            f"{API}/execution/assignments",
+            json={
+                "process_id": process_id,
+                "node_key": "n1",
+                "org_unit_id": org_id,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["org_unit_name"] == "华东制造部"
+
+        instance = _start(manager_client)
+        task = _open_task(manager_client, instance["id"])
+        assert task["candidate_org_unit_id"] == org_id
+
+        # 陈经理属于华东分公司（上级组织），不在此任务限定的组织范围内
+        denied = owner_client.post(f"{API}/execution/tasks/{task['id']}/claim")
+        assert denied.status_code == 403, denied.text
+        assert "组织" in denied.json()["detail"]
+
+        allowed = manager_client.post(f"{API}/execution/tasks/{task['id']}/claim")
+        assert allowed.status_code == 200, allowed.text
+    finally:
+        if instance is not None:
+            manager_client.delete(f"{API}/execution/instances/{instance['id']}")
+        _clear_assignment(manager_client, process_id, "n1")
+
+
+def test_node_assignment_default_assignee(manager_client, owner_client, viewer_client):
+    process_id = _process_id(manager_client, "L3-032")
+    chen_id = _user_id(manager_client, "陈经理")
+    instance = None
+    try:
+        saved = manager_client.put(
+            f"{API}/execution/assignments",
+            json={
+                "process_id": process_id,
+                "node_key": "n1",
+                "default_assignee_user_id": chen_id,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["default_assignee_name"] == "陈经理"
+
+        instance = _start(manager_client)
+        task = _open_task(manager_client, instance["id"])
+        assert task["status"] == "CLAIMED", "默认处理人应直接收到任务"
+        assert task["assignee_user_id"] == chen_id
+        assert task["assignee_name"] == "陈经理"
+
+        denied = viewer_client.post(f"{API}/execution/tasks/{task['id']}/claim")
+        assert denied.status_code == 403
+
+        done = owner_client.post(
+            f"{API}/execution/tasks/{task['id']}/complete",
+            json={
+                "form_data": {"applicant": "陈经理", "amount": 1000, "description": "测试"},
+            },
+        )
+        assert done.status_code == 200, done.text
+    finally:
+        if instance is not None:
+            manager_client.delete(f"{API}/execution/instances/{instance['id']}")
+        _clear_assignment(manager_client, process_id, "n1")
+
+
+def test_assignment_writes_are_manager_only(client, manager_client, owner_client, viewer_client):
+    process_id = _process_id(manager_client, "L3-032")
+    payload = {
+        "process_id": process_id,
+        "node_key": "n2",
+        "role": "OWNER",
+    }
+    assert viewer_client.put(f"{API}/execution/assignments", json=payload).status_code == 403
+    assert owner_client.put(f"{API}/execution/assignments", json=payload).status_code == 403
+    assert manager_client.put(f"{API}/execution/assignments", json=payload).status_code == 200
+    _clear_assignment(manager_client, process_id, "n2")
+
+    # 默认处理人必须是启用且非只读账号
+    users = client.get(f"{API}/auth/users", params={"active_only": True}).json()
+    viewer_id = next(row["id"] for row in users if row["username"] == "viewer")
+    bad = manager_client.put(
+        f"{API}/execution/assignments",
+        json={
+            "process_id": process_id,
+            "node_key": "n2",
+            "default_assignee_user_id": viewer_id,
+        },
+    )
+    assert bad.status_code in (400, 422), bad.text

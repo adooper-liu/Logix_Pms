@@ -4,9 +4,11 @@ import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js'
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
-import { GET, POST, PATCH, DEL } from '../core/api.js';
+import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
 
 /* ============================================================ 9. 流程执行 */
+
+let manualBranchTask = null;
 
 const renderExecution = () => {
   const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open' });
@@ -18,23 +20,41 @@ const renderExecution = () => {
     ]).then(async ([tasks, instances, processes]) => {
       let forms = [];
       let rules = [];
+      let config = null;
+      let assignments = [];
+      let orgs = [];
+      let roleMeta = null;
+      let assignees = [];
       let endpoints = [];
       let deliveries = [];
+      let inboundHooks = [];
+      let inboundActions = [];
       if (ex.tab === 'config' && processes.length) {
         const pid = ex.configProcess || processes[0].id;
         ex.configProcess = pid;
-        [forms, rules] = await Promise.all([
+        [forms, rules, config, assignments, orgs, roleMeta, assignees] = await Promise.all([
           GET('/execution/forms?process_id=' + pid),
           GET('/execution/rules?process_id=' + pid),
+          GET('/execution/config?process_id=' + pid),
+          GET('/execution/assignments?process_id=' + pid),
+          GET('/org-units'),
+          GET('/auth/meta'),
+          GET('/execution/assignees'),
         ]);
       }
       if (ex.tab === 'integrations') {
-        [endpoints, deliveries] = await Promise.all([
+        [endpoints, deliveries, inboundHooks, inboundActions, assignees] = await Promise.all([
           GET('/integrations/endpoints'),
           GET('/integrations/deliveries?limit=100'),
+          GET('/integrations/inbound-hooks'),
+          GET('/integrations/inbound-actions'),
+          GET('/execution/assignees'),
         ]);
       }
-      return { tasks, instances, processes, forms, rules, endpoints, deliveries };
+      return {
+        tasks, instances, processes, forms, rules, config, assignments, orgs, roleMeta,
+        assignees, endpoints, deliveries, inboundHooks, inboundActions,
+      };
     }),
     (d) => {
       state.executionTasks = d.tasks;
@@ -42,8 +62,15 @@ const renderExecution = () => {
       state.executionProcesses = d.processes;
       state.executionForms = d.forms;
       state.executionRules = d.rules;
+      state.executionConfig = d.config;
+      state.executionAssignments = d.assignments;
+      state.executionOrgs = d.orgs;
+      state.executionRoleMeta = d.roleMeta;
+      state.executionAssignees = d.assignees.length ? d.assignees : state.executionAssignees;
       state.executionEndpoints = d.endpoints;
       state.executionDeliveries = d.deliveries;
+      state.executionInboundHooks = d.inboundHooks;
+      state.executionInboundActions = d.inboundActions;
 
     const me = AUTH.user ? AUTH.user.id : null;
     const mine = d.tasks.filter((t) => t.assignee_user_id === me);
@@ -53,15 +80,19 @@ const renderExecution = () => {
     const shown = filter === 'mine' ? mine : filter === 'queue' ? queue : d.tasks;
 
     const taskRows = shown.map((t) => {
-      const canAct = canWrite()
+      const suspended = t.instance_status === 'SUSPENDED';
+      const canAct = !suspended && canWrite()
         && (t.assignee_user_id === null || t.assignee_user_id === me || canManage());
-      const action = !canWrite()
-        ? '<button class="btn-sm" onclick="openTask(' + t.id + ')">查看</button>'
-        : t.assignee_user_id === null
-          ? '<button class="btn-sm btn-p" onclick="claimTask(' + t.id + ')">认领</button>'
-          : canAct
-            ? '<button class="btn-sm" onclick="openTask(' + t.id + ')">处理</button>'
-            : '<button class="btn-sm" onclick="openTask(' + t.id + ')">查看</button>';
+      const overdue = t.due_at && new Date(t.due_at).getTime() < Date.now();
+      const action = suspended
+        ? '<span class="tag t-yel">实例挂起</span>'
+        : !canWrite()
+          ? '<button class="btn-sm" onclick="openTask(' + t.id + ')">查看</button>'
+          : t.assignee_user_id === null
+            ? '<button class="btn-sm btn-p" onclick="claimTask(' + t.id + ')">认领</button>'
+            : canAct
+              ? '<button class="btn-sm" onclick="openTask(' + t.id + ')">处理</button>'
+              : '<button class="btn-sm" onclick="openTask(' + t.id + ')">查看</button>';
       return `
         <tr class="exec-task-row" data-task-id="${t.id}" data-instance-id="${t.instance_id}">
           <td><b>${esc(t.name)}</b>
@@ -71,7 +102,9 @@ const renderExecution = () => {
           <td>${esc(t.candidate_role || '—')}</td>
           <td>${t.assignee_name ? esc(t.assignee_name) : '<span class="muted">公共队列</span>'}</td>
           <td><span class="tag ${t.status === 'PENDING' ? 't-yel' : 't-blu'}">${esc(t.status_label)}</span></td>
-          <td class="tiny">${dtShort(t.created_at)}</td>
+          <td class="tiny">${dtShort(t.created_at)}
+            ${t.due_at ? `<div>${overdue ? '<span class="tag t-red">已超期</span> ' : '到期 '}${dtShort(t.due_at)}</div>` : ''}
+            ${t.escalated_at ? `<div><span class="tag t-blu">已升级</span> ${dtShort(t.escalated_at)}</div>` : ''}</td>
           <td>${action}</td>
         </tr>`;
     }).join('') || emptyRow(7, filter === 'mine'
@@ -81,7 +114,9 @@ const renderExecution = () => {
     const instanceRows = d.instances.map((i) => `
       <tr class="exec-instance-row" data-instance-id="${i.id}" onclick="openInstance(${i.id})">
         <td><b>${esc(i.code)}</b><div class="tiny">${esc(i.process_name)}</div></td>
-        <td><span class="tag ${i.status === 'RUNNING' ? 't-blu' : i.status === 'COMPLETED' ? 't-grn' : 't-gry'}">
+        <td><span class="tag ${i.status === 'RUNNING' ? 't-blu'
+          : i.status === 'COMPLETED' ? 't-grn'
+          : i.status === 'SUSPENDED' ? 't-yel' : 't-gry'}">
           ${esc(i.status_label)}</span></td>
         <td>${i.current_node_name ? esc(i.current_node_name) : '—'}
           <div class="tiny">${esc(i.current_node_key || '')}</div></td>
@@ -122,7 +157,7 @@ const renderExecution = () => {
         </div>
         <table class="tbl">
           <thead><tr><th>任务</th><th>流程</th><th>候选角色</th><th>处理人</th>
-            <th>状态</th><th>创建时间</th><th></th></tr></thead>
+            <th>状态</th><th>创建 / 时限</th><th></th></tr></thead>
           <tbody>${taskRows}</tbody>
         </table>
       </div>`;
@@ -158,9 +193,66 @@ const renderExecution = () => {
           <button class="btn-sm" onclick="deleteRule(${r.id})">删除</button></td></tr>`;
     }).join('') || emptyRow(5, '暂无分支规则');
 
+    const assignmentRows = (d.assignments || []).map((n) => `
+      <tr>
+        <td><b>${esc(n.node_key)}</b><div class="tiny">${esc(n.name)} · ${esc(n.node_type)}</div></td>
+        <td>${esc(n.lane || '—')}<div class="tiny">${esc(n.owner_role || '')}</div></td>
+        <td>${n.role_label ? '<span class="tag t-blu">' + esc(n.role_label) + '</span>' : '—'}</td>
+        <td>${esc(n.org_unit_name || '—')}</td>
+        <td>${esc(n.default_assignee_name || '公共队列')}</td>
+        <td>${n.due_hours !== null && n.due_hours !== undefined
+          ? n.due_hours + ' 小时' : '跟随流程'}</td>
+        <td class="tiny">${n.escalation_hours !== null && n.escalation_hours !== undefined
+          ? n.escalation_hours + ' 小时 → ' + esc(n.escalation_user_name || '未设处理人')
+          : '跟随流程'}</td>
+        <td><button class="btn-sm" onclick="openAssignmentModal('${esc(n.node_key)}')">配置</button></td>
+      </tr>`).join('') || emptyRow(8, '该流程还没有节点');
+
+    const escUserOpts = (d.assignees || []).map((u) =>
+      `<option value="${u.id}"${d.config && d.config.default_escalation_user_id === u.id
+        ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
+    ).join('');
+
     const configPane = !canManage()
       ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
       : `
+      <div class="card">
+        <div class="between">
+          <div><h3 style="margin:0">任务时限与升级</h3>
+            <div class="desc" style="margin:2px 0 0">新任务按小时数生成到期时间；到期后再过
+              升级时限，自动改派给升级处理人</div></div>
+          <div class="gap">
+            <input class="sel" id="exDueHours" type="number" min="0" max="8760"
+              style="width:110px" placeholder="时限（小时）"
+              value="${d.config && d.config.default_task_due_hours !== null
+                ? d.config.default_task_due_hours : ''}">
+            <input class="sel" id="exEscHours" type="number" min="0" max="8760"
+              style="width:110px" placeholder="升级（小时）"
+              value="${d.config && d.config.default_escalation_hours !== null
+                ? d.config.default_escalation_hours : ''}">
+            <select class="sel" id="exEscUser">
+              <option value="">不自动升级</option>${escUserOpts}</select>
+            <button class="btn-sm btn-p" onclick="saveExecutionConfig()">保存</button>
+          </div>
+        </div>
+        <div class="between mt">
+          <div class="tiny">扫描会按实例启动时的快照执行；生产环境可用 cron 调用同接口或
+            <code>scripts/run_escalations.py</code></div>
+          <button class="btn-sm" onclick="runEscalationScan()">运行升级扫描</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">节点分派</h3>
+            <div class="desc" style="margin:2px 0 0">角色/组织作为候选范围；默认处理人优先直接指派；
+              节点时限与升级覆盖流程默认</div></div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>节点</th><th>泳道 / Owner</th><th>候选角色</th><th>组织</th>
+            <th>默认处理人</th><th>时限</th><th>升级</th><th></th></tr></thead>
+          <tbody>${assignmentRows}</tbody>
+        </table>
+      </div>
       <div class="card">
         <div class="between mb">
           <div><h3 style="margin:0">表单与规则</h3>
@@ -190,6 +282,21 @@ const renderExecution = () => {
         </div>
       </div>`;
 
+    const inboundRows = (d.inboundHooks || []).map((h) => `
+      <tr><td><b>${esc(h.code)}</b><div class="tiny">${esc(h.name)}</div></td>
+        <td>${h.process_code
+          ? esc(h.process_code) + ' · ' + esc(h.process_name)
+          : '<span class="muted">全部流程</span>'}</td>
+        <td>${esc(h.run_as_user_name || '—')}</td>
+        <td class="tiny">${(h.action_labels || []).length
+          ? esc(h.action_labels.join('、')) : '—'}</td>
+        <td>${h.is_active ? '<span class="tag t-grn">启用</span>'
+          : '<span class="tag t-gry">停用</span>'}</td>
+        <td class="tiny">${h.last_received_at ? dtShort(h.last_received_at) : '—'}</td>
+        <td><button class="btn-sm" onclick="editInboundHookModal(${h.id})">编辑</button>
+          <button class="btn-sm" onclick="deleteInboundHook(${h.id})">删除</button></td></tr>`).join('')
+      || emptyRow(7, '暂无入站 Webhook');
+
     const endpointRows = (d.endpoints || []).map((ep) => `
       <tr><td><b>${esc(ep.code)}</b><div class="tiny">${esc(ep.url)}</div></td>
         <td>${esc(ep.name)}<div class="tiny">${esc(ep.kind)}</div></td>
@@ -212,6 +319,19 @@ const renderExecution = () => {
     const integrationsPane = !canManage()
       ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
       : `
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">入站 Webhook</h3>
+            <div class="desc" style="margin:2px 0 0">ERP/OA 反向调用：HMAC-SHA256 签名 +
+              event_id 幂等；密钥只在创建或轮换时显示一次</div></div>
+          <button class="btn-sm" onclick="editInboundHookModal(null)">+ 新建入站</button>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>编码 / 名称</th><th>限定流程</th><th>服务账号</th>
+            <th>允许动作</th><th>状态</th><th>最近接收</th><th></th></tr></thead>
+          <tbody>${inboundRows}</tbody>
+        </table>
+      </div>
       <div class="card">
         <div class="between mb">
           <div><h3 style="margin:0">集成端点</h3>
@@ -272,7 +392,139 @@ function setExecutionConfigProcess(processId) {
   RENDERERS.execution();
 }
 
-/* -------------------------------------------------- ERP / OA 集成 */
+async function saveExecutionConfig() {
+  const pid = state.execution.configProcess
+    || (state.executionProcesses && state.executionProcesses[0]
+      ? state.executionProcesses[0].id : null);
+  if (!pid) return toast('请先选择流程', true);
+  const raw = document.getElementById('exDueHours').value.trim();
+  const value = raw === '' ? null : Number(raw);
+  if (value !== null && (!Number.isFinite(value) || value < 0 || value > 8760)) {
+    return toast('任务时限应为 0–8760 小时', true);
+  }
+  const escRaw = document.getElementById('exEscHours').value.trim();
+  const escValue = escRaw === '' ? null : Number(escRaw);
+  if (escValue !== null && (!Number.isFinite(escValue) || escValue < 0 || escValue > 8760)) {
+    return toast('升级时限应为 0–8760 小时', true);
+  }
+  const escUser = document.getElementById('exEscUser').value;
+  try {
+    await PUT('/execution/config?process_id=' + pid, {
+      default_task_due_hours: value,
+      default_escalation_hours: escValue,
+      default_escalation_user_id: escUser ? Number(escUser) : null,
+    });
+    toast('任务时限与升级配置已保存');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function runEscalationScan() {
+  const pid = state.execution.configProcess
+    || (state.executionProcesses && state.executionProcesses[0]
+      ? state.executionProcesses[0].id : null);
+  if (!pid) return toast('请先选择流程', true);
+  try {
+    const result = await POST('/execution/escalations/scan?process_id=' + pid, {});
+    toast(result.escalated
+      ? `已升级 ${result.escalated} 个任务（扫描 ${result.scanned}）`
+      : `没有需要升级的任务（扫描 ${result.scanned}）`);
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openAssignmentModal(nodeKey) {
+  const nodes = state.executionAssignments || [];
+  const node = nodes.find((n) => n.node_key === nodeKey);
+  if (!node) return toast('节点不存在', true);
+  const roles = ((state.executionRoleMeta || {}).roles || []).map((r) =>
+    `<option value="${esc(r.value)}"${node.role === r.value ? ' selected' : ''}>${esc(r.label)}</option>`
+  ).join('');
+  const orgs = (state.executionOrgs || []).map((o) =>
+    `<option value="${o.id}"${node.org_unit_id === o.id ? ' selected' : ''}>${esc(o.name)}${
+      o.type_label ? ' · ' + esc(o.type_label) : ''}</option>`
+  ).join('');
+  const users = (state.executionAssignees || []).map((u) =>
+    `<option value="${u.id}"${node.default_assignee_user_id === u.id ? ' selected' : ''}>${
+      esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
+  ).join('');
+  const escUsers = (state.executionAssignees || []).map((u) =>
+    `<option value="${u.id}"${node.escalation_user_id === u.id ? ' selected' : ''}>${
+      esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
+  ).join('');
+  openModal('节点分派 · ' + node.node_key, `
+    <div class="note mb">节点：<b>${esc(node.name)}</b> · ${esc(node.node_type)}
+      ${node.lane ? ' · 泳道 ' + esc(node.lane) : ''}</div>
+    <div class="field"><label>候选角色</label>
+      <select id="naRole"><option value="">不限角色</option>${roles}</select>
+      <div class="hint">公共任务认领时，账号角色必须匹配； MANAGER+ 始终可处理</div></div>
+    <div class="field"><label>限定组织</label>
+      <select id="naOrg"><option value="">不限组织</option>${orgs}</select>
+      <div class="hint">账号所属组织须为该组织或其下级</div></div>
+    <div class="field"><label>默认处理人</label>
+      <select id="naUser"><option value="">进入公共队列</option>${users}</select>
+      <div class="hint">优先直接指派；停用账号不会生效</div></div>
+    <div class="field"><label>节点时限（小时）</label>
+      <input id="naDue" type="number" min="0" max="8760" value="${
+        node.due_hours === null || node.due_hours === undefined ? '' : node.due_hours}"
+        placeholder="留空则跟随流程默认">
+      <div class="hint">留空表示沿用「任务时限与升级」里的流程默认值</div></div>
+    <div class="row2">
+      <div class="field"><label>升级时限（小时）</label>
+        <input id="naEscHours" type="number" min="0" max="8760" value="${
+          node.escalation_hours === null || node.escalation_hours === undefined
+            ? '' : node.escalation_hours}"
+          placeholder="留空则跟随流程默认">
+        <div class="hint">到期后再过多少小时升级；留空跟随流程</div></div>
+      <div class="field"><label>升级处理人</label>
+        <select id="naEscUser"><option value="">跟随流程</option>${escUsers}</select>
+        <div class="hint">超期后自动改派给该账号</div></div>
+    </div>`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitAssignment('${esc(node.node_key)}')">保存</button>`);
+}
+
+async function submitAssignment(nodeKey) {
+  const pid = state.execution.configProcess
+    || (state.executionProcesses && state.executionProcesses[0]
+      ? state.executionProcesses[0].id : null);
+  if (!pid) return toast('请先选择流程', true);
+  const rawDue = document.getElementById('naDue').value.trim();
+  const due = rawDue === '' ? null : Number(rawDue);
+  if (due !== null && (!Number.isFinite(due) || due < 0 || due > 8760)) {
+    return toast('节点时限应为 0–8760 小时', true);
+  }
+  const rawEsc = document.getElementById('naEscHours').value.trim();
+  const escHours = rawEsc === '' ? null : Number(rawEsc);
+  if (escHours !== null
+    && (!Number.isFinite(escHours) || escHours < 0 || escHours > 8760)) {
+    return toast('升级时限应为 0–8760 小时', true);
+  }
+  const orgValue = document.getElementById('naOrg').value;
+  const userValue = document.getElementById('naUser').value;
+  const escUserValue = document.getElementById('naEscUser').value;
+  try {
+    await PUT('/execution/assignments', {
+      process_id: pid,
+      node_key: nodeKey,
+      role: document.getElementById('naRole').value || null,
+      org_unit_id: orgValue ? Number(orgValue) : null,
+      default_assignee_user_id: userValue ? Number(userValue) : null,
+      due_hours: due,
+      escalation_hours: escHours,
+      escalation_user_id: escUserValue ? Number(escUserValue) : null,
+    });
+    closeModal();
+    toast('节点分派已保存');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 function editEndpointModal(endpointId) {
   const endpoints = state.executionEndpoints || [];
@@ -348,6 +600,119 @@ async function deleteEndpoint(endpointId) {
   try {
     await DEL('/integrations/endpoints/' + endpointId);
     toast('集成端点已删除');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function editInboundHookModal(hookId) {
+  const hooks = state.executionInboundHooks || [];
+  const hook = hookId ? hooks.find((h) => h.id === hookId) : null;
+  const processes = state.executionProcesses || [];
+  const processOpts = processes.map((p) =>
+    `<option value="${p.id}"${hook && hook.process_id === p.id ? ' selected' : ''}>${
+      esc(p.code)} ${esc(p.name)}</option>`).join('');
+  const users = (state.executionAssignees || []).filter(
+    (u) => u.role === 'ADMIN' || u.role === 'MANAGER');
+  const userOpts = users.map((u) =>
+    `<option value="${u.id}"${hook && hook.run_as_user_id === u.id ? ' selected' : ''}>${
+      esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`).join('');
+  const actionDefs = state.executionInboundActions || [];
+  const selected = hook ? (hook.actions || []) : actionDefs.map((a) => a.value);
+  const actionBoxes = actionDefs.map((a) =>
+    `<label class="tiny" style="display:flex;align-items:center;gap:6px">
+      <input type="checkbox" class="ihAct" value="${esc(a.value)}"${
+      selected.includes(a.value) ? ' checked' : ''}> ${esc(a.label)}</label>`).join('');
+  openModal(hook ? '编辑入站 Webhook · ' + hook.code : '新建入站 Webhook', `
+    <div class="row2">
+      <div class="field"><label>编码 *</label>
+        <input id="ihCode" value="${esc(hook ? hook.code : '')}"${hook ? ' readonly' : ''}
+          placeholder="ERP-PROD"></div>
+      <div class="field"><label>名称 *</label>
+        <input id="ihName" value="${esc(hook ? hook.name : '')}" placeholder="ERP 生产入站"></div>
+    </div>
+    <div class="field"><label>限定流程</label>
+      <select id="ihProcess"><option value="">全部流程</option>${processOpts}</select>
+      <div class="hint">选择后只能操作该流程；限定流程时必须允许「启动流程」</div></div>
+    <div class="field"><label>服务账号 *</label>
+      <select id="ihUser"><option value="">请选择</option>${userOpts}</select>
+      <div class="hint">入站操作以此账号身份执行，只能是流程管理科或系统管理员</div></div>
+    <div class="field"><label>允许动作</label>
+      <div class="gap">${actionBoxes || '<span class="muted">没有可用动作</span>'}</div></div>
+    <div class="field"><label>状态</label>
+      <select id="ihActive">
+        <option value="true"${!hook || hook.is_active ? ' selected' : ''}>启用</option>
+        <option value="false"${hook && !hook.is_active ? ' selected' : ''}>停用</option>
+      </select></div>
+    ${hook
+      ? `<label class="tiny" style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="ihRotate"> 轮换密钥（旧密钥立即失效）</label>`
+      : '<div class="hint">保存后生成密钥，只显示这一次，请立即交给对接方。</div>'}`,
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitInboundHook(${hook ? hook.id : 'null'})">保存</button>`);
+}
+
+async function submitInboundHook(hookId) {
+  const code = document.getElementById('ihCode').value.trim();
+  const name = document.getElementById('ihName').value.trim();
+  const userId = document.getElementById('ihUser').value;
+  const processValue = document.getElementById('ihProcess').value;
+  const actions = [...document.querySelectorAll('.ihAct:checked')].map((el) => el.value);
+  if (!name) return toast('名称必填', true);
+  if (!hookId && !code) return toast('编码必填', true);
+  if (!userId) return toast('请选择服务账号', true);
+  if (!actions.length) return toast('至少允许一个动作', true);
+  const payload = {
+    name,
+    process_id: processValue ? Number(processValue) : null,
+    run_as_user_id: Number(userId),
+    actions,
+    is_active: document.getElementById('ihActive').value === 'true',
+  };
+  try {
+    let saved;
+    if (hookId) {
+      const rotate = document.getElementById('ihRotate');
+      payload.rotate_secret = !!(rotate && rotate.checked);
+      saved = await PATCH('/integrations/inbound-hooks/' + hookId, payload);
+    } else {
+      saved = await POST('/integrations/inbound-hooks', { ...payload, code });
+    }
+    if (saved.secret) {
+      showInboundSecret(saved);
+    } else {
+      closeModal();
+      toast('入站 Webhook 已保存');
+    }
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function showInboundSecret(hook) {
+  const url = location.origin + hook.inbound_path;
+  openModal('入站 Webhook 密钥', `
+    <div class="note">密钥只显示这一次。对接方用「timestamp + \".\" + 原始请求体」做
+      HMAC-SHA256 签名。</div>
+    <div class="field"><label>调用地址</label>
+      <input readonly value="${esc(url)}"></div>
+    <div class="field"><label>密钥</label>
+      <textarea readonly rows="2">${esc(hook.secret || '')}</textarea></div>
+    <div class="field"><label>请求头</label>
+      <textarea readonly rows="3">X-Logix-Timestamp: <unix 秒>
+X-Logix-Signature: sha256=<hex>
+Content-Type: application/json</textarea></div>
+    <div class="hint">修改配置时勾选「轮换密钥」可生成新密钥；旧密钥立即失效。</div>`,
+    '<button class="btn btn-p" onclick="closeModal()">我已保存</button>');
+}
+
+async function deleteInboundHook(hookId) {
+  if (!confirm('确定删除这个入站 Webhook？其事件记录会一并删除，旧密钥立即失效。')) return;
+  try {
+    await DEL('/integrations/inbound-hooks/' + hookId);
+    toast('入站 Webhook 已删除');
     RENDERERS.execution();
   } catch (e) {
     toast(e.message, true);
@@ -536,18 +901,21 @@ async function claimTask(taskId) {
 }
 
 async function startInstanceModal() {
-  openModal('启动流程实例', skeleton(4));
+  openModal('启动流程实例', skeleton(5));
   let processes = state.executionProcesses;
   let projects = [];
+  let assignees = [];
   try {
-    [processes, projects] = await Promise.all([
+    [processes, projects, assignees] = await Promise.all([
       processes || GET('/execution/processes'),
       GET('/projects?page_size=100'),
+      GET('/execution/assignees'),
     ]);
   } catch (e) {
     openModal('加载失败', `<div class="errbar"><div>${esc(e.message)}</div></div>`);
     return;
   }
+  state.executionAssignees = assignees;
   const processOpts = processes.map((p) =>
     `<option value="${p.id}">L${p.level} ${esc(p.code)} ${esc(p.name)}（${p.node_count} 节点）</option>`
   ).join('');
@@ -556,14 +924,52 @@ async function startInstanceModal() {
   ).join('');
   openModal('启动流程实例', `
     <div class="field"><label>流程 *</label>
-      <select id="exProcess">${processOpts || '<option value="">没有已建模的流程</option>'}</select>
+      <select id="exProcess" onchange="loadStartNodes(this.value)">${processOpts || '<option value="">没有已建模的流程</option>'}</select>
       <div class="hint">只列出设计器里已有节点的流程</div></div>
     <div class="field"><label>关联项目</label>
       <select id="exProject"><option value="">不关联</option>${projectOpts}</select></div>
+    <div id="exAssign" class="mt"></div>
     <div class="field"><label>流程变量（JSON）</label>
       <textarea id="exVars" placeholder='{"申请人":"张三","金额":10000}'>{"source":"manual"}</textarea></div>`,
     `<button class="btn btn-g" onclick="closeModal()">取消</button>
      <button class="btn btn-p" onclick="submitStartInstance()">启动</button>`);
+  if (processes.length) loadStartNodes(processes[0].id);
+}
+
+async function loadStartNodes(processId) {
+  const box = document.getElementById('exAssign');
+  if (!box || !processId) return;
+  box.innerHTML = '<div class="tiny">加载节点…</div>';
+  try {
+    const model = await GET('/processes/' + processId + '/design');
+    if (!box.isConnected) return;
+    const nodes = (model.nodes || []).filter(
+      (n) => !['START', 'END'].includes(n.node_type));
+    if (!nodes.length) {
+      box.innerHTML = '<div class="note">该流程没有可执行节点。</div>';
+      return;
+    }
+    const assignees = state.executionAssignees || [];
+    const userOpts = assignees.map((a) =>
+      `<option value="${a.id}">${esc(a.display_name)} · ${esc(a.role_label || a.role)}${
+        a.department ? ' · ' + esc(a.department) : ''}</option>`).join('');
+    box.innerHTML = `
+      <h3>节点处理人（可选）</h3>
+      <div class="tiny mb">不选则进入公共队列，流程管理科会收到待认领提醒。</div>
+      <div class="row2">${nodes.map((n) => `
+        <div class="field">
+          <label>${esc(n.node_key)} ${esc(n.name)}
+            <div class="tiny">${esc(n.lane || '')}${
+              n.owner_role ? ' · ' + esc(n.owner_role) : ''}</div></label>
+          <select class="sel" data-assign-key="${esc(n.node_key)}">
+            <option value="">公共队列</option>${userOpts}
+          </select>
+        </div>`).join('')}</div>`;
+  } catch (e) {
+    if (box.isConnected) {
+      box.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
+    }
+  }
 }
 
 async function submitStartInstance() {
@@ -575,12 +981,18 @@ async function submitStartInstance() {
     try { variables = JSON.parse(raw); } catch (e) { return toast('流程变量不是合法 JSON', true); }
   }
   if (!processId) return toast('请选择流程', true);
+  const assignments = {};
+  document.querySelectorAll('[data-assign-key]').forEach((el) => {
+    if (el.value) assignments[el.dataset.assignKey] = Number(el.value);
+  });
+  const payload = {
+    process_id: Number(processId),
+    project_id: projectId ? Number(projectId) : null,
+    variables,
+  };
+  if (Object.keys(assignments).length) payload.assignments = assignments;
   try {
-    const instance = await POST('/execution/instances', {
-      process_id: Number(processId),
-      project_id: projectId ? Number(projectId) : null,
-      variables,
-    });
+    const instance = await POST('/execution/instances', payload);
     closeModal();
     toast('流程已启动：' + instance.code);
     state.execution.tab = 'tasks';
@@ -614,7 +1026,7 @@ function renderFormFields(fields) {
   }).join('');
 }
 
-async function openTask(taskId) {
+async function openTask(taskId, forceManual) {
   const gen = openModal('加载中…', skeleton(4));
   let task;
   try {
@@ -627,7 +1039,10 @@ async function openTask(taskId) {
   }
   if (!modalAlive(gen)) return;
   const me = AUTH.user ? AUTH.user.id : null;
-  const canAct = canWrite()
+  const manualMode = !!forceManual || manualBranchTask === task.id;
+  const overdue = task.due_at && new Date(task.due_at).getTime() < Date.now();
+  const suspended = task.instance_status === 'SUSPENDED';
+  const canAct = !suspended && canWrite()
     && (task.assignee_user_id === null || task.assignee_user_id === me || canManage());
   const options = task.next_options.map((o) =>
     `<option value="${esc(o.node_key)}">${esc(o.node_key)} ${esc(o.name)}${
@@ -635,6 +1050,15 @@ async function openTask(taskId) {
   ).join('');
 
   openModal(task.name + ' · ' + task.instance_code, `
+    ${suspended
+      ? '<div class="note mb">所属流程实例已挂起，恢复后才能处理任务。</div>' : ''}
+    ${task.due_at
+      ? `<div class="note mb">任务时限：${dtShort(task.due_at)}${overdue ? ' · <b>已超期</b>' : ''}</div>`
+      : ''}
+    ${task.escalated_at
+      ? `<div class="note mb">已升级：${dtShort(task.escalated_at)}${
+        task.escalated_to_name ? ' → ' + esc(task.escalated_to_name) : ''}</div>`
+      : ''}
     <div class="row2">
       <div class="field"><label>流程</label><input value="${esc(task.process_name)}" readonly></div>
       <div class="field"><label>节点</label>
@@ -651,9 +1075,14 @@ async function openTask(taskId) {
         <textarea readonly>${esc(task.comment || '—')}</textarea></div>` : ''}
     ${canAct && task.status !== 'COMPLETED' ? `
       ${task.next_options.length > 1 ? `
-        <div class="field"><label>下一步 *</label>
-          <select id="exNext">${options}</select>
-          <div class="hint">该节点有多个分支；有匹配规则时会自动选择，这里可以显式覆盖</div></div>` : ''}
+        <div class="field"><label>分支处理</label>
+          <select id="exBranchMode" onchange="toggleBranchMode()">
+            <option value="auto" ${manualMode ? '' : 'selected'}>按规则自动</option>
+            <option value="manual" ${manualMode ? 'selected' : ''}>手动指定下一步</option>
+          </select>
+          <div class="hint">自动模式由节点规则决定；没有命中规则时会提示改用手动</div></div>
+        <div class="field ${manualMode ? '' : 'hide'}" id="exNextWrap"><label>下一步</label>
+          <select id="exNext">${options}</select></div>` : ''}
       ${(task.form_schema && task.form_schema.length)
         ? '<div class="note">表单：' + esc(task.form_name || task.name) + '</div>' +
           renderFormFields(task.form_schema)
@@ -663,10 +1092,18 @@ async function openTask(taskId) {
         <input id="exComment" placeholder="处理结论或说明"></div>` : ''}
     ${canAct && task.status !== 'COMPLETED'
       ? '<div class="note">完成后流程会自动推进到下一节点；没有后续节点时实例结束。</div>'
-      : '<div class="note">只读：任务已指派给其他人，或当前角色没有处理权限。</div>'}`,
+      : suspended
+        ? '<div class="note">流程实例已挂起，请先让流程管理科恢复实例。</div>'
+        : '<div class="note">只读：任务已指派给其他人，或当前角色没有处理权限。</div>'}`,
     `<button class="btn btn-g" onclick="closeModal()">关闭</button>
      ${canAct && task.status !== 'COMPLETED'
        ? '<button class="btn btn-p" onclick="completeTask(' + task.id + ')">完成并推进</button>' : ''}`);
+}
+
+function toggleBranchMode() {
+  const mode = document.getElementById('exBranchMode');
+  const wrap = document.getElementById('exNextWrap');
+  if (mode && wrap) wrap.classList.toggle('hide', mode.value !== 'manual');
 }
 
 async function completeTask(taskId) {
@@ -690,18 +1127,29 @@ async function completeTask(taskId) {
       }
     }
   }
+  const modeEl = document.getElementById('exBranchMode');
+  const autoMode = !modeEl || modeEl.value === 'auto';
   const nextEl = document.getElementById('exNext');
   const commentEl = document.getElementById('exComment');
   try {
     await POST('/execution/tasks/' + taskId + '/complete', {
       form_data: formData,
-      next_node_key: nextEl ? nextEl.value : null,
+      next_node_key: autoMode ? null : (nextEl ? nextEl.value : null),
       comment: commentEl ? commentEl.value.trim() || null : null,
     });
+    manualBranchTask = null;
     closeModal();
     toast('任务已完成，流程已推进');
     RENDERERS.execution();
   } catch (e) {
+    if (autoMode && /多个分支|next_node_key/.test(e.message)) {
+      // 没有命中规则：回到同一个任务，让处理人手动选择分支
+      manualBranchTask = taskId;
+      toast('没有命中分支规则，请手动指定下一步', true);
+      closeModal();
+      openTask(taskId, true);
+      return;
+    }
     toast(e.message, true);
   }
 }
@@ -730,6 +1178,9 @@ async function openInstance(instanceId) {
     </tr>`).join('') || emptyRow(4, '还没有任务');
 
   openModal(i.code + ' · ' + i.process_name, `
+    ${i.suspended_at
+      ? `<div class="note mb">已挂起：${dtShort(i.suspended_at)}${
+        i.suspend_reason ? ' · ' + esc(i.suspend_reason) : ''}</div>` : ''}
     <div class="row2">
       <div class="field"><label>状态</label><input value="${esc(i.status_label)}" readonly></div>
       <div class="field"><label>当前节点</label>
@@ -747,9 +1198,41 @@ async function openInstance(instanceId) {
       <tbody>${rows}</tbody>
     </table>`,
     `${canManage() && i.status === 'RUNNING'
-      ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
+      ? '<button class="btn btn-g" style="margin-right:auto"'
+        + ' onclick="suspendInstance(' + i.id + ')">挂起实例</button>' : ''}
+     ${canManage() && i.status === 'SUSPENDED'
+      ? '<button class="btn btn-p" style="margin-right:auto"'
+        + ' onclick="resumeInstance(' + i.id + ')">恢复实例</button>' : ''}
+     ${canManage() && (i.status === 'RUNNING' || i.status === 'SUSPENDED')
+      ? '<button class="btn btn-g" style="color:var(--bad-strong)"'
         + ' onclick="cancelInstance(' + i.id + ')">取消实例</button>' : ''}
      <button class="btn btn-g" onclick="closeModal()">关闭</button>`);
+}
+
+async function suspendInstance(instanceId) {
+  const reason = window.prompt('挂起原因（可选；取消则不挂起）');
+  if (reason === null) return;
+  try {
+    await POST('/execution/instances/' + instanceId + '/suspend', {
+      reason: reason.trim() || null,
+    });
+    closeModal();
+    toast('流程实例已挂起');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function resumeInstance(instanceId) {
+  try {
+    await POST('/execution/instances/' + instanceId + '/resume', {});
+    closeModal();
+    toast('流程实例已恢复');
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function cancelInstance(instanceId) {
@@ -767,8 +1250,11 @@ async function cancelInstance(instanceId) {
 
 export {
   renderExecution, cancelInstance, claimTask, completeTask, deleteEndpoint, deleteForm,
-  deleteRule, editEndpointModal, editFormModal, editRuleModal, openInstance, openTask,
-  retryDelivery, runDeliveries, setExecutionConfigProcess, setExecutionFilter,
-  setExecutionTab, startInstanceModal, submitEndpoint, submitForm, submitRule,
-  submitStartInstance,
+  deleteInboundHook, deleteRule, editEndpointModal, editFormModal, editInboundHookModal,
+  editRuleModal, loadStartNodes, openAssignmentModal, openInstance, openTask,
+  resumeInstance, retryDelivery, runDeliveries, runEscalationScan, saveExecutionConfig,
+  setExecutionConfigProcess,
+  setExecutionFilter, setExecutionTab, startInstanceModal, submitAssignment,
+  submitEndpoint, submitForm, submitInboundHook, submitRule, submitStartInstance,
+  suspendInstance, toggleBranchMode,
 };

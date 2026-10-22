@@ -15,10 +15,17 @@ export const state = {
   },
   projects: { filter: { methodology: '', status: '', stage: '' }, keyword: '' },
   workflow: { tab: 'steps', stage: 1 },
+  /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
+  toolboxFilter: null,
   designer: { processId: null, processCode: null, model: null, analysis: null, tab: 'model' },
   knowledge: { type: '', sort: 'recent', keyword: '', tag: '' },
   monitor: { status: '', tab: 'overview' },
   execution: { tab: 'tasks', filter: 'open' },
+  deliverables: {
+    tab: 'project', projectId: null, templateTool: '', templateFormat: '',
+    documentProcessId: null, documentCategory: '', documentOrgUnitId: null,
+    templateOrgUnitId: null,
+  },
 };
 
 export const TITLES = {
@@ -31,4 +38,6 @@ export const TITLES = {
   designer: '流程设计器',
   monitor: '运营监控与KPI',
   knowledge: '流程知识库',
+  deliverables: '交付物与模板库',
+  orgs: '组织与人员',
 };

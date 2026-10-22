@@ -31,7 +31,8 @@ export async function renderAsync(view, loader, painter) {
   painter(data);
 }
 
-export function go(view) {
+export function go(view, skipHash) {
+  if (!RENDERERS[view]) view = 'dashboard';
   state.view = view;
   document.querySelectorAll('.nav a').forEach((a) => {
     a.classList.toggle('active', a.dataset.view === view);
@@ -39,6 +40,27 @@ export function go(view) {
   document.getElementById('pageTitle').textContent = TITLES[view] || view;
   const render = RENDERERS[view];
   if (render) render();
+  // 视图名同步到 hash，方便刷新/分享；用 replaceState 避免触发额外的 hashchange 渲染
+  if (!skipHash && typeof history !== 'undefined') {
+    const target = '#' + view;
+    if (location.hash !== target) history.replaceState(null, '', target);
+  }
+}
+
+/** 启动/登录后恢复到 URL 指向的视图：优先 hash，其次路径（/orgs 这类深链） */
+export function initialView() {
+  const hash = (location.hash || '').replace(/^#/, '');
+  const path = (location.pathname || '').replace(/^\/+|\/+$/g, '');
+  if (RENDERERS[hash]) return hash;
+  if (RENDERERS[path]) return path;
+  return 'dashboard';
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const view = (location.hash || '').replace(/^#/, '');
+    if (RENDERERS[view] && state.view !== view) go(view, true);
+  });
 }
 
 /* 顶栏搜索：按当前视图派发到对应的关键词过滤 */

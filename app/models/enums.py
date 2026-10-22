@@ -47,6 +47,7 @@ class StepStatus(str, Enum):
 
 class InstanceStatus(str, Enum):
     RUNNING = "RUNNING"
+    SUSPENDED = "SUSPENDED"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
@@ -121,3 +122,104 @@ class AuditAction(str, Enum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
+    DOWNLOAD = "DOWNLOAD"
+
+
+class DeliverableType(str, Enum):
+    """交付物形态。决定前端用什么方式预览/填写，不用文件扩展名判断。"""
+
+    DOCUMENT = "DOCUMENT"  # 方案、制度、SOP
+    FORM = "FORM"  # 表单模板
+    DIAGRAM = "DIAGRAM"  # 流程图、价值流图、地图
+    REPORT = "REPORT"  # 分析/评审报告
+    DATA = "DATA"  # 清单、台账、指标表
+    DECISION = "DECISION"  # 决策记录、选定方案
+
+
+class DeliverableStatus(str, Enum):
+    """交付物/模板版本状态。
+
+    实例没有版本时是 MISSING；有版本时状态由 service 统一推导。
+    版本只追加不覆盖：`DRAFT → IN_REVIEW → APPROVED → EFFECTIVE → SUPERSEDED`，
+    任何状态都可以 `RETIRED`（作废），但作废后不能再恢复为现行版。
+    """
+
+    MISSING = "MISSING"
+    DRAFT = "DRAFT"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    EFFECTIVE = "EFFECTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    RETIRED = "RETIRED"
+
+
+class TemplateFormat(str, Enum):
+    """工具模板的载体格式。在线模板没有文件，其余格式带文件。"""
+
+    XLSX = "XLSX"
+    DOCX = "DOCX"
+    PPTX = "PPTX"
+    BPMN = "BPMN"
+    ONLINE = "ONLINE"
+    PDF = "PDF"
+    CSV = "CSV"
+
+
+class TemplateMode(str, Enum):
+    """模板调用方式；GENERATE（服务端填充）尚未实现。"""
+
+    DOWNLOAD = "DOWNLOAD"  # 下载副本
+    ONLINE = "ONLINE"  # 基于在线模板创建交付物
+    GENERATE = "GENERATE"  # 服务端占位符填充
+    LINK = "LINK"  # 只读引用查看
+
+
+class ToolLevel(str, Enum):
+    """步骤契约里工具的使用要求。"""
+
+    REQUIRED = "REQUIRED"
+    RECOMMENDED = "RECOMMENDED"
+    OPTIONAL = "OPTIONAL"
+
+
+class ProcessDocumentCategory(str, Enum):
+    """流程标准配套文件的分类。"""
+
+    SOP = "SOP"
+    FORM = "FORM"
+    CHECKLIST = "CHECKLIST"
+    TEMPLATE = "TEMPLATE"
+    POLICY = "POLICY"
+    OTHER = "OTHER"
+
+
+class OrgUnitType(str, Enum):
+    """组织单元类型。编码由系统内维护，后续可接 ERP/HR 同步。"""
+
+    GROUP = "GROUP"  # 集团
+    COMPANY = "COMPANY"  # 公司/分公司
+    PLANT = "PLANT"  # 工厂
+    DEPARTMENT = "DEPARTMENT"  # 部门
+
+
+class AssetVariationPolicy(str, Enum):
+    """流程标准文件/模板的变体策略。
+
+    LOCKED：集团强制，不允许本地变体；
+    PARAMETERIZED / EXTENDABLE / OPTIONAL：允许本地变体；
+    LOCAL_ONLY：只对所属组织可见，不向下级继承。
+    """
+
+    LOCKED = "LOCKED"
+    PARAMETERIZED = "PARAMETERIZED"
+    EXTENDABLE = "EXTENDABLE"
+    OPTIONAL = "OPTIONAL"
+    LOCAL_ONLY = "LOCAL_ONLY"
+
+
+class BaselineScope(str, Enum):
+    """基线覆盖范围。"""
+
+    ALL = "ALL"
+    PROCESS = "PROCESS"
+    ORG = "ORG"

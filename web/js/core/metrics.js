@@ -247,13 +247,14 @@ export const METRICS = {
 
 /**
  * 渲染带口径说明的指标标签。
- * label 不传时使用注册表里的名称；data-tip 供 CSS 悬浮提示使用，title 兜底。
+ * label 不传时使用注册表里的名称；只设置 data-tip 供自定义提示使用，
+ * 不再同时设置 title——否则浏览器原生提示会和自定义提示重复弹出。
  */
 export function metricHelp(key, label) {
   const m = METRICS[key];
   if (!m) return esc(label === undefined ? key : label);
   const tip = m.formula + (m.note ? '。' + m.note : '');
-  return '<span class="metric-help" tabindex="0" title="' + esc(m.name + '：' + tip) +
+  return '<span class="metric-help has-tip" tabindex="0" aria-label="' + esc(m.name + '：' + tip) +
     '" data-tip="' + esc(tip) + '">' + esc(label === undefined ? m.name : label) +
     '<i class="q">?</i></span>';
 }

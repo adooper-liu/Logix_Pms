@@ -98,6 +98,13 @@ export const NODE_LABEL = {
 export const NODE_CLASS = {
   START: 'start', END: 'end', APPROVAL: 'gate', DECISION: 'gate', WAIT: 'wait',
 };
+/** 交付物/模板版本状态的视觉色调；中文标签一律用后端下发的 status_label */
+export const DLV_TONE = {
+  MISSING: 't-red', DRAFT: 't-gry', IN_REVIEW: 't-yel', APPROVED: 't-blu',
+  EFFECTIVE: 't-grn', SUPERSEDED: 't-gry', RETIRED: 't-gry',
+};
+/** 步骤契约里工具使用要求的色调；标签用后端 level_label */
+export const TOOL_LEVEL_TONE = { REQUIRED: 't-red', RECOMMENDED: 't-blu', OPTIONAL: 't-gry' };
 
 export function methodTag(m, label) {
   return '<span class="tag ' + (M_COLOR[m] || 't-blu') + '">' + esc(label || m) + '</span>';

@@ -10,19 +10,25 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.timeutil import utcnow
 from app.models.enums import InstanceStatus, NodeType, Role, TaskStatus
-from app.models.execution import ProcessInstance, ProcessTask
+from app.models.execution import (
+    NodeAssignment,
+    ProcessExecutionConfig,
+    ProcessInstance,
+    ProcessTask,
+)
+from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project
-from app.models.user import User
+from app.models.user import ROLE_LABELS, User
 from app.schemas.execution import (
     ExecutableProcessOut,
     InstanceDetail,
@@ -33,9 +39,11 @@ from app.schemas.execution import (
     TaskOut,
 )
 from app.services import forms as forms_service
+from app.services import org_scope
 
 INSTANCE_LABELS = {
     InstanceStatus.RUNNING.value: "运行中",
+    InstanceStatus.SUSPENDED.value: "已挂起",
     InstanceStatus.COMPLETED.value: "已完成",
     InstanceStatus.CANCELLED.value: "已取消",
 }
@@ -59,10 +67,39 @@ TASK_TYPE_LABELS = {
 
 OPEN_STATUSES = (TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)
 MANAGER_ROLES = {Role.ADMIN.value, Role.MANAGER.value}
+ROLE_CANDIDATES = {role.value for role in Role} | set(ROLE_LABELS.values())
 
 
 def _is_manager(user: User) -> bool:
     return user.role in MANAGER_ROLES
+
+
+def _candidate_matches(db: Session, user: User, candidate: Optional[str]) -> bool:
+    """候选角色/泳道校验。
+
+    节点的 owner_role/lane 是自由文本，不能假设它一定是系统角色：
+    - 空、或管理者：直接放行；
+    - 命中系统角色值/标签：要求角色一致；
+    - 命中用户部门/组织：放行；
+    - 如果系统里确实有人以该值作为部门或组织：说明它是可识别的分组，其他人不放行；
+    - 其余无法识别的自由文本不硬拦，避免历史节点全部卡死，交给改派处理。
+    """
+    if not candidate or _is_manager(user):
+        return True
+    if candidate in ROLE_CANDIDATES:
+        return user.role == candidate or ROLE_LABELS.get(user.role) == candidate
+    org_name = user.org_unit.name if user.org_unit else None
+    if candidate in {user.department, org_name}:
+        return True
+    department_exists = (
+        db.scalar(select(func.count()).select_from(User).where(User.department == candidate)) or 0
+    )
+    if department_exists:
+        return False
+    org_exists = (
+        db.scalar(select(func.count()).select_from(OrgUnit).where(OrgUnit.name == candidate)) or 0
+    )
+    return not org_exists
 
 
 def _next_instance_code(db: Session) -> str:
@@ -86,6 +123,42 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
         .order_by(ProcessNode.sequence_order, ProcessNode.id)
     ).all()
     edges = db.scalars(select(ProcessEdge).where(ProcessEdge.process_id == process.id)).all()
+    config = db.scalar(
+        select(ProcessExecutionConfig)
+        .options(joinedload(ProcessExecutionConfig.default_escalation_user))
+        .where(ProcessExecutionConfig.process_id == process.id)
+    )
+    assignment_rows = db.scalars(
+        select(NodeAssignment)
+        .options(
+            joinedload(NodeAssignment.org_unit),
+            joinedload(NodeAssignment.default_assignee),
+            joinedload(NodeAssignment.escalation_user),
+        )
+        .where(
+            NodeAssignment.process_id == process.id,
+            NodeAssignment.is_active.is_(True),
+        )
+    ).all()
+    assignments = {
+        row.node_key: {
+            "role": row.role,
+            "role_label": ROLE_LABELS.get(row.role, row.role) if row.role else None,
+            "org_unit_id": row.org_unit_id,
+            "org_name": row.org_unit.name if row.org_unit else None,
+            "default_user_id": row.default_assignee_user_id,
+            "default_user_name": (
+                row.default_assignee.display_name if row.default_assignee else None
+            ),
+            "due_hours": row.due_hours,
+            "escalation_hours": row.escalation_hours,
+            "escalation_user_id": row.escalation_user_id,
+            "escalation_user_name": (
+                row.escalation_user.display_name if row.escalation_user else None
+            ),
+        }
+        for row in assignment_rows
+    }
     return {
         "nodes": [
             {
@@ -109,6 +182,17 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
         ],
         "forms": forms_service.form_snapshot(db, process.id),
         "rules": forms_service.rule_snapshot(db, process.id),
+        "assignments": assignments,
+        "config": {
+            "task_due_hours": config.default_task_due_hours if config else None,
+            "escalation_hours": config.default_escalation_hours if config else None,
+            "escalation_user_id": config.default_escalation_user_id if config else None,
+            "escalation_user_name": (
+                config.default_escalation_user.display_name
+                if config and config.default_escalation_user
+                else None
+            ),
+        },
     }
 
 
@@ -154,18 +238,35 @@ def _create_task(
     node: dict,
     assignee_user_id: Optional[int],
 ) -> ProcessTask:
-    assignee = _assign_user(db, assignee_user_id)
+    assignment = (instance.snapshot.get("assignments") or {}).get(node["key"], {})
+    assignee = _assign_user(db, assignee_user_id) if assignee_user_id else None
+    if assignee is None and assignment.get("default_user_id"):
+        default_user = db.get(User, assignment["default_user_id"])
+        if default_user is not None and default_user.is_active:
+            assignee = default_user
+    due_hours = assignment.get("due_hours")
+    if due_hours is None:
+        due_hours = (instance.snapshot.get("config") or {}).get("task_due_hours")
+    candidate_text = (
+        assignment.get("role_label")
+        or assignment.get("org_name")
+        or node.get("owner")
+        or node.get("lane")
+    )
     task = ProcessTask(
         instance_id=instance.id,
         node_key=node["key"],
         name=node["name"],
         task_type=node.get("type") or NodeType.TASK.value,
         lane=node.get("lane"),
-        candidate_role=node.get("owner") or node.get("lane"),
+        candidate_role=candidate_text,
+        candidate_role_code=assignment.get("role"),
+        candidate_org_unit_id=assignment.get("org_unit_id"),
         status=TaskStatus.CLAIMED.value if assignee else TaskStatus.PENDING.value,
         assignee_user_id=assignee.id if assignee else None,
         assignee_name=assignee.display_name if assignee else None,
         claimed_at=utcnow() if assignee else None,
+        due_at=utcnow() + timedelta(hours=due_hours) if due_hours is not None else None,
     )
     db.add(task)
     instance.current_node_key = node["key"]
@@ -246,22 +347,54 @@ def start_instance(
     return instance
 
 
-def _ensure_task_action(task: ProcessTask, user: User) -> None:
+def _ensure_task_action(db: Session, task: ProcessTask, user: User) -> None:
     if task.status not in OPEN_STATUSES:
         raise HTTPException(status_code=409, detail="任务已结束，不能再操作")
-    if (
-        task.assignee_user_id is not None
-        and task.assignee_user_id != user.id
-        and not _is_manager(user)
-    ):
+    if task.instance.status == InstanceStatus.SUSPENDED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"流程实例已挂起（{task.instance.code}），恢复后才能处理任务",
+        )
+    if task.instance.status != InstanceStatus.RUNNING.value:
+        raise HTTPException(status_code=409, detail="流程实例已结束，不能再处理任务")
+    if task.assignee_user_id == user.id:
+        return
+    if task.assignee_user_id is not None and not _is_manager(user):
         raise HTTPException(
             status_code=403,
             detail=f"任务已指派给 {task.assignee_name or '其他用户'}，只有本人或流程管理科可以处理",
         )
+    if _is_manager(user):
+        return
+    if task.candidate_role_code and user.role != task.candidate_role_code:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"该任务只允许「{ROLE_LABELS.get(task.candidate_role_code, task.candidate_role_code)}」"
+                "角色处理；请联系流程管理科改派"
+            ),
+        )
+    if task.candidate_org_unit_id:
+        allowed_orgs = org_scope.ancestor_ids(db, user.org_unit_id) if user.org_unit_id else set()
+        if task.candidate_org_unit_id not in allowed_orgs:
+            raise HTTPException(
+                status_code=403,
+                detail="该任务限定在指定组织范围内处理；请联系流程管理科改派",
+            )
+    if task.candidate_role_code or task.candidate_org_unit_id:
+        return
+    if task.assignee_user_id is None and not _candidate_matches(db, user, task.candidate_role):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"该任务的候选角色/泳道为「{task.candidate_role}」，当前账号不符合；"
+                "请联系流程管理科改派"
+            ),
+        )
 
 
 def claim_task(db: Session, task: ProcessTask, user: User) -> ProcessTask:
-    _ensure_task_action(task, user)
+    _ensure_task_action(db, task, user)
     task.assignee_user_id = user.id
     task.assignee_name = user.display_name
     task.status = TaskStatus.CLAIMED.value
@@ -276,7 +409,7 @@ def complete_task(
     user: User,
     payload: TaskCompleteRequest,
 ) -> ProcessTask:
-    _ensure_task_action(task, user)
+    _ensure_task_action(db, task, user)
     instance = task.instance
     if instance.status != InstanceStatus.RUNNING.value:
         raise HTTPException(status_code=409, detail="流程实例已结束，不能再处理任务")
@@ -327,8 +460,12 @@ def complete_task(
     task.completed_by_name = user.display_name
     task.form_data = form_data
     task.comment = payload.comment
+    # 表单值是流程上下文的一部分：后续节点的规则必须能读到上游填写的数据。
+    # 采用扁平合并，后填的字段覆盖先前的；显式传入的 variables 优先级最高。
+    merged_variables = {**(instance.variables or {}), **form_data}
     if payload.variables:
-        instance.variables = {**(instance.variables or {}), **payload.variables}
+        merged_variables.update(payload.variables)
+    instance.variables = merged_variables
     db.flush()
 
     if next_key is None:
@@ -359,8 +496,11 @@ def assign_task(db: Session, task: ProcessTask, assignee_user_id: Optional[int])
 
 
 def cancel_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
-    if instance.status != InstanceStatus.RUNNING.value:
-        raise HTTPException(status_code=409, detail="只有运行中的实例可以取消")
+    if instance.status not in (
+        InstanceStatus.RUNNING.value,
+        InstanceStatus.SUSPENDED.value,
+    ):
+        raise HTTPException(status_code=409, detail="只有运行中或已挂起的实例可以取消")
     instance.status = InstanceStatus.CANCELLED.value
     instance.completed_at = utcnow()
     instance.current_node_key = None
@@ -373,7 +513,88 @@ def cancel_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
     return instance
 
 
+def suspend_instance(
+    db: Session, instance: ProcessInstance, reason: Optional[str] = None
+) -> ProcessInstance:
+    if instance.status != InstanceStatus.RUNNING.value:
+        raise HTTPException(status_code=409, detail="只有运行中的实例可以挂起")
+    instance.status = InstanceStatus.SUSPENDED.value
+    instance.suspended_at = utcnow()
+    instance.suspend_reason = reason
+    db.flush()
+    return instance
+
+
+def resume_instance(db: Session, instance: ProcessInstance) -> ProcessInstance:
+    if instance.status != InstanceStatus.SUSPENDED.value:
+        raise HTTPException(status_code=409, detail="只有已挂起的实例可以恢复")
+    instance.status = InstanceStatus.RUNNING.value
+    instance.suspended_at = None
+    instance.suspend_reason = None
+    db.flush()
+    return instance
+
+
 # ------------------------------------------------------------------ 查询与序列化
+
+
+def get_execution_config(db: Session, process_id: int) -> Optional[ProcessExecutionConfig]:
+    return db.scalar(
+        select(ProcessExecutionConfig).where(ProcessExecutionConfig.process_id == process_id)
+    )
+
+
+def save_execution_config(
+    db: Session,
+    process_id: int,
+    due_hours: Optional[int],
+    escalation_hours: Optional[int] = None,
+    escalation_user_id: Optional[int] = None,
+) -> ProcessExecutionConfig:
+    config = get_execution_config(db, process_id)
+    if config is None:
+        config = ProcessExecutionConfig(process_id=process_id)
+        db.add(config)
+    config.default_task_due_hours = due_hours
+    config.default_escalation_hours = escalation_hours
+    config.default_escalation_user_id = escalation_user_id
+    db.flush()
+    return config
+
+
+def get_node_assignment(db: Session, process_id: int, node_key: str) -> Optional[NodeAssignment]:
+    return db.scalar(
+        select(NodeAssignment).where(
+            NodeAssignment.process_id == process_id,
+            NodeAssignment.node_key == node_key,
+        )
+    )
+
+
+def save_node_assignment(
+    db: Session, process_id: int, node_key: str, data: dict
+) -> Optional[NodeAssignment]:
+    row = get_node_assignment(db, process_id, node_key)
+    fields = (
+        "role",
+        "org_unit_id",
+        "default_assignee_user_id",
+        "due_hours",
+        "escalation_hours",
+        "escalation_user_id",
+    )
+    if all(data.get(field) is None for field in fields):
+        if row is not None:
+            db.delete(row)
+        db.flush()
+        return None
+    if row is None:
+        row = NodeAssignment(process_id=process_id, node_key=node_key)
+        db.add(row)
+    for field in fields:
+        setattr(row, field, data.get(field))
+    db.flush()
+    return row
 
 
 def executable_processes(db: Session) -> List[ExecutableProcessOut]:
@@ -426,13 +647,20 @@ def task_out(task: ProcessTask) -> TaskOut:
         task_type_label=TASK_TYPE_LABELS.get(task.task_type, task.task_type),
         lane=task.lane or node.get("lane"),
         candidate_role=task.candidate_role,
+        candidate_role_code=task.candidate_role_code,
+        candidate_org_unit_id=task.candidate_org_unit_id,
         status=task.status,
         status_label=TASK_LABELS.get(task.status, task.status),
+        instance_status=instance.status,
+        instance_status_label=INSTANCE_LABELS.get(instance.status, instance.status),
         assignee_user_id=task.assignee_user_id,
         assignee_name=task.assignee_name,
         created_at=task.created_at,
         claimed_at=task.claimed_at,
         due_at=task.due_at,
+        escalated_at=task.escalated_at,
+        escalated_to_user_id=task.escalated_to_user_id,
+        escalated_to_name=task.escalated_to_name,
         completed_at=task.completed_at,
         completed_by_name=task.completed_by_name,
         form_data=task.form_data,
@@ -458,6 +686,8 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
         definition_version=instance.definition_version,
         started_by_name=instance.started_by_name,
         started_at=instance.started_at,
+        suspended_at=instance.suspended_at,
+        suspend_reason=instance.suspend_reason,
         completed_at=instance.completed_at,
         task_count=len(tasks),
         open_task_count=sum(1 for t in tasks if t.status in OPEN_STATUSES),

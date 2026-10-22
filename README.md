@@ -129,7 +129,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
-种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、
+种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、24 份步骤契约、32 个交付物定义（每个项目自动生成 32 个交付物实例）、5 个演示组织单元与 4 个演示账号（已挂到演示组织）、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
 2 套对标框架（71 个标准分类、249 条流程映射）。
 
@@ -138,9 +138,14 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 ```bash
 python -m scripts.seed            # 库为空时才灌，非空会提示并跳过
 python -m scripts.seed --reset    # 清空重灌
+python -m scripts.seed --reference           # 只补灌工作流/工具/契约/交付物定义/对标数据
 python -m scripts.seed --benchmarks          # 只补灌 SCOR / APQC 对标数据
 python -m scripts.seed --benchmarks --reset  # 只重建对标数据，不动业务数据
 ```
+
+> 工具模板库不预置演示模板：模板属于组织资产，请按团队实际格式通过
+> `/tool-templates` 上传并审批后使用。组织单元同理，生产环境由管理员通过
+> `/org-units` 维护，不进入 `scripts.bootstrap` 的参考数据。
 
 跑测试：
 
@@ -150,11 +155,18 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：9 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器跑两段：11 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
 python scripts/verify_frontend.py http://127.0.0.1:8123 _screenshots
+```
+
+超期升级扫描可直接调用管理接口，也可用 CLI 交给 cron（建议每 15 分钟）：
+
+```bash
+python scripts/run_escalations.py --username manager
+# 只扫描某个流程：--process-id 12
 ```
 
 交互段覆盖：登录、地图下钻、对标框架切换、主题切换、工作流步骤详情、方法论匹配引擎、
@@ -178,6 +190,9 @@ python scripts/verify_frontend.py http://127.0.0.1:8123 _screenshots
 | `CORS_ORIGINS` | `*` | 逗号分隔；生产请收紧 |
 | `SQL_ECHO` | `false` | 打印 SQL |
 | `AUTO_MIGRATE` | `true` | 启动时执行 `alembic upgrade head`；设为 `false` 则直接 `create_all`（测试用） |
+| `ATTACHMENT_DIR` | `./var/attachments` | 交付物文件落盘目录；Docker 里映射为命名卷 `attachments` |
+| `ATTACHMENT_MAX_MB` | `50` | 单文件大小上限 |
+| `ATTACHMENT_ALLOWED_EXTENSIONS` | 见代码 | 逗号分隔的扩展名白名单，默认含 Office / PDF / BPMN / 图片 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `logix_pms` / `psm` / `psm_dev_password` | 仅 docker compose 使用；生产必须改口令 |
 | `DATABASE_URL_DOCKER` | 由上面三项拼出 | 外部托管数据库时，覆盖容器内的整个连接串 |
 | `TEST_DATABASE_URL` | 空 | 设了就让 pytest 针对该库跑 |
@@ -333,7 +348,7 @@ web/            前端（原生 ES 模块，无构建步骤）
 scripts/
   seed.py             命令行灌库
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
-  verify_frontend.py  无头浏览器联调自检（9 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器联调自检（11 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
 docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件与集成说明
 alembic/        数据库迁移脚本（env.py + versions/）
@@ -386,8 +401,8 @@ main.js
 并自动带上状态、阶段或方法论筛选。逐页的元素关系与可视化选型见
 [docs/ui-information-architecture.md](docs/ui-information-architecture.md)；
 所有指标的公式、阈值与边界见 [docs/metrics.md](docs/metrics.md)，
-页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入格式见
-[docs/integration.md](docs/integration.md)。
+页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入（出站事件与 HMAC 入站
+Webhook）格式见 [docs/integration.md](docs/integration.md)。
 BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实施顺序见
 [docs/bpmn-editor-and-attachments.md](docs/bpmn-editor-and-attachments.md)；
 步骤契约、工具预制模板、交付物版本与集团/分公司继承见
@@ -406,19 +421,21 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 pytest 里检查 import 路径是否存在、九个视图是否都注册且有 renderer、样式表是否被引用，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**九个模块与对应接口**：
+**十一个模块与对应接口**：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
 | 管理驾驶舱 | `/dashboard/overview`、`/process-map/heatmap` | 指标卡、五阶段健康度、方法论分布、改善优先级（该改什么）与重点项目（正在做什么）、健康度预警、异常概览；优先级行可定位到地图 |
-| 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC 对标切换与覆盖率；跨层优先级排序统一在驾驶舱查看 |
+| 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC 对标切换与覆盖率；流程详情含标准配套文件（含上级继承）与管理入口 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
-| 流程执行 | `/execution/*` | 启动实例、任务队列、认领/完成/改派、分支选择、实例时间线 |
-| 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配 |
+| 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
+| 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
+| 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
 | 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道建模、节点增删改、改动即时保存并重算指标与建议；BPMN 2.0 导入/导出 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
+| 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
 
 **两处值得说明的取舍**：
 
@@ -441,10 +458,18 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
 | `notification` | 站内通知：任务指派、流程完成、异常超期、里程碑逾期 |
-| `integration_endpoint` / `integration_delivery` | ERP/OA Webhook 端点与 Outbox 投递记录 |
+| `integration_endpoint` / `integration_delivery` | ERP/OA 出站 Webhook 端点与 Outbox 投递记录 |
+| `inbound_webhook` / `inbound_event` | ERP/OA 入站入口（HMAC 签名、服务账号、流程范围）与幂等事件 |
 | `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
+| `step_contract` | 步骤契约：输入、工具引用与使用要求、验收口径、决策门 |
+| `deliverable_definition` / `deliverable_instance` / `deliverable_version` | 标准交付物定义 → 项目实例 → 不可变版本；版本记录模板/标准文件来源 |
+| `process_document` / `process_document_version` | 流程标准配套文件（L1–L4）：SOP / 表单 / 检查表，唯一标准源；支持组织范围、变体策略与来源 lineage |
 | `tool` | 方法论工具箱，每个工具含 5 步标准操作 |
+| `tool_template` / `tool_template_version` / `template_usage` | 工具预制模板、版本与使用记录 |
+| `org_unit` | 组织树：集团/公司/工厂/部门；标准文件与模板按它标范围 |
+| `app_user` | 用户、角色、归属组织与启停状态；管理员在「组织与人员」维护 |
+| `asset_baseline` | 资产基线：某时点的标准文件/模板版本快照（JSON），用于审计与升级前对照 |
 | `kpi_definition` / `kpi_record` | KPI 定义与月度时序 |
 | `exception_event` | 异常事件闭环台账 |
 | `knowledge_item` | 案例 / 模板 / 最佳实践 / 标准 |
@@ -456,6 +481,15 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 ## API 一览
 
 所有接口前缀 `/api/v1`。
+
+### 认证与人员
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/auth/login` | 登录换取令牌 |
+| GET | `/auth/me` | 当前登录用户（含角色标签、归属组织） |
+| GET | `/auth/meta` | 角色值与中文标签 |
+| GET/POST | `/auth/users` | 人员列表（keyword / org_unit_id / role / active_only）/ 新建（ADMIN） |
+| PATCH | `/auth/users/{id}` | 修改姓名、角色、组织、部门、启停、重置口令（ADMIN） |
 
 ### 管理驾驶舱
 | 方法 | 路径 | 说明 |
@@ -485,6 +519,60 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 |---|---|---|
 | GET | `/workflow/stages` | 五阶段 × 24 步骤，含工具、交付物、关键要点 |
 | GET | `/workflow/stages/{stage_no}` | 单阶段 |
+| GET | `/workflow/contracts` | 24 份步骤契约：输入、结构化工具引用、验收标准、责任人角色、决策门 |
+| GET/PUT | `/workflow/steps/{step_no}/contract` | 单步契约；写入需 MANAGER+，工具编码必须存在于工具箱 |
+| GET/POST | `/workflow/deliverable-definitions` | 交付物定义清单 / 新增（写入需 MANAGER+） |
+| PATCH/DELETE | `/workflow/deliverable-definitions/{id}` | 修改 / 删除（已有实例时只能停用） |
+
+### 步骤交付物与版本
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/projects/{id}/deliverables` | 项目交付物清单（按步骤，含当前版本与状态） |
+| GET | `/projects/{id}/deliverables/summary` | 完成度：已生效、评审中、草稿、缺失 |
+| POST | `/projects/{id}/deliverables/sync` | 按最新定义补齐缺失实例（幂等） |
+| GET | `/deliverables/{id}` | 交付物详情与全部版本历史 |
+| PATCH | `/deliverables/{id}` | 调整交付物负责人 |
+| GET/POST | `/deliverables/{id}/versions` | 版本历史 / 登记新版本（R1、R2…自动递增） |
+| POST | `/deliverables/{id}/versions/upload` | 上传版本文件（multipart）；服务端算 SHA-256、校验扩展名与魔数 |
+| GET | `/deliverables/{id}/versions/{vid}/download` | 下载文件（`attachment` + `nosniff`，需登录） |
+| POST | `/deliverables/{id}/versions/{vid}/transition` | 审批流转：DRAFT → IN_REVIEW → APPROVED → EFFECTIVE |
+| POST | `/deliverables/{id}/versions/{vid}/restore` | 恢复已批准的历史版本（移动指针，不复制文件） |
+| GET | `/deliverables/meta` | 类型 / 状态中文标签与允许的状态流转 |
+
+### 流程标准文件（L1–L4）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/process-documents[/{id}]` | 标准文件清单 / 详情 / 新建（写入需 MANAGER+）；支持按流程、项目、组织、分类筛选，`include_ancestors=true` 带上级继承 |
+| GET | `/process-documents/effective` | 按「组织 + 流程 + 日期」解析有效版本；同族优先本地变体，否则向上继承，并返回解释 |
+| PATCH/DELETE | `/process-documents/{id}` | 修改 / 删除（有版本时只能停用，MANAGER+）；可维护变体策略 |
+| GET | `/process-documents/meta` | 分类 / 状态标签与状态机 |
+| GET | `/process-documents/{id}/versions` | 版本历史（`v3.2` + 生效日期） |
+| POST | `/process-documents/{id}/versions/upload` | 上传新版本（MANAGER+，服务端算 SHA-256） |
+| POST | `/process-documents/{id}/versions/{vid}/transition` | 审批流转（MANAGER+） |
+| GET | `/process-documents/{id}/versions/{vid}/download` | 下载标准文件（登录即可，记录审计） |
+| POST | `/process-documents/{id}/versions/{vid}/copy-to-deliverable` | 复制到项目交付物，记录来源标准版本 |
+| POST | `/process-documents/{id}/promote` | 项目交付物晋升为标准文件草稿（MANAGER+） |
+| GET | `/process-documents/{id}/upgrade-impact` | 上级新版本影响分析：落后变体 + 仍固定旧版的项目交付物 |
+| POST | `/process-documents/{id}/rebase` | 变体变基到上级新版本（生成草稿重新审批；major 需显式确认，MANAGER+） |
+
+### 组织单元（集团 → 公司 → 工厂 → 部门）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/org-units`、`/org-units/tree` | 组织扁平清单 / 树；支持类型、上级、关键字筛选 |
+| GET | `/org-units/meta` | 组织类型中文标签 |
+| POST/PATCH/DELETE | `/org-units[/{id}]` | 维护组织主数据（仅管理员）；有下级或资产引用时只能停用 |
+
+标准文件与模板通过 `org_unit_id` 标范围：`NULL` 为集团通用，非空表示该组织及下级可见；
+查询时带 `org_unit_id` 会返回「集团通用 + 本级 + 所有上级」，实现向上继承。
+
+### 资产基线与审计
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/baselines` | 基线清单 / 创建快照（MANAGER+）；范围支持全部、单条流程、组织视角 |
+| GET | `/baselines/{id}` | 基线明细：创建时的标准文件/模板版本 |
+| GET | `/baselines/{id}/diff` | 基线 vs 当前有效版本：已变更 / 新增 / 已移除 / 未变 |
+| GET | `/baselines/governance` | 治理概览：资产有效性、落后变体、固定旧版交付物、基线覆盖率、模板使用 |
+| GET | `/baselines/meta` | 范围与差异状态中文标签 |
 
 ### 流程项目组合
 | 方法 | 路径 | 说明 |
@@ -502,15 +590,21 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/execution/processes` | 可启动流程（设计器里已有节点的流程） |
+| GET | `/execution/assignees` | 可指派人员（启用账号，不含只读） |
+| GET/PUT | `/execution/config` | 流程执行配置：默认任务时限、超期升级时限与升级处理人（MANAGER+ 写入） |
+| GET/PUT | `/execution/assignments` | 节点分派：角色 / 组织范围 / 默认处理人 / 节点时限 / 升级策略（MANAGER+ 写入；随实例启动冻结） |
+| POST | `/execution/escalations/scan` | 扫描已到升级时限的任务并改派（MANAGER+；支持 process_id / limit） |
 | GET | `/execution/instances` | 实例列表，支持 status / process_id |
 | POST | `/execution/instances` | 启动实例；可传 variables 与按节点指派 assignments |
 | GET | `/execution/instances/{id}` | 实例详情、任务时间线与变量 |
-| POST | `/execution/instances/{id}/cancel` | 取消运行中实例（MANAGER+），未完成任务一并取消 |
+| POST | `/execution/instances/{id}/cancel` | 取消运行中/已挂起的实例（MANAGER+），未完成任务一并取消 |
+| POST | `/execution/instances/{id}/suspend` | 挂起运行中的实例（MANAGER+，可带原因）；挂起期间任务不可认领/完成 |
+| POST | `/execution/instances/{id}/resume` | 恢复已挂起的实例（MANAGER+） |
 | DELETE | `/execution/instances/{id}` | 删除实例及任务（MANAGER+，用于清理） |
 | GET | `/execution/tasks` | 任务队列：status / assignee=me\|id / instance_id / process_id / only_open |
 | GET | `/execution/tasks/{id}` | 任务详情（含可选下一步节点） |
 | POST | `/execution/tasks/{id}/claim` | 认领任务 |
-| POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边时必须传 `next_node_key` |
+| POST | `/execution/tasks/{id}/complete` | 完成并推进；多出边默认按规则自动路由，未命中时传 `next_node_key` |
 | PATCH | `/execution/tasks/{id}/assignee` | 改派或退回公共队列（MANAGER+） |
 | GET/POST | `/execution/forms` | 节点表单定义查询 / 新建（写入需 MANAGER+） |
 | PATCH/DELETE | `/execution/forms/{id}` | 修改 / 删除表单定义（MANAGER+） |
@@ -535,6 +629,11 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET | `/integrations/deliveries` | 投递记录，支持 status / limit |
 | POST | `/integrations/deliveries/run` | 投递待发送事件（MANAGER+） |
 | POST | `/integrations/deliveries/{id}/retry` | 手动重试（MANAGER+） |
+| GET/POST | `/integrations/inbound-hooks` | 入站入口列表 / 新建（MANAGER+，密钥只返回一次） |
+| PATCH/DELETE | `/integrations/inbound-hooks/{id}` | 修改 / 轮换密钥 / 删除（MANAGER+） |
+| GET | `/integrations/inbound-actions` | 可用的入站动作及中文标签 |
+| GET | `/integrations/inbound-events` | 入站事件记录（MANAGER+） |
+| POST | `/integrations/inbound/{code}` | 公开入站入口；HMAC 签名 + `event_id` 幂等 |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |
@@ -542,6 +641,21 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET | `/tools/grouped` | 按诊断/设计/落地/监控分组 |
 | GET | `/tools/{code}` | 工具详情（含 5 步标准操作、模板、常见误用） |
 | **POST** | **`/tools/match`** | **按问题找工具：输入「审批太多周期太长」返回匹配工具** |
+
+### 工具模板库
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/tool-templates` | 模板清单，支持 tool_code / format / stage_no / 交付物定义 / keyword 筛选 |
+| GET | `/tool-templates/meta` | 格式、状态、调用方式的中文标签与状态机 |
+| GET/POST | `/tool-templates[/{id}]` | 详情（含全部版本）/ 新建（MANAGER+） |
+| PATCH/DELETE | `/tool-templates/{id}` | 修改 / 删除（有版本或使用记录时只能停用，MANAGER+） |
+| GET/POST | `/tool-templates/{id}/versions` | 版本历史 / 新增在线模板版本（MANAGER+） |
+| POST | `/tool-templates/{id}/versions/upload` | 上传模板文件（语义化版本号、占位符 JSON、SHA-256） |
+| POST | `/tool-templates/{id}/versions/{vid}/transition` | 模板版本审批：DRAFT → IN_REVIEW → APPROVED → EFFECTIVE |
+| GET | `/tool-templates/{id}/versions/{vid}/download` | 下载模板文件并记录一次使用 |
+| GET | `/tool-templates/{id}/versions/{vid}/context` | 按项目/交付物解析占位符取值，列出缺失必填项 |
+| POST | `/tool-templates/{id}/copy` | 复制到项目交付物，生成新版本并固定来源模板版本 |
+| GET/POST | `/tool-templates/{id}/usages` | 使用记录 / 记录一次引用查看（GENERATE 尚未实现） |
 
 ### 流程设计器
 | 方法 | 路径 | 说明 |
@@ -727,6 +841,8 @@ OWNER 的归属按 **`owner_user_id` 外键**判断（项目、异常事件与�
 | 流程设计器 | 节点增删改、泳道建模 | OWNER 仅自己负责的流程 |
 | 运营监控 | 登记异常、处理异常、新建 KPI、录入数据点 | 异常 OWNER+；KPI 需 MANAGER+ |
 | 知识库 | 新建知识条目 | MANAGER+ |
+| 交付物与模板库 | 上传交付物版本、审批/恢复、新建/上传流程标准文件、审批、复制到项目、项目成果晋升、模板管理 | 交付物与复制跟随项目 Owner；标准文件与模板管理需 MANAGER+ |
+| 组织单元 | 新建/修改/停用组织；新建/编辑人员、分配组织与角色、重置口令 | 仅系统管理员（ADMIN） |
 
 无权限时按钮直接隐藏或禁用，后端仍会独立校验（前端隐藏不等于后端放行）。
 
@@ -794,5 +910,21 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
    改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
-8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、BPMN 2.0 导入导出、站内通知、
-   ERP/OA 出站 Webhook；下一步补并行网关与子流程、入站 Webhook/拉取接口、定时投递。
+8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、分支按规则自动路由、上游表单数据进入
+   后续判断、启动按节点指派、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限
+   与超期升级（扫描后自动改派）、实例挂起/恢复、BPMN 2.0 导入导出、站内通知、
+   ERP/OA 出站 Webhook 与 HMAC 入站 Webhook；下一步补并行网关与子流程、ERP 拉取接口、
+   定时投递 worker。
+9. **交付物与标准文件**：本地卷存储、上传/下载、SHA-256、扩展名/魔数校验、
+   项目交付物（定义/实例/版本/审批）、流程标准文件（L1–L4 唯一源、复制到项目、
+   项目成果晋升、流程详情配套文件入口）、工具模板库与前端三页签均已完成；
+   还剩步骤页按项目流程展示「本步骤标准文件」、S3/对象存储、孤儿文件巡检、
+   服务端占位符生成（DOCX/XLSX/PPTX）与保留期策略。
+10. **组织范围与集团继承**：`org_unit` 树、标准文件/模板的组织归属、集团通用 +
+    上级继承、标准文件的变体策略（锁定/参数可调/可扩展/可选/仅本地）、
+    「组织 + 流程 + 日期」有效版本解析、升级影响分析与变体变基已完成；
+    还剩字段级覆盖（`PARAMETERIZED` 的具体参数值）、自动冲突判定与三方内容对比。
+    模板的变体能力沿用同一套策略，可下一步接入。
+11. **基线与审计**：资产基线快照（全部/流程/组织）、「基线 vs 当前有效版本」差异、
+    治理概览（资产有效性、落后变体、仍固定旧版交付物、流程基线覆盖率、模板使用）
+    已完成；还剩定期一致性审计、趋势/告警与导出。

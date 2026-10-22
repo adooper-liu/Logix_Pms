@@ -99,6 +99,11 @@ class ProjectStep(Base):
     is_milestone: Mapped[bool] = mapped_column(Boolean, default=False)
 
     project: Mapped["Project"] = relationship("Project", back_populates="steps")
+    deliverables: Mapped[List["DeliverableInstance"]] = relationship(  # noqa: F821
+        "DeliverableInstance",
+        back_populates="step",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (Index("ix_project_step_project", "project_id", "stage_no", "step_no"),)
 

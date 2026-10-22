@@ -8,10 +8,12 @@ from typing import Dict, List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.enums import ExceptionStatus, StepStatus
+from app.models.enums import ExceptionStatus, InstanceStatus, Role, StepStatus, TaskStatus
+from app.models.execution import ProcessInstance, ProcessTask
 from app.models.monitor import ExceptionEvent
 from app.models.notification import Notification
 from app.models.project import Project, ProjectStep
+from app.models.user import User
 from app.schemas.notification import (
     NotificationOut,
     NotificationScanResult,
@@ -21,11 +23,16 @@ from app.schemas.notification import (
 TYPE_LABELS = {
     "TASK_ASSIGNED": "任务指派",
     "TASK_COMPLETED": "任务完成",
+    "TASK_OVERDUE": "任务超期",
+    "TASK_ESCALATED": "任务升级",
     "INSTANCE_COMPLETED": "流程完成",
     "INSTANCE_CANCELLED": "流程取消",
+    "INSTANCE_SUSPENDED": "流程挂起",
+    "INSTANCE_RESUMED": "流程恢复",
     "EXCEPTION_ASSIGNED": "异常指派",
     "EXCEPTION_OVERDUE": "异常超期",
     "MILESTONE_OVERDUE": "里程碑逾期",
+    "GOVERNANCE_FINDING": "治理待办",
     "SYSTEM": "系统通知",
 }
 
@@ -67,6 +74,29 @@ def notify(
     db.add(notification)
     db.flush()
     return notification
+
+
+def notify_managers(
+    db: Session,
+    type_: str,
+    title: str,
+    body: Optional[str] = None,
+    link: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+) -> int:
+    """给所有启用的管理员/流程管理科发提醒，返回实际生成数。"""
+    managers = db.scalars(
+        select(User).where(
+            User.role.in_((Role.ADMIN.value, Role.MANAGER.value)),
+            User.is_active.is_(True),
+        )
+    ).all()
+    before = db.scalar(select(func.count()).select_from(Notification)) or 0
+    for manager in managers:
+        notify(db, manager.id, type_, title, body, link, entity_type, entity_id)
+    after = db.scalar(select(func.count()).select_from(Notification)) or 0
+    return after - before
 
 
 def out(notification: Notification) -> NotificationOut:
@@ -185,6 +215,42 @@ def scan_overdue(db: Session) -> NotificationScanResult:
                 link="projects",
                 entity_type="project_step",
                 entity_id=step.id,
+            )
+
+    # 流程任务超期：有处理人提醒本人，公共队列提醒流程管理科
+    overdue_tasks = db.scalars(
+        select(ProcessTask).where(
+            ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
+            ProcessTask.due_at.is_not(None),
+            ProcessTask.due_at < now,
+            ProcessTask.instance.has(ProcessInstance.status == InstanceStatus.RUNNING.value),
+        )
+    ).all()
+    for task in overdue_tasks:
+        scanned += 1
+        instance = task.instance
+        if task.assignee_user_id is not None:
+            notify(
+                db,
+                task.assignee_user_id,
+                "TASK_OVERDUE",
+                f"任务已超期：{task.name}",
+                f"{instance.code} {instance.process_name} · 到期 {task.due_at:%Y-%m-%d %H:%M}",
+                link="execution",
+                entity_type="process_task",
+                entity_id=task.id,
+            )
+        else:
+            notify_managers(
+                db,
+                "TASK_OVERDUE",
+                f"公共任务已超期：{task.name}",
+                f"{instance.code} {instance.process_name} · 到期 "
+                f"{task.due_at:%Y-%m-%d %H:%M}"
+                + (f" · 候选：{task.candidate_role}" if task.candidate_role else ""),
+                link="execution",
+                entity_type="process_task",
+                entity_id=task.id,
             )
 
     created_after = db.scalar(select(func.count()).select_from(Notification)) or 0

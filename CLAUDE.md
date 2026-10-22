@@ -36,7 +36,7 @@ app/schemas   Pydantic 契约
 app/services  业务逻辑（方法论匹配、测算、审计…）
 app/api/v1    路由
 web/js/core   前端基础设施（api/auth/format/router/state/ui）
-web/js/views  八个视图模块
+web/js/views  业务视图模块
 ```
 
 前端依赖是单向的：`main.js → views/* → core/router → core/{api,auth,state,ui,format}`。

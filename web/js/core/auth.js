@@ -3,7 +3,7 @@
 import { API_BASE, GET, setToken, getToken, setUnauthorizedHandler } from './api.js';
 import { state } from './state.js';
 import { toast } from './ui.js';
-import { go } from './router.js';
+import { go, initialView } from './router.js';
 
 export const AUTH = { user: null };
 
@@ -84,7 +84,7 @@ export async function doLogin() {
     renderUserChip();
     await loadMeta();
     window.dispatchEvent(new Event('pms:login'));
-    go('dashboard');
+    go(initialView());
     toast('欢迎回来，' + body.user.display_name);
   } catch (e) {
     err.textContent = e.message;
@@ -102,6 +102,7 @@ export function logout() {
   document.getElementById('userName').textContent = '未登录';
   document.getElementById('userAvatar').textContent = '--';
   document.getElementById('userRole').textContent = '';
+  document.getElementById('userRole').classList.add('hide');
   document.getElementById('view').innerHTML = '';
   document.getElementById('mask').classList.remove('show');
   const badge = document.getElementById('notifBadge');
@@ -115,9 +116,15 @@ export function logout() {
 export function renderUserChip() {
   const u = AUTH.user;
   if (!u) return;
-  document.getElementById('userAvatar').textContent = (u.display_name || 'U').slice(-2);
-  document.getElementById('userName').textContent = u.display_name;
-  document.getElementById('userRole').textContent = ROLE_LABEL[u.role] || u.role;
+  const name = u.display_name || 'U';
+  document.getElementById('userAvatar').textContent = name.slice(0, 1);
+  document.getElementById('userName').textContent = name;
+  const roleLabel = ROLE_LABEL[u.role] || u.role;
+  const roleEl = document.getElementById('userRole');
+  // 显示名里已经带了角色（如「系统管理员」「流程管理科」）时不再重复显示角色标签
+  const duplicate = name.includes(roleLabel);
+  roleEl.textContent = duplicate ? '' : roleLabel;
+  roleEl.classList.toggle('hide', duplicate);
 }
 
 /** 枚举中文标签由后端下发，前端不维护映射表 */

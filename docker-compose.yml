@@ -39,10 +39,15 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_dev_password}@db:5432/${POSTGRES_DB:-logix_pms}}
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # 附件落容器内卷；生产可换成 S3/对象存储
+      ATTACHMENT_DIR: ${ATTACHMENT_DIR_DOCKER:-/app/var/attachments}
+      ATTACHMENT_MAX_MB: ${ATTACHMENT_MAX_MB:-50}
       # 生产环境务必替换
       SECRET_KEY: ${SECRET_KEY:-logix-pms-dev-secret-change-me}
     ports:
       - "8123:8123"
+    volumes:
+      - attachments:/app/var/attachments
     depends_on:
       db:
         condition: service_healthy
@@ -50,3 +55,4 @@ services:
 
 volumes:
   pgdata:
+  attachments:

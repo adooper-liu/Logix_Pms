@@ -115,6 +115,8 @@ def main() -> int:
     else:
         print(f"  标准工作流步骤     {reference['workflow_steps']}")
         print(f"  方法论工具         {reference['tools']}")
+        print(f"  步骤契约           {reference['step_contracts']}")
+        print(f"  交付物定义         {reference['deliverable_definitions']}")
         print(f"  对标框架           {reference['benchmark_frameworks']}")
         print(f"  对标分类           {reference['benchmark_categories']}")
     print(f"  数据库             {settings.database_url.split('://')[0]}")

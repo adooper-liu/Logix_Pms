@@ -14,18 +14,41 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
+from app.models.deliverable import (
+    DeliverableDefinition,
+    DeliverableInstance,
+    DeliverableVersion,
+    StepContract,
+)
 from app.models.enums import Role, TaskStatus
-from app.models.execution import FormDefinition, ProcessInstance, ProcessRule, ProcessTask
-from app.models.integration import IntegrationDelivery, IntegrationEndpoint
+from app.models.execution import (
+    FormDefinition,
+    NodeAssignment,
+    ProcessExecutionConfig,
+    ProcessInstance,
+    ProcessRule,
+    ProcessTask,
+)
+from app.models.governance import GovernanceFinding
+from app.models.integration import (
+    InboundEvent,
+    InboundWebhook,
+    IntegrationDelivery,
+    IntegrationEndpoint,
+)
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
+from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
+from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
+from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
-from app.seed import benchmark_data, corpus, corpus_data
+from app.seed import benchmark_data, corpus, corpus_data, deliverable_data
+from app.services import deliverable as deliverable_service
 from app.services import execution as execution_service
 from app.services import notifications as notification_service
 from app.services.workflow import recompute_progress, seed_project_steps
@@ -140,6 +163,78 @@ def _seed_tools(db: Session) -> None:
         )
 
 
+def _seed_step_contracts(db: Session) -> None:
+    """为 24 个标准步骤生成契约；每阶段最后一步是决策门。"""
+    # SessionLocal 是 autoflush=False；先落库，否则下面的 select 看不到刚 add 的步骤
+    db.flush()
+    existing = set(db.scalars(select(WorkflowTemplate.step_no)).all())
+    last_per_stage: Dict[int, str] = {}
+    for row in corpus.WORKFLOW:
+        last_per_stage[row["stage_no"]] = row["step_no"]
+
+    previous: Optional[dict] = None
+    for row in corpus.WORKFLOW:
+        step_no = row["step_no"]
+        # 输入用上一步的产出描述，保持「上游交付物 → 本步产出」的链条可读
+        inputs = (
+            f"上游交付物：{previous['deliverables']}"
+            if previous
+            else "公司战略、年度经营目标与现有制度文件"
+        )
+        if step_no in existing:
+            db.add(
+                StepContract(
+                    step_no=step_no,
+                    inputs=inputs,
+                    tool_codes=deliverable_data.STEP_TOOL_CODES.get(step_no, []),
+                    tool_levels=deliverable_data.STEP_TOOL_LEVELS.get(step_no, {}),
+                    acceptance_criteria=deliverable_data.STAGE_ACCEPTANCE.get(row["stage_no"]),
+                    owner_role=deliverable_data.STEP_OWNER_ROLES.get(step_no),
+                    decision_gate=last_per_stage.get(row["stage_no"]) == step_no,
+                )
+            )
+        previous = row
+
+
+def backfill_step_contract_levels(db: Session) -> int:
+    """升级已有库：只给还没有 tool_levels 的契约补标准使用要求，不覆盖人工配置。"""
+    changed = 0
+    for contract in db.scalars(select(StepContract)).all():
+        if contract.tool_levels:
+            continue
+        levels = deliverable_data.STEP_TOOL_LEVELS.get(contract.step_no, {})
+        if levels:
+            contract.tool_levels = levels
+            changed += 1
+    db.flush()
+    return changed
+
+
+def _seed_deliverable_definitions(db: Session) -> None:
+    db.flush()
+    existing = set(db.scalars(select(WorkflowTemplate.step_no)).all())
+    per_step_order: Dict[str, int] = {}
+    for row in deliverable_data.DELIVERABLES:
+        if row["step_no"] not in existing:
+            continue
+        order = per_step_order.get(row["step_no"], 0) + 1
+        per_step_order[row["step_no"]] = order
+        db.add(
+            DeliverableDefinition(
+                code=row["code"],
+                name=row["name"],
+                step_no=row["step_no"],
+                type=row["type"],
+                required=True,
+                acceptance_criteria=deliverable_data.STAGE_ACCEPTANCE.get(
+                    int(row["step_no"].split(".")[0])
+                ),
+                sort_order=order,
+                is_active=True,
+            )
+        )
+
+
 def _seed_projects(
     db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]
 ) -> Dict[str, int]:
@@ -180,6 +275,7 @@ def _seed_projects(
         db.flush()
         seed_project_steps(db, obj)
         db.flush()
+        deliverable_service.sync_project_instances(db, obj)
         recompute_progress(db, obj)
         ids[row["code"]] = obj.id
     return ids
@@ -599,7 +695,39 @@ def _seed_design_models(db: Session, code_to_id: Dict[str, int]) -> None:
 # ------------------------------------------------------------------ 入口
 
 
-def _seed_users(db: Session) -> Dict[str, int]:
+def _seed_org_units(db: Session) -> Dict[str, int]:
+    """演示用组织树。生产不灌：组织编码由系统管理员通过 /org-units 维护。"""
+    ids: Dict[str, int] = {}
+
+    def add(code: str, name: str, org_type: str, parent: Optional[OrgUnit] = None) -> OrgUnit:
+        org = OrgUnit(
+            code=code,
+            name=name,
+            type=org_type,
+            parent_id=parent.id if parent else None,
+        )
+        db.add(org)
+        db.flush()
+        org.path = (parent.path if parent else "/") + f"{org.id}/"
+        db.flush()
+        ids[code] = org.id
+        return org
+
+    group = add("GROUP-001", "集团总部", "GROUP")
+    east = add("CO-EAST", "华东分公司", "COMPANY", group)
+    add("CO-SOUTH", "华南分公司", "COMPANY", group)
+    add("DEPT-EAST-MFG", "华东制造部", "DEPARTMENT", east)
+    add("DEPT-EAST-QA", "华东质量部", "DEPARTMENT", east)
+    return ids
+
+
+def _seed_users(db: Session, org_ids: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+    org_ids = org_ids or {}
+    demo_orgs = {
+        "admin": "GROUP-001",
+        "manager": "GROUP-001",
+        "chen": "CO-EAST",
+    }
     for row in corpus_data.USERS:
         db.add(
             User(
@@ -608,6 +736,7 @@ def _seed_users(db: Session) -> Dict[str, int]:
                 password_hash=hash_password(row["password"]),
                 role=row["role"],
                 department=row.get("department"),
+                org_unit_id=org_ids.get(demo_orgs.get(row["username"], "")),
             )
         )
     db.flush()
@@ -620,8 +749,20 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        GovernanceFinding,
+        TemplateUsage,
+        ToolTemplateVersion,
+        ToolTemplate,
+        ProcessDocumentVersion,
+        ProcessDocument,
+        DeliverableVersion,
+        DeliverableInstance,
+        DeliverableDefinition,
+        StepContract,
         FormDefinition,
         ProcessRule,
+        ProcessExecutionConfig,
+        NodeAssignment,
         ProcessTask,
         ProcessInstance,
         ProcessBenchmarkMap,
@@ -638,8 +779,11 @@ def _wipe(db: Session) -> None:
         Tool,
         IntegrationDelivery,
         IntegrationEndpoint,
+        InboundEvent,
+        InboundWebhook,
         Notification,
         AuditLog,
+        OrgUnit,
         User,
     ):
         db.query(model).delete()
@@ -655,11 +799,14 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     if reset:
         _wipe(db)
 
-    # 先建用户：流程与项目的 owner_user_id 要在灌数据时解析
-    user_ids = _seed_users(db)
+    # 先建组织，再建用户：演示账号要挂到集团/分公司
+    org_ids = _seed_org_units(db)
+    user_ids = _seed_users(db, org_ids)
     code_to_id = _seed_process_arch(db, user_ids)
     _seed_workflow(db)
     _seed_tools(db)
+    _seed_step_contracts(db)
+    _seed_deliverable_definitions(db)
     _seed_benchmarks(db, code_to_id)
     project_ids = _seed_projects(db, code_to_id, user_ids)
     _seed_kpis(db, code_to_id)
@@ -676,6 +823,15 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "process_arch": db.scalar(select(func.count()).select_from(ProcessArch)) or 0,
         "workflow_steps": db.scalar(select(func.count()).select_from(WorkflowTemplate)) or 0,
         "tools": db.scalar(select(func.count()).select_from(Tool)) or 0,
+        "step_contracts": db.scalar(select(func.count()).select_from(StepContract)) or 0,
+        "deliverable_definitions": db.scalar(
+            select(func.count()).select_from(DeliverableDefinition)
+        )
+        or 0,
+        "deliverable_instances": db.scalar(select(func.count()).select_from(DeliverableInstance))
+        or 0,
+        "deliverable_versions": db.scalar(select(func.count()).select_from(DeliverableVersion))
+        or 0,
         "projects": db.scalar(select(func.count()).select_from(Project)) or 0,
         "project_steps": db.scalar(select(func.count()).select_from(ProjectStep)) or 0,
         "kpis": db.scalar(select(func.count()).select_from(KpiDefinition)) or 0,
@@ -684,6 +840,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "knowledge": db.scalar(select(func.count()).select_from(KnowledgeItem)) or 0,
         "knowledge_tags": db.scalar(select(func.count()).select_from(KnowledgeTag)) or 0,
         "users": db.scalar(select(func.count()).select_from(User)) or 0,
+        "org_units": db.scalar(select(func.count()).select_from(OrgUnit)) or 0,
         "process_nodes": db.scalar(select(func.count()).select_from(ProcessNode)) or 0,
         "process_edges": db.scalar(select(func.count()).select_from(ProcessEdge)) or 0,
         "process_instances": db.scalar(select(func.count()).select_from(ProcessInstance)) or 0,
@@ -722,13 +879,18 @@ def seed_reference(db: Session) -> Dict[str, int]:
 
     - 24 步标准工作流模板
     - 33 个方法论工具
+    - 步骤契约与交付物定义（标准侧，不含项目实例）
     - SCOR / APQC PCF 框架与分类（不含流程映射）
 
+    组织单元属于主数据，生产环境由管理员通过 `/org-units` 维护，不在这里灌。
     按表判空，可重复执行。
     """
     created = {
         "workflow_steps": 0,
         "tools": 0,
+        "step_contracts": 0,
+        "deliverable_definitions": 0,
+        "step_contract_levels": 0,
         "benchmark_frameworks": 0,
         "benchmark_categories": 0,
     }
@@ -738,6 +900,13 @@ def seed_reference(db: Session) -> Dict[str, int]:
     if (db.scalar(select(func.count()).select_from(Tool)) or 0) == 0:
         _seed_tools(db)
         created["tools"] = len(corpus.TOOLS)
+    if (db.scalar(select(func.count()).select_from(StepContract)) or 0) == 0:
+        _seed_step_contracts(db)
+        created["step_contracts"] = len(corpus.WORKFLOW)
+    created["step_contract_levels"] = backfill_step_contract_levels(db)
+    if (db.scalar(select(func.count()).select_from(DeliverableDefinition)) or 0) == 0:
+        _seed_deliverable_definitions(db)
+        created["deliverable_definitions"] = len(deliverable_data.DELIVERABLES)
     if (db.scalar(select(func.count()).select_from(BenchmarkFramework)) or 0) == 0:
         _seed_benchmarks(db, {}, with_mappings=False)
         created["benchmark_frameworks"] = len(benchmark_data.BENCHMARK_FRAMEWORKS)

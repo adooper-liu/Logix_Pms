@@ -11,6 +11,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.core.timeutil import utcnow
 
+ROLE_LABELS = {
+    "ADMIN": "系统管理员",
+    "MANAGER": "流程管理科",
+    "OWNER": "流程 Owner",
+    "VIEWER": "只读",
+}
+
 
 class User(Base):
     """系统用户。
@@ -31,12 +38,27 @@ class User(Base):
 
     role: Mapped[str] = mapped_column(String(16), index=True, default="VIEWER")
     department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 人员归属组织；由管理员在「组织与人员」界面维护
+    org_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("org_unit.id", ondelete="SET NULL", name="fk_app_user_org_unit"),
+        nullable=True,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     audits: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user")
+    org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821
+
+    @property
+    def role_label(self) -> str:
+        return ROLE_LABELS.get(self.role, self.role)
+
+    @property
+    def org_unit_name(self) -> Optional[str]:
+        return self.org_unit.name if self.org_unit else None
 
 
 class AuditLog(Base):

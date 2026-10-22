@@ -21,7 +21,10 @@ class UserOut(ORMModel):
     username: str
     display_name: str
     role: str
+    role_label: Optional[str] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
+    org_unit_name: Optional[str] = None
     is_active: bool
     last_login_at: Optional[UtcDateTime] = None
     created_at: Optional[UtcDateTime] = None
@@ -44,12 +47,14 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6, max_length=128)
     role: Role = Role.VIEWER
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
 
 
 class UserUpdate(BaseModel):
     display_name: Optional[str] = None
     role: Optional[Role] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=6, max_length=128)
 

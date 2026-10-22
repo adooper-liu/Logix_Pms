@@ -3,6 +3,7 @@
 用法：
     python -m scripts.seed                 # 只在库为空时灌
     python -m scripts.seed --reset         # 清空重灌（会丢掉已有业务数据）
+    python -m scripts.seed --reference     # 只补灌参考数据（工作流/工具/契约/定义/对标框架）
     python -m scripts.seed --benchmarks    # 只补灌对标框架数据（已有则跳过）
     python -m scripts.seed --benchmarks --reset   # 只重建对标框架数据
 """
@@ -29,6 +30,7 @@ from app.seed.runner import (  # noqa: E402
     reset_benchmarks,
     seed_benchmarks_if_empty,
     seed_if_empty,
+    seed_reference,
 )
 
 
@@ -37,6 +39,11 @@ def main() -> int:
     parser.add_argument("--reset", action="store_true", help="先清空对应数据再灌")
     parser.add_argument(
         "--benchmarks", action="store_true", help="只处理对标框架数据，不动业务数据"
+    )
+    parser.add_argument(
+        "--reference",
+        action="store_true",
+        help="只补灌参考数据：工作流、工具、步骤契约、交付物定义、对标框架（缺失才灌）",
     )
     args = parser.parse_args()
 
@@ -52,6 +59,8 @@ def main() -> int:
             if counts is None:
                 print("对标框架数据已存在，跳过。要重建请加 --benchmarks --reset。")
                 return 0
+        elif args.reference:
+            counts = seed_reference(db)
         elif args.reset:
             counts = reset_and_seed(db)
         else:

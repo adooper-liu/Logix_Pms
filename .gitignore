@@ -19,6 +19,9 @@ htmlcov/
 *.db
 *.sqlite3
 
+# 本地上传的附件（生产挂 Docker volume / 对象存储）
+var/
+
 # 前端联调自检生成的截图
 _screenshots/
 

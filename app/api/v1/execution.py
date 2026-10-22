@@ -6,20 +6,29 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser
-from app.models.enums import InstanceStatus, TaskStatus
-from app.models.execution import FormDefinition, ProcessRule, ProcessTask
+from app.models.enums import InstanceStatus, Role, TaskStatus
+from app.models.execution import FormDefinition, NodeAssignment, ProcessRule
 from app.models.process import ProcessArch, ProcessNode
+from app.models.user import ROLE_LABELS, User
 from app.schemas.common import DeleteResult
 from app.schemas.execution import (
+    AssigneeOut,
+    EscalationScanResult,
     ExecutableProcessOut,
+    ExecutionConfigOut,
+    ExecutionConfigUpdate,
     FormDefinitionCreate,
     FormDefinitionOut,
     FormDefinitionUpdate,
     InstanceDetail,
     InstanceOut,
     InstanceStartRequest,
+    InstanceSuspendRequest,
+    NodeAssignmentOut,
+    NodeAssignmentUpdate,
     ProcessRuleCreate,
     ProcessRuleOut,
     ProcessRuleUpdate,
@@ -28,12 +37,24 @@ from app.schemas.execution import (
     TaskOut,
 )
 from app.services import audit as audit_service
+from app.services import escalation as escalation_service
 from app.services import execution as execution_service
+from app.services import execution_flow as flow_service
 from app.services import forms as forms_service
 from app.services import integrations as integration_service
 from app.services import notifications as notification_service
+from app.services import org_unit as org_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
+
+
+def _validate_assignee(db, user_id: int, label: str) -> User:
+    assignee = db.get(User, user_id)
+    if assignee is None or not assignee.is_active:
+        raise HTTPException(status_code=400, detail=f"{label}不存在或已停用")
+    if assignee.role == Role.VIEWER.value:
+        raise HTTPException(status_code=400, detail=f"只读账号不能作为{label}")
+    return assignee
 
 
 @router.get(
@@ -43,6 +64,230 @@ router = APIRouter(prefix="/execution", tags=["流程执行"])
 )
 def list_executable_processes(db: DbSession):
     return execution_service.executable_processes(db)
+
+
+@router.get(
+    "/config",
+    response_model=ExecutionConfigOut,
+    summary="流程执行配置（任务时限与超期升级）",
+)
+def get_config(db: DbSession, process_id: int):
+    _ensure_process(db, process_id)
+    config = execution_service.get_execution_config(db, process_id)
+    return ExecutionConfigOut(
+        process_id=process_id,
+        default_task_due_hours=config.default_task_due_hours if config else None,
+        default_escalation_hours=config.default_escalation_hours if config else None,
+        default_escalation_user_id=(config.default_escalation_user_id if config else None),
+        default_escalation_user_name=(
+            config.default_escalation_user.display_name
+            if config and config.default_escalation_user
+            else None
+        ),
+        updated_at=config.updated_at if config else None,
+    )
+
+
+@router.put(
+    "/config",
+    response_model=ExecutionConfigOut,
+    summary="维护流程执行配置（MANAGER+）",
+)
+def save_config(payload: ExecutionConfigUpdate, db: DbSession, user: ManagerUser, process_id: int):
+    process = _ensure_process(db, process_id)
+    if payload.default_escalation_user_id is not None:
+        _validate_assignee(db, payload.default_escalation_user_id, "升级处理人")
+    config = execution_service.save_execution_config(
+        db,
+        process_id,
+        payload.default_task_due_hours,
+        payload.default_escalation_hours,
+        payload.default_escalation_user_id,
+    )
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_execution_config",
+        config.id,
+        f"流程 {process.code} 任务时限设为 "
+        f"{payload.default_task_due_hours if payload.default_task_due_hours is not None else '不设'}；"
+        f"升级时限 "
+        f"{payload.default_escalation_hours if payload.default_escalation_hours is not None else '不升级'}"
+        f"，升级处理人 {payload.default_escalation_user_id or '不设'}",
+    )
+    db.commit()
+    db.refresh(config)
+    return ExecutionConfigOut(
+        process_id=process_id,
+        default_task_due_hours=config.default_task_due_hours,
+        default_escalation_hours=config.default_escalation_hours,
+        default_escalation_user_id=config.default_escalation_user_id,
+        default_escalation_user_name=(
+            config.default_escalation_user.display_name if config.default_escalation_user else None
+        ),
+        updated_at=config.updated_at,
+    )
+
+
+@router.post(
+    "/escalations/scan",
+    response_model=EscalationScanResult,
+    summary="运行超期任务升级扫描（MANAGER+）",
+)
+def scan_escalations(
+    db: DbSession,
+    user: ManagerUser,
+    process_id: Optional[int] = None,
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    if process_id is not None:
+        _ensure_process(db, process_id)
+    result = escalation_service.scan_escalations(db, user, process_id=process_id, limit=limit)
+    if result.escalated:
+        audit_service.record(
+            db,
+            user,
+            "UPDATE",
+            "process_task",
+            None,
+            f"运行升级扫描：扫描 {result.scanned}、升级 {result.escalated}、跳过 {result.skipped}",
+        )
+    db.commit()
+    return result
+
+
+@router.get(
+    "/assignments",
+    response_model=List[NodeAssignmentOut],
+    summary="节点分派配置（角色 / 组织 / 默认处理人 / 时限 / 升级）",
+)
+def list_assignments(db: DbSession, user: CurrentUser, process_id: int):
+    _ensure_process(db, process_id)
+    nodes = db.scalars(
+        select(ProcessNode)
+        .where(ProcessNode.process_id == process_id)
+        .order_by(ProcessNode.sequence_order, ProcessNode.id)
+    ).all()
+    rows = {
+        row.node_key: row
+        for row in db.scalars(
+            select(NodeAssignment)
+            .options(
+                joinedload(NodeAssignment.org_unit),
+                joinedload(NodeAssignment.default_assignee),
+            )
+            .where(
+                NodeAssignment.process_id == process_id,
+                NodeAssignment.is_active.is_(True),
+            )
+        ).all()
+    }
+    return [_assignment_out(node, rows.get(node.node_key)) for node in nodes]
+
+
+@router.put(
+    "/assignments",
+    response_model=NodeAssignmentOut,
+    summary="维护节点分派（MANAGER+）",
+)
+def save_assignment(payload: NodeAssignmentUpdate, db: DbSession, user: ManagerUser):
+    _ensure_process(db, payload.process_id)
+    _ensure_node(db, payload.process_id, payload.node_key)
+    if payload.org_unit_id is not None:
+        try:
+            org_service.require_org(db, payload.org_unit_id)
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.default_assignee_user_id is not None:
+        _validate_assignee(db, payload.default_assignee_user_id, "默认处理人")
+    if payload.escalation_user_id is not None:
+        _validate_assignee(db, payload.escalation_user_id, "升级处理人")
+    row = execution_service.save_node_assignment(
+        db,
+        payload.process_id,
+        payload.node_key,
+        {
+            "role": payload.role.value if payload.role else None,
+            "org_unit_id": payload.org_unit_id,
+            "default_assignee_user_id": payload.default_assignee_user_id,
+            "due_hours": payload.due_hours,
+            "escalation_hours": payload.escalation_hours,
+            "escalation_user_id": payload.escalation_user_id,
+        },
+    )
+    node = db.scalar(
+        select(ProcessNode).where(
+            ProcessNode.process_id == payload.process_id,
+            ProcessNode.node_key == payload.node_key,
+        )
+    )
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "node_assignment",
+        row.id if row else None,
+        f"节点分派 {payload.process_id}/{payload.node_key}："
+        f"角色={payload.role.value if payload.role else '不限'}，"
+        f"组织={payload.org_unit_id or '不限'}，"
+        f"默认处理人={payload.default_assignee_user_id or '公共队列'}，"
+        f"升级={payload.escalation_hours if payload.escalation_hours is not None else '不升级'}"
+        f"/{payload.escalation_user_id or '不设'}",
+    )
+    db.commit()
+    if row is not None:
+        db.refresh(row)
+    return _assignment_out(node, row)
+
+
+def _assignment_out(node: ProcessNode, row: Optional[NodeAssignment]) -> NodeAssignmentOut:
+    return NodeAssignmentOut(
+        process_id=node.process_id,
+        node_key=node.node_key,
+        name=node.name,
+        node_type=node.node_type,
+        lane=node.lane,
+        owner_role=node.owner_role,
+        role=row.role if row else None,
+        role_label=ROLE_LABELS.get(row.role, row.role) if row and row.role else None,
+        org_unit_id=row.org_unit_id if row else None,
+        org_unit_name=row.org_unit.name if row and row.org_unit else None,
+        default_assignee_user_id=row.default_assignee_user_id if row else None,
+        default_assignee_name=(
+            row.default_assignee.display_name if row and row.default_assignee else None
+        ),
+        due_hours=row.due_hours if row else None,
+        escalation_hours=row.escalation_hours if row else None,
+        escalation_user_id=row.escalation_user_id if row else None,
+        escalation_user_name=(
+            row.escalation_user.display_name if row and row.escalation_user else None
+        ),
+    )
+
+
+@router.get(
+    "/assignees",
+    response_model=List[AssigneeOut],
+    summary="可指派人员（启用账号，不含只读）",
+)
+def list_assignees(db: DbSession, user: CurrentUser):
+    rows = db.scalars(
+        select(User)
+        .where(User.is_active.is_(True), User.role != Role.VIEWER.value)
+        .order_by(User.display_name)
+    ).all()
+    return [
+        AssigneeOut(
+            id=row.id,
+            display_name=row.display_name,
+            role=row.role,
+            role_label=ROLE_LABELS.get(row.role, row.role),
+            department=row.department,
+            org_unit_name=row.org_unit_name,
+        )
+        for row in rows
+    ]
 
 
 # ------------------------------------------------------------------ 表单与规则配置
@@ -249,63 +494,6 @@ def delete_rule(rule_id: int, db: DbSession, user: ManagerUser):
     return DeleteResult(deleted=1)
 
 
-def _open_task(db, instance_id: int):
-    return db.scalar(
-        select(ProcessTask)
-        .where(
-            ProcessTask.instance_id == instance_id,
-            ProcessTask.status.in_((TaskStatus.PENDING.value, TaskStatus.CLAIMED.value)),
-        )
-        .order_by(ProcessTask.id)
-    )
-
-
-def _notify_open_task(db, instance) -> None:
-    task = _open_task(db, instance.id)
-    if task is not None and task.assignee_user_id is not None:
-        notification_service.notify(
-            db,
-            task.assignee_user_id,
-            "TASK_ASSIGNED",
-            f"新任务：{task.name}",
-            f"{instance.process_name}（{instance.code}）",
-            link="execution",
-            entity_type="process_task",
-            entity_id=task.id,
-        )
-
-
-def _instance_event(instance) -> dict:
-    return {
-        "instance_id": instance.id,
-        "code": instance.code,
-        "process_id": instance.process_id,
-        "process_name": instance.process_name,
-        "project_id": instance.project_id,
-        "status": instance.status,
-        "current_node_key": instance.current_node_key,
-        "started_by_id": instance.started_by_id,
-        "started_by_name": instance.started_by_name,
-        "started_at": instance.started_at,
-    }
-
-
-def _task_event(task) -> dict:
-    return {
-        "task_id": task.id,
-        "instance_id": task.instance_id,
-        "instance_code": task.instance.code,
-        "process_name": task.instance.process_name,
-        "node_key": task.node_key,
-        "name": task.name,
-        "task_type": task.task_type,
-        "status": task.status,
-        "assignee_user_id": task.assignee_user_id,
-        "assignee_name": task.assignee_name,
-        "created_at": task.created_at,
-    }
-
-
 # ------------------------------------------------------------------ 实例
 
 
@@ -334,12 +522,7 @@ def start_instance(payload: InstanceStartRequest, db: DbSession, user: WriteUser
     process = db.get(ProcessArch, payload.process_id)
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
-    instance = execution_service.start_instance(db, process, user, payload)
-    _notify_open_task(db, instance)
-    integration_service.enqueue(db, "instance.started", _instance_event(instance))
-    opened = _open_task(db, instance.id)
-    if opened is not None:
-        integration_service.enqueue(db, "task.created", _task_event(opened))
+    instance = flow_service.start_instance(db, process, user, payload)
     audit_service.record(
         db,
         user,
@@ -362,14 +545,83 @@ def get_instance(instance_id: int, db: DbSession):
 
 
 @router.post(
+    "/instances/{instance_id}/suspend",
+    response_model=InstanceOut,
+    summary="挂起运行中的实例（流程管理科及以上）",
+)
+def suspend_instance(
+    instance_id: int,
+    payload: InstanceSuspendRequest,
+    db: DbSession,
+    user: ManagerUser,
+):
+    instance = execution_service.get_instance(db, instance_id)
+    execution_service.suspend_instance(db, instance, payload.reason)
+    integration_service.enqueue(db, "instance.suspended", flow_service.instance_event(instance))
+    notification_service.notify(
+        db,
+        instance.started_by_id,
+        "INSTANCE_SUSPENDED",
+        f"流程已挂起：{instance.process_name}",
+        f"{instance.code}" + (f" · {payload.reason}" if payload.reason else ""),
+        link="execution",
+        entity_type="process_instance",
+        entity_id=instance.id,
+    )
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_instance",
+        instance.id,
+        f"挂起流程实例 {instance.code}" + (f"：{payload.reason}" if payload.reason else ""),
+    )
+    db.commit()
+    db.refresh(instance)
+    return execution_service.instance_out(instance)
+
+
+@router.post(
+    "/instances/{instance_id}/resume",
+    response_model=InstanceOut,
+    summary="恢复已挂起的实例（流程管理科及以上）",
+)
+def resume_instance(instance_id: int, db: DbSession, user: ManagerUser):
+    instance = execution_service.get_instance(db, instance_id)
+    execution_service.resume_instance(db, instance)
+    integration_service.enqueue(db, "instance.resumed", flow_service.instance_event(instance))
+    notification_service.notify(
+        db,
+        instance.started_by_id,
+        "INSTANCE_RESUMED",
+        f"流程已恢复：{instance.process_name}",
+        f"{instance.code}",
+        link="execution",
+        entity_type="process_instance",
+        entity_id=instance.id,
+    )
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_instance",
+        instance.id,
+        f"恢复流程实例 {instance.code}",
+    )
+    db.commit()
+    db.refresh(instance)
+    return execution_service.instance_out(instance)
+
+
+@router.post(
     "/instances/{instance_id}/cancel",
     response_model=InstanceOut,
-    summary="取消运行中的实例（流程管理科及以上）",
+    summary="取消运行中/已挂起的实例（流程管理科及以上）",
 )
 def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
     execution_service.cancel_instance(db, instance)
-    integration_service.enqueue(db, "instance.cancelled", _instance_event(instance))
+    integration_service.enqueue(db, "instance.cancelled", flow_service.instance_event(instance))
     notification_service.notify(
         db,
         instance.started_by_id,
@@ -454,7 +706,7 @@ def get_task(task_id: int, db: DbSession):
 def claim_task(task_id: int, db: DbSession, user: WriteUser):
     task = execution_service.get_task(db, task_id)
     execution_service.claim_task(db, task, user)
-    integration_service.enqueue(db, "task.claimed", _task_event(task))
+    integration_service.enqueue(db, "task.claimed", flow_service.task_event(task))
     audit_service.record(
         db, user, "UPDATE", "process_task", task.id, f"认领任务 {task.name}（{task.instance.code}）"
     )
@@ -467,29 +719,7 @@ def claim_task(task_id: int, db: DbSession, user: WriteUser):
 def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, user: WriteUser):
     task = execution_service.get_task(db, task_id)
     instance_code = task.instance.code
-    execution_service.complete_task(db, task, user, payload)
-    instance = task.instance
-    if instance.status == InstanceStatus.COMPLETED.value:
-        if instance.started_by_id:
-            notification_service.notify(
-                db,
-                instance.started_by_id,
-                "INSTANCE_COMPLETED",
-                f"流程已完成：{instance.process_name}",
-                f"{instance.code}",
-                link="execution",
-                entity_type="process_instance",
-                entity_id=instance.id,
-            )
-    else:
-        _notify_open_task(db, instance)
-    integration_service.enqueue(db, "task.completed", _task_event(task))
-    if instance.status == InstanceStatus.COMPLETED.value:
-        integration_service.enqueue(db, "instance.completed", _instance_event(instance))
-    else:
-        following = _open_task(db, instance.id)
-        if following is not None:
-            integration_service.enqueue(db, "task.created", _task_event(following))
+    flow_service.complete_task(db, task, user, payload)
     audit_service.record(
         db,
         user,
@@ -511,7 +741,7 @@ def complete_task(task_id: int, payload: TaskCompleteRequest, db: DbSession, use
 def assign_task(task_id: int, payload: TaskAssignRequest, db: DbSession, user: ManagerUser):
     task = execution_service.get_task(db, task_id)
     execution_service.assign_task(db, task, payload.assignee_user_id)
-    integration_service.enqueue(db, "task.assigned", _task_event(task))
+    integration_service.enqueue(db, "task.assigned", flow_service.task_event(task))
     if task.assignee_user_id is not None:
         notification_service.notify(
             db,

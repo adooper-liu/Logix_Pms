@@ -23,9 +23,26 @@ def test_openapi_schema_builds(client):
         f"{API}/dashboard/overview",
         f"{API}/process-map/tree",
         f"{API}/workflow/stages",
+        f"{API}/workflow/contracts",
+        f"{API}/workflow/deliverable-definitions",
         f"{API}/projects",
+        f"{API}/projects/{{project_id}}/deliverables",
+        f"{API}/deliverables/{{instance_id}}/versions",
+        f"{API}/deliverables/{{instance_id}}/versions/upload",
         f"{API}/projects/recommend-methodology",
         f"{API}/tools/match",
+        f"{API}/tool-templates",
+        f"{API}/tool-templates/{{template_id}}/copy",
+        f"{API}/process-documents",
+        f"{API}/process-documents/{{document_id}}/promote",
+        f"{API}/process-documents/{{document_id}}/upgrade-impact",
+        f"{API}/process-documents/{{document_id}}/rebase",
+        f"{API}/org-units",
+        f"{API}/org-units/tree",
+        f"{API}/baselines",
+        f"{API}/baselines/governance",
+        f"{API}/baselines/findings",
+        f"{API}/baselines/audit-scan",
         f"{API}/design/analyze",
         f"{API}/monitor/kpi-radar",
         f"{API}/knowledge",
@@ -40,6 +57,11 @@ def test_root_serves_wired_frontend(client):
     assert "/static/js/main.js" in r.text
     assert 'type="module"' in r.text, "入口必须以 ES 模块方式加载"
     assert "流程管理系统" in r.text
+    # 已知视图路径直接返回前端入口，未知路径仍然 404
+    r = client.get("/orgs")
+    assert r.status_code == 200
+    assert "/static/js/main.js" in r.text
+    assert client.get("/not-a-view").status_code == 404
 
 
 def test_static_assets_served(client):
@@ -48,7 +70,7 @@ def test_static_assets_served(client):
         ("/static/css/components.css", ".modal"),
         ("/static/css/views.css", ".gantt"),
         ("/static/js/main.js", "Object.assign(window"),
-        ("/static/js/core/api.js", "export async function api"),
+        ("/static/js/core/api.js", "export const api ="),
         ("/static/js/views/projects.js", "export {"),
     ]:
         r = client.get(path)

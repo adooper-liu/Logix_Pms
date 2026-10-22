@@ -24,7 +24,7 @@
 | 流程建模 | [web/js/views/designer.js](../web/js/views/designer.js) 的泳道卡片，节点/连线存 `ProcessNode` / `ProcessEdge` | 不是标准 BPMN 画布；不能拖拽连线、画网关、调整布局 |
 | BPMN 导入导出 | [app/services/bpmn.py](../app/services/bpmn.py) 的结构子集 | 会拒绝 `parallelGateway` / `subProcess` / `boundaryEvent` 等；导入即替换，不能保留完整 XML |
 | 执行引擎 | 单令牌顺序执行，启动时快照节点/连线 | 不支持并行、子流程、事件；正式 BPMN 中的这些元素目前不可执行 |
-| 附件 | 无 | 没有上传、存储、版本、权限与审计 |
+| 附件 | 流程标准文件已实现：`process_document` / `process_document_version`，挂 L1–L4、版本审批、上传/下载、复制到项目与成果晋升（`app/models/process_document.py`） | 尚未覆盖任意格式的通用流程附件、S3/对象存储与孤儿文件巡检 |
 
 因此不能直接把 bpmn-js 接上就宣布「支持 BPMN」：编辑器能画出的元素，
 执行引擎必须能执行，或者明确拒绝启动并告诉用户原因。
