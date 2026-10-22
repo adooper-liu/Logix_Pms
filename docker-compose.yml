@@ -42,6 +42,7 @@ services:
       # 附件落容器内卷；生产可换成 S3/对象存储
       ATTACHMENT_DIR: ${ATTACHMENT_DIR_DOCKER:-/app/var/attachments}
       ATTACHMENT_MAX_MB: ${ATTACHMENT_MAX_MB:-50}
+      DRAWIO_EMBED_URL: "${DRAWIO_EMBED_URL:-https://embed.diagrams.net/?embed=1&proto=json&spin=1&libraries=1&saveAndExit=1}"
       # 生产环境务必替换
       SECRET_KEY: ${SECRET_KEY:-logix-pms-dev-secret-change-me}
     ports:

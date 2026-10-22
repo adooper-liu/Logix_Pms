@@ -93,6 +93,14 @@ class Settings:
         )
     )
 
+    # draw.io 白板（独立于 BPMN 设计器）：默认用官方 embed，生产可指向自托管实例
+    drawio_embed_url: str = field(
+        default_factory=lambda: _env(
+            "DRAWIO_EMBED_URL",
+            "https://embed.diagrams.net/?embed=1&proto=json&spin=1&libraries=1&saveAndExit=1",
+        )
+    )
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")

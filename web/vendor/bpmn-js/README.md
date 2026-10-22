@@ -9,8 +9,10 @@
 包含文件：
 
 - `bpmn-modeler.js`：UMD 构建，浏览器全局 `BpmnJS`
+- `bpmn-lint.js`：bpmnlint 12 + recommended 规则打包，浏览器全局 `BpmnLint`
+- `bpmn-auto-layout.js`：bpmn-auto-layout 1.3，浏览器全局 `BpmnAutoLayout`
 - `bpmn-js.css` / `diagram-js.css`：编辑器样式
 - `bpmn-font/`：调色板与元素图标字体
-- `LICENSE`：原始许可证
+- `LICENSE`、`LICENSE.bpmnlint`、`LICENSE.bpmn-auto-layout`：原始许可证
 
 > 注意：许可证要求 bpmn.io 水印保持可见，不能通过 CSS 隐藏或遮挡。

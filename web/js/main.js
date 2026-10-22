@@ -32,6 +32,7 @@ import * as monitorView from './views/monitor.js';
 import * as knowledgeView from './views/knowledge.js';
 import * as deliverableView from './views/deliverables.js';
 import * as orgsView from './views/orgs.js';
+import * as sketchesView from './views/sketches.js';
 
 register('dashboard', dashboard.renderDashboard);
 register('map', mapView.renderMap);
@@ -44,6 +45,7 @@ register('monitor', monitorView.renderMonitor);
 register('knowledge', knowledgeView.renderKnowledge);
 register('deliverables', deliverableView.renderDeliverables);
 register('orgs', orgsView.renderOrgs);
+register('sketches', sketchesView.renderSketches);
 
 // Canvas 读的是当前主题色，切换主题后要原地重绘，不能等下一次请求
 function applyTheme(code) {
@@ -78,6 +80,7 @@ Object.assign(window, {
   ...knowledgeView,
   ...deliverableView,
   ...orgsView,
+  ...sketchesView,
   // 跨视图共用：模板库与步骤推荐都从这里发起「复制到项目」
   ...templateCopy,
 });

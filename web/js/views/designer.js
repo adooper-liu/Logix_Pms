@@ -121,23 +121,27 @@ function paintDesigner() {
     </div>`;
 
   const bpmnPane = `
-    <div class="card designer-card">
+    <div class="card designer-card" id="bpmnCard">
       <div class="between mb designer-toolbar">
         <div class="gap">
           <span class="tiny">专业 BPMN 2.0 画布（bpmn-js）</span>
+          <button class="btn-sm" onclick="runBpmnLint()">运行校验</button>
+          <button class="btn-sm" onclick="autoLayoutBpmn()">自动布局</button>
+          <button class="btn-sm" onclick="toggleBpmnFullscreen()">全屏</button>
           <button class="btn-sm" onclick="fitBpmnViewport()">适应画布</button>
           <span class="tiny" id="bpmnSaveState">${
             model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
               : '编辑后自动保存草稿'}</span>
         </div>
-        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看 PMS 指标 · 自动保存草稿</div>
+        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看/编辑 PMS 指标 · 自动保存草稿</div>
       </div>
       <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
       <div id="bpmnSelection" class="bpmn-selection">
-        <div class="tiny muted">选中一个元素查看 PMS 指标</div>
+        <div class="tiny muted">选中一个元素查看/编辑 PMS 指标</div>
       </div>
+      <div id="bpmnLint" class="bpmn-lint"></div>
       <div class="note" style="margin-top:8px">执行引擎暂不支持并行网关、子流程、边界事件；
-        画出这些元素后保存会被拒绝。PMS 指标仍在简洁画布/分析页维护。</div>
+        画出这些元素后保存会被拒绝。bpmnlint 会额外提示 BPMN 建模问题。</div>
       ${validationHtml(st.model)}
     </div>`;
 
@@ -235,6 +239,12 @@ function destroyBpmnModeler() {
   const st = state.designer;
   if (st.bpmnSaveTimer) clearTimeout(st.bpmnSaveTimer);
   st.bpmnSaveTimer = null;
+  if (st.bpmnFullscreenHandler) {
+    document.removeEventListener('keydown', st.bpmnFullscreenHandler);
+    st.bpmnFullscreenHandler = null;
+  }
+  const card = document.getElementById('bpmnCard');
+  if (card) card.classList.remove('fullscreen');
   if (st.bpmnModeler) {
     try { st.bpmnModeler.destroy(); } catch (e) { /* 已销毁 */ }
     st.bpmnModeler = null;
@@ -296,6 +306,7 @@ async function saveBpmnNow() {
     st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
     setBpmnSaveState('已保存 · v' + (response.draft_version || response.version));
     renderBpmnSelection(st.bpmnSelection || []);
+    runBpmnLint();
     return true;
   } catch (e) {
     setBpmnSaveState('保存失败：' + e.message);
@@ -305,19 +316,45 @@ async function saveBpmnNow() {
 }
 
 let bpmnJsPromise = null;
+let bpmnLintPromise = null;
+let bpmnLayoutPromise = null;
+
+function loadScriptOnce(src, getGlobal) {
+  if (getGlobal()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('资源加载失败：' + src));
+    document.head.appendChild(script);
+  });
+}
 
 function loadBpmnJs() {
   if (window.BpmnJS) return Promise.resolve();
   if (!bpmnJsPromise) {
-    bpmnJsPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = '/static/vendor/bpmn-js/bpmn-modeler.js';
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('bpmn-js 资源加载失败'));
-      document.head.appendChild(script);
-    });
+    bpmnJsPromise = loadScriptOnce(
+      '/static/vendor/bpmn-js/bpmn-modeler.js?v=18.31.1', () => window.BpmnJS);
   }
   return bpmnJsPromise;
+}
+
+function loadBpmnLint() {
+  if (window.BpmnLint) return Promise.resolve();
+  if (!bpmnLintPromise) {
+    bpmnLintPromise = loadScriptOnce(
+      '/static/vendor/bpmn-js/bpmn-lint.js?v=2', () => window.BpmnLint);
+  }
+  return bpmnLintPromise;
+}
+
+function loadBpmnAutoLayout() {
+  if (window.BpmnAutoLayout) return Promise.resolve();
+  if (!bpmnLayoutPromise) {
+    bpmnLayoutPromise = loadScriptOnce(
+      '/static/vendor/bpmn-js/bpmn-auto-layout.js?v=1.3.0', () => window.BpmnAutoLayout);
+  }
+  return bpmnLayoutPromise;
 }
 
 async function mountBpmnEditor() {
@@ -337,6 +374,7 @@ async function mountBpmnEditor() {
   destroyBpmnModeler();
   const modeler = new window.BpmnJS({ container });
   st.bpmnModeler = modeler;
+  window.__bpmnSpike = { modeler, lint: window.BpmnLint };
   st.bpmnSelection = [];
   st.bpmnImporting = true;
   modeler.on('selection.changed', (event) => {
@@ -350,6 +388,7 @@ async function mountBpmnEditor() {
     modeler.get('canvas').zoom('fit-viewport');
     st.bpmnImporting = false;
     setBpmnSaveState('草稿 · v' + (st.model.draft_version || st.model.version));
+    runBpmnLint();
   } catch (e) {
     st.bpmnImporting = false;
     container.innerHTML = `<div class="errbar">BPMN 加载失败：${esc(e.message)}</div>`;
@@ -431,6 +470,146 @@ async function saveBpmnMetrics(nodeKey) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+function hydrateLintConnections(container) {
+  const elements = (container && container.flowElements) || [];
+  elements.forEach((element) => {
+    if (element.$type !== 'bpmn:SequenceFlow') return;
+    const source = element.sourceRef;
+    const target = element.targetRef;
+    if (source) {
+      source.outgoing = source.outgoing || [];
+      if (!source.outgoing.includes(element)) source.outgoing.push(element);
+    }
+    if (target) {
+      target.incoming = target.incoming || [];
+      if (!target.incoming.includes(element)) target.incoming.push(element);
+    }
+  });
+  elements.forEach((element) => {
+    if (element.flowElements) hydrateLintConnections(element);
+  });
+}
+
+async function runBpmnLint() {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  if (!modeler) return;
+  try {
+    await loadBpmnLint();
+    const definitions = modeler.getDefinitions();
+    (definitions.rootElements || []).forEach((root) => {
+      if (root.$type === 'bpmn:Process') hydrateLintConnections(root);
+    });
+    const grouped = await window.BpmnLint.lint(definitions);
+    const registry = modeler.get('elementRegistry');
+    const issues = [];
+    Object.entries(grouped || {}).forEach(([rule, list]) => {
+      (list || []).forEach((issue) => {
+        const element = issue.id ? registry.get(issue.id) : null;
+        issues.push({
+          ...issue,
+          rule,
+          meta: { ...(issue.meta || {}), element },
+        });
+      });
+    });
+    st.bpmnLint = issues;
+    renderBpmnLint();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderBpmnLint() {
+  const box = document.getElementById('bpmnLint');
+  if (!box) return;
+  const issues = state.designer.bpmnLint || [];
+  if (!issues.length) {
+    box.innerHTML = '<div class="tiny muted">bpmnlint 未发现问题</div>';
+    return;
+  }
+  const errors = issues.filter((i) => i.category === 'error').length;
+  const warns = issues.filter((i) => i.category !== 'error').length;
+  box.innerHTML = `
+    <div class="between mb"><b>建模校验</b>
+      <span class="tiny">${errors} 错误 · ${warns} 警告</span></div>
+    ${issues.map((issue, index) => {
+      const element = issue.meta && issue.meta.element;
+      const label = element ? (element.name || element.id) : '流程级';
+      const category = issue.category === 'error' ? 'error' : 'warn';
+      return `<div class="bpmn-lint-item ${category}" onclick="selectLintIssue(${index})">
+        <span class="tag ${category === 'error' ? 't-red' : 't-yel'}">${
+          category === 'error' ? '错误' : '警告'}</span>
+        <b>${esc(issue.rule || '')}</b> · ${esc(issue.message || '')}
+        <span class="tiny">（${esc(label)}）</span></div>`;
+    }).join('')}`;
+}
+
+function selectLintIssue(index) {
+  const issue = (state.designer.bpmnLint || [])[index];
+  const element = issue && issue.meta && issue.meta.element;
+  if (!element) return;
+  const modeler = state.designer.bpmnModeler;
+  if (!modeler) return;
+  modeler.get('selection').select(element);
+  modeler.get('canvas').scrollToElement(element);
+}
+
+async function autoLayoutBpmn() {
+  const modeler = state.designer.bpmnModeler;
+  if (!modeler) return;
+  if (!confirm('自动布局会重新排列节点并覆盖当前画布布局，确定继续？')) return;
+  try {
+    await loadBpmnAutoLayout();
+    const { xml } = await modeler.saveXML({ format: true });
+    const layouted = await window.BpmnAutoLayout.layoutProcess(xml);
+    state.designer.bpmnImporting = true;
+    await modeler.importXML(layouted);
+    state.designer.bpmnImporting = false;
+    state.designer.bpmnSelection = [];
+    renderBpmnSelection([]);
+    modeler.get('canvas').zoom('fit-viewport');
+    const saved = await saveBpmnNow();
+    if (saved) {
+      await runBpmnLint();
+      toast('已自动布局并保存');
+    }
+  } catch (e) {
+    state.designer.bpmnImporting = false;
+    toast(e.message, true);
+  }
+}
+
+function toggleBpmnFullscreen() {
+  const card = document.getElementById('bpmnCard');
+  if (!card) return;
+  const enter = !card.classList.contains('fullscreen');
+  card.classList.toggle('fullscreen', enter);
+  const resize = () => {
+    const modeler = state.designer.bpmnModeler;
+    if (modeler) {
+      modeler.get('canvas').resized();
+      modeler.get('canvas').zoom('fit-viewport');
+    }
+  };
+  if (enter) {
+    state.designer.bpmnFullscreenHandler = (event) => {
+      if (event.key !== 'Escape') return;
+      card.classList.remove('fullscreen');
+      document.removeEventListener('keydown', state.designer.bpmnFullscreenHandler);
+      state.designer.bpmnFullscreenHandler = null;
+      setTimeout(resize, 60);
+    };
+    document.addEventListener('keydown', state.designer.bpmnFullscreenHandler);
+  } else {
+    if (state.designer.bpmnFullscreenHandler) {
+      document.removeEventListener('keydown', state.designer.bpmnFullscreenHandler);
+      state.designer.bpmnFullscreenHandler = null;
+    }
+  }
+  setTimeout(resize, 60);
 }
 
 function normalizeLayout(st) {
@@ -1488,12 +1667,13 @@ function addLaneNode() {
 
 
 export {
-  addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, cloneModel,
-  deleteEdge, deleteNode, diffVersion, editNode, exportBpmn, fitBpmnViewport,
-  fitDesigner, importBpmn, openDesigner, openEdgeEditor, openNodeEditor,
-  openVersionHistory, paintDesigner, paintMetrics, paintSuggestions,
-  persistDesign, publishDesign, reanalyze, redoDesigner, rejectReview,
-  reloadDesign, renderDesigner, rollbackVersion, saveEdge, saveNode,
-  saveNodeAssignment, saveBpmnMetrics, setDesignerTab, submitReview,
-  switchProcess, toggleDesignerMode, undoDesigner,
+  addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, autoLayoutBpmn,
+  cloneModel, deleteEdge, deleteNode, diffVersion, editNode, exportBpmn,
+  fitBpmnViewport, fitDesigner, importBpmn, openDesigner, openEdgeEditor,
+  openNodeEditor, openVersionHistory, paintDesigner, paintMetrics,
+  paintSuggestions, persistDesign, publishDesign, reanalyze, redoDesigner,
+  rejectReview, reloadDesign, renderDesigner, rollbackVersion, runBpmnLint,
+  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, selectLintIssue,
+  setDesignerTab, submitReview, switchProcess, toggleBpmnFullscreen,
+  toggleDesignerMode, undoDesigner,
 };

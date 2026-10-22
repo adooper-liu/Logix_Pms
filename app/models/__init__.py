@@ -62,6 +62,7 @@ from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.sketch import Sketch
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
@@ -77,6 +78,7 @@ __all__ = [
     "Project",
     "ProjectStep",
     "WorkflowTemplate",
+    "Sketch",
     "Tool",
     "ToolTemplate",
     "ToolTemplateVersion",

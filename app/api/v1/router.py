@@ -23,6 +23,7 @@ from app.api.v1 import (
     process_documents,
     process_map,
     projects,
+    sketches,
     tool_templates,
     tools,
     workflow,
@@ -44,6 +45,7 @@ protected.include_router(benchmark.router)
 protected.include_router(baselines.router)
 protected.include_router(workflow.router)
 protected.include_router(projects.router)
+protected.include_router(sketches.router)
 protected.include_router(deliverables.standard_router)
 protected.include_router(deliverables.project_router)
 protected.include_router(deliverables.router)

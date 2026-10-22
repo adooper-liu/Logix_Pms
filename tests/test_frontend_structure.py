@@ -45,6 +45,7 @@ def test_frontend_has_modules():
         "execution.js",
         "deliverables.js",
         "orgs.js",
+        "sketches.js",
     } <= names
     assert "main.js" in names
 
@@ -77,6 +78,7 @@ def test_view_modules_are_registered():
         "execution",
         "deliverables",
         "orgs",
+        "sketches",
     ):
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
 
@@ -94,6 +96,7 @@ def test_every_view_module_exports_a_renderer():
         "execution.js": "renderExecution",
         "deliverables.js": "renderDeliverables",
         "orgs.js": "renderOrgs",
+        "sketches.js": "renderSketches",
     }
     for filename, symbol in renderers.items():
         src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")

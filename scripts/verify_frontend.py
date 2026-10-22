@@ -32,6 +32,7 @@ VIEWS = [
     ("execution", "流程执行"),
     ("deliverables", "交付物与模板库"),
     ("orgs", "组织与人员"),
+    ("sketches", "架构草图"),
 ]
 
 failures: list[str] = []
@@ -515,6 +516,15 @@ def main() -> int:
             page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
             assert page.locator("#bpmnCanvas .djs-element").count() >= 5
             assert page.locator(".bjs-powered-by").count() == 1, "bpmn.io 水印必须保留"
+            page.click('#view button:has-text("运行校验")')
+            page.wait_for_selector(".bpmn-lint-item", timeout=8000)
+            assert page.locator(".bpmn-lint-item").count() >= 1
+            page.click('#view button:has-text("全屏")')
+            page.wait_for_timeout(400)
+            assert page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            assert not page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
             page.click('#view button:has-text("简洁画布")')
             page.wait_for_selector("#designerCanvas")
             page.screenshot(path=str(out_dir / "interaction-designer-bpmnjs.png"), full_page=True)

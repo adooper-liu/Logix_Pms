@@ -40,4 +40,5 @@ export const TITLES = {
   knowledge: '流程知识库',
   deliverables: '交付物与模板库',
   orgs: '组织与人员',
+  sketches: '架构草图',
 };

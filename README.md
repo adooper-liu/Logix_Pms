@@ -155,7 +155,7 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：11 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器跑两段：12 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
@@ -348,7 +348,7 @@ web/            前端（原生 ES 模块，无构建步骤）
 scripts/
   seed.py             命令行灌库
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
-  verify_frontend.py  无头浏览器联调自检（11 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器联调自检（12 个视图 + 交互路径 + 主题切换 + 截图）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
 docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件、执行与设计器差距分析
 alembic/        数据库迁移脚本（env.py + versions/）
@@ -369,7 +369,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 
 ```text
 main.js
-  └─ views/*        九个视图，各自 import 需要的 core
+  └─ views/*        十二个视图，各自 import 需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
             └─ core/{api, auth, state, theme, ui, format}.js
 ```
@@ -410,7 +410,8 @@ BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实�
 流程执行与设计器的行业最佳实践、差距矩阵与专业化路线见
 [docs/process-execution-gap-analysis.md](docs/process-execution-gap-analysis.md)。
 bpmn-js 专业画布的选型、验证结果与许可证注意事项见
-[docs/bpmn-js-spike.md](docs/bpmn-js-spike.md)。
+[docs/bpmn-js-spike.md](docs/bpmn-js-spike.md)；
+独立 draw.io 架构草图的定位与嵌入方式见 [docs/sketches.md](docs/sketches.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
@@ -437,6 +438,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
 | 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
 | 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 默认 bpmn-js 专业 BPMN 2.0 画布（调色板/折点/撤销重做/复制粘贴，布局与折点持久化），可切简洁泳道画布；节点拖拽、连线编辑、模型校验；草稿 → 评审 → 发布、版本历史/差异/回滚；BPMN 导入/导出 |
+| 架构草图 | `/sketches` | 独立 draw.io 白板：自由画布、mxfile 版本保存、关联流程/项目；**不参与 BPMN 建模与流程执行** |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 | 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
@@ -639,6 +641,16 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET | `/integrations/inbound-actions` | 可用的入站动作及中文标签 |
 | GET | `/integrations/inbound-events` | 入站事件记录（MANAGER+） |
 | POST | `/integrations/inbound/{code}` | 公开入站入口；HMAC 签名 + `event_id` 幂等 |
+
+### 架构草图
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/sketches/meta` | draw.io embed 地址（来自 `DRAWIO_EMBED_URL`） |
+| GET/POST | `/sketches` | 草图列表 / 新建（OWNER+，可关联流程/项目） |
+| GET | `/sketches/{id}` | 草图详情（含 mxfile XML） |
+| PATCH | `/sketches/{id}` | 修改信息 / 保存 draw.io XML（OWNER+） |
+| DELETE | `/sketches/{id}` | 删除草图（MANAGER+） |
 
 ### 方法论工具箱
 | 方法 | 路径 | 说明 |

@@ -50,6 +50,7 @@ from app.models.process import (
 )
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.sketch import Sketch
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
@@ -784,6 +785,7 @@ def _wipe(db: Session) -> None:
         KnowledgeTag,
         KnowledgeItem,
         KpiDefinition,
+        Sketch,
         Project,
         WorkflowTemplate,
         Tool,
