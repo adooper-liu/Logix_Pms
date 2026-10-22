@@ -224,6 +224,18 @@ class ProcessModelDiffOut(BaseModel):
     edges_changed: List[Dict] = []
 
 
+class ProcessNodeMetricsUpdate(BaseModel):
+    duration_minutes: Optional[float] = Field(default=None, ge=0)
+    wait_minutes: Optional[float] = Field(default=None, ge=0)
+    cost: Optional[float] = Field(default=None, ge=0)
+    rework_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    approval_levels: Optional[int] = Field(default=None, ge=0, le=10)
+    is_value_added: Optional[bool] = None
+    expected_version: Optional[int] = Field(
+        default=None, description="客户端看到的模型版本；不一致时拒绝"
+    )
+
+
 class BpmnImportRequest(BaseModel):
     xml: str = Field(description="BPMN 2.0 XML 文本")
     expected_version: Optional[int] = Field(

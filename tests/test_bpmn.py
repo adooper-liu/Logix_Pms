@@ -30,6 +30,34 @@ PARALLEL_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>
 """
 
+LAYOUT_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="D3" targetNamespace="http://example.com/bpmn">
+  <bpmn:process id="P3">
+    <bpmn:startEvent id="start" name="开始"/>
+    <bpmn:task id="task1" name="处理"/>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="start" targetRef="task1"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_1">
+    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="P3">
+      <bpmndi:BPMNShape id="Shape_start" bpmnElement="start">
+        <dc:Bounds x="111" y="222" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_task1" bpmnElement="task1">
+        <dc:Bounds x="333" y="444" width="180" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_f1" bpmnElement="Flow_1">
+        <di:waypoint x="147" y="240"/>
+        <di:waypoint x="777" y="484"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
+"""
+
 
 def _process_pid(client, code: str = "L3-032") -> int:
     rows = client.get(f"{API}/process-map/flat").json()
@@ -112,6 +140,27 @@ def test_import_minimal_external_bpmn(client):
         client.delete(f"{API}/process-map/{pid}")
 
 
+def test_bpmn_layout_and_waypoints_persist(client):
+    """bpmn-js 调整过的坐标/折点必须原样保存，刷新后不能重新排版。"""
+    pid = _create_process(client, "L3-BPMN-LAYOUT")
+    try:
+        imported = client.post(f"{API}/processes/{pid}/bpmn", json={"xml": LAYOUT_XML})
+        assert imported.status_code == 200, imported.text
+        model = imported.json()
+        by_key = {node["node_key"]: node for node in model["nodes"]}
+        assert by_key["start"]["position_x"] == 111
+        assert by_key["task1"]["position_y"] == 444
+
+        exported = client.get(f"{API}/processes/{pid}/bpmn")
+        assert exported.status_code == 200
+        xml = exported.text
+        assert 'x="111"' in xml and 'y="444"' in xml
+        assert 'x="777"' in xml, "连线折点被重新生成了"
+        assert "pms:durationMinutes" in xml
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
 def test_import_rejects_parallel_gateway(client):
     pid = _create_process(client, "L3-BPMN-PAR")
     try:
@@ -183,6 +232,53 @@ def test_round_trip_preserves_pms_metrics(client):
         client.delete(f"{API}/process-map/{source}")
         if target is not None:
             client.delete(f"{API}/process-map/{target}")
+
+
+def test_external_editor_can_drop_pms_extensions(client):
+    """bpmn-js 等编辑器可能不认识 pms:*；同 id 节点应从当前草稿继承指标。"""
+    pid = _create_process(client, "L3-BPMN-EXT")
+    try:
+        saved = client.put(
+            f"{API}/processes/{pid}/design",
+            json={
+                "nodes": [
+                    {
+                        "node_key": "task1",
+                        "name": "处理",
+                        "node_type": "TASK",
+                        "lane": "L",
+                        "duration_minutes": 15,
+                        "wait_minutes": 2,
+                        "cost": 3,
+                        "rework_rate": 0.1,
+                        "approval_levels": 1,
+                        "is_value_added": False,
+                    }
+                ],
+                "edges": [],
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        external = """<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  id="D1" targetNamespace="http://example.com/bpmn">
+  <bpmn:process id="P1">
+    <bpmn:task id="task1" name="处理（外部编辑器）"/>
+  </bpmn:process>
+</bpmn:definitions>
+"""
+        imported = client.post(f"{API}/processes/{pid}/bpmn", json={"xml": external})
+        assert imported.status_code == 200, imported.text
+        node = imported.json()["nodes"][0]
+        assert node["name"] == "处理（外部编辑器）"
+        assert node["duration_minutes"] == 15
+        assert node["wait_minutes"] == 2
+        assert node["cost"] == 3
+        assert node["rework_rate"] == 0.1
+        assert node["approval_levels"] == 1
+        assert node["is_value_added"] is False
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
 
 
 def test_import_version_conflict(client):

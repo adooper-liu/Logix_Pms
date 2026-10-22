@@ -171,6 +171,8 @@ class ProcessModelVersion(Base):
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # bpmn-js 的完整 XML（含 DI 坐标/连线折点/泳道）；用于还原用户的版面调整
+    bpmn_xml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     change_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     created_by_id: Mapped[Optional[int]] = mapped_column(

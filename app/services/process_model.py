@@ -19,6 +19,7 @@ from app.core.timeutil import utcnow
 from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.user import User
 from app.schemas.process import ProcessModelIn
+from app.services import bpmn as bpmn_service
 
 DRAFT = "DRAFT"
 IN_REVIEW = "IN_REVIEW"
@@ -116,6 +117,13 @@ def rows_from_snapshot(
     return nodes, edges
 
 
+def render_bpmn(process: ProcessArch, snapshot: dict) -> Optional[str]:
+    nodes, edges = rows_from_snapshot(process.id, snapshot)
+    if not nodes:
+        return None
+    return bpmn_service.export_bpmn(process, nodes, edges)
+
+
 def ensure_baseline(db: Session, process: ProcessArch) -> Optional[ProcessModelVersion]:
     """老数据没有版本记录时，把当前已发布模型登记为基线版本。
 
@@ -133,6 +141,7 @@ def ensure_baseline(db: Session, process: ProcessArch) -> Optional[ProcessModelV
         version=baseline_version,
         status=PUBLISHED,
         snapshot=snapshot,
+        bpmn_xml=render_bpmn(process, snapshot),
         change_note="现有模型基线",
         created_by_name="系统",
         published_at=process.model_updated_at or utcnow(),
@@ -149,6 +158,8 @@ def save_draft(
     payload: ProcessModelIn,
     user: User,
     note: Optional[str] = None,
+    bpmn_xml: Optional[str] = None,
+    keep_bpmn: bool = False,
 ) -> ProcessModelVersion:
     ensure_baseline(db, process)
     latest = latest_version(db, process.id)
@@ -161,6 +172,10 @@ def save_draft(
         latest.snapshot = snapshot
         if note:
             latest.change_note = note
+        if bpmn_xml is not None:
+            latest.bpmn_xml = bpmn_xml
+        elif not (keep_bpmn and latest.bpmn_xml):
+            latest.bpmn_xml = render_bpmn(process, snapshot)
         version = latest
     else:
         # 已发布后第一次编辑：版本号从已发布版本继续；发布前只保留一个草稿
@@ -168,11 +183,18 @@ def save_draft(
             process.published_model_version or 0,
             latest.version if latest is not None else 0,
         )
+        if bpmn_xml is not None:
+            xml = bpmn_xml
+        elif keep_bpmn and latest is not None and latest.bpmn_xml:
+            xml = latest.bpmn_xml
+        else:
+            xml = render_bpmn(process, snapshot)
         version = ProcessModelVersion(
             process_id=process.id,
             version=base + 1,
             status=DRAFT,
             snapshot=snapshot,
+            bpmn_xml=xml,
             change_note=note,
             created_by_id=user.id,
             created_by_name=user.display_name,
@@ -305,6 +327,7 @@ def rollback(
         version=base + 1,
         status=DRAFT,
         snapshot=source.snapshot or {},
+        bpmn_xml=source.bpmn_xml or render_bpmn(process, source.snapshot or {}),
         change_note=note or f"回滚自 v{source.version}",
         created_by_id=user.id,
         created_by_name=user.display_name,

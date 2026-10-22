@@ -8,6 +8,9 @@
   // 在样式表绘制前恢复主题，避免刷新时闪一下默认色
   try { document.documentElement.dataset.theme = localStorage.getItem('pms_theme') || 'default'; } catch (e) {}
 </script>
+<link rel="stylesheet" href="/static/vendor/bpmn-js/bpmn-js.css">
+<link rel="stylesheet" href="/static/vendor/bpmn-js/diagram-js.css">
+<link rel="stylesheet" href="/static/vendor/bpmn-js/bpmn-font/css/bpmn.css">
 <link rel="stylesheet" href="/static/css/base.css">
 <link rel="stylesheet" href="/static/css/components.css">
 <link rel="stylesheet" href="/static/css/views.css">

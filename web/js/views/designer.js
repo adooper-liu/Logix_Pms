@@ -5,7 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { metricHelp } from '../core/metrics.js';
-import { API_BASE, GET, POST, PUT, getToken } from '../core/api.js';
+import { API_BASE, GET, PATCH, POST, PUT, getToken } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 6. 流程设计器 */
@@ -82,6 +82,7 @@ function paintDesigner() {
   st.editable = editable;
   st.bnSet = bnSet;
   st.metricOf = metricOf;
+  if (!st.mode) st.mode = 'bpmn';
   normalizeLayout(st);
 
   const tab = st.tab || 'model';
@@ -92,7 +93,7 @@ function paintDesigner() {
         指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
     </div>`;
 
-  const modelPane = `
+  const simplePane = `
     <div class="card designer-card">
       <div class="between mb designer-toolbar">
         <div class="gap">
@@ -118,6 +119,29 @@ function paintDesigner() {
       </div>
       ${validationHtml(st.model)}
     </div>`;
+
+  const bpmnPane = `
+    <div class="card designer-card">
+      <div class="between mb designer-toolbar">
+        <div class="gap">
+          <span class="tiny">专业 BPMN 2.0 画布（bpmn-js）</span>
+          <button class="btn-sm" onclick="fitBpmnViewport()">适应画布</button>
+          <span class="tiny" id="bpmnSaveState">${
+            model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
+              : '编辑后自动保存草稿'}</span>
+        </div>
+        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看 PMS 指标 · 自动保存草稿</div>
+      </div>
+      <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
+      <div id="bpmnSelection" class="bpmn-selection">
+        <div class="tiny muted">选中一个元素查看 PMS 指标</div>
+      </div>
+      <div class="note" style="margin-top:8px">执行引擎暂不支持并行网关、子流程、边界事件；
+        画出这些元素后保存会被拒绝。PMS 指标仍在简洁画布/分析页维护。</div>
+      ${validationHtml(st.model)}
+    </div>`;
+
+  const modelPane = st.mode === 'bpmn' ? bpmnPane : simplePane;
 
   const analysisPane = `
     <div class="grid g2">
@@ -155,6 +179,9 @@ function paintDesigner() {
         </div>
         <div class="gap">
           <select class="sel" onchange="switchProcess(this.value)">${opts}</select>
+          ${editable
+            ? `<button class="btn btn-g" onclick="toggleDesignerMode()">${
+              st.mode === 'bpmn' ? '简洁画布' : '专业 BPMN 画布'}</button>` : ''}
           <button class="btn btn-g" onclick="openVersionHistory()">版本历史</button>
           ${model.status === 'DRAFT' && editable
             ? '<button class="btn btn-g" onclick="submitReview()">提交评审</button>' : ''}
@@ -176,12 +203,235 @@ function paintDesigner() {
       <div class="mt">${tabBar}</div>
     </div>
     ${tab === 'analysis' ? analysisPane : modelPane}`;
-  if (tab !== 'analysis') renderCanvas();
+  if (tab !== 'analysis') {
+    if (st.mode === 'bpmn') mountBpmnEditor();
+    else renderCanvas();
+  }
 }
 
 /* -------------------------------------------------- 画布 */
 
 const DW = { laneH: 140, nodeW: 170, nodeH: 60, x0: 120, step: 200, top: 40 };
+
+const EMPTY_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="Process_1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="开始"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="180" y="160" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+function destroyBpmnModeler() {
+  const st = state.designer;
+  if (st.bpmnSaveTimer) clearTimeout(st.bpmnSaveTimer);
+  st.bpmnSaveTimer = null;
+  if (st.bpmnModeler) {
+    try { st.bpmnModeler.destroy(); } catch (e) { /* 已销毁 */ }
+    st.bpmnModeler = null;
+  }
+}
+
+function toggleDesignerMode() {
+  const st = state.designer;
+  destroyBpmnModeler();
+  st.tab = 'model';
+  st.mode = st.mode === 'bpmn' ? 'simple' : 'bpmn';
+  RENDERERS.designer();
+}
+
+function fitBpmnViewport() {
+  const modeler = state.designer.bpmnModeler;
+  if (modeler) modeler.get('canvas').zoom('fit-viewport');
+}
+
+function setBpmnSaveState(text) {
+  const el = document.getElementById('bpmnSaveState');
+  if (el) el.textContent = text;
+}
+
+async function fetchBpmnXml() {
+  const pid = state.designer.processId;
+  const model = await GET('/processes/' + pid + '/design');
+  if (!(model.nodes || []).length) return EMPTY_BPMN_XML;
+  const res = await fetch(API_BASE + '/processes/' + pid + '/bpmn', {
+    headers: { Authorization: 'Bearer ' + getToken() },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || ('BPMN 加载失败（' + res.status + '）'));
+  }
+  return await res.text();
+}
+
+function scheduleBpmnSave() {
+  const st = state.designer;
+  if (st.bpmnImporting || !st.bpmnModeler) return;
+  setBpmnSaveState('有未保存修改…');
+  if (st.bpmnSaveTimer) clearTimeout(st.bpmnSaveTimer);
+  st.bpmnSaveTimer = setTimeout(saveBpmnNow, 900);
+}
+
+async function saveBpmnNow() {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  if (!modeler) return;
+  try {
+    const { xml } = await modeler.saveXML({ format: true });
+    const response = await POST('/processes/' + st.processId + '/bpmn', {
+      xml,
+      expected_version: st.model ? st.model.version : null,
+    });
+    st.model = response;
+    st.savedModel = cloneModel(response);
+    st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
+    setBpmnSaveState('已保存 · v' + (response.draft_version || response.version));
+    renderBpmnSelection(st.bpmnSelection || []);
+    return true;
+  } catch (e) {
+    setBpmnSaveState('保存失败：' + e.message);
+    toast(e.message, true);
+    return false;
+  }
+}
+
+let bpmnJsPromise = null;
+
+function loadBpmnJs() {
+  if (window.BpmnJS) return Promise.resolve();
+  if (!bpmnJsPromise) {
+    bpmnJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/static/vendor/bpmn-js/bpmn-modeler.js';
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('bpmn-js 资源加载失败'));
+      document.head.appendChild(script);
+    });
+  }
+  return bpmnJsPromise;
+}
+
+async function mountBpmnEditor() {
+  const st = state.designer;
+  const container = document.getElementById('bpmnCanvas');
+  if (!container) return;
+  try {
+    await loadBpmnJs();
+  } catch (e) {
+    container.innerHTML = `<div class="errbar">${esc(e.message)}</div>`;
+    return;
+  }
+  if (!window.BpmnJS) {
+    container.innerHTML = '<div class="errbar">bpmn-js 资源未加载</div>';
+    return;
+  }
+  destroyBpmnModeler();
+  const modeler = new window.BpmnJS({ container });
+  st.bpmnModeler = modeler;
+  st.bpmnSelection = [];
+  st.bpmnImporting = true;
+  modeler.on('selection.changed', (event) => {
+    st.bpmnSelection = event.newSelection || [];
+    renderBpmnSelection(st.bpmnSelection);
+  });
+  modeler.on('commandStack.changed', scheduleBpmnSave);
+  try {
+    const xml = await fetchBpmnXml();
+    await modeler.importXML(xml);
+    modeler.get('canvas').zoom('fit-viewport');
+    st.bpmnImporting = false;
+    setBpmnSaveState('草稿 · v' + (st.model.draft_version || st.model.version));
+  } catch (e) {
+    st.bpmnImporting = false;
+    container.innerHTML = `<div class="errbar">BPMN 加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderBpmnSelection(selection) {
+  const panel = document.getElementById('bpmnSelection');
+  if (!panel) return;
+  const element = (selection || [])[0];
+  const bo = element && element.businessObject;
+  if (!bo) {
+    panel.innerHTML = '<div class="tiny muted">选中一个元素查看/编辑 PMS 指标</div>';
+    return;
+  }
+  const st = state.designer;
+  const node = ((st.model || {}).nodes || [])
+    .find((item) => item.node_key === bo.id);
+  const type = String(bo.$type || '').replace('bpmn:', '');
+  const editable = !!st.editable && !!node;
+  const ro = editable ? '' : ' readonly';
+  panel.innerHTML = `
+    <div class="between mb">
+      <b>${esc(bo.name || bo.id || '未命名元素')}</b>
+      <span class="tag t-blu">${esc(type)}</span>
+    </div>
+    ${node ? `
+      <div class="grid g3">
+        <div class="field"><label>作业时间（分钟）</label>
+          <input id="bpDur" type="number" min="0" value="${node.duration_minutes}"${ro}></div>
+        <div class="field"><label>等待时间（分钟）</label>
+          <input id="bpWait" type="number" min="0" value="${node.wait_minutes}"${ro}></div>
+        <div class="field"><label>单次成本（元）</label>
+          <input id="bpCost" type="number" min="0" step="0.1" value="${node.cost}"${ro}></div>
+        <div class="field"><label>返工率（0–1）</label>
+          <input id="bpRework" type="number" min="0" max="1" step="0.05" value="${node.rework_rate}"${ro}></div>
+        <div class="field"><label>审批层级</label>
+          <input id="bpApproval" type="number" min="0" max="10" value="${node.approval_levels}"${ro}></div>
+        <div class="field"><label>增值活动</label>
+          <select id="bpVa"${editable ? '' : ' disabled'}>
+            <option value="true"${node.is_value_added ? ' selected' : ''}>是</option>
+            <option value="false"${!node.is_value_added ? ' selected' : ''}>否</option>
+          </select></div>
+      </div>
+      ${editable
+        ? `<div class="between mt"><div class="hint">指标保存后不影响图形；发布后才影响运行时。</div>
+            <button class="btn-sm btn-p" onclick="saveBpmnMetrics('${esc(node.node_key)}')">保存指标</button></div>`
+        : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`
+      : '<div class="tiny muted">该元素没有 PMS 测算数据</div>'}
+    <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标在下方单独保存。</div>`;
+}
+
+async function saveBpmnMetrics(nodeKey) {
+  const st = state.designer;
+  if (!st.model.nodes.some((node) => node.node_key === nodeKey)) {
+    toast('画布还在保存，请稍后再试', true);
+    return;
+  }
+  const value = (id) => Number(document.getElementById(id).value);
+  try {
+    const response = await PATCH(
+      '/processes/' + st.processId + '/design/nodes/' + nodeKey,
+      {
+        duration_minutes: value('bpDur'),
+        wait_minutes: value('bpWait'),
+        cost: value('bpCost'),
+        rework_rate: value('bpRework'),
+        approval_levels: value('bpApproval'),
+        is_value_added: document.getElementById('bpVa').value === 'true',
+        expected_version: st.model.version,
+      },
+    );
+    st.model = response;
+    st.savedModel = cloneModel(response);
+    st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
+    setBpmnSaveState('指标已保存 · v' + (response.draft_version || response.version));
+    renderBpmnSelection(st.bpmnSelection || []);
+    toast('节点指标已保存');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 function normalizeLayout(st) {
   const ordered = st.model.nodes.slice().sort(
@@ -765,6 +1015,10 @@ async function exportBpmn() {
   const id = state.designer.processId;
   if (!id) return toast('请先选择一条流程', true);
   try {
+    if (state.designer.bpmnModeler) {
+      const ok = await saveBpmnNow();
+      if (!ok) return;
+    }
     const res = await fetch(API_BASE + '/processes/' + id + '/bpmn', {
       headers: { Authorization: 'Bearer ' + getToken() },
     });
@@ -772,19 +1026,24 @@ async function exportBpmn() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || ('导出失败（' + res.status + '）'));
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = (state.designer.processCode || 'process') + '.bpmn';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    const xml = await res.text();
+    downloadBpmn(xml);
     toast('BPMN 已导出');
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+function downloadBpmn(xml) {
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (state.designer.processCode || 'process') + '.bpmn';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function importBpmn() {
@@ -1230,10 +1489,11 @@ function addLaneNode() {
 
 export {
   addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, cloneModel,
-  deleteEdge, deleteNode, diffVersion, editNode, exportBpmn, fitDesigner, importBpmn,
-  openDesigner, openEdgeEditor, openNodeEditor, openVersionHistory, paintDesigner,
-  paintMetrics, paintSuggestions, persistDesign, publishDesign, reanalyze,
-  redoDesigner, rejectReview, reloadDesign, renderDesigner, rollbackVersion,
-  saveEdge, saveNode, saveNodeAssignment, setDesignerTab, submitReview, switchProcess,
-  undoDesigner,
+  deleteEdge, deleteNode, diffVersion, editNode, exportBpmn, fitBpmnViewport,
+  fitDesigner, importBpmn, openDesigner, openEdgeEditor, openNodeEditor,
+  openVersionHistory, paintDesigner, paintMetrics, paintSuggestions,
+  persistDesign, publishDesign, reanalyze, redoDesigner, rejectReview,
+  reloadDesign, renderDesigner, rollbackVersion, saveEdge, saveNode,
+  saveNodeAssignment, saveBpmnMetrics, setDesignerTab, submitReview,
+  switchProcess, toggleDesignerMode, undoDesigner,
 };

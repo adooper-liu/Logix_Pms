@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from fastapi import HTTPException
 
@@ -82,22 +82,59 @@ def _elem_id(key: str) -> str:
     return key if _SAFE_ID.match(key) else "Node_" + re.sub(r"\W", "_", key)
 
 
-def _add_extension(parent: ET.Element, node: ProcessNode) -> None:
-    ext = ET.SubElement(parent, _q(BPMN_NS, "extensionElements"))
-    ET.SubElement(ext, _q(PMS_NS, "nodeType")).text = node.node_type
-    if node.owner_role:
-        ET.SubElement(ext, _q(PMS_NS, "ownerRole")).text = node.owner_role
+def _pms_value(node, key, default=None):
+    if isinstance(node, dict):
+        return node.get(key, default)
+    return getattr(node, key, default)
+
+
+def _add_pms_fields(ext: ET.Element, node) -> None:
+    ET.SubElement(ext, _q(PMS_NS, "nodeType")).text = _pms_value(node, "node_type", "TASK")
+    owner_role = _pms_value(node, "owner_role")
+    if owner_role:
+        ET.SubElement(ext, _q(PMS_NS, "ownerRole")).text = owner_role
     # 这些是 PMS 的测算字段，标准 BPMN 没有对应元素；放在扩展里保证往返不丢数据。
     metrics = {
-        "durationMinutes": node.duration_minutes,
-        "waitMinutes": node.wait_minutes,
-        "cost": node.cost,
-        "reworkRate": node.rework_rate,
-        "approvalLevels": node.approval_levels,
-        "valueAdded": "true" if node.is_value_added else "false",
+        "durationMinutes": _pms_value(node, "duration_minutes", 0.0),
+        "waitMinutes": _pms_value(node, "wait_minutes", 0.0),
+        "cost": _pms_value(node, "cost", 0.0),
+        "reworkRate": _pms_value(node, "rework_rate", 0.0),
+        "approvalLevels": _pms_value(node, "approval_levels", 0),
+        "valueAdded": "true" if _pms_value(node, "is_value_added", True) else "false",
     }
     for name, value in metrics.items():
         ET.SubElement(ext, _q(PMS_NS, name)).text = str(value)
+
+
+def _add_extension(parent: ET.Element, node: ProcessNode) -> None:
+    ext = ET.SubElement(parent, _q(BPMN_NS, "extensionElements"))
+    _add_pms_fields(ext, node)
+
+
+def sync_pms_extensions(xml_text: str, nodes: Sequence[dict]) -> str:
+    """把当前快照里的 PMS 字段同步进已有 BPMN XML，保留用户的 DI/折点/泳道。"""
+    root = _parse_bpmn(xml_text)
+    process_el = next((el for el in root.iter() if _local(el.tag) == "process"), None)
+    if process_el is None:
+        raise HTTPException(status_code=400, detail="BPMN 中没有找到 process 元素")
+    by_key = {node.get("node_key"): node for node in nodes}
+    for element in process_el:
+        element_id = element.get("id")
+        node = by_key.get(element_id)
+        if node is None:
+            continue
+        ext = next(
+            (child for child in element if _local(child.tag) == "extensionElements"),
+            None,
+        )
+        if ext is None:
+            ext = ET.SubElement(element, _q(BPMN_NS, "extensionElements"))
+        for child in list(ext):
+            if child.tag.startswith(f"{{{PMS_NS}}}"):
+                ext.remove(child)
+        _add_pms_fields(ext, node)
+    ET.indent(root, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
 
 
 def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[ProcessEdge]) -> str:
@@ -135,10 +172,11 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
 
     # 泳道
     lane_set = ET.SubElement(process_el, _q(BPMN_NS, "laneSet"), {"id": "LaneSet_1"})
+    lane_ids: Dict[str, str] = {}
     for index, lane in enumerate(lanes, start=1):
-        lane_el = ET.SubElement(
-            lane_set, _q(BPMN_NS, "lane"), {"id": f"Lane_{index}", "name": lane}
-        )
+        lane_id = f"Lane_{index}"
+        lane_ids[lane] = lane_id
+        lane_el = ET.SubElement(lane_set, _q(BPMN_NS, "lane"), {"id": lane_id, "name": lane})
         for node in ordered:
             if (node.lane or "主流程") == lane:
                 ET.SubElement(lane_el, _q(BPMN_NS, "flowNodeRef")).text = _elem_id(node.node_key)
@@ -185,6 +223,40 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
         x = node.position_x if node.position_x else 180.0 * (index + 1)
         y = node.position_y if node.position_y else 120.0 * (lane_index + 1)
         positions[node.node_key] = (x, y)
+
+    if positions:
+        left = min(x for x, _ in positions.values()) - 160
+        right = max(x for x, _ in positions.values()) + 180 + 40
+        for lane in lanes:
+            ys = [
+                positions[node.node_key][1] for node in ordered if (node.lane or "主流程") == lane
+            ]
+            if not ys:
+                continue
+            top = min(ys) - 20
+            bottom = max(ys) + 80 + 20
+            shape = ET.SubElement(
+                plane,
+                _q(BPMNDI_NS, "BPMNShape"),
+                {
+                    "id": f"Shape_{lane_ids[lane]}",
+                    "bpmnElement": lane_ids[lane],
+                    "isHorizontal": "true",
+                },
+            )
+            ET.SubElement(
+                shape,
+                _q(DC_NS, "Bounds"),
+                {
+                    "x": str(left),
+                    "y": str(top),
+                    "width": str(right - left),
+                    "height": str(bottom - top),
+                },
+            )
+
+    for node in ordered:
+        x, y = positions[node.node_key]
         shape = ET.SubElement(
             plane,
             _q(BPMNDI_NS, "BPMNShape"),
@@ -205,16 +277,14 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
             _q(BPMNDI_NS, "BPMNEdge"),
             {"id": f"Edge_{index}", "bpmnElement": flow_ids[id(edge)]},
         )
-        ET.SubElement(
-            shape,
-            _q(DI_NS, "waypoint"),
-            {"x": str(source[0] + 90), "y": str(source[1] + 40)},
-        )
-        ET.SubElement(
-            shape,
-            _q(DI_NS, "waypoint"),
-            {"x": str(target[0] + 90), "y": str(target[1] + 40)},
-        )
+        sx, sy = source[0] + 180, source[1] + 40
+        tx, ty = target[0], target[1] + 40
+        for x, y in ((sx, sy), (sx + 30, sy), (sx + 30, ty), (tx, ty)):
+            ET.SubElement(
+                shape,
+                _q(DI_NS, "waypoint"),
+                {"x": str(x), "y": str(y)},
+            )
 
     ET.indent(definitions, space="  ")
     xml = ET.tostring(definitions, encoding="unicode")

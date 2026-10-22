@@ -463,6 +463,9 @@ def main() -> int:
         # 设计器：打开节点编辑，改等待时间，指标应变化
         def designer_edit_node() -> None:
             goto("designer")
+            if page.locator('#view button:has-text("简洁画布")').count():
+                page.click('#view button:has-text("简洁画布")')
+                page.wait_for_timeout(400)
             before = page.inner_text("#view")
             assert "流程模型" in before
             page.wait_for_selector("#designerCanvas")
@@ -500,6 +503,22 @@ def main() -> int:
             assert "流程周期效率" in page.inner_text("#view")
             page.screenshot(path=str(out_dir / "interaction-designer.png"), full_page=True)
 
+        # 专业 BPMN 画布（bpmn-js）：加载、调色板、水印、返回简洁画布
+        def designer_bpmn_spike() -> None:
+            goto("designer")
+            if page.locator('#view .seg button:has-text("流程模型")').count():
+                page.click('#view .seg button:has-text("流程模型")')
+                page.wait_for_timeout(300)
+            if page.locator('#view button:has-text("专业 BPMN 画布")').count():
+                page.click('#view button:has-text("专业 BPMN 画布")')
+            page.wait_for_selector("#bpmnCanvas .djs-palette", timeout=8000)
+            page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
+            assert page.locator("#bpmnCanvas .djs-element").count() >= 5
+            assert page.locator(".bjs-powered-by").count() == 1, "bpmn.io 水印必须保留"
+            page.click('#view button:has-text("简洁画布")')
+            page.wait_for_selector("#designerCanvas")
+            page.screenshot(path=str(out_dir / "interaction-designer-bpmnjs.png"), full_page=True)
+
         # 设计器：草稿 → 评审 → 发布，版本历史可打开
         def designer_version_governance() -> None:
             created = page.evaluate(
@@ -526,6 +545,9 @@ def main() -> int:
             try:
                 page.evaluate(f"switchProcess({pid})")
                 page.wait_for_timeout(500)
+                if page.locator('#view button:has-text("简洁画布")').count():
+                    page.click('#view button:has-text("简洁画布")')
+                    page.wait_for_timeout(300)
                 if page.locator('#view .seg button:has-text("流程模型")').count():
                     page.click('#view .seg button:has-text("流程模型")')
                 page.wait_for_selector("#designerCanvas")
@@ -907,6 +929,9 @@ def main() -> int:
         # BPMN 导出后再导入，结构应保持不变
         def bpmn_roundtrip() -> None:
             goto("designer")
+            if page.locator("#view .page-head select.sel").count():
+                page.select_option("#view .page-head select.sel", label="L3 L3-032 采购需求提报")
+                page.wait_for_timeout(900)
             tmp = tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False)
             tmp.close()
             path = Path(tmp.name)
@@ -986,6 +1011,7 @@ def main() -> int:
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
         check("设计器改节点并重算", designer_edit_node)
+        check("设计器专业 BPMN 画布（bpmn-js）", designer_bpmn_spike)
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
         check("监控异常处理弹窗", monitor)
         check("知识库详情 + 快速找工具", knowledge)

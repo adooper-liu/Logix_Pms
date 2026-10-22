@@ -409,6 +409,8 @@ BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实�
 [docs/process-deliverable-versioning.md](docs/process-deliverable-versioning.md)。
 流程执行与设计器的行业最佳实践、差距矩阵与专业化路线见
 [docs/process-execution-gap-analysis.md](docs/process-execution-gap-analysis.md)。
+bpmn-js 专业画布的选型、验证结果与许可证注意事项见
+[docs/bpmn-js-spike.md](docs/bpmn-js-spike.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。
 这一轮的痛点（信息密度、主题不统一）不是框架能力问题，引入 Vue 会带来全量重写、构建链、
@@ -434,7 +436,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
 | 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
-| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 泳道画布：节点拖拽、连线绘制/编辑、缩放平移、撤销重做、模型校验、节点/连线属性；草稿 → 评审 → 发布、版本历史/差异/回滚；BPMN 2.0 导入/导出 |
+| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | 默认 bpmn-js 专业 BPMN 2.0 画布（调色板/折点/撤销重做/复制粘贴，布局与折点持久化），可切简洁泳道画布；节点拖拽、连线编辑、模型校验；草稿 → 评审 → 发布、版本历史/差异/回滚；BPMN 导入/导出 |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 | 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |

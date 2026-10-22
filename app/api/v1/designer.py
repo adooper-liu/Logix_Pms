@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -25,6 +26,7 @@ from app.schemas.process import (
     ProcessModelOut,
     ProcessModelVersionDetail,
     ProcessModelVersionOut,
+    ProcessNodeMetricsUpdate,
     ProcessNodeOut,
     PublishModelRequest,
     ReviewModelRequest,
@@ -166,21 +168,83 @@ def save_design(process_id: int, payload: ProcessModelIn, db: DbSession, user: W
     return _load_model(db, process_id)
 
 
+@router.patch(
+    "/processes/{process_id}/design/nodes/{node_key}",
+    response_model=ProcessModelOut,
+    summary="更新草稿节点指标（不改变 BPMN 图形）",
+)
+def update_node_metrics(
+    process_id: int,
+    node_key: str,
+    payload: ProcessNodeMetricsUpdate,
+    db: DbSession,
+    user: WriteUser,
+):
+    process = _require_process(db, process_id)
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
+    if payload.expected_version is not None and payload.expected_version != process.model_version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"流程模型已被他人修改（服务端 v{process.model_version}，"
+                f"你提交的是 v{payload.expected_version}）。请刷新后重试。"
+            ),
+        )
+    snapshot = copy.deepcopy(model_service.current_snapshot(db, process_id))
+    nodes = snapshot.get("nodes") or []
+    target = next((node for node in nodes if node.get("node_key") == node_key), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"节点 {node_key} 不存在")
+    updates = payload.model_dump(exclude_unset=True, exclude={"expected_version"})
+    target.update(updates)
+
+    model_payload = ProcessModelIn(
+        nodes=nodes,
+        edges=snapshot.get("edges") or [],
+        expected_version=payload.expected_version,
+    )
+    validation = designer.validate_model(model_payload.nodes, model_payload.edges)
+    if validation["errors"]:
+        raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
+    version = model_service.save_draft(
+        db, process, model_payload, user, note="更新节点指标", keep_bpmn=True
+    )
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_design",
+        process_id,
+        f"更新节点指标 {process.code}/{node_key}（v{version.version}）",
+    )
+    db.commit()
+    return _load_model(db, process_id)
+
+
 @router.get(
     "/processes/{process_id}/bpmn",
     summary="导出 BPMN 2.0",
     response_class=Response,
 )
 def export_bpmn(process_id: int, db: DbSession):
-    process = db.get(ProcessArch, process_id)
-    if process is None:
-        raise HTTPException(status_code=404, detail="流程不存在")
-    nodes, edges = model_service.rows_from_snapshot(
-        process_id, model_service.current_snapshot(db, process_id)
-    )
-    if not nodes:
-        raise HTTPException(status_code=400, detail="流程还没有建模，无法导出 BPMN")
-    xml = bpmn_service.export_bpmn(process, list(nodes), list(edges))
+    process = _require_process(db, process_id)
+    snapshot = model_service.current_snapshot(db, process_id)
+    latest = model_service.latest_version(db, process_id)
+    if latest is not None and latest.bpmn_xml:
+        try:
+            xml = bpmn_service.sync_pms_extensions(latest.bpmn_xml, snapshot.get("nodes") or [])
+        except HTTPException as exc:
+            nodes, edges = model_service.rows_from_snapshot(process_id, snapshot)
+            if not nodes:
+                raise HTTPException(
+                    status_code=400, detail="流程还没有建模，无法导出 BPMN"
+                ) from exc
+            xml = bpmn_service.export_bpmn(process, list(nodes), list(edges))
+    else:
+        nodes, edges = model_service.rows_from_snapshot(process_id, snapshot)
+        if not nodes:
+            raise HTTPException(status_code=400, detail="流程还没有建模，无法导出 BPMN")
+        xml = bpmn_service.export_bpmn(process, list(nodes), list(edges))
     return Response(
         content=xml,
         media_type="application/xml",
@@ -210,6 +274,33 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
         )
 
     parsed = bpmn_service.import_bpmn(payload.xml)
+    # bpmn-js 等外部编辑器不认识 PMS 的测算扩展时，可能把 pms:* 丢掉；
+    # 对同 id 的节点/同起止的连线，用当前草稿里的 PMS 字段兜底，避免一次保存把指标清零。
+    previous = model_service.current_snapshot(db, process_id)
+    old_nodes = {node["node_key"]: node for node in previous.get("nodes") or []}
+    old_edges = {
+        (edge["source_key"], edge["target_key"]): edge for edge in previous.get("edges") or []
+    }
+    for node in parsed["nodes"]:
+        old = old_nodes.get(node["node_key"])
+        if not old:
+            continue
+        for field in (
+            "duration_minutes",
+            "wait_minutes",
+            "cost",
+            "rework_rate",
+            "approval_levels",
+            "is_value_added",
+        ):
+            node[field] = old.get(field, node[field])
+        if node.get("owner_role") is None:
+            node["owner_role"] = old.get("owner_role")
+    for edge in parsed["edges"]:
+        old = old_edges.get((edge["source_key"], edge["target_key"]))
+        if old and edge.get("probability") in (None, 1.0):
+            edge["probability"] = old.get("probability", 1.0)
+
     model_payload = ProcessModelIn(
         nodes=parsed["nodes"], edges=parsed["edges"], expected_version=payload.expected_version
     )
@@ -217,7 +308,14 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
     if validation["errors"]:
         raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
 
-    version = model_service.save_draft(db, process, model_payload, user, note="BPMN 导入")
+    version = model_service.save_draft(
+        db,
+        process,
+        model_payload,
+        user,
+        note="BPMN 导入",
+        bpmn_xml=payload.xml,
+    )
     audit_service.record(
         db,
         user,

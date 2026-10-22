@@ -77,6 +77,12 @@
 .diff-block b{display:block;margin-bottom:4px;font-size:12.5px}
 .designer-exec-config{border:1px solid var(--line);border-radius:10px;padding:12px;
   margin:12px 0;background:var(--panel-2)}
+.bpmn-canvas{height:clamp(640px, calc(100vh - 230px), 980px);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
+.bpmn-canvas .djs-container{background:var(--panel)}
+.bpmn-canvas.readonly .djs-palette,.bpmn-canvas.readonly .djs-context-pad{display:none}
+.bpmn-selection{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  margin-top:10px;background:var(--panel-2)}
 
 /* ===== 流程项目组合：步骤清单 ===== */
 .steplist{border:1px solid var(--line);border-radius:10px;overflow:hidden}

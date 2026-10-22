@@ -34,6 +34,48 @@ def _versions(client, pid: int) -> list[dict]:
     return response.json()
 
 
+def test_update_node_metrics_in_draft(client):
+    pid = _create_process(client, "L3-MNODE")
+    try:
+        saved = client.put(
+            f"{API}/processes/{pid}/design",
+            json=_model([_node("a")]),
+        )
+        assert saved.status_code == 200, saved.text
+
+        patched = client.patch(
+            f"{API}/processes/{pid}/design/nodes/a",
+            json={
+                "duration_minutes": 25,
+                "wait_minutes": 5,
+                "cost": 7.5,
+                "rework_rate": 0.2,
+                "approval_levels": 2,
+                "is_value_added": False,
+                "expected_version": 1,
+            },
+        )
+        assert patched.status_code == 200, patched.text
+        node = patched.json()["nodes"][0]
+        assert node["duration_minutes"] == 25
+        assert node["wait_minutes"] == 5
+        assert node["cost"] == 7.5
+        assert node["rework_rate"] == 0.2
+        assert node["approval_levels"] == 2
+        assert node["is_value_added"] is False
+
+        analysis = client.post(f"{API}/processes/{pid}/design/analyze").json()
+        assert analysis["metrics"]["lead_time_minutes"] == 37.5
+
+        missing = client.patch(
+            f"{API}/processes/{pid}/design/nodes/ghost",
+            json={"duration_minutes": 1},
+        )
+        assert missing.status_code == 404
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
 def test_draft_review_publish_diff_and_rollback(client, manager_client, owner_client):
     pid = _create_process(client)
     try:
