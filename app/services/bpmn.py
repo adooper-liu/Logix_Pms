@@ -486,6 +486,8 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
                 "label": (el.get("name") or None) and el.get("name")[:64],
                 "condition": condition[:128] if condition else None,
                 "probability": probability_value,
+                # 区分「显式为 1.0」和「XML 没写」：后者才允许用旧快照兜底
+                "_probability_explicit": probability is not None,
             }
         )
 

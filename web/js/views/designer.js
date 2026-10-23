@@ -1,5 +1,5 @@
 /* 视图：designer */
-import { esc, num, dur, dtShort, emptyRow, NODE_LABEL, NODE_CLASS } from '../core/format.js';
+import { esc, num, dur, dtShort, emptyRow, NODE_LABEL } from '../core/format.js';
 import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
@@ -35,9 +35,6 @@ const renderDesigner = () => {
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
       state.designer.analysis = analysis;
-      state.designer.history = [];
-      state.designer.future = [];
-      state.designer.fitted = false;
       state.designer.processCode = (list.find((r) => r.id === id) || {}).code;
     }
   };
@@ -55,35 +52,11 @@ function paintDesigner() {
     '<option value="' + p.id + '"' + (p.id === st.processId ? ' selected' : '') + '>' +
     'L' + p.level + ' ' + esc(p.code) + ' ' + esc(p.name) + '</option>').join('');
 
-  // 按泳道分组，泳道顺序取该泳道最早出现的节点顺序
-  const lanes = [];
-  const laneOf = {};
-  model.nodes.slice().sort((a, b) => a.sequence_order - b.sequence_order).forEach((n) => {
-    if (!laneOf[n.lane]) {
-      laneOf[n.lane] = { name: n.lane, nodes: [], first: n.sequence_order };
-      lanes.push(laneOf[n.lane]);
-    }
-    laneOf[n.lane].nodes.push(n);
-  });
-  lanes.sort((a, b) => a.first - b.first);
-
-  // 按钮用下标引用泳道名，避免把用户输入拼进 onclick 属性
-  st.lanes = lanes.map((l) => l.name);
-
   const proc = (st.processes || []).find((p) => p.id === st.processId) || {};
   const inReview = model.status === 'IN_REVIEW';
   const editable = !inReview && canWrite() && (canManage()
     || (AUTH.user && proc.owner_user_id === AUTH.user.id));
-
-  const bnSet = new Set((st.analysis ? st.analysis.nodes : []).filter((n) => n.is_bottleneck)
-    .map((n) => n.node_key));
-  const metricOf = {};
-  (st.analysis ? st.analysis.nodes : []).forEach((n) => { metricOf[n.node_key] = n; });
   st.editable = editable;
-  st.bnSet = bnSet;
-  st.metricOf = metricOf;
-  if (!st.mode) st.mode = 'bpmn';
-  normalizeLayout(st);
 
   const tab = st.tab || 'model';
   const tabBar = `
@@ -91,33 +64,6 @@ function paintDesigner() {
       <button class="${tab === 'model' ? 'on' : ''}" onclick="setDesignerTab('model')">流程模型</button>
       <button class="${tab === 'analysis' ? 'on' : ''}" onclick="setDesignerTab('analysis')">
         指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
-    </div>`;
-
-  const simplePane = `
-    <div class="card designer-card">
-      <div class="between mb designer-toolbar">
-        <div class="gap">
-          <span class="tiny">添加：</span>
-          ${Object.keys(NODE_LABEL).map((t) =>
-            `<button class="btn-sm" onclick="addNodeAtCenter('${t}')"${
-              editable ? '' : ' disabled'}>${NODE_LABEL[t]}</button>`).join('')}
-          <button class="btn-sm" onclick="addLane()"${editable ? '' : ' disabled'}>+ 泳道</button>
-          <span class="designer-sep"></span>
-          <button class="btn-sm" onclick="undoDesigner()" title="撤销">撤销</button>
-          <button class="btn-sm" onclick="redoDesigner()" title="重做">重做</button>
-          <button class="btn-sm" onclick="fitDesigner()">适应画布</button>
-          <span class="tiny" id="designerZoom">100%</span>
-        </div>
-        <div class="tiny">拖拽移动 · 从节点右侧圆点拉线 · 点击连线编辑 · 滚轮缩放 · 拖空白平移</div>
-      </div>
-      <div class="designer-canvas" id="designerCanvas">
-        <div class="designer-world" id="designerWorld">
-          <div class="designer-lanes" id="designerLanes"></div>
-          <svg class="designer-edge-layer" id="designerEdges"></svg>
-          <div class="designer-node-layer" id="designerNodes"></div>
-        </div>
-      </div>
-      ${validationHtml(st.model)}
     </div>`;
 
   const bpmnPane = `
@@ -128,6 +74,7 @@ function paintDesigner() {
           <button class="btn-sm" onclick="runBpmnLint()">运行校验</button>
           <button class="btn-sm" onclick="autoLayoutBpmn()">自动布局</button>
           <button class="btn-sm" onclick="toggleBpmnFullscreen()">全屏</button>
+          ${editable ? '<button class="btn-sm" onclick="addBpmnLane()">+ 泳道</button>' : ''}
           <button class="btn-sm" id="bpmnPropsToggle"
             onclick="toggleBpmnSidebar('props')">属性</button>
           <button class="btn-sm bpmn-lint-toggle" id="bpmnLintToggle"
@@ -151,7 +98,7 @@ function paintDesigner() {
         </div>
         <div class="bpmn-drawer-body">
           <div id="bpmnPropsPanel" class="bpmn-drawer-pane">
-            <div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>
+            <div class="tiny muted">选中一个元素查看/编辑属性</div>
           </div>
           <div id="bpmnLintPanel" class="bpmn-drawer-pane hide">
             <div id="bpmnLint" class="bpmn-lint"></div>
@@ -163,7 +110,7 @@ function paintDesigner() {
       ${validationHtml(st.model)}
     </div>`;
 
-  const modelPane = st.mode === 'bpmn' ? bpmnPane : simplePane;
+  const modelPane = bpmnPane;
 
   const analysisPane = `
     <div class="grid g2">
@@ -211,9 +158,6 @@ function paintDesigner() {
       </div>
       <div class="designer-head-bar">
         <div class="designer-head-actions">
-          ${editable
-            ? `<button class="btn-sm btn-g" onclick="toggleDesignerMode()">${
-              st.mode === 'bpmn' ? '简洁画布' : '专业 BPMN 画布'}</button>` : ''}
           <button class="btn-sm btn-g" onclick="openVersionHistory()">版本历史</button>
           ${model.status === 'DRAFT' && editable
             ? '<button class="btn-sm btn-g" onclick="submitReview()">提交评审</button>' : ''}
@@ -224,22 +168,17 @@ function paintDesigner() {
           ${inReview
             ? '<span class="tiny">评审中，暂不可编辑</span>'
             : editable
-              ? '<button class="btn-sm btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
+              ? ''
               : '<span class="tiny">只读（你不是这条流程的 Owner）</span>'}
           <a class="link-btn link-btn-sm" onclick="go('execution')">去流程执行 →</a>
         </div>
       </div>
     </div>
     ${tab === 'analysis' ? analysisPane : modelPane}`;
-  if (tab !== 'analysis') {
-    if (st.mode === 'bpmn') mountBpmnEditor();
-    else renderCanvas();
-  }
+  if (tab !== 'analysis') mountBpmnEditor();
 }
 
 /* -------------------------------------------------- 画布 */
-
-const DW = { laneH: 140, nodeW: 170, nodeH: 60, x0: 120, step: 200, top: 40 };
 
 const EMPTY_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -273,14 +212,6 @@ function destroyBpmnModeler() {
     try { st.bpmnModeler.destroy(); } catch (e) { /* 已销毁 */ }
     st.bpmnModeler = null;
   }
-}
-
-function toggleDesignerMode() {
-  const st = state.designer;
-  destroyBpmnModeler();
-  st.tab = 'model';
-  st.mode = st.mode === 'bpmn' ? 'simple' : 'bpmn';
-  RENDERERS.designer();
 }
 
 function fitBpmnViewport() {
@@ -354,12 +285,9 @@ function scheduleBpmnSave() {
   st.bpmnSaveTimer = setTimeout(saveBpmnNow, 900);
 }
 
-async function saveBpmnNow() {
+async function postBpmnXml(xml) {
   const st = state.designer;
-  const modeler = st.bpmnModeler;
-  if (!modeler) return;
   try {
-    const { xml } = await modeler.saveXML({ format: true });
     const response = await POST('/processes/' + st.processId + '/bpmn', {
       xml,
       expected_version: st.model ? st.model.version : null,
@@ -376,6 +304,21 @@ async function saveBpmnNow() {
     toast(e.message, true);
     return false;
   }
+}
+
+async function saveBpmnNow() {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  if (!modeler) return false;
+  let xml;
+  try {
+    ({ xml } = await modeler.saveXML({ format: true }));
+  } catch (e) {
+    setBpmnSaveState('保存失败：' + e.message);
+    toast(e.message, true);
+    return false;
+  }
+  return postBpmnXml(xml);
 }
 
 let bpmnJsPromise = null;
@@ -444,6 +387,9 @@ PmsPaletteProvider.prototype.getPaletteEntries = function () {
   const startWait = (event) => {
     create.start(event, elementFactory.createShape({ type: 'bpmn:IntermediateCatchEvent' }));
   };
+  const startCreate = (type) => (event) => {
+    create.start(event, elementFactory.createShape({ type }));
+  };
   // 返回函数而不是对象：在默认调色板（优先级 1000）之后执行，才能删掉既有条目
   return function (entries) {
     delete entries['create.subprocess-expanded'];
@@ -454,6 +400,25 @@ PmsPaletteProvider.prototype.getPaletteEntries = function () {
       className: 'bpmn-icon-intermediate-event-none pms-wait-entry',
       title: '创建等待事件（中间捕获事件，不是结束事件）',
       action: { dragstart: startWait, click: startWait },
+    };
+    // 简洁画布删除后，审批/移交仍需要直接入口
+    entries['create.pms-approval'] = {
+      group: 'activity',
+      className: 'bpmn-icon-user',
+      title: '创建审批节点',
+      action: {
+        dragstart: startCreate('bpmn:UserTask'),
+        click: startCreate('bpmn:UserTask'),
+      },
+    };
+    entries['create.pms-handoff'] = {
+      group: 'activity',
+      className: 'bpmn-icon-manual',
+      title: '创建移交节点',
+      action: {
+        dragstart: startCreate('bpmn:ManualTask'),
+        click: startCreate('bpmn:ManualTask'),
+      },
     };
     // 评审/只读时保留调色板可见，但禁止创建元素；导航工具仍可用
     if (!state.designer.editable) {
@@ -606,35 +571,124 @@ function assignmentContext(processId) {
   return promise;
 }
 
+const PMS_NS = 'http://logix-pms.local/bpmn';
+
+/** PMS 节点类型 ↔ 标准 BPMN 元素类型。 */
+const PMS_TO_BPMN_TYPE = {
+  START: 'bpmn:StartEvent',
+  END: 'bpmn:EndEvent',
+  TASK: 'bpmn:Task',
+  APPROVAL: 'bpmn:UserTask',
+  WAIT: 'bpmn:IntermediateCatchEvent',
+  DECISION: 'bpmn:ExclusiveGateway',
+  HANDOFF: 'bpmn:ManualTask',
+};
+const BPMN_TO_PMS_TYPE = Object.fromEntries(
+  Object.entries(PMS_TO_BPMN_TYPE).map(([pms, bpmn]) => [bpmn, pms]),
+);
+
+function bpmnLanes() {
+  const modeler = state.designer.bpmnModeler;
+  if (!modeler) return [];
+  return modeler.get('elementRegistry').filter((element) => element.type === 'bpmn:Lane')
+    .sort((a, b) => a.y - b.y);
+}
+
+function bpmnLaneOf(element) {
+  return element && element.parent && element.parent.type === 'bpmn:Lane'
+    ? element.parent : null;
+}
+
+function bpmnNodeTypeOf(bo, node) {
+  if (node && node.node_type) return node.node_type;
+  return BPMN_TO_PMS_TYPE[bo && bo.$type] || 'TASK';
+}
+
+function bpmnPanelHeader(bo) {
+  const type = String((bo && bo.$type) || '').replace('bpmn:', '');
+  return `<div class="between mb">
+    <b>${esc((bo && (bo.name || bo.id)) || '未命名元素')}</b>
+    <span class="tag t-blu">${esc(type)}</span>
+  </div>`;
+}
+
+function bpmnNameEditor(bo, saveCall, hint) {
+  const editable = !!state.designer.editable;
+  return `
+    <div class="field"><label>名称</label>
+      <input id="bpName" value="${esc(bo.name || '')}" placeholder="未命名"${
+        editable ? '' : ' readonly'}></div>
+    ${editable
+      ? `<div class="between mb"><span class="tiny muted">${esc(hint)}</span>
+          <button class="btn-sm" onclick="${saveCall}">保存名称</button></div>`
+      : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`;
+}
+
 function renderBpmnSelection(selection) {
   const panel = document.getElementById('bpmnPropsPanel');
   if (!panel) return;
   const element = (selection || [])[0];
   const bo = element && element.businessObject;
   if (!bo) {
-    panel.innerHTML = '<div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>';
+    panel.innerHTML = '<div class="tiny muted">选中一个元素查看/编辑属性</div>';
     return;
   }
+  const type = bo.$type || '';
+  if (type === 'bpmn:SequenceFlow') {
+    renderBpmnFlowPanel(panel, element);
+  } else if (type === 'bpmn:Lane') {
+    renderBpmnLanePanel(panel, element);
+  } else if (type === 'bpmn:Process' || type === 'bpmn:Collaboration') {
+    renderBpmnProcessPanel(panel, element);
+  } else {
+    renderBpmnNodePanel(panel, element);
+  }
+}
+
+function renderBpmnNodePanel(panel, element) {
   const st = state.designer;
-  const node = ((st.model || {}).nodes || [])
-    .find((item) => item.node_key === bo.id);
-  const type = String(bo.$type || '').replace('bpmn:', '');
-  const editable = !!st.editable && !!node;
+  const bo = element.businessObject;
+  const node = ((st.model || {}).nodes || []).find((item) => item.node_key === bo.id);
+  const editable = !!st.editable;
+  const pmsEditable = editable && !!node;
   // 分派配置的写接口要求 MANAGER+，权限比 PMS 指标更窄
-  const canConfigExec = editable && canManage();
-  const ro = editable ? '' : ' readonly';
+  const canConfigExec = pmsEditable && canManage();
+  const ro = pmsEditable ? '' : ' readonly';
+  const isFlowNode = !!(bo.$instanceOf && bo.$instanceOf('bpmn:FlowNode'));
+  const lanes = isFlowNode ? bpmnLanes() : [];
+  const currentLane = bpmnLaneOf(element);
+  const currentLaneName = currentLane ? (currentLane.businessObject.name || currentLane.id) : '';
+  const pmsType = bpmnNodeTypeOf(bo, node);
+  const typeOpts = Object.keys(PMS_TO_BPMN_TYPE).map((key) =>
+    `<option value="${key}"${key === pmsType ? ' selected' : ''}>${
+      esc(NODE_LABEL[key] || key)}</option>`).join('');
+  const laneOpts = lanes.map((lane) => {
+    const name = lane.businessObject.name || lane.id;
+    return `<option value="${esc(name)}"${name === currentLaneName ? ' selected' : ''}>${
+      esc(name)}</option>`;
+  }).join('');
   panel.innerHTML = `
-    <div class="between mb">
-      <b>${esc(bo.name || bo.id || '未命名元素')}</b>
-      <span class="tag t-blu">${esc(type)}</span>
-    </div>
-    <div class="field"><label>名称</label>
-      <input id="bpName" value="${esc(bo.name || '')}" placeholder="未命名"${
-        st.editable ? '' : ' readonly'}></div>
-    ${st.editable
-      ? `<div class="between mb"><span class="tiny muted">双击画布元素可直接改名；这里也可以修改同一名称</span>
-          <button class="btn-sm" onclick="saveBpmnName('${esc(bo.id)}')">保存名称</button></div>`
-      : ''}
+    ${bpmnPanelHeader(bo)}
+    ${bpmnNameEditor(bo, `saveBpmnName('${esc(bo.id)}')`, '双击画布元素也可直接改名')}
+    ${isFlowNode ? `
+      <div class="row2">
+        <div class="field"><label>节点类型</label>
+          <div class="gap">
+            <select id="bpNodeType"${editable ? '' : ' disabled'}>${typeOpts}</select>
+            ${editable
+              ? `<button class="btn-sm" onclick="changeBpmnNodeType('${esc(bo.id)}')">应用类型</button>`
+              : ''}
+          </div></div>
+        <div class="field"><label>所属泳道</label>
+          <div class="gap">
+            <select id="bpNodeLane"${editable && lanes.length ? '' : ' disabled'}>
+              ${lanes.length ? laneOpts : '<option value="">没有泳道</option>'}
+            </select>
+            ${editable && lanes.length
+              ? `<button class="btn-sm" onclick="moveBpmnNodeToLane('${esc(bo.id)}')">移动</button>`
+              : ''}
+          </div></div>
+      </div>` : ''}
     ${node ? `
       <div class="grid g3">
         <div class="field"><label>作业时间（分钟）</label>
@@ -648,12 +702,15 @@ function renderBpmnSelection(selection) {
         <div class="field"><label>审批层级</label>
           <input id="bpApproval" type="number" min="0" max="10" value="${node.approval_levels}"${ro}></div>
         <div class="field"><label>增值活动</label>
-          <select id="bpVa"${editable ? '' : ' disabled'}>
+          <select id="bpVa"${pmsEditable ? '' : ' disabled'}>
             <option value="true"${node.is_value_added ? ' selected' : ''}>是</option>
             <option value="false"${!node.is_value_added ? ' selected' : ''}>否</option>
           </select></div>
       </div>
-      ${editable
+      <div class="field"><label>负责人 / 岗位</label>
+        <input id="bpOwner" value="${esc(node.owner_role || '')}"
+          placeholder="如：采购计划员"${ro}></div>
+      ${pmsEditable
         ? `<div class="between mt"><div class="hint">指标保存后不影响图形；发布后才影响运行时。</div>
             <button class="btn-sm btn-p" onclick="saveBpmnMetrics('${esc(node.node_key)}')">保存指标</button></div>`
         : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`
@@ -664,6 +721,77 @@ function renderBpmnSelection(selection) {
       : ''}
     <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标与执行配置各自单独保存。</div>`;
   if (canConfigExec) renderBpmnAssignment(bo.id);
+}
+
+function renderBpmnFlowPanel(panel, element) {
+  const bo = element.businessObject;
+  const editable = !!state.designer.editable;
+  const condition = bo.conditionExpression && bo.conditionExpression.body
+    ? bo.conditionExpression.body : '';
+  const rawProbability = bo.$attrs && bo.$attrs['pms:probability'];
+  const probability = rawProbability === undefined || rawProbability === null
+    ? '1' : rawProbability;
+  const source = bo.sourceRef ? (bo.sourceRef.name || bo.sourceRef.id) : '?';
+  const target = bo.targetRef ? (bo.targetRef.name || bo.targetRef.id) : '?';
+  const disabled = editable ? '' : ' readonly';
+  panel.innerHTML = `
+    ${bpmnPanelHeader(bo)}
+    <div class="tiny muted mb">${esc(source)} → ${esc(target)}</div>
+    <div class="field"><label>标签</label>
+      <input id="bpFlowLabel" value="${esc(bo.name || '')}" placeholder="通过 / 驳回"${disabled}></div>
+    <div class="row2">
+      <div class="field"><label>条件说明</label>
+        <input id="bpFlowCondition" value="${esc(condition)}"
+          placeholder="预算与需求均合规"${disabled}></div>
+      <div class="field"><label>概率（0–1）</label>
+        <input id="bpFlowProb" type="number" min="0" max="1" step="0.05"
+          value="${esc(probability)}"${disabled}></div>
+    </div>
+    <div class="between mt">
+      <div class="hint">条件与概率写入 BPMN，发布后参与运行时分支。</div>
+      ${editable
+        ? `<div class="gap">
+            <button class="btn-sm btn-g" onclick="deleteBpmnFlow('${esc(bo.id)}')">删除连线</button>
+            <button class="btn-sm btn-p" onclick="saveBpmnFlow('${esc(bo.id)}')">保存连线</button>
+          </div>` : ''}
+    </div>`;
+}
+
+function renderBpmnLanePanel(panel, element) {
+  const bo = element.businessObject;
+  const editable = !!state.designer.editable;
+  const refs = bo.flowNodeRef || [];
+  const names = refs.map((ref) => ref.name || ref.id);
+  panel.innerHTML = `
+    ${bpmnPanelHeader(bo)}
+    <div class="field"><label>泳道名称</label>
+      <input id="bpLaneName" value="${esc(bo.name || '')}" placeholder="部门 / 角色"${
+        editable ? '' : ' readonly'}></div>
+    ${editable
+      ? `<div class="between mb"><span class="tiny muted">节点 ${refs.length} 个</span>
+          <button class="btn-sm btn-p" onclick="saveBpmnLaneName('${esc(bo.id)}')">保存名称</button></div>`
+      : ''}
+    <div class="hint">${names.length
+      ? '包含：' + names.map((name) => esc(name)).join('、')
+      : '泳道里还没有节点'}</div>
+    ${editable ? '<button class="btn-sm btn-g" onclick="addBpmnLane()">+ 添加泳道</button>' : ''}`;
+}
+
+function renderBpmnProcessPanel(panel, element) {
+  const bo = element.businessObject;
+  const lanes = bpmnLanes();
+  const rows = lanes.map((lane) => {
+    const laneBo = lane.businessObject;
+    const count = (laneBo.flowNodeRef || []).length;
+    return `<div class="tiny">${esc(laneBo.name || laneBo.id)} · ${count} 节点</div>`;
+  }).join('') || '<div class="tiny muted">还没有泳道</div>';
+  panel.innerHTML = `
+    ${bpmnPanelHeader(bo)}
+    <div class="field"><label>流程名称</label>
+      <input value="${esc(bo.name || '')}" readonly></div>
+    <div class="mb"><div class="tiny muted mb">泳道</div>${rows}</div>
+    ${state.designer.editable
+      ? '<button class="btn-sm btn-g" onclick="addBpmnLane()">+ 添加泳道</button>' : ''}`;
 }
 
 async function renderBpmnAssignment(nodeKey) {
@@ -752,26 +880,334 @@ async function saveBpmnMetrics(nodeKey) {
     return;
   }
   const value = (id) => Number(document.getElementById(id).value);
+  const ownerInput = document.getElementById('bpOwner');
   try {
+    const payload = {
+      duration_minutes: value('bpDur'),
+      wait_minutes: value('bpWait'),
+      cost: value('bpCost'),
+      rework_rate: value('bpRework'),
+      approval_levels: value('bpApproval'),
+      is_value_added: document.getElementById('bpVa').value === 'true',
+      expected_version: st.model.version,
+    };
+    if (ownerInput) payload.owner_role = ownerInput.value.trim() || null;
     const response = await PATCH(
       '/processes/' + st.processId + '/design/nodes/' + nodeKey,
-      {
-        duration_minutes: value('bpDur'),
-        wait_minutes: value('bpWait'),
-        cost: value('bpCost'),
-        rework_rate: value('bpRework'),
-        approval_levels: value('bpApproval'),
-        is_value_added: document.getElementById('bpVa').value === 'true',
-        expected_version: st.model.version,
-      },
+      payload,
     );
     st.model = response;
     st.savedModel = cloneModel(response);
     st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
-    setBpmnSaveState('指标已保存 · v' + (response.draft_version || response.version));
+    setBpmnSaveState('属性已保存 · v' + (response.draft_version || response.version));
     renderBpmnSelection(st.bpmnSelection || []);
-    toast('节点指标已保存');
+    toast('节点属性已保存');
   } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function clearBpmnSaveTimer() {
+  const st = state.designer;
+  if (st.bpmnSaveTimer) {
+    clearTimeout(st.bpmnSaveTimer);
+    st.bpmnSaveTimer = null;
+  }
+}
+
+async function saveBpmnFlow(flowId) {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const element = modeler && modeler.get('elementRegistry').get(flowId);
+  if (!element) return;
+  const label = (document.getElementById('bpFlowLabel')?.value || '').trim();
+  const condition = (document.getElementById('bpFlowCondition')?.value || '').trim();
+  const probability = Number(document.getElementById('bpFlowProb')?.value);
+  if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+    toast('概率必须在 0–1 之间', true);
+    return;
+  }
+  try {
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    const conditionExpression = condition
+      ? bpmnFactory.create('bpmn:FormalExpression', { body: condition })
+      : undefined;
+    modeling.updateProperties(element, { name: label || undefined, conditionExpression });
+    // pms:probability 是 PMS 扩展属性，bpmn-moddle 放在只读 getter 返回的
+    // $attrs 对象里；直接改对象内容，保存时由序列化器输出为属性。
+    // 不能整体赋值 $attrs（会报 getter-only），也不能走 updateProperties
+    //（会把 $attrs 本身序列化成 "[object Object]"）。
+    const attrs = element.businessObject.$attrs;
+    if (attrs) attrs['pms:probability'] = String(probability);
+    clearBpmnSaveTimer();
+    const saved = await saveBpmnNow();
+    if (saved) toast('连线属性已保存');
+    renderBpmnSelection(st.bpmnSelection || []);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteBpmnFlow(flowId) {
+  if (!confirm('删除这条连线？')) return;
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const element = modeler && modeler.get('elementRegistry').get(flowId);
+  if (!element) return;
+  try {
+    st.bpmnSelection = [];
+    modeler.get('selection').select([]);
+    modeler.get('modeling').removeElements([element]);
+    clearBpmnSaveTimer();
+    const saved = await saveBpmnNow();
+    if (saved) toast('连线已删除');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function setPmsNodeType(xml, nodeId, pmsType) {
+  const doc = bpmnXmlDoc(xml);
+  const processEl = doc.getElementsByTagNameNS(BPMN_NS, 'process')[0];
+  if (!processEl) return xml;
+  const target = Array.from(processEl.children)
+    .find((el) => el.getAttribute('id') === nodeId);
+  if (!target) return xml;
+  let ext = directChildren(target, 'extensionElements')[0];
+  if (!ext) {
+    ext = doc.createElementNS(BPMN_NS, 'bpmn:extensionElements');
+    target.insertBefore(ext, target.firstChild);
+  }
+  let typeEl = Array.from(ext.children)
+    .find((el) => el.namespaceURI === PMS_NS && el.localName === 'nodeType');
+  if (!typeEl) {
+    typeEl = doc.createElementNS(PMS_NS, 'pms:nodeType');
+    ext.appendChild(typeEl);
+  }
+  typeEl.textContent = pmsType;
+  return new XMLSerializer().serializeToString(doc);
+}
+
+async function changeBpmnNodeType(nodeId) {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const element = modeler && modeler.get('elementRegistry').get(nodeId);
+  const select = document.getElementById('bpNodeType');
+  if (!element || !select) return;
+  const pmsType = select.value;
+  const targetType = PMS_TO_BPMN_TYPE[pmsType];
+  if (!targetType || element.businessObject.$type === targetType) return;
+  try {
+    const replaced = modeler.get('bpmnReplace').replaceElement(element, { type: targetType });
+    if (replaced) {
+      modeler.get('selection').select(replaced);
+      st.bpmnSelection = [replaced];
+    }
+    const { xml } = await modeler.saveXML({ format: true });
+    const patched = setPmsNodeType(xml, nodeId, pmsType);
+    clearBpmnSaveTimer();
+    const saved = await postBpmnXml(patched);
+    if (saved) {
+      showBpmnSidebarTab('props');
+      toast('节点类型已更新');
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function moveBpmnNodeToLane(nodeId) {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const element = modeler && modeler.get('elementRegistry').get(nodeId);
+  const select = document.getElementById('bpNodeLane');
+  if (!element || !select) return;
+  const lane = bpmnLanes().find(
+    (item) => (item.businessObject.name || item.id) === select.value,
+  );
+  if (!lane) return;
+  if (element.parent === lane) {
+    toast('节点已经在该泳道');
+    return;
+  }
+  try {
+    const dx = lane.x + Math.max(40, (lane.width - element.width) / 2) - element.x;
+    const dy = lane.y + Math.max(30, (lane.height - element.height) / 2) - element.y;
+    modeler.get('modeling').moveElements([element], { x: dx, y: dy }, lane);
+    clearBpmnSaveTimer();
+    const saved = await saveBpmnNow();
+    if (saved) toast('节点已移动到「' + (lane.businessObject.name || lane.id) + '」');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveBpmnLaneName(laneId) {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const element = modeler && modeler.get('elementRegistry').get(laneId);
+  const input = document.getElementById('bpLaneName');
+  if (!element || !input) return;
+  const name = input.value.trim();
+  if (!name) {
+    toast('泳道名称不能为空', true);
+    return;
+  }
+  try {
+    modeler.get('modeling').updateProperties(element, { name });
+    clearBpmnSaveTimer();
+    const saved = await saveBpmnNow();
+    if (saved) toast('泳道名称已更新');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function collectBpmnIds(doc) {
+  const ids = new Set();
+  Array.from(doc.getElementsByTagName('*')).forEach((el) => {
+    const id = el.getAttribute('id');
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+/** 在现有 BPMN XML 末尾追加一条泳道和一个默认活动。
+ *  bpmn-js 没有官方的 createLane API，这里用 DOM 修改后重新导入。 */
+function appendBpmnLane(xml, name) {
+  const doc = bpmnXmlDoc(xml);
+  const processEl = doc.getElementsByTagNameNS(BPMN_NS, 'process')[0];
+  if (!processEl) return null;
+  const plane = doc.getElementsByTagNameNS(BPMNDI_NS, 'BPMNPlane')[0];
+  const ids = collectBpmnIds(doc);
+  let laneSet = directChildren(processEl, 'laneSet')[0];
+  if (!laneSet) {
+    laneSet = doc.createElementNS(BPMN_NS, 'bpmn:laneSet');
+    laneSet.setAttribute('id', 'LaneSet_1');
+    ids.add('LaneSet_1');
+    processEl.insertBefore(laneSet, processEl.firstChild);
+  }
+  const existingLaneIds = new Set(
+    directChildren(laneSet, 'lane').map((lane) => lane.getAttribute('id')),
+  );
+  let laneIndex = 1;
+  while (ids.has('Lane_' + laneIndex)) laneIndex += 1;
+  const laneId = 'Lane_' + laneIndex;
+  ids.add(laneId);
+  const modelKeys = new Set(
+    ((state.designer.model || {}).nodes || []).map((node) => node.node_key),
+  );
+  let nodeIndex = 1;
+  while (modelKeys.has('n' + nodeIndex) || ids.has('n' + nodeIndex)) nodeIndex += 1;
+  const taskId = 'n' + nodeIndex;
+
+  const shapeBounds = (shape) => {
+    const bounds = directChildren(shape, 'Bounds')[0];
+    if (!bounds) return null;
+    return {
+      x: Number(bounds.getAttribute('x')) || 0,
+      y: Number(bounds.getAttribute('y')) || 0,
+      width: Number(bounds.getAttribute('width')) || 0,
+      height: Number(bounds.getAttribute('height')) || 0,
+    };
+  };
+  let left = 40;
+  let width = 800;
+  let top = 40;
+  if (plane) {
+    const laneBounds = directChildren(plane, 'BPMNShape')
+      .filter((shape) => existingLaneIds.has(shape.getAttribute('bpmnElement')))
+      .map(shapeBounds)
+      .filter(Boolean);
+    const nodeBounds = directChildren(plane, 'BPMNShape')
+      .map(shapeBounds)
+      .filter(Boolean);
+    if (laneBounds.length) {
+      left = Math.min(...laneBounds.map((item) => item.x));
+      width = Math.max(...laneBounds.map((item) => item.x + item.width)) - left;
+      top = Math.max(...laneBounds.map((item) => item.y + item.height)) + 20;
+    } else if (nodeBounds.length) {
+      left = Math.max(0, Math.min(...nodeBounds.map((item) => item.x)) - 40);
+      width = Math.max(...nodeBounds.map((item) => item.x + item.width)) - left + 40;
+      top = Math.max(...nodeBounds.map((item) => item.y + item.height)) + 20;
+    }
+    width = Math.max(width, 600);
+  }
+
+  const lane = doc.createElementNS(BPMN_NS, 'bpmn:lane');
+  lane.setAttribute('id', laneId);
+  lane.setAttribute('name', name);
+  const ref = doc.createElementNS(BPMN_NS, 'bpmn:flowNodeRef');
+  ref.textContent = taskId;
+  lane.appendChild(ref);
+  laneSet.appendChild(lane);
+
+  const task = doc.createElementNS(BPMN_NS, 'bpmn:task');
+  task.setAttribute('id', taskId);
+  task.setAttribute('name', '新活动');
+  const firstFlow = directChildren(processEl, 'sequenceFlow')[0] || null;
+  processEl.insertBefore(task, firstFlow);
+
+  if (plane) {
+    const laneShape = doc.createElementNS(BPMNDI_NS, 'bpmndi:BPMNShape');
+    laneShape.setAttribute('id', 'Shape_' + laneId);
+    laneShape.setAttribute('bpmnElement', laneId);
+    laneShape.setAttribute('isHorizontal', 'true');
+    const laneBox = doc.createElementNS(DC_NS, 'dc:Bounds');
+    laneBox.setAttribute('x', String(roundCoord(left)));
+    laneBox.setAttribute('y', String(roundCoord(top)));
+    laneBox.setAttribute('width', String(roundCoord(width)));
+    laneBox.setAttribute('height', '140');
+    laneShape.appendChild(laneBox);
+    const firstShape = directChildren(plane, 'BPMNShape')[0] || null;
+    plane.insertBefore(laneShape, firstShape);
+
+    const taskShape = doc.createElementNS(BPMNDI_NS, 'bpmndi:BPMNShape');
+    taskShape.setAttribute('id', taskId + '_di');
+    taskShape.setAttribute('bpmnElement', taskId);
+    const taskBox = doc.createElementNS(DC_NS, 'dc:Bounds');
+    taskBox.setAttribute('x', String(roundCoord(left + 120)));
+    taskBox.setAttribute('y', String(roundCoord(top + 30)));
+    taskBox.setAttribute('width', '100');
+    taskBox.setAttribute('height', '80');
+    taskShape.appendChild(taskBox);
+    const firstEdge = directChildren(plane, 'BPMNEdge')[0] || null;
+    plane.insertBefore(taskShape, firstEdge);
+  }
+  return { xml: new XMLSerializer().serializeToString(doc), laneId, taskId };
+}
+
+async function addBpmnLane() {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  if (!modeler) return;
+  const input = window.prompt('输入泳道名称（部门 / 角色）：', '新泳道');
+  if (input === null) return;
+  const name = input.trim() || '新泳道';
+  if (bpmnLanes().some((lane) => (lane.businessObject.name || '') === name)) {
+    toast('泳道已存在', true);
+    return;
+  }
+  try {
+    const { xml } = await modeler.saveXML({ format: true });
+    const patched = appendBpmnLane(xml, name);
+    if (!patched) throw new Error('无法添加泳道：BPMN 中没有 process 元素');
+    st.bpmnImporting = true;
+    await modeler.importXML(patched.xml);
+    st.bpmnImporting = false;
+    fitBpmnViewport();
+    const saved = await saveBpmnNow();
+    if (!saved) return;
+    const added = modeler.get('elementRegistry').get(patched.taskId);
+    if (added) {
+      modeler.get('selection').select(added);
+      st.bpmnSelection = [added];
+    }
+    showBpmnSidebarTab('props');
+    toast('泳道「' + name + '」已添加');
+  } catch (e) {
+    st.bpmnImporting = false;
     toast(e.message, true);
   }
 }
@@ -1352,25 +1788,6 @@ function toggleBpmnFullscreen() {
   setTimeout(resize, 60);
 }
 
-function normalizeLayout(st) {
-  const ordered = st.model.nodes.slice().sort(
-    (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
-  const lanes = [];
-  ordered.forEach((n) => { if (!lanes.includes(n.lane)) lanes.push(n.lane); });
-  st.lanes = lanes;
-  const laneIdx = {};
-  lanes.forEach((l, i) => { laneIdx[l] = i; });
-  const counters = {};
-  st.model.nodes.forEach((n) => {
-    const i = laneIdx[n.lane] === undefined ? 0 : laneIdx[n.lane];
-    counters[n.lane] = (counters[n.lane] || 0) + 1;
-    if (!n.position_x || n.position_x < 20) {
-      n.position_x = DW.x0 + (counters[n.lane] - 1) * DW.step;
-    }
-    n.position_y = DW.top + i * DW.laneH + 40;
-  });
-}
-
 function validateModel(model) {
   const errors = [];
   const warnings = [];
@@ -1417,390 +1834,6 @@ function validationHtml(model) {
     ...v.warnings.map((m) => `<div class="designer-issue warn">! ${esc(m)}</div>`),
   ].join('');
   return `<div class="designer-validation">${items}</div>`;
-}
-
-function renderCanvas() {
-  const st = state.designer;
-  const world = document.getElementById('designerWorld');
-  if (!world || !st.model) return;
-  const lanesEl = document.getElementById('designerLanes');
-  const edgesEl = document.getElementById('designerEdges');
-  const nodesEl = document.getElementById('designerNodes');
-  const zoomEl = document.getElementById('designerZoom');
-  const zoom = st.zoom || 1;
-  const pan = st.pan || { x: 0, y: 0 };
-  const laneCount = Math.max(1, (st.lanes || []).length);
-  const maxX = Math.max(900, ...st.model.nodes.map((n) => (n.position_x || 0) + 360));
-  const height = DW.top + laneCount * DW.laneH + 80;
-  world.style.width = maxX + 'px';
-  world.style.height = height + 'px';
-  world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
-  if (zoomEl) zoomEl.textContent = Math.round(zoom * 100) + '%';
-
-  lanesEl.innerHTML = (st.lanes || []).map((name, i) => `
-    <div class="designer-lane" style="top:${DW.top + i * DW.laneH}px;
-      height:${DW.laneH}px;width:${maxX}px">
-      <span>${esc(name)}</span>
-    </div>`).join('');
-
-  const byKey = {};
-  st.model.nodes.forEach((n) => { byKey[n.node_key] = n; });
-  edgesEl.setAttribute('width', maxX);
-  edgesEl.setAttribute('height', height);
-  edgesEl.setAttribute('viewBox', `0 0 ${maxX} ${height}`);
-  edgesEl.innerHTML = `
-    <defs>
-      <marker id="dArrow" viewBox="0 0 10 10" refX="9" refY="5"
-        markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line-strong)"></path>
-      </marker>
-      <marker id="dArrowSel" viewBox="0 0 10 10" refX="9" refY="5"
-        markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--brand)"></path>
-      </marker>
-    </defs>
-    ${(st.model.edges || []).map((e, i) => {
-      const s = byKey[e.source_key];
-      const t = byKey[e.target_key];
-      if (!s || !t) return '';
-      const sx = (s.position_x || 0) + DW.nodeW;
-      const sy = (s.position_y || 0) + DW.nodeH / 2;
-      const tx = t.position_x || 0;
-      const ty = (t.position_y || 0) + DW.nodeH / 2;
-      const bend = Math.max(50, Math.abs(tx - sx) / 2);
-      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`;
-      const label = e.label || e.condition || '';
-      const mx = (sx + tx) / 2;
-      const my = (sy + ty) / 2 - 6;
-      return `<path class="designer-edge-hit" data-edge="${i}" d="${d}"></path>
-        <path class="designer-edge" data-edge="${i}" d="${d}"
-          marker-end="url(#dArrow)"></path>${
-        label ? `<text class="designer-edge-label" x="${mx}" y="${my}">${
-          esc(label.length > 18 ? label.slice(0, 18) + '…' : label)}</text>` : ''}`;
-    }).join('')}`;
-
-  nodesEl.innerHTML = st.model.nodes.map((n) => {
-    const bn = st.bnSet && st.bnSet.has(n.node_key);
-    const m = st.metricOf ? st.metricOf[n.node_key] : null;
-    return `<div class="node designer-node ${NODE_CLASS[n.node_type] || ''}${bn ? ' bn' : ''}"
-        data-key="${esc(n.node_key)}"
-        style="left:${n.position_x || 0}px;top:${n.position_y || 0}px;
-          width:${DW.nodeW}px;height:${DW.nodeH}px">
-      ${bn ? '<span class="bnbadge">瓶颈</span>' : ''}
-      <b>${esc(n.name)}</b>
-      <span class="designer-node-meta">${NODE_LABEL[n.node_type] || n.node_type} · ${
-        dur(n.duration_minutes)}${n.wait_minutes > 0 ? ' +等 ' + dur(n.wait_minutes) : ''}${
-        m && m.visit_count > 1.001 ? ' · ↻' + num(m.visit_count, 2) + '次' : ''}</span>
-      <span class="designer-port" data-port="out" data-key="${esc(n.node_key)}"></span>
-    </div>`;
-  }).join('');
-
-  attachCanvasInteractions();
-  if (!st.fitted && st.model.nodes.length) {
-    st.fitted = true;
-    setTimeout(fitDesigner, 0);
-  }
-}
-
-function canvasPoint(clientX, clientY) {
-  const canvas = document.getElementById('designerCanvas');
-  const st = state.designer;
-  const rect = canvas.getBoundingClientRect();
-  const pan = st.pan || { x: 0, y: 0 };
-  const zoom = st.zoom || 1;
-  return {
-    x: (clientX - rect.left - pan.x) / zoom,
-    y: (clientY - rect.top - pan.y) / zoom,
-  };
-}
-
-function attachCanvasInteractions() {
-  const st = state.designer;
-  const canvas = document.getElementById('designerCanvas');
-  if (!canvas) return;
-  const editable = !!st.editable;
-
-  document.querySelectorAll('.designer-edge-hit').forEach((el) => {
-    el.addEventListener('click', (evt) => {
-      evt.stopPropagation();
-      openEdgeEditor(Number(el.dataset.edge));
-    });
-  });
-
-  document.querySelectorAll('.designer-node').forEach((el) => {
-    if (!editable) {
-      el.addEventListener('click', () => openNodeEditor(el.dataset.key));
-      return;
-    }
-    let drag = null;
-    el.addEventListener('pointerdown', (evt) => {
-      if (evt.target.classList.contains('designer-port')) return;
-      evt.stopPropagation();
-      const p = canvasPoint(evt.clientX, evt.clientY);
-      drag = {
-        key: el.dataset.key,
-        startX: p.x,
-        startY: p.y,
-        nodeX: Number(el.style.left.replace('px', '')),
-        nodeY: Number(el.style.top.replace('px', '')),
-        moved: false,
-        history: cloneModel(st.model),
-      };
-      el.setPointerCapture(evt.pointerId);
-    });
-    el.addEventListener('pointermove', (evt) => {
-      if (!drag) return;
-      const p = canvasPoint(evt.clientX, evt.clientY);
-      const dx = p.x - drag.startX;
-      const dy = p.y - drag.startY;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
-      el.style.left = Math.max(20, drag.nodeX + dx) + 'px';
-      el.style.top = Math.max(20, drag.nodeY + dy) + 'px';
-    });
-    el.addEventListener('pointerup', () => {
-      if (!drag) return;
-      const node = st.model.nodes.find((n) => n.node_key === drag.key);
-      const left = Number(el.style.left.replace('px', ''));
-      const top = Number(el.style.top.replace('px', ''));
-      if (drag.moved && node) {
-        st.history.push(drag.history);
-        st.history = st.history.slice(-60);
-        st.future = [];
-        node.position_x = left;
-        node.lane = laneAt(top, st);
-        persistDesign('节点位置已保存');
-      } else if (!drag.moved) {
-        openNodeEditor(drag.key);
-      }
-      drag = null;
-    });
-  });
-
-  document.querySelectorAll('.designer-port').forEach((port) => {
-    if (!editable) return;
-    port.addEventListener('pointerdown', (evt) => {
-      evt.stopPropagation();
-      evt.preventDefault();
-      const node = st.model.nodes.find((n) => n.node_key === port.dataset.key);
-      if (!node) return;
-      const sx = (node.position_x || 0) + DW.nodeW;
-      const sy = (node.position_y || 0) + DW.nodeH / 2;
-      const edgeLayer = document.getElementById('designerEdges');
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('class', 'designer-edge draft');
-      path.setAttribute('d', `M ${sx} ${sy} L ${sx} ${sy}`);
-      path.setAttribute('marker-end', 'url(#dArrowSel)');
-      edgeLayer.appendChild(path);
-      const move = (e) => {
-        const p = canvasPoint(e.clientX, e.clientY);
-        const b = Math.max(40, Math.abs(p.x - sx) / 2);
-        path.setAttribute('d',
-          `M ${sx} ${sy} C ${sx + b} ${sy}, ${p.x - b} ${p.y}, ${p.x} ${p.y}`);
-      };
-      const up = (e) => {
-        document.removeEventListener('pointermove', move);
-        document.removeEventListener('pointerup', up);
-        const targetEl = document.elementFromPoint(e.clientX, e.clientY);
-        const target = targetEl && targetEl.closest('.designer-node');
-        const targetKey = target && target.dataset.key;
-        path.remove();
-        if (!targetKey || targetKey === node.node_key) return;
-        if (st.model.edges.some((x) =>
-          x.source_key === node.node_key && x.target_key === targetKey)) {
-          return toast('这两个节点之间已有连线', true);
-        }
-        pushHistory();
-        st.model.edges.push({
-          source_key: node.node_key, target_key: targetKey,
-          label: null, condition: null, probability: 1,
-        });
-        persistDesign('连线已创建');
-      };
-      document.addEventListener('pointermove', move);
-      document.addEventListener('pointerup', up);
-    });
-  });
-
-  // 空白拖拽平移
-  let panState = null;
-  canvas.addEventListener('pointerdown', (evt) => {
-    if (evt.target.closest('.designer-node') || evt.target.closest('.designer-edge')
-      || evt.target.closest('.designer-edge-hit')) return;
-    evt.preventDefault();
-    panState = {
-      x: evt.clientX, y: evt.clientY,
-      panX: (st.pan || { x: 0, y: 0 }).x,
-      panY: (st.pan || { x: 0, y: 0 }).y,
-    };
-    canvas.setPointerCapture(evt.pointerId);
-  });
-  canvas.addEventListener('pointermove', (evt) => {
-    if (!panState) return;
-    st.pan = {
-      x: panState.panX + evt.clientX - panState.x,
-      y: panState.panY + evt.clientY - panState.y,
-    };
-    const world = document.getElementById('designerWorld');
-    if (world) {
-      world.style.transform = `translate(${st.pan.x}px, ${st.pan.y}px) scale(${st.zoom || 1})`;
-    }
-  });
-  canvas.addEventListener('pointerup', () => { panState = null; });
-  canvas.addEventListener('wheel', (evt) => {
-    evt.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const cx = evt.clientX - rect.left;
-    const cy = evt.clientY - rect.top;
-    const zoom = st.zoom || 1;
-    const next = Math.min(2, Math.max(0.35, zoom * (evt.deltaY < 0 ? 1.1 : 0.9)));
-    const m = canvasPoint(evt.clientX, evt.clientY);
-    st.pan = { x: cx - m.x * next, y: cy - m.y * next };
-    st.zoom = next;
-    renderCanvas();
-  }, { passive: false });
-}
-
-function laneAt(y, st) {
-  const idx = Math.floor((y - DW.top) / DW.laneH);
-  return (st.lanes && st.lanes[idx]) || (st.lanes && st.lanes[0]) || '主流程';
-}
-
-function pushHistory() {
-  const st = state.designer;
-  st.history = st.history || [];
-  st.history.push(cloneModel(st.model));
-  st.history = st.history.slice(-60);
-  st.future = [];
-}
-
-function undoDesigner() {
-  const st = state.designer;
-  if (!st.history || !st.history.length) return toast('没有可撤销的操作');
-  st.future = st.future || [];
-  st.future.push(cloneModel(st.model));
-  st.model = st.history.pop();
-  normalizeLayout(st);
-  paintDesigner();
-  persistDesign('已撤销');
-}
-
-function redoDesigner() {
-  const st = state.designer;
-  if (!st.future || !st.future.length) return toast('没有可重做的操作');
-  st.history = st.history || [];
-  st.history.push(cloneModel(st.model));
-  st.model = st.future.pop();
-  normalizeLayout(st);
-  paintDesigner();
-  persistDesign('已重做');
-}
-
-function fitDesigner() {
-  const st = state.designer;
-  const canvas = document.getElementById('designerCanvas');
-  if (!canvas || !st.model.nodes.length) return;
-  const rect = canvas.getBoundingClientRect();
-  const maxX = Math.max(...st.model.nodes.map((n) => (n.position_x || 0) + DW.nodeW)) + 80;
-  const maxY = Math.max(...st.model.nodes.map((n) => (n.position_y || 0) + DW.nodeH)) + 80;
-  const zoom = Math.min(1.2, Math.max(0.35,
-    Math.min((rect.width - 40) / maxX, (rect.height - 40) / maxY)));
-  st.zoom = zoom;
-  st.pan = { x: 20, y: 20 };
-  renderCanvas();
-}
-
-function addNodeAtCenter(type, lane, name) {
-  const st = state.designer;
-  const canvas = document.getElementById('designerCanvas');
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const p = canvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-  let seq = 1;
-  st.model.nodes.forEach((n) => { seq = Math.max(seq, n.sequence_order + 1); });
-  let key = 'new_' + seq;
-  while (st.model.nodes.some((n) => n.node_key === key)) key = 'new_' + (++seq);
-  const laneName = lane || laneAt(p.y, st);
-  const laneNodes = st.model.nodes.filter((n) => n.lane === laneName);
-  const maxX = laneNodes.length
-    ? Math.max(...laneNodes.map((n) => n.position_x || 0)) : 0;
-  let x = Math.max(20, p.x);
-  if (laneNodes.length && x <= maxX + 40) x = maxX + DW.step;
-  pushHistory();
-  st.model.nodes.push({
-    node_key: key,
-    name: name || NODE_LABEL[type] || '新节点',
-    node_type: type,
-    lane: laneName,
-    owner_role: null,
-    duration_minutes: 30,
-    wait_minutes: 0,
-    cost: 0,
-    rework_rate: 0,
-    approval_levels: 0,
-    is_value_added: type !== 'DECISION' && type !== 'END',
-    sequence_order: seq,
-    position_x: x,
-    position_y: Math.max(20, p.y),
-  });
-  normalizeLayout(st);
-  paintDesigner();
-  persistDesign('节点已添加');
-}
-
-function addLane() {
-  const name = prompt('输入泳道名称（部门 / 角色）：', '新泳道');
-  if (name === null) return;
-  const lane = name.trim() || '新泳道';
-  if (state.designer.lanes.includes(lane)) return toast('泳道已存在', true);
-  addNodeAtCenter('TASK', lane, '新活动');
-}
-
-async function openEdgeEditor(index) {
-  const st = state.designer;
-  const e = st.model.edges[index];
-  if (!e) return;
-  openModal('编辑连线', `
-    <div class="field"><label>起点 → 终点</label>
-      <input value="${esc(e.source_key)} → ${esc(e.target_key)}" readonly></div>
-    <div class="row2">
-      <div class="field"><label>标签</label>
-        <input id="edgeLabel" value="${esc(e.label || '')}" placeholder="通过 / 驳回"></div>
-      <div class="field"><label>概率</label>
-        <input id="edgeProb" type="number" min="0" max="1" step="0.05"
-          value="${e.probability}"></div>
-    </div>
-    <div class="field"><label>条件说明</label>
-      <input id="edgeCond" value="${esc(e.condition || '')}"
-        placeholder="预算与需求均合规"></div>`,
-    `<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"
-       onclick="deleteEdge(${index})">删除连线</button>
-     <button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveEdge(${index})">保存</button>`);
-}
-
-function saveEdge(index) {
-  const st = state.designer;
-  const e = st.model.edges[index];
-  if (!e) return;
-  const prob = Number(document.getElementById('edgeProb').value);
-  if (!Number.isFinite(prob) || prob < 0 || prob > 1) {
-    return toast('概率必须在 0–1 之间', true);
-  }
-  pushHistory();
-  e.label = document.getElementById('edgeLabel').value.trim() || null;
-  e.condition = document.getElementById('edgeCond').value.trim() || null;
-  e.probability = prob;
-  closeModal();
-  persistDesign('连线已保存');
-}
-
-function deleteEdge(index) {
-  const st = state.designer;
-  if (!st.model.edges[index]) return;
-  pushHistory();
-  st.model.edges.splice(index, 1);
-  closeModal();
-  persistDesign('连线已删除');
 }
 
 async function submitReview() {
@@ -1993,11 +2026,6 @@ function importBpmn() {
       state.designer.savedModel = cloneModel(body);
       state.designer.analysis = await POST(
         '/processes/' + id + '/design/analyze', {});
-      state.designer.history = [];
-      state.designer.future = [];
-      state.designer.zoom = 1;
-      state.designer.pan = { x: 0, y: 0 };
-      state.designer.fitted = false;
       toast('BPMN 已导入并更新模型');
       RENDERERS.designer();
     } catch (e) {
@@ -2089,11 +2117,6 @@ function switchProcess(id) {
   state.designer.processId = Number(id);
   state.designer.processCode = (state.designer.processes.find((p) => p.id === Number(id)) || {}).code;
   state.designer.tab = 'model';
-  state.designer.zoom = 1;
-  state.designer.pan = { x: 0, y: 0 };
-  state.designer.fitted = false;
-  state.designer.history = [];
-  state.designer.future = [];
   state.designer.assignmentCtx = null;
   state.designer.assignmentPending = null;
   RENDERERS.designer();
@@ -2119,50 +2142,6 @@ function cloneModel(model) {
  *  连线悬空），必须把模型回滚到最后一个服务端确认过的版本并重绘，
  *  否则内存里的模型和界面显示就分叉了，下次重绘会冒出从未保存成功的节点。
  */
-async function persistDesign(successMsg) {
-  const st = state.designer;
-  const validation = validateModel(st.model);
-  if (validation.errors.length) {
-    toast('模型有错误：' + validation.errors[0], true);
-    paintDesigner();
-    return;
-  }
-  normalizeLayout(st);
-  const payload = {
-    nodes: st.model.nodes.map((n) => ({
-      node_key: n.node_key, name: n.name, node_type: n.node_type, lane: n.lane,
-      owner_role: n.owner_role, duration_minutes: n.duration_minutes, wait_minutes: n.wait_minutes,
-      cost: n.cost, rework_rate: n.rework_rate, approval_levels: n.approval_levels,
-      is_value_added: n.is_value_added, sequence_order: n.sequence_order,
-      position_x: n.position_x, position_y: n.position_y,
-    })),
-    edges: st.model.edges.map((e) => ({
-      source_key: e.source_key, target_key: e.target_key,
-      label: e.label, condition: e.condition, probability: e.probability,
-    })),
-    // 带上「我编辑时所基于的版本」，服务端据此发现别人的并发修改
-    expected_version: st.savedModel ? st.savedModel.version : null,
-  };
-  try {
-    st.model = await PUT('/processes/' + st.processId + '/design', payload);
-    st.savedModel = cloneModel(st.model);
-    st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
-    paintDesigner();
-    if (successMsg) toast(successMsg);
-  } catch (e) {
-    if (e.status === 409) {
-      // 别人先保存了：丢弃本地改动并重新载入最新版本，而不是覆盖别人的劳动成果
-      toast(e.message + ' 已为你载入最新版本。', true);
-      await reloadDesign();
-      return;
-    }
-    st.model = cloneModel(st.savedModel);
-    paintDesigner();
-    toast('保存失败，已回滚到上次保存的版本：' + e.message, true);
-  }
-}
-
-/** 丢弃本地改动，重新拉取服务端的最新模型与分析结果 */
 async function reloadDesign() {
   const st = state.designer;
   try {
@@ -2173,8 +2152,6 @@ async function reloadDesign() {
     st.model = model;
     st.savedModel = cloneModel(model);
     st.analysis = analysis;
-    st.history = [];
-    st.future = [];
     // 冲突重载可能带回别人的结构改动，分派配置也跟着重新拉取
     st.assignmentCtx = null;
     st.assignmentPending = null;
@@ -2185,138 +2162,6 @@ async function reloadDesign() {
 }
 
 /** 节点点击入口：有权限就编辑，没权限就看只读详情 */
-function openNodeEditor(nodeKey) {
-  const st = state.designer;
-  const proc = (st.processes || []).find((p) => p.id === st.processId) || {};
-  const editable = canWrite() && (canManage()
-    || (AUTH.user && proc.owner_user_id === AUTH.user.id));
-  if (editable) return editNode(nodeKey);
-
-  const n = (st.model.nodes || []).find((x) => x.node_key === nodeKey);
-  if (!n) return;
-  const m = (st.analysis ? st.analysis.nodes : []).find((x) => x.node_key === nodeKey) || {};
-  openModal(n.name + ' · 节点详情', `
-    <div class="row2">
-      <div class="field"><label>节点类型</label>
-        <input value="${NODE_LABEL[n.node_type] || n.node_type}" readonly></div>
-      <div class="field"><label>所属泳道</label><input value="${esc(n.lane)}" readonly></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>负责人 / 岗位</label>
-        <input value="${esc(n.owner_role || '未指定')}" readonly></div>
-      <div class="field"><label>是否增值</label>
-        <input value="${n.is_value_added ? '增值（VA）' : '非增值（NVA）'}" readonly></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>作业时间</label><input value="${dur(n.duration_minutes)}" readonly></div>
-      <div class="field"><label>等待时间</label><input value="${dur(n.wait_minutes)}" readonly></div>
-      <div class="field"><label>返工率</label><input value="${num(n.rework_rate * 100, 0)}%" readonly></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>审批层级</label><input value="${n.approval_levels}" readonly></div>
-      <div class="field"><label>期望执行次数</label>
-        <input value="${m.visit_count === undefined ? '—' : num(m.visit_count, 2)}" readonly></div>
-      <div class="field"><label>对周期贡献</label>
-        <input value="${m.weighted_minutes === undefined ? '—' : dur(m.weighted_minutes)}" readonly></div>
-    </div>
-    <div class="note">当前角色无编辑权限，如需修改请联系这条流程的 Owner 或流程管理科。</div>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
-}
-
-async function editNode(nodeKey) {
-  const n = state.designer.model.nodes.find((x) => x.node_key === nodeKey);
-  if (!n) return;
-  const laneList = [...new Set(state.designer.model.nodes.map((x) => x.lane))];
-  const pid = state.designer.processId;
-
-  let assignment = null;
-  let executionBlock = '';
-  if (canManage()) {
-    try {
-      const ctx = await assignmentContext(pid);
-      assignment = ctx.assignments.get(nodeKey) || {};
-      const roleOpts = roleOptionHtml(ctx.roles, assignment.role);
-      const orgOpts = orgOptionHtml(ctx.orgs, assignment.org_unit_id);
-      const userOpts = userOptionHtml(ctx.users, assignment.default_assignee_user_id);
-      const escUserOpts = userOptionHtml(ctx.users, assignment.escalation_user_id);
-      executionBlock = `
-        <div class="designer-exec-config">
-          <div class="between mb"><h3 style="margin:0">执行配置</h3>
-            <button class="btn-sm btn-p" onclick="saveNodeAssignment('${esc(nodeKey)}')">
-              保存执行配置</button></div>
-          <div class="desc" style="margin:0 0 8px">只影响发布后的新实例；运行中实例使用启动快照</div>
-          <div class="row2">
-            <div class="field"><label>候选角色</label>
-              <select id="edRole"><option value="">不限</option>${roleOpts}</select></div>
-            <div class="field"><label>限定组织</label>
-              <select id="edOrg"><option value="">不限</option>${orgOpts}</select></div>
-          </div>
-          <div class="row2">
-            <div class="field"><label>默认处理人</label>
-              <select id="edAssignee"><option value="">公共队列</option>${userOpts}</select></div>
-            <div class="field"><label>节点时限（小时）</label>
-              <input id="edDue" type="number" min="0" max="8760"
-                value="${assignment.due_hours ?? ''}" placeholder="跟随流程"></div>
-          </div>
-          <div class="row2">
-            <div class="field"><label>升级时限（小时）</label>
-              <input id="edEscHours" type="number" min="0" max="8760"
-                value="${assignment.escalation_hours ?? ''}" placeholder="跟随流程"></div>
-            <div class="field"><label>升级处理人</label>
-              <select id="edEscUser"><option value="">跟随流程</option>${escUserOpts}</select></div>
-          </div>
-        </div>`;
-    } catch (e) {
-      executionBlock = `<div class="note mb">执行配置加载失败：${esc(e.message)}</div>`;
-    }
-  }
-
-  openModal('编辑活动节点 · ' + n.name, `
-    <div class="row2">
-      <div class="field"><label>活动名称</label><input id="edName" value="${esc(n.name)}"></div>
-      <div class="field"><label>节点类型</label>
-        <select id="edType">${Object.keys(NODE_LABEL).map((t) =>
-          '<option value="' + t + '"' + (n.node_type === t ? ' selected' : '') + '>' +
-          NODE_LABEL[t] + '</option>').join('')}</select></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>所属泳道（部门/角色）</label>
-        <input id="edLane" list="laneList" value="${esc(n.lane)}">
-        <datalist id="laneList">${laneList.map((l) => '<option value="' + esc(l) + '">').join('')}</datalist></div>
-      <div class="field"><label>负责人 / 岗位</label>
-        <input id="edOwner" value="${esc(n.owner_role || '')}" placeholder="如：采购计划员"></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>作业时间（分钟）</label>
-        <input id="edDur" type="number" min="0" step="1" value="${n.duration_minutes}"></div>
-      <div class="field"><label>等待 / 排队（分钟）</label>
-        <input id="edWait" type="number" min="0" step="1" value="${n.wait_minutes}"></div>
-      <div class="field"><label>单次执行成本（元）</label>
-        <input id="edCost" type="number" min="0" step="0.1" value="${n.cost}"></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>返工率（0–1）</label>
-        <input id="edRework" type="number" min="0" max="1" step="0.05" value="${n.rework_rate}">
-        <div class="hint">>0.1 会触发返工损失建议</div></div>
-      <div class="field"><label>审批层级数</label>
-        <input id="edLevels" type="number" min="0" max="10" step="1" value="${n.approval_levels}">
-        <div class="hint">累计 >3 层会触发决策下沉建议</div></div>
-      <div class="field"><label>是否增值活动</label>
-        <select id="edVa">
-          <option value="true"${n.is_value_added ? ' selected' : ''}>增值（VA）</option>
-          <option value="false"${!n.is_value_added ? ' selected' : ''}>非增值（NVA）</option>
-        </select></div>
-    </div>
-    ${executionBlock}
-    <div class="note">节点的「等待时间」是周期效率的主要杀手。真实场景下把它按现场实测填进去，
-      右侧测算会立刻反映出来。</div>`,
-    `<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"
-       onclick="deleteNode('${nodeKey}')">删除节点</button>
-     <button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveNode('${nodeKey}')">保存节点</button>`);
-}
-
-/** 从表单读取分派配置；bpmn 属性面板与节点弹窗共用，字段 id 由调用方传入。 */
 function readAssignmentPayload(nodeKey, ids) {
   const value = (id) => document.getElementById(id).value;
   const numOrNull = (id) => {
@@ -2367,74 +2212,13 @@ async function saveBpmnAssignment(nodeKey) {
   }
 }
 
-async function saveNodeAssignment(nodeKey) {
-  try {
-    await persistAssignment(nodeKey, {
-      role: 'edRole',
-      org: 'edOrg',
-      assignee: 'edAssignee',
-      due: 'edDue',
-      escalationHours: 'edEscHours',
-      escalationUser: 'edEscUser',
-    });
-    toast('节点执行配置已保存');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-function saveNode(nodeKey) {
-  const n = state.designer.model.nodes.find((x) => x.node_key === nodeKey);
-  if (!n) return;
-  const g = (id) => document.getElementById(id).value;
-  pushHistory();
-  n.name = g('edName').trim() || n.name;
-  n.node_type = g('edType');
-  n.lane = g('edLane').trim() || n.lane;
-  n.owner_role = g('edOwner').trim() || null;
-  n.duration_minutes = Number(g('edDur') || 0);
-  n.wait_minutes = Number(g('edWait') || 0);
-  n.cost = Number(g('edCost') || 0);
-  n.rework_rate = Number(g('edRework') || 0);
-  n.approval_levels = Number(g('edLevels') || 0);
-  n.is_value_added = g('edVa') === 'true';
-  closeModal();
-  persistDesign('节点已保存，指标已重算');
-}
-
-function deleteNode(nodeKey) {
-  const st = state.designer;
-  pushHistory();
-  st.model.nodes = st.model.nodes.filter((x) => x.node_key !== nodeKey);
-  // 连线引用已删节点会导致后端校验失败，这里一并清掉
-  st.model.edges = st.model.edges.filter((e) => e.source_key !== nodeKey && e.target_key !== nodeKey);
-  closeModal();
-  persistDesign('节点已删除');
-}
-
-function addNode(lane) {
-  addNodeAtCenter('TASK', lane, '新活动');
-}
-
-function addDesignerNode(laneIdx) {
-  addNode((state.designer.lanes || [])[laneIdx]);
-}
-
-function addLaneNode() {
-  addLane();
-}
-
-
 export {
-  addDesignerNode, addLane, addLaneNode, addNode, addNodeAtCenter, autoLayoutBpmn,
-  cloneModel, deleteEdge, deleteNode, diffVersion, editNode, exportBpmn,
-  fitBpmnViewport, fitDesigner, importBpmn, openDesigner, openEdgeEditor,
-  openNodeEditor, openVersionHistory, paintDesigner, paintMetrics,
-  paintSuggestions, persistDesign, publishDesign, reanalyze, redoDesigner,
-  rejectReview, reloadDesign, renderDesigner, rollbackVersion, runBpmnLint,
-  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, saveBpmnName,
-  saveBpmnAssignment,
-  selectLintIssue,
-  closeBpmnSidebar, setDesignerTab, showBpmnSidebarTab, submitReview, switchProcess,
-  toggleBpmnFullscreen, toggleBpmnSidebar, toggleDesignerMode, undoDesigner,
+  addBpmnLane, autoLayoutBpmn, changeBpmnNodeType, closeBpmnSidebar,
+  deleteBpmnFlow, diffVersion, exportBpmn, fitBpmnViewport, importBpmn,
+  moveBpmnNodeToLane, openDesigner, openVersionHistory, reanalyze,
+  rejectReview, renderDesigner, rollbackVersion, runBpmnLint,
+  saveBpmnAssignment, saveBpmnFlow, saveBpmnLaneName, saveBpmnMetrics,
+  saveBpmnName, selectLintIssue, setDesignerTab, showBpmnSidebarTab,
+  submitReview, switchProcess, toggleBpmnFullscreen, toggleBpmnSidebar,
+  publishDesign,
 };

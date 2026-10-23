@@ -294,11 +294,14 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             "is_value_added",
         ):
             node[field] = old.get(field, node[field])
-        if node.get("owner_role") is None:
+        # 负责人以快照为准：新属性栏通过 PATCH 写快照，画布里的旧 pms:ownerRole
+        # 可能还没同步，不能反过来覆盖刚保存的值。
+        if old:
             node["owner_role"] = old.get("owner_role")
     for edge in parsed["edges"]:
+        explicit = edge.pop("_probability_explicit", False)
         old = old_edges.get((edge["source_key"], edge["target_key"]))
-        if old and edge.get("probability") in (None, 1.0):
+        if old and not explicit:
             edge["probability"] = old.get("probability", 1.0)
 
     model_payload = ProcessModelIn(

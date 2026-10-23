@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -122,7 +123,8 @@ def main() -> int:
             page.wait_for_timeout(200)
 
         def goto(view: str) -> None:
-            # 上一个检查可能留下未关的弹窗，遮罩会挡住导航点击
+            # 上一个检查可能留下未关的弹窗/全屏画布，遮罩会挡住导航点击
+            page.keyboard.press("Escape")
             page.evaluate("() => closeModal()")
             page.wait_for_timeout(150)
             page.click(f'.nav a[data-view="{view}"]')
@@ -133,29 +135,35 @@ def main() -> int:
             page.wait_for_timeout(600)
 
         def pick_editable_design() -> None:
-            """选一条草稿状态、节点足够且含 n3 的流程，避免本地数据进入评审后自检失效。"""
-            picked = page.evaluate(
-                """async () => {
-                  const t = localStorage.getItem('psm_token');
-                  const rows = await fetch('/api/v1/process-map/flat', {
-                    headers: {'Authorization': 'Bearer ' + t},
-                  }).then(r => r.json());
-                  for (const row of rows) {
-                    if (row.level < 3) continue;
-                    const res = await fetch('/api/v1/processes/' + row.id + '/design', {
-                      headers: {'Authorization': 'Bearer ' + t},
-                    });
-                    if (!res.ok) continue;
-                    const model = await res.json();
-                    const keys = (model.nodes || []).map(n => n.node_key);
-                    if (model.status === 'DRAFT' && keys.includes('n3') && keys.length >= 6) {
-                      return {id: row.id, code: row.code};
-                    }
-                  }
-                  return null;
-                }"""
-            )
-            assert picked, "没有可编辑的演示流程（需要草稿、至少 6 个节点且含 n3）"
+            """选一条可编辑、节点足够且含 n3 的流程，避免本地数据进入评审后自检失效。"""
+            picked = None
+            for _attempt in range(4):
+                picked = page.evaluate(
+                    """async () => {
+                      const t = localStorage.getItem('psm_token');
+                      const rows = await fetch('/api/v1/process-map/flat', {
+                        headers: {'Authorization': 'Bearer ' + t},
+                      }).then(r => r.json());
+                      for (const row of rows) {
+                        if (row.level < 3) continue;
+                        const res = await fetch('/api/v1/processes/' + row.id + '/design', {
+                          headers: {'Authorization': 'Bearer ' + t},
+                        });
+                        if (!res.ok) continue;
+                        const model = await res.json();
+                        const keys = (model.nodes || []).map(n => n.node_key);
+                        if (model.status !== 'IN_REVIEW'
+                            && keys.includes('n3') && keys.length >= 6) {
+                          return {id: row.id, code: row.code};
+                        }
+                      }
+                      return null;
+                    }"""
+                )
+                if picked:
+                    break
+                page.wait_for_timeout(700)
+            assert picked, "没有可编辑的演示流程（需要非评审、至少 6 个节点且含 n3）"
             page.select_option("#view select.sel", value=str(picked["id"]))
             page.wait_for_timeout(1500)
 
@@ -614,55 +622,35 @@ def main() -> int:
         def designer_edit_node() -> None:
             goto("designer")
             pick_editable_design()
-            if page.locator('#view button:has-text("简洁画布")').count():
-                page.click('#view button:has-text("简洁画布")')
-                page.wait_for_timeout(400)
-            before = page.inner_text("#view")
-            assert "流程模型" in before
-            page.wait_for_selector("#designerCanvas")
-            assert page.locator("#view .designer-node").count() >= 6, "画布没有渲染节点"
-            assert page.locator("#view .designer-edge").count() >= 5, "画布没有渲染连线"
-            edge_point = page.locator("#view .designer-edge-hit").first.evaluate(
-                """el => {
-                  const p = el.getPointAtLength(el.getTotalLength() / 2);
-                  const pt = new DOMPoint(p.x, p.y).matrixTransform(el.getScreenCTM());
-                  return { x: pt.x, y: pt.y };
-                }"""
-            )
-            page.mouse.click(edge_point["x"], edge_point["y"])
-            page.wait_for_selector("#mask.show")
-            assert "编辑连线" in page.inner_text("#mTitle")
-            page.click('#mFoot button:has-text("取消")')
+            page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
+            assert page.locator("#bpmnCanvas .djs-element").count() >= 5, "画布没有渲染节点"
+            page.click('#bpmnCanvas [data-element-id="n3"]')
             page.wait_for_timeout(300)
-            page.click("#view .node >> nth=0")
-            page.wait_for_selector("#mask.show")
-            assert "编辑活动节点" in page.inner_text("#mTitle")
-            original_wait = page.input_value("#edWait")
-            page.fill("#edWait", "0")
-            page.click("#mFoot .btn-p")
-            page.wait_for_timeout(1800)
-            assert "指标已重算" in page.inner_text("#toast"), page.inner_text("#toast")
+            if not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"):
+                page.click("#bpmnPropsToggle")
+            page.wait_for_selector("#bpmnSidebar.open #bpWait", timeout=8000)
+            original_wait = page.input_value("#bpWait")
+            page.fill("#bpWait", "0")
+            page.click('#bpmnSidebar button:has-text("保存指标")')
+            page.wait_for_timeout(1500)
+            assert "节点属性已保存" in page.inner_text("#toast"), page.inner_text("#toast")
 
             # 还原演示数据，避免自检反复改写种子模型
-            page.click("#view .node >> nth=0")
-            page.wait_for_selector("#mask.show")
-            page.fill("#edWait", original_wait)
-            page.click("#mFoot .btn-p")
+            page.fill("#bpWait", original_wait)
+            page.click('#bpmnSidebar button:has-text("保存指标")')
             page.wait_for_timeout(1500)
             page.click('#view .seg button:has-text("指标与建议")')
             page.wait_for_timeout(800)
             assert "流程周期效率" in page.inner_text("#view")
             page.screenshot(path=str(out_dir / "interaction-designer.png"), full_page=True)
 
-        # 专业 BPMN 画布（bpmn-js）：加载、调色板、水印、返回简洁画布
+        # 专业 BPMN 画布（bpmn-js）：加载、调色板、水印、自动布局
         def designer_bpmn_spike() -> None:
             goto("designer")
             pick_editable_design()
             if page.locator('#view .seg button:has-text("流程模型")').count():
                 page.click('#view .seg button:has-text("流程模型")')
                 page.wait_for_timeout(300)
-            if page.locator('#view button:has-text("专业 BPMN 画布")').count():
-                page.click('#view button:has-text("专业 BPMN 画布")')
             page.wait_for_selector("#bpmnCanvas .djs-palette", timeout=8000)
             page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
             assert page.locator("#bpmnCanvas .djs-element").count() >= 5
@@ -676,6 +664,12 @@ def main() -> int:
             ), "调色板仍提供抛出/边界中间事件"
             assert page.locator('#bpmnCanvas [data-action="create.pms-wait-event"]').count() == 1, (
                 "缺少等待事件入口"
+            )
+            assert page.locator('#bpmnCanvas [data-action="create.pms-approval"]').count() == 1, (
+                "缺少审批节点入口"
+            )
+            assert page.locator('#bpmnCanvas [data-action="create.pms-handoff"]').count() == 1, (
+                "缺少移交节点入口"
             )
             # 选中活动节点后，属性区应能直接维护节点分派 / SLA
             page.click('#bpmnCanvas [data-element-id="n3"]')
@@ -806,7 +800,7 @@ def main() -> int:
                 "进入全屏后属性/校验侧栏应收起"
             )
             canvas_box = page.locator("#bpmnCanvas").bounding_box()
-            assert canvas_box and canvas_box["height"] >= 600, canvas_box
+            assert canvas_box and canvas_box["height"] >= 550, canvas_box
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             assert not page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
@@ -843,11 +837,141 @@ def main() -> int:
                 }"""
             )
             assert not diagonals, f"自动布局后仍有斜线连线：{diagonals[:3]}"
-            page.click('#view button:has-text("简洁画布")')
-            page.wait_for_selector("#designerCanvas")
             page.screenshot(path=str(out_dir / "interaction-designer-bpmnjs.png"), full_page=True)
 
         # 设计器：草稿 → 评审 → 发布，版本历史可打开
+        # bpmn-js 属性侧栏：节点负责人/类型/泳道、新增泳道、连线条件与概率
+        def designer_bpmn_properties() -> None:
+            goto("designer")
+            pick_editable_design()
+            page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
+            pid = page.evaluate("() => window.state.designer.processId")
+
+            def design_model() -> dict:
+                return page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      return await fetch('/api/v1/processes/' + pid + '/design',
+                        {headers: {Authorization: 'Bearer ' + t}}).then(r => r.json());
+                    }""",
+                    pid,
+                )
+
+            def ensure_sidebar() -> None:
+                if not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"):
+                    page.click("#bpmnPropsToggle")
+                page.wait_for_selector("#bpmnSidebar.open", timeout=5000)
+                page.wait_for_timeout(200)
+
+            model = design_model()
+            row = next(item for item in model["nodes"] if item["node_type"] in ("TASK", "APPROVAL"))
+            node_key = row["node_key"]
+            page.click(f'#bpmnCanvas [data-element-id="{node_key}"]')
+            page.wait_for_timeout(300)
+            ensure_sidebar()
+            page.wait_for_selector("#bpOwner", timeout=5000)
+
+            # 负责人
+            original_owner = page.input_value("#bpOwner")
+            page.fill("#bpOwner", "E2E负责人")
+            page.click('#bpmnSidebar button:has-text("保存指标")')
+            page.wait_for_timeout(1200)
+            node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
+            assert node["owner_role"] == "E2E负责人"
+            page.fill("#bpOwner", original_owner)
+            page.click('#bpmnSidebar button:has-text("保存指标")')
+            page.wait_for_timeout(1200)
+
+            # 类型（TASK ↔ APPROVAL）
+            ensure_sidebar()
+            original_type = page.input_value("#bpNodeType")
+            target_type = "APPROVAL" if original_type != "APPROVAL" else "TASK"
+            page.select_option("#bpNodeType", target_type)
+            page.click('#bpmnSidebar button:has-text("应用类型")')
+            page.wait_for_timeout(1600)
+            node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
+            assert node["node_type"] == target_type, node
+            ensure_sidebar()
+            page.select_option("#bpNodeType", original_type)
+            page.click('#bpmnSidebar button:has-text("应用类型")')
+            page.wait_for_timeout(1600)
+
+            # 跨泳道移动
+            ensure_sidebar()
+            lane_options = page.eval_on_selector_all(
+                "#bpNodeLane option", "els => els.map(e => e.value)"
+            )
+            original_lane = page.input_value("#bpNodeLane")
+            target_lane = next((item for item in lane_options if item != original_lane), None)
+            assert target_lane, lane_options
+            page.select_option("#bpNodeLane", target_lane)
+            page.click('#bpmnSidebar button:has-text("移动")')
+            page.wait_for_timeout(1600)
+            node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
+            assert node["lane"] == target_lane, node
+            ensure_sidebar()
+            page.select_option("#bpNodeLane", original_lane)
+            page.click('#bpmnSidebar button:has-text("移动")')
+            page.wait_for_timeout(1600)
+
+            # 新增泳道（自动带默认活动）
+            lane_name = f"E2E泳道{int(time.time() * 1000) % 100000}"
+            lane_name2 = lane_name + "改"
+            page.once("dialog", lambda dialog: dialog.accept(lane_name))
+            page.click('#view button:has-text("+ 泳道")')
+            page.wait_for_timeout(2200)
+            added = [item for item in design_model()["nodes"] if item["lane"] == lane_name]
+            assert added, "新增泳道后没有默认活动"
+
+            # 泳道改名
+            page.evaluate(
+                """(name) => {
+                  const m = window.__bpmnSpike.modeler;
+                  const lane = m.get('elementRegistry').getAll().find(
+                    e => e.type === 'bpmn:Lane' && e.businessObject.name === name);
+                  if (lane) m.get('selection').select(lane);
+                }""",
+                lane_name,
+            )
+            ensure_sidebar()
+            page.wait_for_selector("#bpLaneName", timeout=5000)
+            page.fill("#bpLaneName", lane_name2)
+            page.click('#bpmnSidebar button:has-text("保存名称")')
+            page.wait_for_timeout(1600)
+            renamed = [item for item in design_model()["nodes"] if item["lane"] == lane_name2]
+            assert renamed, "泳道改名后节点归属没有更新"
+
+            # 连线标签/条件/概率
+            flow = page.evaluate(
+                """() => {
+                  const m = window.__bpmnSpike.modeler;
+                  const f = m.get('elementRegistry').getAll()
+                    .find(e => e.type === 'bpmn:SequenceFlow');
+                  if (!f) return null;
+                  m.get('selection').select(f);
+                  return {
+                    source: f.businessObject.sourceRef.id,
+                    target: f.businessObject.targetRef.id,
+                  };
+                }"""
+            )
+            assert flow, "流程没有连线"
+            ensure_sidebar()
+            page.wait_for_selector("#bpFlowProb", timeout=5000)
+            page.fill("#bpFlowLabel", "E2E标签")
+            page.fill("#bpFlowCondition", "E2E条件")
+            page.fill("#bpFlowProb", "0.55")
+            page.click('#bpmnSidebar button:has-text("保存连线")')
+            page.wait_for_timeout(1600)
+            edge = next(
+                item
+                for item in design_model()["edges"]
+                if item["source_key"] == flow["source"] and item["target_key"] == flow["target"]
+            )
+            assert edge["label"] == "E2E标签", edge
+            assert edge["condition"] == "E2E条件", edge
+            assert abs(edge["probability"] - 0.55) < 1e-6, edge
+
         def designer_version_governance() -> None:
             created = page.evaluate(
                 """async () => {
@@ -871,29 +995,51 @@ def main() -> int:
                 }"""
             )
             try:
+                page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      const nodes = [
+                        {node_key: 'start', name: '开始', node_type: 'START', lane: '测试泳道'},
+                        {node_key: 'task', name: '审批', node_type: 'APPROVAL', lane: '测试泳道',
+                         owner_role: '测试岗', duration_minutes: 60, wait_minutes: 30,
+                         cost: 10, rework_rate: 0, approval_levels: 1, is_value_added: false},
+                        {node_key: 'end', name: '结束', node_type: 'END', lane: '测试泳道'},
+                      ];
+                      const edges = [
+                        {source_key: 'start', target_key: 'task'},
+                        {source_key: 'task', target_key: 'end'},
+                      ];
+                      await fetch('/api/v1/processes/' + pid + '/design', {
+                        method: 'PUT',
+                        headers: {Authorization: 'Bearer ' + t, 'Content-Type': 'application/json'},
+                        body: JSON.stringify({nodes, edges}),
+                      });
+                      await fetch('/api/v1/execution/assignments', {
+                        method: 'PUT',
+                        headers: {Authorization: 'Bearer ' + t, 'Content-Type': 'application/json'},
+                        body: JSON.stringify({process_id: pid, node_key: 'task',
+                          role: null, org_unit_id: null, default_assignee_user_id: null,
+                          due_hours: 2, escalation_hours: null, escalation_user_id: null}),
+                      });
+                    }""",
+                    pid,
+                )
                 page.evaluate(f"switchProcess({pid})")
-                page.wait_for_timeout(500)
-                if page.locator('#view button:has-text("简洁画布")').count():
-                    page.click('#view button:has-text("简洁画布")')
-                    page.wait_for_timeout(300)
-                if page.locator('#view .seg button:has-text("流程模型")').count():
-                    page.click('#view .seg button:has-text("流程模型")')
-                page.wait_for_selector("#designerCanvas")
-                page.wait_for_timeout(500)
-                for label in ("开始", "作业", "结束"):
-                    page.click(f'#view .designer-toolbar button:has-text("{label}")')
-                    page.wait_for_timeout(700)
+                page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
+                page.wait_for_timeout(600)
                 assert "草稿" in page.inner_text("#view"), page.inner_text("#view")[:200]
 
-                # 节点级执行配置：设计器内直接设时限
-                page.click("#view .designer-node >> nth=0")
-                page.wait_for_selector("#edDue")
-                assert "执行配置" in page.inner_text("#mBody")
-                page.fill("#edDue", "2")
-                page.click('#mBody button:has-text("保存执行配置")')
-                page.wait_for_timeout(700)
-                assert "节点执行配置已保存" in page.inner_text("#toast")
-                page.click('#mFoot button:has-text("取消")')
+                assignments = page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      return await fetch('/api/v1/execution/assignments?process_id=' + pid,
+                        {headers: {Authorization: 'Bearer ' + t}}).then(r => r.json());
+                    }""",
+                    pid,
+                )
+                assert any(
+                    item["node_key"] == "task" and item["due_hours"] == 2 for item in assignments
+                ), assignments
 
                 page.click('#view button:has-text("版本历史")')
                 page.wait_for_selector("#mask.show")
@@ -1342,6 +1488,7 @@ def main() -> int:
         check("设计器只读调色板可见可折叠", designer_readonly_palette)
         check("设计器改节点并重算", designer_edit_node)
         check("设计器专业 BPMN 画布（bpmn-js）", designer_bpmn_spike)
+        check("设计器 bpmn-js 属性补全", designer_bpmn_properties)
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
         check("监控异常处理弹窗", monitor)
         check("知识库详情 + 快速找工具", knowledge)

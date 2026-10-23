@@ -112,6 +112,7 @@ def test_import_round_trip(client):
         by_key = {n["node_key"]: n for n in model["nodes"]}
         assert by_key["n4"]["node_type"] == "APPROVAL"
         assert by_key["n4"]["lane"] == "部门负责人"
+        assert by_key["n4"]["owner_role"] == "部门负责人"
         assert by_key["n6"]["node_type"] == "TASK"
 
         # n4 → n6 的条件在往返后仍然保留
@@ -308,3 +309,66 @@ def test_viewer_can_export_but_not_import(viewer_client):
     assert viewer_client.get(f"{API}/processes/{pid}/bpmn").status_code == 200
     r = viewer_client.post(f"{API}/processes/{pid}/bpmn", json={"xml": MINIMAL_XML})
     assert r.status_code == 403
+
+
+def test_owner_role_patch_survives_stale_bpmn_save(client):
+    """属性栏用 PATCH 改负责人后，画布里旧的 pms:ownerRole 不能把它覆盖回去。"""
+    source = _process_pid(client)
+    xml = client.get(f"{API}/processes/{source}/bpmn").text
+    pid = _create_process(client, "L3-BPMN-OWNER")
+    try:
+        imported = client.post(
+            f"{API}/processes/{pid}/bpmn", json={"xml": xml, "expected_version": 0}
+        )
+        assert imported.status_code == 200, imported.text
+        stale_xml = client.get(f"{API}/processes/{pid}/bpmn").text
+
+        patched = client.patch(
+            f"{API}/processes/{pid}/design/nodes/n4",
+            json={"owner_role": "新角色"},
+        )
+        assert patched.status_code == 200, patched.text
+        assert (
+            next(node for node in patched.json()["nodes"] if node["node_key"] == "n4")["owner_role"]
+            == "新角色"
+        )
+
+        saved = client.post(
+            f"{API}/processes/{pid}/bpmn",
+            json={"xml": stale_xml, "expected_version": patched.json()["version"]},
+        )
+        assert saved.status_code == 200, saved.text
+        assert (
+            next(node for node in saved.json()["nodes"] if node["node_key"] == "n4")["owner_role"]
+            == "新角色"
+        )
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
+def test_explicit_probability_one_survives_resave(client):
+    """把连线概率显式改成 1.0 后，不能被「缺省值兜底」还原成旧概率。"""
+    source = _process_pid(client)
+    xml = client.get(f"{API}/processes/{source}/bpmn").text
+    pid = _create_process(client, "L3-BPMN-PROB")
+    try:
+        imported = client.post(
+            f"{API}/processes/{pid}/bpmn", json={"xml": xml, "expected_version": 0}
+        )
+        assert imported.status_code == 200, imported.text
+        exported = client.get(f"{API}/processes/{pid}/bpmn").text
+        assert 'pms:probability="0.7"' in exported
+        edited = exported.replace('pms:probability="0.7"', 'pms:probability="1"', 1)
+        saved = client.post(
+            f"{API}/processes/{pid}/bpmn",
+            json={"xml": edited, "expected_version": imported.json()["version"]},
+        )
+        assert saved.status_code == 200, saved.text
+        edge = next(
+            item
+            for item in saved.json()["edges"]
+            if item["source_key"] == "n4" and item["target_key"] == "n5"
+        )
+        assert edge["probability"] == 1.0
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
