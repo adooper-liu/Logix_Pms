@@ -144,7 +144,23 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text);
 /* ===== 侧边栏 ===== */
 .side{width:236px;background:linear-gradient(180deg,var(--nav-bg),var(--nav-bg-2));
   color:var(--nav-text);flex-shrink:0;display:flex;flex-direction:column;
-  position:sticky;top:0;height:100vh}
+  position:sticky;top:0;height:100vh;transition:width .18s ease}
+.nav-collapse{position:absolute;right:-13px;top:92px;z-index:40;width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  border:1px solid var(--line);border-radius:50%;background:var(--panel);
+  color:var(--sub);font-family:inherit;font-size:15px;line-height:1;cursor:pointer;
+  box-shadow:var(--shadow-sm)}
+.nav-collapse:hover{border-color:var(--brand);color:var(--brand)}
+html.nav-collapsed .side{width:64px}
+html.nav-collapsed .side .logo{justify-content:center;padding:18px 0 14px}
+html.nav-collapsed .side .brand,
+html.nav-collapsed .nav .grp,
+html.nav-collapsed .nav a .lbl,
+html.nav-collapsed .side .foot{display:none}
+html.nav-collapsed .nav{padding:12px 8px}
+html.nav-collapsed .nav a{justify-content:center;gap:0;padding:10px 0}
+html.nav-collapsed .nav a .ic{width:auto;font-size:17px}
+html.nav-collapsed .nav a.active::before{left:-8px}
 .side .logo{display:flex;align-items:center;gap:11px;padding:22px 20px 18px;
   border-bottom:1px solid var(--nav-line)}
 .side .logo .mark{width:36px;height:36px;flex:0 0 36px;border-radius:11px;

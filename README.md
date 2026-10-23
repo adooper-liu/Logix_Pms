@@ -409,8 +409,11 @@ BPMN 正式编辑器与流程附件/版本管理的选型、数据模型与实�
 [docs/process-deliverable-versioning.md](docs/process-deliverable-versioning.md)。
 流程执行与设计器的行业最佳实践、差距矩阵与专业化路线见
 [docs/process-execution-gap-analysis.md](docs/process-execution-gap-analysis.md)。
+“战略 → 组织 → 制度 → 流程 → 表单 → 工具”，以及工作量与绩效考核的跨层缺口见
+[docs/framework-gap-analysis.md](docs/framework-gap-analysis.md)。
 bpmn-js 专业画布的选型、验证结果与许可证注意事项见
-[docs/bpmn-js-spike.md](docs/bpmn-js-spike.md)；
+[docs/bpmn-js-spike.md](docs/bpmn-js-spike.md)；行业最佳实践与 P1/P2 路线见
+[docs/bpmn-js-best-practices.md](docs/bpmn-js-best-practices.md)；
 独立 draw.io 架构草图的定位与嵌入方式见 [docs/sketches.md](docs/sketches.md)。
 
 **为什么不引入 Vue**：当前是刻意维持的零构建前端，页面数量与交互复杂度仍在原生模块可维护的范围内。

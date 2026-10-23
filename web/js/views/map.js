@@ -12,11 +12,13 @@ import { openDesigner } from './designer.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
-const LEVEL_LABELS = { 1: 'L1 价值链', 2: 'L2 流程类别', 3: 'L3 流程', 4: 'L4 活动' };
+const LEVEL_LABELS = {
+  1: 'L1 价值链', 2: 'L2 流程类别', 3: 'L3 流程', 4: 'L4 活动', 5: 'L5 子活动',
+};
 
 /** 统计一个节点的全部下级（不含自身），按层级拆分；树的计数取 L4 活动数 */
 function subtreeStats(node) {
-  const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   const walk = (current) => {
     (current.children || []).forEach((child) => {
       counts[child.level] = (counts[child.level] || 0) + 1;
@@ -25,7 +27,7 @@ function subtreeStats(node) {
   };
   walk(node);
   return {
-    total: counts[1] + counts[2] + counts[3] + counts[4],
+    total: counts[1] + counts[2] + counts[3] + counts[4] + counts[5],
     leaves: counts[4],
     counts,
   };
@@ -36,6 +38,7 @@ function subtreeTitle(stats) {
     stats.counts[2] ? `L2 ${stats.counts[2]}` : '',
     stats.counts[3] ? `L3 ${stats.counts[3]}` : '',
     stats.counts[4] ? `L4 ${stats.counts[4]}` : '',
+    stats.counts[5] ? `L5 ${stats.counts[5]}` : '',
   ].filter(Boolean);
   return `含 ${stats.leaves} 个 L4 活动${parts.length ? '（' + parts.join(' / ') + '）' : ''}`;
 }
@@ -49,7 +52,8 @@ function renderOutline(list, path) {
     const stats = subtreeStats(n);
     return `
       <div class="tree-item lv${n.level}${inPath ? ' in-path' : ''}${on ? ' on' : ''}"
-           onclick="mapSelect('${n.code}')">
+           onclick="mapSelect('${n.code}')" title="${esc(LEVEL_LABELS[n.level] || ('L' + n.level))}">
+        <span class="tree-level">L${n.level}</span>
         <span class="tree-dot${n.is_improvement_target ? ' target' : ''}"></span>
         <span class="tree-name">${esc(n.name)}</span>
         <span class="cnt has-tip" tabindex="0"
@@ -90,7 +94,7 @@ const renderMap = () => {
     if (improvementOnly) shown = shown.filter((n) => n.is_improvement_target);
 
     const flat = flattenTree(tree);
-    const levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    const levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     flat.forEach((n) => { levelCounts[n.level] = (levelCounts[n.level] || 0) + 1; });
     const targetCount = flat.filter((n) => n.is_improvement_target).length;
     const healthValues = flat
@@ -113,6 +117,7 @@ const renderMap = () => {
         '<span>/</span><a onclick="mapGo(' + i + ')">' + esc(state.map.names[code] || code) + '</a>'));
     const treeHtml = `
       <div class="tree-item root${path.length === 0 ? ' on' : ''}" onclick="mapGo(-1)">
+        <span class="tree-level" aria-hidden="true"></span>
         <span class="tree-dot"></span>
         <span class="tree-name">全部价值链</span>
         <span class="cnt">${tree.length}</span>
@@ -127,6 +132,7 @@ const renderMap = () => {
         <tr class="clk map-row" onclick="mapClick('${n.code}', ${hasKids})">
           <td>
             <div class="map-name">
+              <span class="tag t-gry">L${n.level}</span>
               <span class="map-code">${esc(n.code)}</span>
               <b>${esc(n.name)}</b>
               ${n.is_improvement_target ? '<span class="tag t-red">待改善</span>' : ''}
@@ -212,11 +218,18 @@ const renderMap = () => {
         </div>
       </div>
 
-      <div class="map-layout">
+      <div class="map-layout${state.map.navCollapsed ? ' nav-collapsed' : ''}">
         <aside class="map-side card">
-          <div class="map-side-hd">架构导航</div>
+          <div class="map-side-hd">
+            <span class="map-side-title">架构导航</span>
+            <button class="map-side-toggle" onclick="toggleMapNav()"
+              title="${state.map.navCollapsed ? '展开架构导航' : '收起架构导航'}">
+              <span class="map-side-toggle-icon">${state.map.navCollapsed ? '›' : '‹'}</span>
+              <span class="map-side-toggle-label">${state.map.navCollapsed ? '展开' : '收起'}</span>
+            </button>
+          </div>
           <div class="map-tree">${treeHtml}</div>
-          <div class="map-side-foot tiny">点击层级展开；数字为本分支 L4 活动数；L4 活动在右侧列表中查看。</div>
+          <div class="map-side-foot tiny">每行左侧标注 L1–L5 层级；点击层级展开；数字为本分支 L4 活动数；更深层活动在右侧列表查看。</div>
         </aside>
 
         <div class="map-main">
@@ -408,6 +421,12 @@ function startProjectFromProcess(processId, processName) {
 
 function mapGo(index) {
   state.map.path = index < 0 ? [] : state.map.path.slice(0, index + 1);
+  RENDERERS.map();
+}
+
+/** 折叠/展开左侧架构导航；状态保存在 state.map，切换路由后仍保持 */
+function toggleMapNav() {
+  state.map.navCollapsed = !state.map.navCollapsed;
   RENDERERS.map();
 }
 
@@ -638,4 +657,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, dlMapDocument, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, openDocManager, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement };
+export { renderMap, deleteProcess, dlMapDocument, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, openDocManager, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement, toggleMapNav };

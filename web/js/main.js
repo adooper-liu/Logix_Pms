@@ -87,8 +87,30 @@ Object.assign(window, {
 
 /* -------------------------------------------------- 页面外壳 */
 
+const NAV_COLLAPSED_KEY = 'pms_nav_collapsed';
+
+function applyNavCollapsed(collapsed) {
+  document.documentElement.classList.toggle('nav-collapsed', collapsed);
+  const button = document.getElementById('navCollapse');
+  if (!button) return;
+  button.textContent = collapsed ? '›' : '‹';
+  button.title = collapsed ? '展开导航' : '收起导航';
+  button.setAttribute('aria-label', button.title);
+  button.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function toggleNav() {
+  const collapsed = !document.documentElement.classList.contains('nav-collapsed');
+  try {
+    localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch (e) { /* 隐私模式下忽略 */ }
+  applyNavCollapsed(collapsed);
+}
+
 function wireChrome() {
   document.querySelectorAll('.nav a').forEach((a) => {
+    const label = a.querySelector('.lbl');
+    if (label) a.title = label.textContent.trim();
     a.onclick = () => {
       // 侧栏进入工具箱应看全部工具；步骤页的「只看推荐」是临时状态
       if (a.dataset.view === 'toolbox') state.toolboxFilter = null;
@@ -96,6 +118,13 @@ function wireChrome() {
       go(a.dataset.view);
     };
   });
+  const navCollapse = document.getElementById('navCollapse');
+  if (navCollapse) navCollapse.onclick = toggleNav;
+  try {
+    applyNavCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
+  } catch (e) {
+    applyNavCollapsed(false);
+  }
   document.getElementById('mask').onclick = (e) => {
     if (e.target.id === 'mask') closeModal();
   };

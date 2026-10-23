@@ -6,7 +6,12 @@
 <title>流程管理系统 PMS · Logix</title>
 <script>
   // 在样式表绘制前恢复主题，避免刷新时闪一下默认色
-  try { document.documentElement.dataset.theme = localStorage.getItem('pms_theme') || 'default'; } catch (e) {}
+  try {
+    document.documentElement.dataset.theme = localStorage.getItem('pms_theme') || 'default';
+    if (localStorage.getItem('pms_nav_collapsed') === '1') {
+      document.documentElement.classList.add('nav-collapsed');
+    }
+  } catch (e) {}
 </script>
 <link rel="stylesheet" href="/static/vendor/bpmn-js/bpmn-js.css">
 <link rel="stylesheet" href="/static/vendor/bpmn-js/diagram-js.css">
@@ -19,6 +24,8 @@
 <div class="app">
   <!-- 侧边栏 -->
   <aside class="side">
+    <button class="nav-collapse" id="navCollapse" type="button"
+      aria-label="收起导航" aria-expanded="true" title="收起导航">‹</button>
     <div class="logo">
       <span class="mark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
@@ -28,23 +35,23 @@
     </div>
     <nav class="nav">
       <div class="grp">总览</div>
-      <a class="active" data-view="dashboard"><span class="ic">▦</span>管理驾驶舱</a>
-      <a data-view="map"><span class="ic">◈</span>企业流程地图</a>
+      <a class="active" data-view="dashboard"><span class="ic">▦</span><span class="lbl">管理驾驶舱</span></a>
+      <a data-view="map"><span class="ic">◈</span><span class="lbl">企业流程地图</span></a>
       <div class="grp">立项</div>
-      <a data-view="projects"><span class="ic">▤</span>流程项目组合</a>
+      <a data-view="projects"><span class="ic">▤</span><span class="lbl">流程项目组合</span></a>
       <div class="grp">方法与建模</div>
-      <a data-view="workflow"><span class="ic">⏣</span>五阶段标准工作流</a>
-      <a data-view="toolbox"><span class="ic">⚒</span>方法论工具箱</a>
-      <a data-view="deliverables"><span class="ic">⎘</span>交付物与模板库</a>
-      <a data-view="designer"><span class="ic">⌗</span>流程设计器</a>
-      <a data-view="sketches"><span class="ic">◇</span>架构草图</a>
+      <a data-view="workflow"><span class="ic">⏣</span><span class="lbl">五阶段标准工作流</span></a>
+      <a data-view="toolbox"><span class="ic">⚒</span><span class="lbl">方法论工具箱</span></a>
+      <a data-view="deliverables"><span class="ic">⎘</span><span class="lbl">交付物与模板库</span></a>
+      <a data-view="designer"><span class="ic">⌗</span><span class="lbl">流程设计器</span></a>
+      <a data-view="sketches"><span class="ic">◇</span><span class="lbl">架构草图</span></a>
       <div class="grp">运行</div>
-      <a data-view="execution"><span class="ic">▶</span>流程执行</a>
+      <a data-view="execution"><span class="ic">▶</span><span class="lbl">流程执行</span></a>
       <div class="grp">监控与沉淀</div>
-      <a data-view="monitor"><span class="ic">◔</span>运营监控与KPI</a>
-      <a data-view="knowledge"><span class="ic">⎙</span>流程知识库</a>
+      <a data-view="monitor"><span class="ic">◔</span><span class="lbl">运营监控与KPI</span></a>
+      <a data-view="knowledge"><span class="ic">⎙</span><span class="lbl">流程知识库</span></a>
       <div class="grp">系统</div>
-      <a data-view="orgs"><span class="ic">⚙</span>组织与人员</a>
+      <a data-view="orgs"><span class="ic">⚙</span><span class="lbl">组织与人员</span></a>
     </nav>
     <div class="foot">v1.0 · BPR / 优化 / 精益 一体化<br>
       <span id="backendState">连接后端中…</span></div>

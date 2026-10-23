@@ -581,11 +581,23 @@ def main() -> int:
             page.wait_for_timeout(600)
             item = page.locator("#view .tree-item").filter(has_text="研发设计").first
             count = item.locator(".cnt")
+            assert item.locator(".tree-level").inner_text().strip() == "L1"
             assert count.inner_text().strip() == "9", (
                 f"L1 研发设计 L4 活动数错误：{count.inner_text()}"
             )
             assert "含 9 个 L4 活动" in (count.get_attribute("data-tip") or "")
             assert count.get_attribute("title") is None, "计数不应再使用浏览器原生 title 提示"
+
+            # 左侧架构导航可折叠/展开
+            page.click(".map-side-toggle")
+            page.wait_for_timeout(300)
+            assert page.locator(".map-layout").evaluate(
+                "e => e.classList.contains('nav-collapsed')"
+            ), "架构导航没有折叠"
+            assert not page.locator(".map-tree").is_visible()
+            page.click(".map-side-toggle")
+            page.wait_for_timeout(300)
+            assert page.locator(".map-tree").is_visible(), "架构导航没有展开"
 
         # 设计器：打开节点编辑，改等待时间，指标应变化
         # 评审中的流程为只读：调色板必须保留可见、可折叠，但创建工具不可用
@@ -1181,6 +1193,34 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert page.evaluate("document.documentElement.dataset.theme") == "default"
 
+        # 左侧主导航：折叠只留图标、刷新保持、展开后不影响导航
+        def main_nav_collapse() -> None:
+            goto("dashboard")
+            if page.evaluate("document.documentElement.classList.contains('nav-collapsed')"):
+                page.click("#navCollapse")
+                page.wait_for_timeout(300)
+            assert page.locator(".side").bounding_box()["width"] > 200
+            page.click("#navCollapse")
+            page.wait_for_timeout(300)
+            assert page.evaluate("document.documentElement.classList.contains('nav-collapsed')")
+            assert page.locator(".side").bounding_box()["width"] < 80
+            assert not page.locator(".nav .grp").first.is_visible()
+            assert not page.locator(".nav a .lbl").first.is_visible()
+            assert page.get_attribute('.nav a[data-view="map"]', "title") == "企业流程地图", (
+                "折叠后缺少导航提示"
+            )
+
+            page.reload(wait_until="networkidle")
+            page.wait_for_timeout(1200)
+            assert page.evaluate("document.documentElement.classList.contains('nav-collapsed')"), (
+                "刷新后没有保持折叠状态"
+            )
+
+            page.click("#navCollapse")
+            page.wait_for_timeout(300)
+            assert page.locator(".side").bounding_box()["width"] > 200
+            page.evaluate("() => localStorage.removeItem('pms_nav_collapsed')")
+
         # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
         def dashboard_entries() -> None:
             goto("dashboard")
@@ -1471,6 +1511,7 @@ def main() -> int:
         check("流程详情配套文件入口", map_documents_entry)
         check("对标框架切换", benchmark_switch)
         check("主题切换", theme_switch)
+        check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
