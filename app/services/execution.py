@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
@@ -25,6 +25,7 @@ from app.models.execution import (
     ProcessInstance,
     ProcessTask,
     ProcessTaskEvent,
+    TaskWorklog,
 )
 from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
@@ -39,6 +40,10 @@ from app.schemas.execution import (
     TaskCompleteRequest,
     TaskEventOut,
     TaskOut,
+    WorkloadSummary,
+    WorkloadSummaryRow,
+    WorklogCreate,
+    WorklogOut,
 )
 from app.services import forms as forms_service
 from app.services import org_scope
@@ -180,6 +185,7 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
                 "type": n.node_type,
                 "lane": n.lane,
                 "owner": n.owner_role,
+                "standard_minutes": n.duration_minutes,
             }
             for n in nodes
         ],
@@ -523,6 +529,133 @@ def claim_task(db: Session, task: ProcessTask, user: User) -> ProcessTask:
     return task
 
 
+WORKLOG_TYPE_LABELS = {
+    "HANDLE": "处理",
+    "WAIT": "等待",
+    "REWORK": "返工",
+    "OTHER": "其他",
+}
+
+
+def worklog_out(row: TaskWorklog) -> WorklogOut:
+    return WorklogOut(
+        id=row.id,
+        task_id=row.task_id,
+        user_id=row.user_id,
+        user_name=row.user_name,
+        work_type=row.work_type,
+        work_type_label=WORKLOG_TYPE_LABELS.get(row.work_type, row.work_type),
+        started_at=row.started_at,
+        ended_at=row.ended_at,
+        effort_minutes=row.effort_minutes,
+        note=row.note,
+        created_at=row.created_at,
+    )
+
+
+def record_worklog(
+    db: Session,
+    task: ProcessTask,
+    user: User,
+    payload: WorklogCreate,
+) -> TaskWorklog:
+    """登记实际工时。开放任务沿用处理权限；已完成任务允许本人/完成人/管理科补录。"""
+    if task.status == TaskStatus.CANCELLED.value:
+        raise HTTPException(status_code=409, detail="任务已取消，不能登记工时")
+    if task.status in OPEN_STATUSES:
+        _ensure_task_action(db, task, user)
+    elif not (
+        _is_manager(user) or task.completed_by_id == user.id or task.assignee_user_id == user.id
+    ):
+        raise HTTPException(status_code=403, detail="只有任务处理人或流程管理科可以登记工时")
+
+    effort = payload.effort_minutes
+    if effort is None and payload.started_at and payload.ended_at:
+        effort = max(0.0, (payload.ended_at - payload.started_at).total_seconds() / 60)
+    if effort is None or effort < 0:
+        raise HTTPException(status_code=400, detail="请填写实际工时，或提供开始/结束时间")
+    if effort > 10080:
+        raise HTTPException(status_code=400, detail="单条工时不能超过 10080 分钟")
+
+    work_type = (payload.work_type or "HANDLE").upper()
+    if work_type not in WORKLOG_TYPE_LABELS:
+        work_type = "OTHER"
+    row = TaskWorklog(
+        task_id=task.id,
+        user_id=user.id,
+        user_name=user.display_name,
+        work_type=work_type,
+        started_at=payload.started_at,
+        ended_at=payload.ended_at,
+        effort_minutes=float(effort),
+        note=payload.note,
+        created_at=utcnow(),
+    )
+    db.add(row)
+    task.actual_minutes = float(task.actual_minutes or 0) + float(effort)
+    db.flush()
+    return row
+
+
+def list_task_worklogs(db: Session, task_id: int) -> List[TaskWorklog]:
+    return list(
+        db.scalars(
+            select(TaskWorklog).where(TaskWorklog.task_id == task_id).order_by(TaskWorklog.id)
+        ).all()
+    )
+
+
+def workload_summary(
+    db: Session,
+    *,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    user_id: Optional[int] = None,
+    org_unit_id: Optional[int] = None,
+    process_id: Optional[int] = None,
+) -> WorkloadSummary:
+    stmt = (
+        select(
+            TaskWorklog.user_id,
+            TaskWorklog.user_name,
+            func.count(func.distinct(TaskWorklog.task_id)),
+            func.coalesce(func.sum(TaskWorklog.effort_minutes), 0.0),
+        )
+        .join(ProcessTask, ProcessTask.id == TaskWorklog.task_id)
+        .join(ProcessInstance, ProcessInstance.id == ProcessTask.instance_id)
+    )
+    if from_date is not None:
+        stmt = stmt.where(TaskWorklog.created_at >= datetime.combine(from_date, time.min))
+    if to_date is not None:
+        stmt = stmt.where(
+            TaskWorklog.created_at < datetime.combine(to_date + timedelta(days=1), time.min)
+        )
+    if user_id is not None:
+        stmt = stmt.where(TaskWorklog.user_id == user_id)
+    if org_unit_id is not None:
+        stmt = stmt.where(ProcessTask.candidate_org_unit_id == org_unit_id)
+    if process_id is not None:
+        stmt = stmt.where(ProcessInstance.process_id == process_id)
+    stmt = stmt.group_by(TaskWorklog.user_id, TaskWorklog.user_name).order_by(
+        func.sum(TaskWorklog.effort_minutes).desc()
+    )
+    rows = [
+        WorkloadSummaryRow(
+            user_id=row[0],
+            user_name=row[1],
+            task_count=int(row[2] or 0),
+            effort_minutes=float(row[3] or 0),
+        )
+        for row in db.execute(stmt).all()
+    ]
+    return WorkloadSummary(
+        from_date=from_date.isoformat() if from_date else None,
+        to_date=to_date.isoformat() if to_date else None,
+        total_minutes=round(sum(row.effort_minutes for row in rows), 2),
+        rows=rows,
+    )
+
+
 def complete_task(
     db: Session,
     task: ProcessTask,
@@ -595,6 +728,23 @@ def complete_task(
     )
     if not updated:
         raise HTTPException(status_code=409, detail="任务已被他人处理，请刷新后重试")
+
+    if payload.effort_minutes is not None and payload.effort_minutes > 0:
+        task.actual_minutes = float(task.actual_minutes or 0) + float(payload.effort_minutes)
+        db.add(
+            TaskWorklog(
+                task_id=task.id,
+                user_id=user.id,
+                user_name=user.display_name,
+                work_type="HANDLE",
+                started_at=task.claimed_at or now,
+                ended_at=now,
+                effort_minutes=float(payload.effort_minutes),
+                note="完成任务时登记",
+                created_at=now,
+            )
+        )
+        db.flush()
 
     instance.variables = merged_variables
     record_task_event(
@@ -874,6 +1024,8 @@ def task_out(task: ProcessTask) -> TaskOut:
         form_schema=(form or {}).get("fields", []),
         form_name=(form or {}).get("name"),
         comment=task.comment,
+        standard_minutes=float(node.get("standard_minutes") or 0),
+        actual_minutes=float(task.actual_minutes or 0),
         next_options=options,
     )
 

@@ -46,5 +46,40 @@ class OrgUnit(Base):
     parent: Mapped[Optional["OrgUnit"]] = relationship(
         "OrgUnit", back_populates="children", remote_side="OrgUnit.id"
     )
+    positions: Mapped[List["Position"]] = relationship(
+        "Position", back_populates="org_unit", order_by="Position.code"
+    )
 
     __table_args__ = (Index("ix_org_unit_parent_type", "parent_id", "type"),)
+
+
+class Position(Base):
+    """岗位主数据：连接组织、人员与流程活动。
+
+    岗位是“谁负责/谁处理”的稳定口径；流程节点和用户都只引用岗位 ID，
+    不再散落自由文本。岗位可以挂在某个组织下，也可以不挂（集团通用岗位）。
+    """
+
+    __tablename__ = "position"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    org_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("org_unit.id", ondelete="SET NULL", name="fk_position_org_unit"),
+        nullable=True,
+        index=True,
+    )
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit", back_populates="positions")
+
+    @property
+    def org_unit_name(self) -> Optional[str]:
+        return self.org_unit.name if self.org_unit else None
+
+    __table_args__ = (Index("ix_position_org_name", "org_unit_id", "name"),)

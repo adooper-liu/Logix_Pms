@@ -5,7 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { metricHelp } from '../core/metrics.js';
-import { API_BASE, GET, PATCH, POST, PUT, getToken } from '../core/api.js';
+import { API_BASE, GET, PATCH, POST, PUT, DEL, getToken } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 6. 流程设计器 */
@@ -28,13 +28,21 @@ const renderDesigner = () => {
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
-      const [model, analysis] = await Promise.all([
+      const [model, analysis, positions, tools, toolMeta, docMeta] = await Promise.all([
         GET('/processes/' + id + '/design'),
         POST('/processes/' + id + '/design/analyze', {}),
+        GET('/positions'),
+        GET('/tools'),
+        GET('/tools/meta'),
+        GET('/process-documents/meta'),
       ]);
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
       state.designer.analysis = analysis;
+      state.designer.positions = positions;
+      state.designer.tools = tools;
+      state.designer.toolMeta = toolMeta;
+      state.docMeta = docMeta;
       state.designer.processCode = (list.find((r) => r.id === id) || {}).code;
     }
   };
@@ -667,6 +675,18 @@ function renderBpmnNodePanel(panel, element) {
     return `<option value="${esc(name)}"${name === currentLaneName ? ' selected' : ''}>${
       esc(name)}</option>`;
   }).join('');
+  const activities = (st.processes || []).filter(
+    (item) => item.level === 4 && item.parent_id === st.processId,
+  );
+  const activityOpts = activities.map((item) =>
+    `<option value="${item.id}"${item.id === (node && node.process_arch_id) ? ' selected' : ''}>${
+      esc(item.code)} · ${esc(item.name)}</option>`).join('');
+  const positions = st.positions || [];
+  const positionOpts = positions.map((item) =>
+    `<option value="${item.id}"${item.id === (node && node.owner_position_id)
+      ? ' selected' : ''}>${esc(item.code)} · ${esc(item.name)}</option>`).join('');
+  const legacyPosition = node && node.owner_role && !node.owner_position_id
+    ? `<option value="" selected>${esc(node.owner_role)}（未关联岗位）</option>` : '';
   panel.innerHTML = `
     ${bpmnPanelHeader(bo)}
     ${bpmnNameEditor(bo, `saveBpmnName('${esc(bo.id)}')`, '双击画布元素也可直接改名')}
@@ -690,6 +710,26 @@ function renderBpmnNodePanel(panel, element) {
           </div></div>
       </div>` : ''}
     ${node ? `
+      <div class="row2">
+        <div class="field"><label>L4 活动（统一活动 ID）</label>
+          <div class="gap">
+            <select id="bpActivity"${pmsEditable ? '' : ' disabled'}>
+              <option value="">未关联</option>${activityOpts}
+            </select>
+            ${pmsEditable
+              ? `<button class="btn-sm" onclick="saveBpmnNodeActivity('${esc(node.node_key)}')">关联</button>`
+              : ''}
+          </div>
+          ${node.process_arch_id
+            ? '' : '<div class="hint">未关联活动：工作量/绩效无法按活动汇总</div>'}
+        </div>
+        <div class="field"><label>负责人岗位</label>
+          <select id="bpPosition"${pmsEditable ? '' : ' disabled'}>
+            <option value="">未分配</option>${legacyPosition}${positionOpts}
+          </select>
+          ${positions.length ? '' : '<div class="hint">请先在「组织与人员 → 岗位」维护岗位</div>'}
+        </div>
+      </div>
       <div class="grid g3">
         <div class="field"><label>作业时间（分钟）</label>
           <input id="bpDur" type="number" min="0" value="${node.duration_minutes}"${ro}></div>
@@ -707,9 +747,9 @@ function renderBpmnNodePanel(panel, element) {
             <option value="false"${!node.is_value_added ? ' selected' : ''}>否</option>
           </select></div>
       </div>
-      <div class="field"><label>负责人 / 岗位</label>
-        <input id="bpOwner" value="${esc(node.owner_role || '')}"
-          placeholder="如：采购计划员"${ro}></div>
+      <div id="bpToolsSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载工具绑定…</div></div>
+      <div id="bpDocsSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载标准文件…</div></div>
+      <div id="bpMetaSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载表单与规则…</div></div>
       ${pmsEditable
         ? `<div class="between mt"><div class="hint">指标保存后不影响图形；发布后才影响运行时。</div>
             <button class="btn-sm btn-p" onclick="saveBpmnMetrics('${esc(node.node_key)}')">保存指标</button></div>`
@@ -719,8 +759,9 @@ function renderBpmnNodePanel(panel, element) {
       ? '<div id="bpmnAssignSlot" class="bpmn-assign-slot">'
         + '<div class="tiny muted">正在加载执行配置…</div></div>'
       : ''}
-    <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标与执行配置各自单独保存。</div>`;
+    <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标、执行配置与活动绑定各自单独保存。</div>`;
   if (canConfigExec) renderBpmnAssignment(bo.id);
+  if (node) hydrateBpmnNodeExtras(bo.id);
 }
 
 function renderBpmnFlowPanel(panel, element) {
@@ -850,6 +891,181 @@ async function renderBpmnAssignment(nodeKey) {
     </div>`;
 }
 
+async function saveBpmnNodeActivity(nodeKey) {
+  const st = state.designer;
+  const select = document.getElementById('bpActivity');
+  if (!select) return;
+  const value = select.value ? Number(select.value) : null;
+  try {
+    const response = await PATCH(
+      '/processes/' + st.processId + '/design/nodes/' + nodeKey,
+      { process_arch_id: value, expected_version: st.model.version },
+    );
+    st.model = response;
+    st.savedModel = cloneModel(response);
+    st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
+    renderBpmnSelection(st.bpmnSelection || []);
+    toast(value ? '已关联 L4 活动' : '已解除活动关联');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function hydrateBpmnNodeExtras(nodeKey) {
+  const st = state.designer;
+  const pid = st.processId;
+  const [toolsRes, docsRes, formsRes, rulesRes] = await Promise.allSettled([
+    GET('/processes/' + pid + '/design/nodes/' + nodeKey + '/tools'),
+    GET('/process-documents?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
+    GET('/execution/forms?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
+    GET('/execution/rules?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
+  ]);
+  const current = (st.bpmnSelection || [])[0];
+  const currentId = current && current.businessObject ? current.businessObject.id : null;
+  if (st.processId !== pid || currentId !== nodeKey) return;
+  renderBpmnNodeTools(nodeKey, toolsRes.status === 'fulfilled' ? toolsRes.value : []);
+  renderBpmnNodeDocs(nodeKey, docsRes.status === 'fulfilled' ? docsRes.value : []);
+  renderBpmnNodeMeta(
+    formsRes.status === 'fulfilled' ? formsRes.value : [],
+    rulesRes.status === 'fulfilled' ? rulesRes.value : [],
+  );
+}
+
+function renderBpmnNodeTools(nodeKey, rows) {
+  const slot = document.getElementById('bpToolsSlot');
+  if (!slot) return;
+  const st = state.designer;
+  const editable = !!st.editable;
+  const bound = new Set(rows.map((row) => row.tool_code));
+  const toolOptions = (st.tools || [])
+    .filter((tool) => !bound.has(tool.code))
+    .map((tool) => `<option value="${esc(tool.code)}">${esc(tool.code)} · ${
+      esc(tool.name)}</option>`).join('');
+  const levelLabels = (st.toolMeta && st.toolMeta.level_labels) || {};
+  const levelOptions = Object.entries(levelLabels)
+    .map(([value, label]) => `<option value="${value}"${
+      value === 'RECOMMENDED' ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  const list = rows.map((row) => `
+    <div class="between bpmn-node-row">
+      <span>${esc(row.tool_name || row.tool_code)}</span>
+      <span class="gap">
+        <span class="tag t-gry">${esc(row.level_label || row.level)}</span>
+        ${editable ? `<button class="btn-sm" onclick="removeBpmnNodeTool('${esc(nodeKey)}',
+          '${esc(row.tool_code)}')">移除</button>` : ''}
+      </span>
+    </div>`).join('') || '<div class="tiny muted">还没有绑定推荐工具</div>';
+  slot.innerHTML = `
+    <div class="between mb"><b>推荐工具</b><span class="tiny muted">${rows.length} 个</span></div>
+    ${list}
+    ${editable ? `
+      <div class="gap mt">
+        <select id="bpToolCode"><option value="">选择工具</option>${toolOptions}</select>
+        <select id="bpToolLevel">${levelOptions}</select>
+        <button class="btn-sm btn-p" onclick="addBpmnNodeTool('${esc(nodeKey)}')">绑定</button>
+      </div>` : ''}`;
+}
+
+async function addBpmnNodeTool(nodeKey) {
+  const code = document.getElementById('bpToolCode')?.value;
+  if (!code) return toast('请选择工具', true);
+  const level = document.getElementById('bpToolLevel')?.value || 'RECOMMENDED';
+  try {
+    await POST(
+      '/processes/' + state.designer.processId + '/design/nodes/' + nodeKey + '/tools',
+      { tool_code: code, level },
+    );
+    toast('工具已绑定');
+    hydrateBpmnNodeExtras(nodeKey);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removeBpmnNodeTool(nodeKey, toolCode) {
+  try {
+    await DEL(
+      '/processes/' + state.designer.processId + '/design/nodes/' + nodeKey +
+      '/tools/' + encodeURIComponent(toolCode),
+    );
+    toast('已解除工具绑定');
+    hydrateBpmnNodeExtras(nodeKey);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderBpmnNodeDocs(nodeKey, rows) {
+  const slot = document.getElementById('bpDocsSlot');
+  if (!slot) return;
+  const list = rows.map((row) => `
+    <div class="between bpmn-node-row">
+      <span>${esc(row.title)}</span>
+      <span class="tag t-gry">${esc(row.category_label || row.category)}</span>
+    </div>`).join('') || '<div class="tiny muted">该活动还没有标准文件</div>';
+  slot.innerHTML = `
+    <div class="between mb"><b>标准文件</b><span class="tiny muted">${rows.length} 份</span></div>
+    ${list}
+    <div class="gap mt">
+      ${canManage()
+        ? `<button class="btn-sm" onclick="openNodeDocumentModal('${esc(nodeKey)}')">
+            + 新增标准文件</button>` : ''}
+      <a class="link-btn link-btn-sm" onclick="go('deliverables')">去交付物与模板库</a>
+    </div>`;
+}
+
+function openNodeDocumentModal(nodeKey) {
+  const labels = (state.docMeta && state.docMeta.category_labels) || {};
+  const options = Object.entries(labels).map(([value, label]) =>
+    `<option value="${value}"${value === 'SOP' ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  openModal('新增活动标准文件', `
+    <div class="field"><label>标题 *</label>
+      <input id="ndTitle" placeholder="如：需求审批单"></div>
+    <div class="row2">
+      <div class="field"><label>类型</label><select id="ndCategory">${options}</select></div>
+      <div class="field"><label>说明</label><input id="ndDesc"></div>
+    </div>
+    <div class="note">文件会挂到当前活动；版本、审批与上传在「交付物与模板库」里继续维护。</div>`,
+  `<button class="btn btn-g" onclick="closeModal()">取消</button>
+   <button class="btn btn-p" onclick="submitNodeDocument('${esc(nodeKey)}')">创建</button>`);
+}
+
+async function submitNodeDocument(nodeKey) {
+  const title = document.getElementById('ndTitle')?.value.trim();
+  if (!title) return toast('标题必填', true);
+  try {
+    await POST('/process-documents', {
+      process_id: state.designer.processId,
+      node_key: nodeKey,
+      title,
+      category: document.getElementById('ndCategory')?.value || 'SOP',
+      description: document.getElementById('ndDesc')?.value.trim() || null,
+    });
+    closeModal();
+    toast('标准文件已创建');
+    hydrateBpmnNodeExtras(nodeKey);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function renderBpmnNodeMeta(forms, rules) {
+  const slot = document.getElementById('bpMetaSlot');
+  if (!slot) return;
+  const formText = forms.length ? forms.map((form) => form.name).join('、') : '未配置';
+  slot.innerHTML = `
+    <div class="between mb"><b>表单与分支规则</b>
+      ${canManage()
+        ? '<button class="btn-sm" onclick="openExecutionConfig()">去执行页配置</button>' : ''}
+    </div>
+    <div class="tiny">表单：${esc(formText)}</div>
+    <div class="tiny">分支规则：${rules.length} 条</div>`;
+}
+
+function openExecutionConfig() {
+  state.execution.tab = 'config';
+  go('execution');
+}
+
 async function saveBpmnName(elementId) {
   const st = state.designer;
   const modeler = st.bpmnModeler;
@@ -880,7 +1096,7 @@ async function saveBpmnMetrics(nodeKey) {
     return;
   }
   const value = (id) => Number(document.getElementById(id).value);
-  const ownerInput = document.getElementById('bpOwner');
+  const positionSelect = document.getElementById('bpPosition');
   try {
     const payload = {
       duration_minutes: value('bpDur'),
@@ -891,7 +1107,13 @@ async function saveBpmnMetrics(nodeKey) {
       is_value_added: document.getElementById('bpVa').value === 'true',
       expected_version: st.model.version,
     };
-    if (ownerInput) payload.owner_role = ownerInput.value.trim() || null;
+    if (positionSelect) {
+      const positionId = positionSelect.value ? Number(positionSelect.value) : null;
+      const selected = (st.positions || []).find((item) => item.id === positionId);
+      payload.owner_position_id = positionId;
+      // owner_role 保留为展示兼容字段；选岗位时同步成岗位名称
+      if (selected) payload.owner_role = selected.name;
+    }
     const response = await PATCH(
       '/processes/' + st.processId + '/design/nodes/' + nodeKey,
       payload,
@@ -2218,7 +2440,9 @@ export {
   moveBpmnNodeToLane, openDesigner, openVersionHistory, reanalyze,
   rejectReview, renderDesigner, rollbackVersion, runBpmnLint,
   saveBpmnAssignment, saveBpmnFlow, saveBpmnLaneName, saveBpmnMetrics,
-  saveBpmnName, selectLintIssue, setDesignerTab, showBpmnSidebarTab,
+  saveBpmnName, saveBpmnNodeActivity, addBpmnNodeTool, removeBpmnNodeTool,
+  openNodeDocumentModal, submitNodeDocument, openExecutionConfig,
+  selectLintIssue, setDesignerTab, showBpmnSidebarTab,
   submitReview, switchProcess, toggleBpmnFullscreen, toggleBpmnSidebar,
   publishDesign,
 };

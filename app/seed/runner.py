@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
-from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
+from app.models.benchmark import (
+    BenchmarkCategory,
+    BenchmarkFramework,
+    BenchmarkMetric,
+    ProcessBenchmarkMap,
+)
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -30,6 +35,7 @@ from app.models.execution import (
     ProcessRule,
     ProcessTask,
     ProcessTaskEvent,
+    TaskWorklog,
 )
 from app.models.governance import GovernanceFinding
 from app.models.integration import (
@@ -41,8 +47,9 @@ from app.models.integration import (
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
-from app.models.org import OrgUnit
+from app.models.org import OrgUnit, Position
 from app.models.process import (
+    NodeTool,
     ProcessArch,
     ProcessEdge,
     ProcessModelVersion,
@@ -55,7 +62,7 @@ from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
-from app.seed import benchmark_data, corpus, corpus_data, deliverable_data
+from app.seed import benchmark_data, corpus, corpus_data, deliverable_data, pcf_data
 from app.services import deliverable as deliverable_service
 from app.services import execution as execution_service
 from app.services import notifications as notification_service
@@ -102,7 +109,12 @@ def _owner_user_id(owner: Optional[str], user_ids: Dict[str, int]) -> Optional[i
     return None
 
 
-def _seed_process_arch(db: Session, user_ids: Dict[str, int]) -> Dict[str, int]:
+def _seed_process_arch(
+    db: Session,
+    user_ids: Dict[str, int],
+    org_name_ids: Optional[Dict[str, int]] = None,
+) -> Dict[str, int]:
+    org_name_ids = org_name_ids or {}
     code_to_id: Dict[str, int] = {}
     # 先按 level 排序，保证父节点先入库
     for row in sorted(corpus.PROCESS_ARCH, key=lambda r: r["level"]):
@@ -120,6 +132,7 @@ def _seed_process_arch(db: Session, user_ids: Dict[str, int]) -> Dict[str, int]:
             owner=row.get("owner"),
             owner_user_id=_owner_user_id(row.get("owner"), user_ids),
             department=row.get("department"),
+            org_unit_id=org_name_ids.get(row.get("department") or ""),
             description=row.get("description"),
             strategic_importance=row.get("si", 3.0),
             pain_score=row.get("pain", 3.0),
@@ -292,9 +305,12 @@ def _seed_projects(
 def _seed_benchmarks(
     db: Session, code_to_id: Dict[str, int], *, with_mappings: bool = True
 ) -> None:
-    """对标框架、标准分类树与流程映射。
+    """SCOR 手写分类 + APQC PCF v8.0 三套变体、指标目录与流程映射。
 
-    with_mappings=False 只灌框架与分类，供生产环境使用：公司流程还没录入时
+    APQC 数据来自 `app/seed/data/pcf_v80.json`（由 scripts/import_pcf.py 生成），
+    分类和映射都以 PCF ID（external_id）为稳定键。
+
+    with_mappings=False 只灌框架、分类与指标，供生产环境使用：公司流程还没录入时
     不存在可映射的流程，等流程建好后再通过页面/API 维护映射。
     """
     frameworks: Dict[str, BenchmarkFramework] = {}
@@ -311,13 +327,38 @@ def _seed_benchmarks(
         db.flush()
         frameworks[framework.code] = framework
 
-    categories: Dict[str, Dict[str, BenchmarkCategory]] = {}
+    pcf_dataset = pcf_data.load_pcf_v80()
+    for row in pcf_dataset["frameworks"]:
+        base_code = row.get("base_framework_code")
+        base = frameworks.get(base_code) if base_code else None
+        framework = BenchmarkFramework(
+            code=row["code"],
+            name=row["name"],
+            name_en=row.get("name_en"),
+            version=row.get("version"),
+            description=row.get("description"),
+            sort_order=row.get("sort_order", 0),
+            industry=row.get("industry"),
+            is_primary=row.get("is_primary", False),
+            base_framework_id=base.id if base else None,
+            source_file=row.get("source_file"),
+            generated_on=row.get("generated_on"),
+            attribution=row.get("attribution"),
+        )
+        db.add(framework)
+        db.flush()
+        frameworks[framework.code] = framework
+
+    # 两个解析表：SCOR 用 code，APQC 用 external_id（PCF ID）。
+    categories_by_code: Dict[tuple[str, str], BenchmarkCategory] = {}
+    categories_by_external: Dict[tuple[str, str], BenchmarkCategory] = {}
+
     for row in sorted(benchmark_data.BENCHMARK_CATEGORIES, key=lambda r: r["level"]):
         framework = frameworks.get(row["framework"])
         if framework is None:
             raise ValueError(f"对标分类 {row['code']} 引用了未知框架 {row['framework']}")
         parent_code = row.get("parent")
-        parent = categories.get(row["framework"], {}).get(parent_code) if parent_code else None
+        parent = categories_by_code.get((row["framework"], parent_code)) if parent_code else None
         if parent_code and parent is None:
             raise ValueError(f"对标分类 {row['code']} 的父节点 {parent_code} 尚未入库，检查顺序")
         category = BenchmarkCategory(
@@ -331,18 +372,77 @@ def _seed_benchmarks(
         )
         db.add(category)
         db.flush()
-        categories.setdefault(framework.code, {})[category.code] = category
+        categories_by_code[(framework.code, category.code)] = category
+
+    for pcf_framework in pcf_dataset["frameworks"]:
+        framework = frameworks[pcf_framework["code"]]
+        by_external: Dict[str, BenchmarkCategory] = {}
+        for row in sorted(pcf_framework["categories"], key=lambda r: r["level"]):
+            category = BenchmarkCategory(
+                framework_id=framework.id,
+                code=row["code"],
+                name=row["name"],
+                name_en=row.get("name_en"),
+                name_zh=row.get("name_zh"),
+                external_id=row["external_id"],
+                level=row["level"],
+                description=row.get("description"),
+                metrics_available=row.get("metrics_available", False),
+                difference_index=row.get("difference_index", 0),
+                change_details=row.get("change_details"),
+                sort_order=row.get("sort_order", 0),
+            )
+            db.add(category)
+            by_external[row["external_id"]] = category
+        db.flush()
+        for row in pcf_framework["categories"]:
+            parent_external = row.get("parent_external_id")
+            if parent_external:
+                by_external[row["external_id"]].parent_id = by_external[parent_external].id
+        db.flush()
+        categories_by_external.update(
+            {
+                (framework.code, external_id): category
+                for external_id, category in by_external.items()
+            }
+        )
+        categories_by_code.update(
+            {(framework.code, category.code): category for category in by_external.values()}
+        )
+
+    if (db.scalar(select(func.count()).select_from(BenchmarkMetric)) or 0) == 0:
+        db.add_all(
+            [
+                BenchmarkMetric(
+                    external_id=row["external_id"],
+                    metric_id=row["metric_id"],
+                    metric_category=row.get("metric_category"),
+                    name=row["name"],
+                    formula=row.get("formula"),
+                    unit=row.get("unit"),
+                    source=row.get("source"),
+                )
+                for row in pcf_data.metric_rows()
+            ]
+        )
+        db.flush()
 
     if not with_mappings:
         return
 
+    def resolve_category(row: Dict[str, str]) -> Optional[BenchmarkCategory]:
+        if row.get("external_id"):
+            return categories_by_external.get((row["framework"], row["external_id"]))
+        return categories_by_code.get((row["framework"], row["category"]))
+
     for row in benchmark_data.PROCESS_BENCHMARK_MAP:
         process_id = code_to_id.get(row["process"])
-        category = categories.get(row["framework"], {}).get(row["category"])
+        category = resolve_category(row)
         if process_id is None:
             raise ValueError(f"对标映射引用了未知流程 {row['process']}")
         if category is None:
-            raise ValueError(f"对标映射引用了未知分类 {row['framework']} / {row['category']}")
+            key = row.get("external_id") or row.get("category")
+            raise ValueError(f"对标映射引用了未知分类 {row['framework']} / {key}")
         db.add(
             ProcessBenchmarkMap(
                 process_id=process_id,
@@ -357,8 +457,9 @@ def _seed_benchmarks(
     mapped_categories: Dict[int, List[int]] = {}
     for row in benchmark_data.PROCESS_BENCHMARK_MAP:
         process_id = code_to_id[row["process"]]
-        category = categories[row["framework"]][row["category"]]
-        mapped_categories.setdefault(process_id, []).append(category.id)
+        category = resolve_category(row)
+        if category is not None:
+            mapped_categories.setdefault(process_id, []).append(category.id)
     for process in process_rows:
         if process.level != 4 or process.id in mapped_categories:
             continue
@@ -654,7 +755,16 @@ def _seed_knowledge(db: Session, project_ids: Dict[str, int]) -> None:
             db.add(KnowledgeTag(knowledge_id=item.id, tag=tag))
 
 
-def _seed_design_models(db: Session, code_to_id: Dict[str, int]) -> None:
+def _seed_design_models(
+    db: Session,
+    code_to_id: Dict[str, int],
+    position_ids: Optional[Dict[str, int]] = None,
+) -> None:
+    position_ids = position_ids or {}
+    l4_by_parent_name = {
+        (row.parent_id, row.name): row.id
+        for row in db.scalars(select(ProcessArch).where(ProcessArch.level == 4)).all()
+    }
     for process_code, model in corpus_data.DESIGN_MODELS.items():
         process_id = code_to_id.get(process_code)
         if process_id is None:
@@ -676,6 +786,8 @@ def _seed_design_models(db: Session, code_to_id: Dict[str, int]) -> None:
                     node_type=node["type"],
                     lane=node["lane"],
                     owner_role=node.get("owner"),
+                    process_arch_id=l4_by_parent_name.get((process_id, node["name"])),
+                    owner_position_id=position_ids.get(node.get("owner") or ""),
                     duration_minutes=float(node.get("dur", 0)),
                     wait_minutes=float(node.get("wait", 0)),
                     cost=float(node.get("cost", 0)),
@@ -726,16 +838,60 @@ def _seed_org_units(db: Session) -> Dict[str, int]:
     add("CO-SOUTH", "华南分公司", "COMPANY", group)
     add("DEPT-EAST-MFG", "华东制造部", "DEPARTMENT", east)
     add("DEPT-EAST-QA", "华东质量部", "DEPARTMENT", east)
+    # 与流程架构里的 department 名称对齐，便于组织口径汇总与回填
+    add("DEPT-STR", "战略部", "DEPARTMENT", group)
+    add("DEPT-RD", "研发中心", "DEPARTMENT", group)
+    add("DEPT-PROC", "采购部", "DEPARTMENT", group)
+    add("DEPT-FIN", "财务部", "DEPARTMENT", group)
+    add("DEPT-MFG", "制造部", "DEPARTMENT", group)
+    add("DEPT-SALES", "销售运营部", "DEPARTMENT", group)
+    add("DEPT-CS", "客户服务中心", "DEPARTMENT", group)
+    add("DEPT-FUNC", "职能中心", "DEPARTMENT", group)
     return ids
 
 
-def _seed_users(db: Session, org_ids: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+def _seed_positions(db: Session, org_ids: Dict[str, int]) -> Dict[str, int]:
+    """从演示设计模型的负责人文本创建岗位，并挂到对应部门。"""
+    org_of_position = {
+        "采购计划员": "DEPT-PROC",
+        "预算会计": "DEPT-FIN",
+        "部门负责人": "DEPT-FUNC",
+    }
+    names = sorted(
+        {
+            node.get("owner")
+            for model in corpus_data.DESIGN_MODELS.values()
+            for node in model["nodes"]
+            if node.get("owner")
+        }
+    )
+    ids: Dict[str, int] = {}
+    for index, name in enumerate(names, start=1):
+        position = Position(
+            code=f"POS-{index:03d}",
+            name=name,
+            org_unit_id=org_ids.get(org_of_position.get(name, "")),
+            is_active=True,
+        )
+        db.add(position)
+        db.flush()
+        ids[name] = position.id
+    return ids
+
+
+def _seed_users(
+    db: Session,
+    org_ids: Optional[Dict[str, int]] = None,
+    position_ids: Optional[Dict[str, int]] = None,
+) -> Dict[str, int]:
     org_ids = org_ids or {}
+    position_ids = position_ids or {}
     demo_orgs = {
         "admin": "GROUP-001",
         "manager": "GROUP-001",
         "chen": "CO-EAST",
     }
+    demo_positions = {"chen": "采购计划员"}
     for row in corpus_data.USERS:
         db.add(
             User(
@@ -745,6 +901,7 @@ def _seed_users(db: Session, org_ids: Optional[Dict[str, int]] = None) -> Dict[s
                 role=row["role"],
                 department=row.get("department"),
                 org_unit_id=org_ids.get(demo_orgs.get(row["username"], "")),
+                position_id=position_ids.get(demo_positions.get(row["username"], "")),
             )
         )
     db.flush()
@@ -771,12 +928,15 @@ def _wipe(db: Session) -> None:
         ProcessRule,
         ProcessExecutionConfig,
         NodeAssignment,
+        TaskWorklog,
         ProcessTask,
         ProcessInstance,
         ProcessTaskEvent,
         IdempotencyRecord,
         ProcessBenchmarkMap,
+        BenchmarkMetric,
         ProcessModelVersion,
+        NodeTool,
         ProcessEdge,
         ProcessNode,
         ProjectStep,
@@ -795,8 +955,9 @@ def _wipe(db: Session) -> None:
         InboundWebhook,
         Notification,
         AuditLog,
-        OrgUnit,
         User,
+        Position,
+        OrgUnit,
     ):
         db.query(model).delete()
     for level in (4, 3, 2, 1):
@@ -811,10 +972,12 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     if reset:
         _wipe(db)
 
-    # 先建组织，再建用户：演示账号要挂到集团/分公司
+    # 先建组织，再建岗位/用户：演示账号要挂到集团/分公司与岗位
     org_ids = _seed_org_units(db)
-    user_ids = _seed_users(db, org_ids)
-    code_to_id = _seed_process_arch(db, user_ids)
+    org_name_ids = {org.name: org.id for org in db.scalars(select(OrgUnit)).all()}
+    position_ids = _seed_positions(db, org_ids)
+    user_ids = _seed_users(db, org_ids, position_ids)
+    code_to_id = _seed_process_arch(db, user_ids, org_name_ids)
     _seed_workflow(db)
     _seed_tools(db)
     _seed_step_contracts(db)
@@ -824,7 +987,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_kpis(db, code_to_id)
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids)
-    _seed_design_models(db, code_to_id)
+    _seed_design_models(db, code_to_id, position_ids)
     _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)
     _seed_notifications(db, user_ids)
@@ -853,6 +1016,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "knowledge_tags": db.scalar(select(func.count()).select_from(KnowledgeTag)) or 0,
         "users": db.scalar(select(func.count()).select_from(User)) or 0,
         "org_units": db.scalar(select(func.count()).select_from(OrgUnit)) or 0,
+        "positions": db.scalar(select(func.count()).select_from(Position)) or 0,
         "process_nodes": db.scalar(select(func.count()).select_from(ProcessNode)) or 0,
         "process_edges": db.scalar(select(func.count()).select_from(ProcessEdge)) or 0,
         "process_instances": db.scalar(select(func.count()).select_from(ProcessInstance)) or 0,
@@ -868,6 +1032,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,
         "benchmark_mappings": db.scalar(select(func.count()).select_from(ProcessBenchmarkMap)) or 0,
+        "benchmark_metrics": db.scalar(select(func.count()).select_from(BenchmarkMetric)) or 0,
     }
 
 
@@ -892,7 +1057,7 @@ def seed_reference(db: Session) -> Dict[str, int]:
     - 24 步标准工作流模板
     - 33 个方法论工具
     - 步骤契约与交付物定义（标准侧，不含项目实例）
-    - SCOR / APQC PCF 框架与分类（不含流程映射）
+    - SCOR 与 APQC PCF v8.0（跨行业/消费品/消费电子）框架、分类与指标目录（不含流程映射）
 
     组织单元属于主数据，生产环境由管理员通过 `/org-units` 维护，不在这里灌。
     按表判空，可重复执行。
@@ -905,6 +1070,7 @@ def seed_reference(db: Session) -> Dict[str, int]:
         "step_contract_levels": 0,
         "benchmark_frameworks": 0,
         "benchmark_categories": 0,
+        "benchmark_metrics": 0,
     }
     if (db.scalar(select(func.count()).select_from(WorkflowTemplate)) or 0) == 0:
         _seed_workflow(db)
@@ -921,8 +1087,14 @@ def seed_reference(db: Session) -> Dict[str, int]:
         created["deliverable_definitions"] = len(deliverable_data.DELIVERABLES)
     if (db.scalar(select(func.count()).select_from(BenchmarkFramework)) or 0) == 0:
         _seed_benchmarks(db, {}, with_mappings=False)
-        created["benchmark_frameworks"] = len(benchmark_data.BENCHMARK_FRAMEWORKS)
-        created["benchmark_categories"] = len(benchmark_data.BENCHMARK_CATEGORIES)
+        pcf_dataset = pcf_data.load_pcf_v80()
+        created["benchmark_frameworks"] = len(benchmark_data.BENCHMARK_FRAMEWORKS) + len(
+            pcf_dataset["frameworks"]
+        )
+        created["benchmark_categories"] = len(benchmark_data.BENCHMARK_CATEGORIES) + sum(
+            len(framework["categories"]) for framework in pcf_dataset["frameworks"]
+        )
+        created["benchmark_metrics"] = len(pcf_dataset["metrics"])
     db.commit()
     return created
 
@@ -998,6 +1170,7 @@ def _benchmark_counts(db: Session) -> Dict[str, int]:
         or 0,
         "benchmark_categories": db.scalar(select(func.count()).select_from(BenchmarkCategory)) or 0,
         "benchmark_mappings": db.scalar(select(func.count()).select_from(ProcessBenchmarkMap)) or 0,
+        "benchmark_metrics": db.scalar(select(func.count()).select_from(BenchmarkMetric)) or 0,
     }
 
 
@@ -1017,6 +1190,7 @@ def seed_benchmarks_if_empty(db: Session) -> Optional[Dict[str, int]]:
 def reset_benchmarks(db: Session) -> Dict[str, int]:
     """只重建对标框架数据，不动业务数据。"""
     db.query(ProcessBenchmarkMap).delete()
+    db.query(BenchmarkMetric).delete()
     for level in (5, 4, 3, 2, 1):
         db.query(BenchmarkCategory).filter(BenchmarkCategory.level == level).delete()
     db.query(BenchmarkFramework).delete()

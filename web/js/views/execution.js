@@ -1030,10 +1030,12 @@ async function openTask(taskId, forceManual) {
   const gen = openModal('加载中…', skeleton(4));
   let task;
   let events = [];
+  let worklogs = [];
   try {
-    [task, events] = await Promise.all([
+    [task, events, worklogs] = await Promise.all([
       GET('/execution/tasks/' + taskId),
       GET('/execution/tasks/' + taskId + '/events'),
+      GET('/execution/tasks/' + taskId + '/worklogs'),
     ]);
   } catch (e) {
     if (modalAlive(gen)) {
@@ -1050,12 +1052,20 @@ async function openTask(taskId, forceManual) {
       <td>${esc(evt.actor_name || '系统')}</td>
       <td class="tiny">${esc((evt.detail && evt.detail.comment) || '')}</td></tr>`).join('')
     || emptyRow(5, '暂无任务事件');
+  const worklogRows = (worklogs || []).map((row) => `
+    <tr><td class="tiny">${dtShort(row.created_at)}</td>
+      <td>${esc(row.user_name || '—')}</td>
+      <td>${esc(row.work_type_label || row.work_type)}</td>
+      <td>${row.effort_minutes} 分钟</td>
+      <td class="tiny">${esc(row.note || '')}</td></tr>`).join('')
+    || emptyRow(5, '暂无工时记录');
   const me = AUTH.user ? AUTH.user.id : null;
   const manualMode = !!forceManual || manualBranchTask === task.id;
   const overdue = task.due_at && new Date(task.due_at).getTime() < Date.now();
   const suspended = task.instance_status === 'SUSPENDED';
   const canAct = !suspended && canWrite()
     && (task.assignee_user_id === null || task.assignee_user_id === me || canManage());
+  const canLog = canAct || canManage() || task.assignee_user_id === me;
   const options = task.next_options.map((o) =>
     `<option value="${esc(o.node_key)}">${esc(o.node_key)} ${esc(o.name)}${
       o.label ? ' · ' + esc(o.label) : ''}</option>`
@@ -1075,6 +1085,12 @@ async function openTask(taskId, forceManual) {
       <div class="field"><label>流程</label><input value="${esc(task.process_name)}" readonly></div>
       <div class="field"><label>节点</label>
         <input value="${esc(task.node_key)} · ${esc(task.task_type_label)}" readonly></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>标准工时</label>
+        <input value="${task.standard_minutes} 分钟" readonly></div>
+      <div class="field"><label>实际工时</label>
+        <input value="${task.actual_minutes} 分钟" readonly></div>
     </div>
     <div class="row2">
       <div class="field"><label>候选角色 / 泳道</label>
@@ -1100,8 +1116,20 @@ async function openTask(taskId, forceManual) {
           renderFormFields(task.form_schema)
         : `<div class="field"><label>表单数据（JSON，可选）</label>
             <textarea id="exForm" placeholder='{"审批意见":"同意","金额":10000}'>{}</textarea></div>`}
+      <div class="field"><label>本次实际工时（分钟）</label>
+        <input id="exEffort" type="number" min="0" max="10080"
+          placeholder="用于工作量统计，可留空"></div>
       <div class="field"><label>处理意见 / 备注</label>
         <input id="exComment" placeholder="处理结论或说明"></div>` : ''}
+    <div class="between mt">
+      <h3 style="margin:0">工时记录</h3>
+      ${canLog
+        ? `<button class="btn-sm" onclick="openWorklogModal(${task.id})">补录工时</button>` : ''}
+    </div>
+    <table class="tbl">
+      <thead><tr><th>时间</th><th>人员</th><th>类型</th><th>工时</th><th>备注</th></tr></thead>
+      <tbody>${worklogRows}</tbody>
+    </table>
     <h3 class="mt">任务历史</h3>
     <table class="tbl">
       <thead><tr><th>时间</th><th>事件</th><th>状态</th><th>处理人</th><th>说明</th></tr></thead>
@@ -1148,11 +1176,17 @@ async function completeTask(taskId) {
   const autoMode = !modeEl || modeEl.value === 'auto';
   const nextEl = document.getElementById('exNext');
   const commentEl = document.getElementById('exComment');
+  const effortEl = document.getElementById('exEffort');
+  const effort = effortEl && effortEl.value !== '' ? Number(effortEl.value) : null;
+  if (effort !== null && (!Number.isFinite(effort) || effort < 0)) {
+    return toast('实际工时必须是非负数', true);
+  }
   try {
     await POST('/execution/tasks/' + taskId + '/complete', {
       form_data: formData,
       next_node_key: autoMode ? null : (nextEl ? nextEl.value : null),
       comment: commentEl ? commentEl.value.trim() || null : null,
+      effort_minutes: effort,
     });
     manualBranchTask = null;
     closeModal();
@@ -1167,6 +1201,54 @@ async function completeTask(taskId) {
       openTask(taskId, true);
       return;
     }
+    toast(e.message, true);
+  }
+}
+
+async function openWorklogModal(taskId) {
+  let labels = state.executionWorklogLabels;
+  if (!labels) {
+    try {
+      const meta = await GET('/execution/meta');
+      labels = meta.worklog_type_labels || {};
+      state.executionWorklogLabels = labels;
+    } catch (e) {
+      labels = {};
+    }
+  }
+  const entries = Object.entries(labels);
+  const options = entries.length
+    ? entries.map(([value, label]) => `<option value="${value}"${
+      value === 'HANDLE' ? ' selected' : ''}>${esc(label)}</option>`).join('')
+    : '<option value="HANDLE">处理</option>';
+  openModal('补录工时', `
+    <div class="row2">
+      <div class="field"><label>工时类型</label><select id="wlType">${options}</select></div>
+      <div class="field"><label>实际工时（分钟）</label>
+        <input id="wlMinutes" type="number" min="0" max="10080" placeholder="如 30"></div>
+    </div>
+    <div class="field"><label>备注</label>
+      <input id="wlNote" placeholder="如：返工/等待/额外沟通"></div>
+    <div class="note">同一任务多次补录会累加；已完成任务也可以补录。</div>`,
+  `<button class="btn btn-g" onclick="closeModal()">取消</button>
+   <button class="btn btn-p" onclick="submitWorklog(${taskId})">保存</button>`);
+}
+
+async function submitWorklog(taskId) {
+  const minutes = Number(document.getElementById('wlMinutes').value);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return toast('请填写大于 0 的工时', true);
+  }
+  try {
+    await POST('/execution/tasks/' + taskId + '/worklogs', {
+      work_type: document.getElementById('wlType').value || 'HANDLE',
+      effort_minutes: minutes,
+      note: document.getElementById('wlNote').value.trim() || null,
+    });
+    toast('工时已补录');
+    closeModal();
+    openTask(taskId);
+  } catch (e) {
     toast(e.message, true);
   }
 }
@@ -1269,6 +1351,7 @@ export {
   renderExecution, cancelInstance, claimTask, completeTask, deleteEndpoint, deleteForm,
   deleteInboundHook, deleteRule, editEndpointModal, editFormModal, editInboundHookModal,
   editRuleModal, loadStartNodes, openAssignmentModal, openInstance, openTask,
+  openWorklogModal, submitWorklog,
   resumeInstance, retryDelivery, runDeliveries, runEscalationScan, saveExecutionConfig,
   setExecutionConfigProcess,
   setExecutionFilter, setExecutionTab, startInstanceModal, submitAssignment,

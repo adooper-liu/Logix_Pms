@@ -8,9 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import OrgUnitType
-from app.models.org import OrgUnit
+from app.models.org import OrgUnit, Position
+from app.models.process import ProcessArch
 from app.models.process_document import ProcessDocument
 from app.models.tool_template import ToolTemplate
+from app.models.user import User
 from app.schemas.org import OrgUnitMeta, OrgUnitOut, OrgUnitTree
 
 TYPE_LABELS: Dict[str, str] = {
@@ -71,9 +73,21 @@ def delete_org(db: Session, org: OrgUnit) -> None:
         )
         or 0
     )
-    if children or documents or templates:
+    positions = (
+        db.scalar(select(func.count()).select_from(Position).where(Position.org_unit_id == org.id))
+        or 0
+    )
+    processes = (
+        db.scalar(
+            select(func.count()).select_from(ProcessArch).where(ProcessArch.org_unit_id == org.id)
+        )
+        or 0
+    )
+    users = db.scalar(select(func.count()).select_from(User).where(User.org_unit_id == org.id)) or 0
+    if children or documents or templates or positions or processes or users:
         raise OrgError(
-            f"组织仍有 {children} 个下级、{documents} 份标准文件、{templates} 个模板，"
+            f"组织仍有 {children} 个下级、{documents} 份标准文件、{templates} 个模板、"
+            f"{positions} 个岗位、{processes} 条流程、{users} 个用户，"
             "请停用（is_active=false）而不是删除"
         )
     db.delete(org)

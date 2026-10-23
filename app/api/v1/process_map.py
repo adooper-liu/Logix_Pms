@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, ManagerUser, apply_owner_update, resolve_owner
 from app.models.benchmark import ProcessBenchmarkMap
@@ -15,13 +16,20 @@ from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project
 from app.schemas.common import DeleteResult
 from app.schemas.process import (
+    DraftPromoteRequest,
+    DraftPromoteResult,
     HeatmapItem,
+    PcfDraftPreview,
+    PcfDraftRequest,
+    PcfDraftResult,
     ProcessArchCreate,
     ProcessArchOut,
     ProcessArchTree,
     ProcessArchUpdate,
 )
 from app.services import audit as audit_service
+from app.services import org_unit as org_service
+from app.services import pcf_draft as pcf_draft_service
 
 router = APIRouter(prefix="/process-map", tags=["流程地图"])
 
@@ -55,12 +63,17 @@ def _to_out(p: ProcessArch) -> ProcessArchOut:
         owner=p.owner,
         owner_user_id=p.owner_user_id,
         department=p.department,
+        org_unit_id=p.org_unit_id,
+        org_unit_name=p.org_unit_name,
         description=p.description,
         strategic_importance=p.strategic_importance,
         pain_score=p.pain_score,
         improvement_space=p.improvement_space,
         health_score=p.health_score,
         is_improvement_target=p.is_improvement_target,
+        is_draft=p.is_draft,
+        source_framework_code=p.source_framework_code,
+        source_external_id=p.source_external_id,
         priority_score=p.priority_score,
         heat_level=_heat_level(p),
     )
@@ -75,7 +88,9 @@ def get_tree(
     max_level: int = Query(default=4, ge=1, le=4),
     improvement_only: bool = Query(default=False, description="只看待改善的流程"),
 ):
-    rows = db.scalars(select(ProcessArch).order_by(ProcessArch.code)).all()
+    rows = db.scalars(
+        select(ProcessArch).options(selectinload(ProcessArch.org_unit)).order_by(ProcessArch.code)
+    ).all()
     if improvement_only:
         rows = [r for r in rows if r.is_improvement_target]
     by_parent: dict = {}
@@ -107,7 +122,7 @@ def list_processes(
     keyword: Optional[str] = None,
     improvement_only: bool = False,
 ):
-    stmt = select(ProcessArch)
+    stmt = select(ProcessArch).options(selectinload(ProcessArch.org_unit))
     if level is not None:
         stmt = stmt.where(ProcessArch.level == level)
     if parent_id is not None:
@@ -133,7 +148,12 @@ def heatmap(
     level: int = Query(default=3, ge=1, le=4, description="默认看 L3 流程层"),
     limit: int = Query(default=20, ge=1, le=100),
 ):
-    rows = db.scalars(select(ProcessArch).where(ProcessArch.level == level)).all()
+    rows = db.scalars(
+        select(ProcessArch).where(
+            ProcessArch.level == level,
+            ProcessArch.is_draft.is_(False),
+        )
+    ).all()
     project_counts = dict(
         db.execute(
             select(Project.process_id, func.count(Project.id))
@@ -180,7 +200,14 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
         raise HTTPException(status_code=409, detail=f"流程编码 {payload.code} 已存在")
     if payload.parent_id is not None and db.get(ProcessArch, payload.parent_id) is None:
         raise HTTPException(status_code=400, detail="parent_id 指向的流程不存在")
+    if payload.org_unit_id is not None:
+        try:
+            org_service.require_org(db, payload.org_unit_id)
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     data = payload.model_dump()
+    if data.get("org_unit_id") and not data.get("department"):
+        data["department"] = org_service.require_org(db, data["org_unit_id"]).name
     data["owner_user_id"], data["owner"] = resolve_owner(
         db, data.get("owner_user_id"), data.get("owner")
     )
@@ -193,12 +220,68 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
     return _to_out(obj)
 
 
+@router.post(
+    "/pcf/preview",
+    response_model=PcfDraftPreview,
+    summary="预览从 PCF 生成流程草稿",
+)
+def preview_pcf_draft(payload: PcfDraftRequest, db: DbSession, user: ManagerUser):
+    return pcf_draft_service.preview_draft(db, payload)
+
+
+@router.post(
+    "/pcf/generate",
+    response_model=PcfDraftResult,
+    status_code=status.HTTP_201_CREATED,
+    summary="从 PCF 生成本地流程架构草稿",
+)
+def generate_pcf_draft(payload: PcfDraftRequest, db: DbSession, user: ManagerUser):
+    result = pcf_draft_service.generate(db, payload)
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "process_draft",
+        result.created_process_ids[0] if result.created_process_ids else 0,
+        f"从 {result.framework_code} 生成 {result.create_count} 个流程草稿"
+        f"（复用 {result.reuse_count} 个）",
+    )
+    db.commit()
+    return result
+
+
+@router.post(
+    "/drafts/promote",
+    response_model=DraftPromoteResult,
+    summary="确认流程架构草稿",
+)
+def promote_process_drafts(payload: DraftPromoteRequest, db: DbSession, user: ManagerUser):
+    updated = pcf_draft_service.promote_drafts(db, payload.process_ids)
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_draft",
+        payload.process_ids[0],
+        f"确认 {updated} 个流程架构草稿",
+    )
+    db.commit()
+    return DraftPromoteResult(updated=updated)
+
+
 @router.patch("/{process_id}", response_model=ProcessArchOut, summary="更新流程节点")
 def update_process(process_id: int, payload: ProcessArchUpdate, db: DbSession, user: ManagerUser):
     obj = db.get(ProcessArch, process_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="流程不存在")
     data = payload.model_dump(exclude_unset=True)
+    if data.get("org_unit_id") is not None:
+        try:
+            org = org_service.require_org(db, data["org_unit_id"])
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not data.get("department") and not obj.department:
+            data["department"] = org.name
     apply_owner_update(db, data, obj.owner)
     changed = sorted(data.keys())
     for field, value in data.items():

@@ -41,6 +41,8 @@ class ProcessDocument(Base):
     title: Mapped[str] = mapped_column(String(200))
     category: Mapped[str] = mapped_column(String(24), index=True)  # ProcessDocumentCategory
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 可选的活动级绑定：NULL = 流程级标准；非空 = 仅针对该 BPMN 节点
+    node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     owner_user_id: Mapped[Optional[int]] = mapped_column(
@@ -84,7 +86,10 @@ class ProcessDocument(Base):
         order_by="ProcessDocumentVersion.id",
     )
 
-    __table_args__ = (Index("ix_process_document_process_category", "process_id", "category"),)
+    __table_args__ = (
+        Index("ix_process_document_process_category", "process_id", "category"),
+        Index("ix_process_document_process_node", "process_id", "node_key"),
+    )
 
 
 class ProcessDocumentVersion(Base):

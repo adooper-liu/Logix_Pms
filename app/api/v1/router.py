@@ -20,6 +20,7 @@ from app.api.v1 import (
     monitor,
     notifications,
     orgs,
+    positions,
     process_documents,
     process_map,
     projects,
@@ -57,6 +58,7 @@ protected.include_router(designer.router)
 protected.include_router(monitor.router)
 protected.include_router(notifications.router)
 protected.include_router(orgs.router)
+protected.include_router(positions.router)
 protected.include_router(knowledge.router)
 api_router.include_router(protected)
 

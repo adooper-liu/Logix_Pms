@@ -39,6 +39,8 @@ NODE_FIELDS = (
     "node_type",
     "lane",
     "owner_role",
+    "process_arch_id",
+    "owner_position_id",
     "duration_minutes",
     "wait_minutes",
     "cost",

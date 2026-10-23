@@ -53,6 +53,7 @@ class ProcessDocumentOut(ORMModel):
     process_id: int
     process_code: Optional[str] = None
     process_name: Optional[str] = None
+    node_key: Optional[str] = Field(default=None, description="关联的 BPMN 节点；NULL=流程级")
     code: str
     title: str
     category: str
@@ -85,6 +86,7 @@ class ProcessDocumentDetail(ProcessDocumentOut):
 
 class ProcessDocumentCreate(BaseModel):
     process_id: int
+    node_key: Optional[str] = Field(default=None, max_length=64, description="关联活动节点")
     code: Optional[str] = Field(default=None, description="不传则自动生成 PD-<流程编码>-NN")
     title: str = Field(min_length=1, max_length=200)
     category: ProcessDocumentCategory = ProcessDocumentCategory.SOP
@@ -99,6 +101,7 @@ class ProcessDocumentCreate(BaseModel):
 
 
 class ProcessDocumentUpdate(BaseModel):
+    node_key: Optional[str] = Field(default=None, max_length=64)
     title: Optional[str] = Field(default=None, max_length=200)
     category: Optional[ProcessDocumentCategory] = None
     description: Optional[str] = None

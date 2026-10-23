@@ -92,6 +92,7 @@ def meta():
 def list_documents(
     db: DbSession,
     process_id: Optional[int] = None,
+    node_key: Optional[str] = Query(default=None, description="按活动节点过滤"),
     project_id: Optional[int] = None,
     org_unit_id: Optional[int] = Query(
         default=None, description="按组织范围过滤：集团通用 + 本级 + 上级继承"
@@ -122,6 +123,8 @@ def list_documents(
             )
         else:
             stmt = stmt.where(ProcessDocument.process_id == process_id)
+    if node_key:
+        stmt = stmt.where(ProcessDocument.node_key == node_key)
     if project_id is not None:
         project = db.get(Project, project_id)
         if project is None:
@@ -190,6 +193,10 @@ def create_document(payload: ProcessDocumentCreate, db: DbSession, user: Manager
     if db.scalar(select(ProcessDocument).where(ProcessDocument.code == code)):
         raise HTTPException(status_code=409, detail=f"标准文件编码 {code} 已存在")
     data = as_columns(payload.model_dump(exclude={"code"}))
+    try:
+        document_service.validate_node_key(db, payload.process_id, data.get("node_key"))
+    except document_service.ProcessDocumentError as exc:
+        raise _fail(exc) from exc
     if data.get("org_unit_id") is not None:
         try:
             org_service.require_org(db, data["org_unit_id"])
@@ -234,6 +241,11 @@ def update_document(
 ):
     document = _get(db, document_id)
     data = as_columns(payload.model_dump(exclude_unset=True))
+    if "node_key" in data:
+        try:
+            document_service.validate_node_key(db, document.process_id, data["node_key"])
+        except document_service.ProcessDocumentError as exc:
+            raise _fail(exc) from exc
     if data.get("org_unit_id") is not None:
         try:
             org_service.require_org(db, data["org_unit_id"])

@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, CurrentUser, DbSession, ManagerUser
 from app.core.security import create_token, hash_password, using_dev_secret, verify_password
@@ -25,6 +26,7 @@ from app.schemas.user import (
 from app.services import audit as audit_service
 from app.services import org_unit as org_service
 from app.services import ownership as ownership_service
+from app.services import position as position_service
 
 router = APIRouter(prefix="/auth", tags=["认证与权限"])
 audit_router = APIRouter(prefix="/audit", tags=["审计"])
@@ -78,7 +80,7 @@ def list_users(
     role: Optional[Role] = None,
     active_only: bool = False,
 ):
-    stmt = select(User)
+    stmt = select(User).options(selectinload(User.org_unit), selectinload(User.position))
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(
@@ -108,6 +110,11 @@ def create_user(payload: UserCreate, admin: AdminUser, db: DbSession):
             org_service.require_org(db, payload.org_unit_id)
         except org_service.OrgError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.position_id is not None:
+        try:
+            position_service.require_position(db, payload.position_id)
+        except position_service.PositionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     obj = User(
         username=payload.username.strip(),
         display_name=payload.display_name.strip(),
@@ -115,6 +122,7 @@ def create_user(payload: UserCreate, admin: AdminUser, db: DbSession):
         role=payload.role.value,
         department=payload.department,
         org_unit_id=payload.org_unit_id,
+        position_id=payload.position_id,
     )
     db.add(obj)
     db.flush()
@@ -139,6 +147,11 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
         try:
             org_service.require_org(db, data["org_unit_id"])
         except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if data.get("position_id") is not None:
+        try:
+            position_service.require_position(db, data["position_id"])
+        except position_service.PositionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     new_role = data.get("role", obj.role)

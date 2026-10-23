@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import or_, select
 
 from app.api.deps import DbSession
-from app.models.enums import ToolCategory
+from app.models.enums import ToolCategory, ToolLevel
 from app.models.tool import Tool
 from app.schemas.tool import (
     ToolBrief,
@@ -28,6 +28,20 @@ CATEGORY_LABELS = {
     ToolCategory.DEPLOY.value: "落地工具",
     ToolCategory.MONITOR.value: "监控工具",
 }
+
+TOOL_LEVEL_LABELS = {
+    ToolLevel.REQUIRED.value: "必需",
+    ToolLevel.RECOMMENDED.value: "推荐",
+    ToolLevel.OPTIONAL.value: "可选",
+}
+
+
+@router.get("/meta", summary="工具分类与使用要求标签")
+def tool_meta():
+    return {
+        "category_labels": CATEGORY_LABELS,
+        "level_labels": TOOL_LEVEL_LABELS,
+    }
 
 
 @router.get(

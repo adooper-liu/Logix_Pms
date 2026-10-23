@@ -4,7 +4,12 @@
 """
 
 from app.models.baseline import AssetBaseline
-from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
+from app.models.benchmark import (
+    BenchmarkCategory,
+    BenchmarkFramework,
+    BenchmarkMetric,
+    ProcessBenchmarkMap,
+)
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -47,6 +52,7 @@ from app.models.execution import (
     ProcessRule,
     ProcessTask,
     ProcessTaskEvent,
+    TaskWorklog,
 )
 from app.models.governance import GovernanceFinding
 from app.models.integration import (
@@ -58,8 +64,8 @@ from app.models.integration import (
 from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
-from app.models.org import OrgUnit
-from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
+from app.models.org import OrgUnit, Position
+from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.sketch import Sketch
@@ -73,6 +79,7 @@ __all__ = [
     "ProcessModelVersion",
     "ProcessNode",
     "ProcessEdge",
+    "NodeTool",
     "ProcessDocument",
     "ProcessDocumentVersion",
     "Project",
@@ -96,12 +103,14 @@ __all__ = [
     "AuditLog",
     "BenchmarkFramework",
     "BenchmarkCategory",
+    "BenchmarkMetric",
     "ProcessBenchmarkMap",
     "AssetBaseline",
     "GovernanceFinding",
     "ProcessInstance",
     "ProcessTask",
     "ProcessTaskEvent",
+    "TaskWorklog",
     "IdempotencyRecord",
     "FormDefinition",
     "ProcessRule",
@@ -109,6 +118,7 @@ __all__ = [
     "NodeAssignment",
     "Notification",
     "OrgUnit",
+    "Position",
     "IntegrationEndpoint",
     "IntegrationDelivery",
     "InboundWebhook",

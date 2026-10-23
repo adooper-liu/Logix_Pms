@@ -16,6 +16,11 @@ class BenchmarkFrameworkOut(BaseModel):
     name_en: Optional[str] = None
     version: Optional[str] = None
     description: Optional[str] = None
+    industry: Optional[str] = None
+    is_primary: bool = False
+    base_framework_code: Optional[str] = None
+    generated_on: Optional[str] = None
+    attribution: Optional[str] = None
     is_active: bool = True
     category_count: int = 0
     mapped_process_count: int = 0
@@ -32,9 +37,15 @@ class BenchmarkCategoryOut(BaseModel):
     code: str
     name: str
     name_en: Optional[str] = None
+    name_zh: Optional[str] = None
+    external_id: Optional[str] = None
     level: int
     parent_id: Optional[int] = None
     description: Optional[str] = None
+    metrics_available: bool = False
+    metric_count: int = 0
+    difference_index: int = 0
+    change_details: Optional[str] = None
     mapped_process_count: int = 0
     subtree_mapped_process_count: int = 0
     children: List["BenchmarkCategoryOut"] = []
@@ -57,6 +68,7 @@ class BenchmarkMappingOut(BaseModel):
     process_name: str
     category_id: int
     category_code: str
+    category_external_id: Optional[str] = None
     category_name: str
     category_level: int
     framework_code: str
@@ -76,9 +88,35 @@ class CoverageCategoryOut(BaseModel):
     code: str
     name: str
     name_en: Optional[str] = None
+    name_zh: Optional[str] = None
+    external_id: Optional[str] = None
     level: int
+    description: Optional[str] = None
+    metric_count: int = 0
     mapped_count: int = 0
     processes: List[ProcessRef] = []
+
+
+class BenchmarkMetricOut(BaseModel):
+    id: int
+    external_id: str
+    metric_id: str
+    metric_category: Optional[str] = None
+    name: str
+    formula: Optional[str] = None
+    unit: Optional[str] = None
+    source: Optional[str] = None
+
+
+class CategoryMetricsOut(BaseModel):
+    """某个分类元素挂载的 PCF 指标；按 PCF ID 跨变体共用。"""
+
+    category_id: int
+    code: str
+    name: str
+    name_en: Optional[str] = None
+    external_id: Optional[str] = None
+    metrics: List[BenchmarkMetricOut] = []
 
 
 class FrameworkCoverageOut(BaseModel):

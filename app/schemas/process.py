@@ -23,6 +23,7 @@ class ProcessArchBase(BaseModel):
         default=None, description="归属账号 id，权限判断以它为准；不传则按 owner 姓名尝试绑定"
     )
     department: Optional[str] = Field(default=None, max_length=64)
+    org_unit_id: Optional[int] = Field(default=None, description="归属组织（主数据外键）")
     description: Optional[str] = None
 
     strategic_importance: float = Field(default=3.0, ge=0, le=5)
@@ -41,6 +42,7 @@ class ProcessArchUpdate(BaseModel):
     owner: Optional[str] = None
     owner_user_id: Optional[int] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
     description: Optional[str] = None
     strategic_importance: Optional[float] = Field(default=None, ge=0, le=5)
     pain_score: Optional[float] = Field(default=None, ge=0, le=5)
@@ -58,12 +60,17 @@ class ProcessArchOut(ORMModel):
     owner: Optional[str] = None
     owner_user_id: Optional[int] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
+    org_unit_name: Optional[str] = None
     description: Optional[str] = None
     strategic_importance: float
     pain_score: float
     improvement_space: float
     health_score: Optional[float] = None
     is_improvement_target: bool
+    is_draft: bool = False
+    source_framework_code: Optional[str] = None
+    source_external_id: Optional[str] = None
     priority_score: float = Field(default=0, description="战略重要性 × 痛点 × 改善空间")
     heat_level: str = Field(
         default="LOW", description="CRITICAL / HIGH / MEDIUM / LOW，由后端统一判定"
@@ -95,6 +102,49 @@ class HeatmapItem(BaseModel):
     heat_level: str = Field(description="CRITICAL / HIGH / MEDIUM / LOW")
 
 
+# ---------------------------------------------------------------- PCF 架构草稿
+
+
+class PcfDraftRequest(BaseModel):
+    """从标准分类树勾选节点，生成企业流程架构草稿。"""
+
+    framework_code: str = Field(default="APQC_PCF", max_length=32)
+    external_ids: List[str] = Field(min_length=1, max_length=500, description="PCF ID 列表")
+    include_activities: bool = Field(default=True, description="同时生成 L4 活动")
+
+
+class PcfDraftItem(BaseModel):
+    external_id: str
+    pcf_code: str
+    name: str
+    name_en: Optional[str] = None
+    level: int
+    state: str = Field(description="CREATE 新建 / REUSE 复用已有流程")
+    process_id: Optional[int] = None
+
+
+class PcfDraftPreview(BaseModel):
+    framework_code: str
+    framework_name: str
+    framework_version: Optional[str] = None
+    create_count: int
+    reuse_count: int
+    by_level: Dict[str, Dict[str, int]] = {}
+    items: List[PcfDraftItem] = []
+
+
+class PcfDraftResult(PcfDraftPreview):
+    created_process_ids: List[int] = []
+
+
+class DraftPromoteRequest(BaseModel):
+    process_ids: List[int] = Field(min_length=1, max_length=2000)
+
+
+class DraftPromoteResult(BaseModel):
+    updated: int
+
+
 # ---------------------------------------------------------------- 流程设计器
 
 
@@ -104,6 +154,8 @@ class ProcessNodeIn(BaseModel):
     node_type: NodeType = NodeType.TASK
     lane: str = Field(default="主流程", max_length=64, description="泳道 = 部门/角色")
     owner_role: Optional[str] = Field(default=None, max_length=64)
+    process_arch_id: Optional[int] = Field(default=None, description="统一活动 ID（L4 活动）")
+    owner_position_id: Optional[int] = Field(default=None, description="负责人岗位")
 
     duration_minutes: float = Field(default=0, ge=0, description="作业时间(分钟)")
     wait_minutes: float = Field(default=0, ge=0, description="等待/排队时间(分钟)")
@@ -124,6 +176,8 @@ class ProcessNodeOut(ORMModel):
     node_type: str
     lane: str
     owner_role: Optional[str] = None
+    process_arch_id: Optional[int] = None
+    owner_position_id: Optional[int] = None
     duration_minutes: float
     wait_minutes: float
     cost: float
@@ -232,6 +286,8 @@ class ProcessNodeMetricsUpdate(BaseModel):
     approval_levels: Optional[int] = Field(default=None, ge=0, le=10)
     is_value_added: Optional[bool] = None
     owner_role: Optional[str] = Field(default=None, max_length=64)
+    process_arch_id: Optional[int] = None
+    owner_position_id: Optional[int] = None
     expected_version: Optional[int] = Field(
         default=None, description="客户端看到的模型版本；不一致时拒绝"
     )

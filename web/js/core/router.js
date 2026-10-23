@@ -74,6 +74,7 @@ export function onSearch(value) {
       RENDERERS.projects();
     } else if (v === 'knowledge') {
       state.knowledge.keyword = value;
+      state.knowledge.page = 1;
       RENDERERS.knowledge();
     } else if (v === 'toolbox') {
       state.toolboxKeyword = value;
@@ -81,6 +82,9 @@ export function onSearch(value) {
     } else if (v === 'map') {
       state.mapKeyword = value;
       RENDERERS.map();
+    } else if (v === 'pcf') {
+      state.pcf.keyword = value;
+      RENDERERS.pcf();
     }
   }, 260);
 }

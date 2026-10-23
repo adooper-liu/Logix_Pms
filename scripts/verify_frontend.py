@@ -165,6 +165,29 @@ def main() -> int:
                 page.wait_for_timeout(700)
             assert picked, "没有可编辑的演示流程（需要非评审、至少 6 个节点且含 n3）"
             page.select_option("#view select.sel", value=str(picked["id"]))
+
+        def select_bpmn_node(key: str) -> None:
+            """自动布局下连线命中区可能压过节点，用 bpmn-js 选择 API 稳定选中。"""
+            page.evaluate(
+                """(key) => {
+                  const modeler = window.__bpmnSpike.modeler;
+                  modeler.get('selection').select(
+                    modeler.get('elementRegistry').get(key));
+                }""",
+                key,
+            )
+            page.wait_for_timeout(300)
+
+        def start_bpmn_direct_editing(key: str) -> None:
+            page.evaluate(
+                """(key) => {
+                  const modeler = window.__bpmnSpike.modeler;
+                  modeler.get('directEditing').activate(
+                    modeler.get('elementRegistry').get(key));
+                }""",
+                key,
+            )
+            page.wait_for_timeout(300)
             page.wait_for_timeout(1500)
 
         def pick_review_design() -> dict | None:
@@ -230,22 +253,93 @@ def main() -> int:
             assert "L4-201" in selected, f"管理入口未带入流程：{selected}"
 
         # 对标框架：同一层流程切换 SCOR / APQC，覆盖率应有差异
+        # 从 PCF 生成架构草稿：只验证勾选与预览，不落库
+        def pcf_draft_wizard() -> None:
+            goto("map")
+            page.click('#view button:has-text("从 PCF 生成")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_selector("#pcfTree .pcf-node", timeout=8000)
+            options = page.eval_on_selector_all(
+                "#pcfFramework option", "els => els.map(e => e.value)"
+            )
+            assert {"APQC_PCF", "APQC_PCF_CP", "APQC_PCF_CE"} <= set(options), options
+
+            page.fill("#pcfSearch", "建立和维护流程管理治理")
+            page.wait_for_timeout(400)
+            leaf = page.locator(
+                '#pcfTree label.pcf-label:has-text("建立和维护流程管理治理") input'
+            ).first
+            leaf.check()
+            page.click('#mFoot button:has-text("预览")')
+            page.wait_for_selector('#pcfPreview:has-text("将新建")', timeout=8000)
+            text = page.inner_text("#pcfPreview")
+            assert "L3 新建 1" in text, text
+            assert "L4 新建 4" in text, text
+            assert "L1 新建 1" in text and "L2 新建 1" in text, text
+            close_modal()
+
+        # PCF 分类浏览：层级、双语、官方定义与指标
+        def pcf_browser() -> None:
+            goto("pcf")
+            page.wait_for_selector("#pcfRows .pcf-row", timeout=12000)
+            text = page.inner_text("#view")
+            assert "L1 流程类" in text and "L5 任务" in text, text[:200]
+            assert "PCF 是分类，不是流程图" in text
+            assert page.locator("#pcfRows .pcf-row").count() >= 13
+
+            page.fill("#pcfQ", "采购物料与服务")
+            page.wait_for_timeout(500)
+            assert "采购物料与服务" in page.inner_text("#pcfRows")
+            page.click('#pcfRows .pcf-row:has-text("采购物料与服务")')
+            page.wait_for_selector("#pcfDetail h3", timeout=8000)
+            detail = page.inner_text("#pcfDetail")
+            assert "Procure materials and services" in detail, detail[:160]
+            assert "PCF ID 10216" in detail, detail[:160]
+            assert "官方定义" in detail
+
+            page.wait_for_selector("#pcfMetricBox table", timeout=10000)
+            assert "指标 ID" in page.inner_text("#pcfMetricBox")
+
         def benchmark_switch() -> None:
             goto("map")
+            options = page.eval_on_selector_all(
+                "#view select[title='切换对标框架'] option", "els => els.map(e => e.value)"
+            )
+            assert {"SCOR", "APQC_PCF", "APQC_PCF_CP", "APQC_PCF_CE"} <= set(options), options
+
             page.select_option("#view select[title='切换对标框架']", "SCOR")
-            page.wait_for_selector("#view :text('对标覆盖')", timeout=8000)
+            page.wait_for_selector("#view .card h3:has-text('SCOR')", timeout=8000)
+            page.wait_for_selector("#view .map-bench-pill", state="visible", timeout=8000)
             text = page.inner_text("#view")
             assert "24/28" in text, f"SCOR 覆盖率渲染异常：{text[:160]!r}"
             assert "L3-010" in text, "SCOR 应显示研发类未覆盖流程"
 
             page.select_option("#view select[title='切换对标框架']", "APQC_PCF")
+            page.wait_for_selector("#view .card h3:has-text('跨行业')", timeout=8000)
             page.wait_for_selector("#view :text('28/28')", timeout=8000)
             text = page.inner_text("#view")
             assert "所有 L3 流程" in text, f"APQC 应全量覆盖：{text[:160]!r}"
+            assert "主框架" in text, "APQC 跨行业版应标记为主框架"
+            assert "分类框架来源与署名" in text, "应展示 APQC 署名"
 
+            # 消费电子行业配置也能覆盖公司流程
+            page.select_option("#view select[title='切换对标框架']", "APQC_PCF_CE")
+            page.wait_for_selector("#view .card h3:has-text('消费电子')", timeout=8000)
+            page.wait_for_selector("#view :text('28/28')", timeout=8000)
+            assert "消费电子" in page.inner_text("#view")
+
+            page.select_option("#view select[title='切换对标框架']", "APQC_PCF")
+            page.wait_for_selector("#view .card h3:has-text('跨行业')", timeout=8000)
+            page.wait_for_selector("#view .map-bench-pill", state="visible", timeout=8000)
             page.click("#view .map-bench-pill >> nth=0")
-            page.wait_for_selector("#mBody table")
+            page.wait_for_selector("#mBody table", state="visible")
             assert "编码" in page.inner_text("#mBody")
+            assert "查看 PCF 指标" in page.inner_text("#mFoot"), "分类弹窗应提供指标入口"
+
+            page.click('#mFoot button:has-text("查看 PCF 指标")')
+            page.wait_for_selector("#mBody table", state="visible")
+            body = page.inner_text("#mBody")
+            assert "指标 ID" in body and "公式" in body, body[:160]
             close_modal()
 
         # 标准工作流：步骤详情
@@ -413,6 +507,7 @@ def main() -> int:
             page.wait_for_selector("#mask.show")
             body = page.inner_text("#mBody")
             assert "所属流程" in body, "新建标准文件弹窗缺少流程选择"
+            assert "关联活动" in body, "新建标准文件弹窗缺少活动绑定"
             assert "适用范围" in body and "集团总部" in body, "新建标准文件缺少组织范围"
             assert "变体策略" in body and "依据上级标准" in body, "新建标准文件缺少变体配置"
             close_modal()
@@ -509,6 +604,27 @@ def main() -> int:
             page.wait_for_selector("#mask.show")
             assert "组织编码" in page.inner_text("#mBody")
             close_modal()
+
+            # 岗位主数据：新建 → 列表出现 → 删除
+            suffix = str(int(time.time() * 1000))[-5:]
+            position_code = "POS-E2E" + suffix
+            position_name = "E2E岗位" + suffix
+            page.click('#view .tabs button:has-text("岗位")')
+            page.wait_for_timeout(500)
+            assert "岗位主数据" in page.inner_text("#view")
+            page.click('#view button:has-text("+ 新建岗位")')
+            page.wait_for_selector("#mask.show")
+            assert "岗位编码" in page.inner_text("#mBody")
+            page.fill("#posCode", position_code)
+            page.fill("#posName", position_name)
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1000)
+            assert position_name in page.inner_text("#view")
+            row = page.locator("#view tr").filter(has_text=position_name).first
+            page.once("dialog", lambda dialog: dialog.accept())
+            row.locator('button:has-text("删除")').click()
+            page.wait_for_timeout(1000)
+            assert position_name not in page.inner_text("#view")
 
         # 草图：draw.io embed 的 proto=json 收发的是 JSON 字符串
         def sketch_drawio_protocol() -> None:
@@ -635,9 +751,9 @@ def main() -> int:
             goto("designer")
             pick_editable_design()
             page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
+            page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
             assert page.locator("#bpmnCanvas .djs-element").count() >= 5, "画布没有渲染节点"
-            page.click('#bpmnCanvas [data-element-id="n3"]')
-            page.wait_for_timeout(300)
+            select_bpmn_node("n3")
             if not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"):
                 page.click("#bpmnPropsToggle")
             page.wait_for_selector("#bpmnSidebar.open #bpWait", timeout=8000)
@@ -684,7 +800,7 @@ def main() -> int:
                 "缺少移交节点入口"
             )
             # 选中活动节点后，属性区应能直接维护节点分派 / SLA
-            page.click('#bpmnCanvas [data-element-id="n3"]')
+            select_bpmn_node("n3")
             page.wait_for_timeout(400)
             assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
                 "单击不应自动打开属性栏"
@@ -723,7 +839,7 @@ def main() -> int:
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             # 双击只做画布内改名，不再打开侧栏
-            page.dblclick('#bpmnCanvas [data-element-id="n3"]')
+            start_bpmn_direct_editing("n3")
             page.wait_for_timeout(300)
             assert page.locator(".djs-direct-editing-parent").count() >= 1, (
                 "双击改名（bpmn-js 原生编辑）被取消了"
@@ -878,21 +994,117 @@ def main() -> int:
             model = design_model()
             row = next(item for item in model["nodes"] if item["node_type"] in ("TASK", "APPROVAL"))
             node_key = row["node_key"]
-            page.click(f'#bpmnCanvas [data-element-id="{node_key}"]')
+            # 自动布局下连线命中区可能压过节点，直接走 bpmn-js 选择 API，避免点选被连线截获。
+            page.evaluate(
+                """(key) => {
+                  const modeler = window.__bpmnSpike.modeler;
+                  const element = modeler.get('elementRegistry').get(key);
+                  modeler.get('selection').select(element);
+                }""",
+                node_key,
+            )
             page.wait_for_timeout(300)
             ensure_sidebar()
-            page.wait_for_selector("#bpOwner", timeout=5000)
+            page.wait_for_selector("#bpPosition", timeout=5000)
 
-            # 负责人
-            original_owner = page.input_value("#bpOwner")
-            page.fill("#bpOwner", "E2E负责人")
+            # 负责人岗位（主数据）
+            original_position = page.input_value("#bpPosition")
+            position_options = page.eval_on_selector_all(
+                "#bpPosition option", "els => els.map(e => e.value).filter(Boolean)"
+            )
+            target_position = next(
+                (item for item in position_options if item != original_position), None
+            )
+            assert target_position, position_options
+            page.select_option("#bpPosition", target_position)
             page.click('#bpmnSidebar button:has-text("保存指标")')
             page.wait_for_timeout(1200)
             node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
-            assert node["owner_role"] == "E2E负责人"
-            page.fill("#bpOwner", original_owner)
+            assert str(node["owner_position_id"]) == target_position, node
+            ensure_sidebar()
+            page.select_option("#bpPosition", original_position)
             page.click('#bpmnSidebar button:has-text("保存指标")')
             page.wait_for_timeout(1200)
+
+            # L4 活动关联
+            ensure_sidebar()
+            original_activity = page.input_value("#bpActivity")
+            activity_options = page.eval_on_selector_all(
+                "#bpActivity option", "els => els.map(e => e.value).filter(Boolean)"
+            )
+            target_activity = next(
+                (item for item in activity_options if item != original_activity), None
+            )
+            assert target_activity, activity_options
+            page.select_option("#bpActivity", target_activity)
+            page.click('#bpmnSidebar button:has-text("关联")')
+            page.wait_for_timeout(1200)
+            node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
+            assert str(node["process_arch_id"]) == target_activity, node
+            ensure_sidebar()
+            page.select_option("#bpActivity", original_activity)
+            page.click('#bpmnSidebar button:has-text("关联")')
+            page.wait_for_timeout(1200)
+
+            # 活动级工具绑定（新增后通过 API 清理）
+            ensure_sidebar()
+            page.wait_for_selector("#bpToolCode", timeout=5000)
+            tool_options = page.eval_on_selector_all(
+                "#bpToolCode option", "els => els.map(e => e.value).filter(Boolean)"
+            )
+            tool_code = tool_options[0]
+            page.select_option("#bpToolCode", tool_code)
+            page.click('#bpmnSidebar button:has-text("绑定")')
+            page.wait_for_timeout(1200)
+            bound_tools = page.evaluate(
+                """async ({pid, nodeKey}) => {
+                  const t = localStorage.getItem('psm_token');
+                  return await fetch('/api/v1/processes/' + pid + '/design/nodes/' +
+                    nodeKey + '/tools', {headers: {Authorization: 'Bearer ' + t}})
+                    .then(r => r.json());
+                }""",
+                {"pid": pid, "nodeKey": node_key},
+            )
+            assert any(item["tool_code"] == tool_code for item in bound_tools), bound_tools
+            page.evaluate(
+                """async ({pid, nodeKey, code}) => {
+                  const t = localStorage.getItem('psm_token');
+                  await fetch('/api/v1/processes/' + pid + '/design/nodes/' +
+                    nodeKey + '/tools/' + encodeURIComponent(code),
+                    {method: 'DELETE', headers: {Authorization: 'Bearer ' + t}});
+                }""",
+                {"pid": pid, "nodeKey": node_key, "code": tool_code},
+            )
+
+            # 活动级标准文件（创建后通过 API 清理）
+            ensure_sidebar()
+            page.click('#bpmnSidebar button:has-text("+ 新增标准文件")')
+            page.wait_for_selector("#ndTitle", timeout=5000)
+            page.fill("#ndTitle", "E2E 活动标准文件")
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1200)
+            docs = page.evaluate(
+                """async ({pid, nodeKey}) => {
+                  const t = localStorage.getItem('psm_token');
+                  return await fetch('/api/v1/process-documents?process_id=' + pid +
+                    '&node_key=' + encodeURIComponent(nodeKey),
+                    {headers: {Authorization: 'Bearer ' + t}}).then(r => r.json());
+                }""",
+                {"pid": pid, "nodeKey": node_key},
+            )
+            document = next(item for item in docs if item["title"] == "E2E 活动标准文件")
+            assert document["node_key"] == node_key
+            page.evaluate(
+                """async (id) => {
+                  const t = localStorage.getItem('psm_token');
+                  await fetch('/api/v1/process-documents/' + id,
+                    {method: 'DELETE', headers: {Authorization: 'Bearer ' + t}});
+                }""",
+                document["id"],
+            )
+
+            # 表单/规则状态区应已渲染
+            assert "表单与分支规则" in page.inner_text("#bpmnSidebar")
 
             # 类型（TASK ↔ APPROVAL）
             ensure_sidebar()
@@ -1510,6 +1722,8 @@ def main() -> int:
         check("架构树计数", map_tree_counts)
         check("流程详情配套文件入口", map_documents_entry)
         check("对标框架切换", benchmark_switch)
+        check("PCF 分类浏览（层级/双语/指标）", pcf_browser)
+        check("从 PCF 生成草稿向导（预览）", pcf_draft_wizard)
         check("主题切换", theme_switch)
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)

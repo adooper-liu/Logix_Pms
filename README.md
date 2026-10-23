@@ -39,7 +39,7 @@
 - **可解释的量化测算**：按流转概率求期望周期，计入分支、回路和返工；成本与时间同口径；
   模型不可信时明确标记，不拿假数字冒充结论。
 - **诊断直连工具**：9 类结构性建议 + 33 个方法论工具，从「发现问题」到「下一步做什么」。
-- **一套架构、多套对标**：公司流程架构保持唯一，交叉映射 SCOR 与 APQC PCF，切换只换参照系。
+- **一套架构、多套对标**：公司流程架构保持唯一，交叉映射 SCOR 与 APQC PCF v8.0（跨行业/消费品/消费电子），切换只换参照系。
 - **运营闭环与治理**：KPI 雷达/趋势、异常闭环、知识沉淀、审计留痕、`owner_user_id` 归属校验。
 - **工程可维护**：零构建前端、主题令牌、API 优先、Alembic 迁移、SQLite/PostgreSQL 双后端 CI。
 
@@ -131,7 +131,8 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 
 种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、24 份步骤契约、32 个交付物定义（每个项目自动生成 32 个交付物实例）、5 个演示组织单元与 4 个演示账号（已挂到演示组织）、
 15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
-2 套对标框架（71 个标准分类、249 条流程映射）。
+4 套对标框架（SCOR + APQC PCF v8.0 跨行业/消费品/消费电子，共 6,135 个标准分类、
+62 条显式流程映射（L4 继承后 249 条）、3,453 条 PCF 指标）。
 
 手动重灌：
 
@@ -139,7 +140,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 python -m scripts.seed            # 库为空时才灌，非空会提示并跳过
 python -m scripts.seed --reset    # 清空重灌
 python -m scripts.seed --reference           # 只补灌工作流/工具/契约/交付物定义/对标数据
-python -m scripts.seed --benchmarks          # 只补灌 SCOR / APQC 对标数据
+python -m scripts.seed --benchmarks          # 只补灌 SCOR / APQC PCF v8.0 对标数据
 python -m scripts.seed --benchmarks --reset  # 只重建对标数据，不动业务数据
 ```
 
@@ -209,8 +210,20 @@ python scripts/run_escalations.py --username manager
 |---|---|
 | [app/seed/corpus.py](app/seed/corpus.py) | 148 个 L1–L4 流程节点、24 步标准工作流、33 个方法论工具 |
 | [app/seed/corpus_data.py](app/seed/corpus_data.py) | 8 个项目、KPI 与记录、异常、知识库、设计器模型、表单/规则、流程实例与任务、通知、4 个演示账号 |
-| [app/seed/benchmark_data.py](app/seed/benchmark_data.py) | SCOR / APQC PCF 框架、分类与 62 条流程映射 |
+| [app/seed/benchmark_data.py](app/seed/benchmark_data.py) | SCOR 分类与 62 条流程映射（APQC 侧用 PCF ID） |
+| [app/seed/pcf_data.py](app/seed/pcf_data.py) | 加载 APQC PCF v8.0 生成数据 |
+| [app/seed/data/pcf_v80.json](app/seed/data/pcf_v80.json) | 三套 v8.0 变体、中文 L1–L3 与 3,453 条指标（由脚本生成，勿手改） |
 | [app/seed/runner.py](app/seed/runner.py) | 按外键顺序写库；`seed_if_empty()` 负责判空 |
+
+APQC 数据重新生成：
+
+```bash
+python scripts/import_pcf.py \
+  --cross-industry <Cross-Industry v8.0.xlsx> \
+  --consumer-products <Consumer Products v8.0.xlsx> \
+  --consumer-electronics <Consumer Electronics v8.0.xlsx> \
+  --chinese <APQC_PCF_v80_跨行业流程分类框架_中文整理版.xlsx>
+```
 
 触发方式：
 
@@ -259,7 +272,8 @@ docker compose exec -e BOOTSTRAP_ADMIN_PASSWORD='<强口令>' api \
 ```
 
 `bootstrap` 灌入的是生产也需要的基础数据：24 步工作流、33 个工具、
-SCOR/APQC 框架与分类（**不含**流程映射，等公司流程录入后再维护）。
+SCOR 与 APQC PCF v8.0 三套变体（跨行业/消费品/消费电子）的框架、分类与指标
+（**不含**流程映射，等公司流程录入后再维护）。
 完全空系统可加 `--skip-reference`；同名管理员忘记口令可加 `--reset-password`。
 
 1. 用管理员登录，再通过界面/API 创建真实流程、项目与账号。
@@ -400,6 +414,8 @@ main.js
 驾驶舱的主指标卡、阶段行、方法论图例、风险提醒和项目行都是入口：点击后会跳到对应页面，
 并自动带上状态、阶段或方法论筛选。逐页的元素关系与可视化选型见
 [docs/ui-information-architecture.md](docs/ui-information-architecture.md)；
+代码怎么组织、交互怎么写、状态放哪、共享组件有哪些，见
+[docs/frontend-architecture.md](docs/frontend-architecture.md)；
 所有指标的公式、阈值与边界见 [docs/metrics.md](docs/metrics.md)，
 页面上带 `?` 的指标可以直接悬停查看简版口径。ERP/OA 接入（出站事件与 HMAC 入站
 Webhook）格式见 [docs/integration.md](docs/integration.md)。
@@ -429,12 +445,13 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 pytest 里检查 import 路径是否存在、九个视图是否都注册且有 renderer、样式表是否被引用，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**十一个模块与对应接口**：
+**十三个模块与对应接口**：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
 | 管理驾驶舱 | `/dashboard/overview`、`/process-map/heatmap` | 指标卡、五阶段健康度、方法论分布、改善优先级（该改什么）与重点项目（正在做什么）、健康度预警、异常概览；优先级行可定位到地图 |
-| 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC 对标切换与覆盖率；流程详情含标准配套文件（含上级继承）与管理入口 |
+| 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC PCF v8.0 变体切换与覆盖率；分类弹窗可查看 PCF 指标与框架署名；可从 PCF 勾选生成架构草稿并确认；流程详情含标准配套文件（含上级继承）与管理入口 |
+| PCF 分类框架 | `/benchmark/frameworks/{code}/tree`、`/benchmark/categories/{id}/metrics` | L1–L5 可展开树、中英文对照、搜索、官方定义、指标与公司流程覆盖；用于学习、识别与对标 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
 | 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
 | 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
@@ -462,7 +479,7 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 
 | 表 | 说明 |
 |---|---|
-| `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分（战略重要性 × 痛点 × 改善空间） |
+| `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分；`is_draft` 标记从 PCF 生成、尚未确认的草稿 |
 | `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
@@ -482,7 +499,8 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `kpi_definition` / `kpi_record` | KPI 定义与月度时序 |
 | `exception_event` | 异常事件闭环台账 |
 | `knowledge_item` | 案例 / 模板 / 最佳实践 / 标准 |
-| `benchmark_framework` / `benchmark_category` | 对标框架（SCOR / APQC PCF）的 L1–L5 标准分类树 |
+| `benchmark_framework` / `benchmark_category` | 对标框架（SCOR / APQC PCF v8.0 跨行业/消费品/消费电子）的 L1–L5 分类树；`external_id` 存 PCF ID，`name_zh`/`name_en` 中英文对照 |
+| `benchmark_metric` | APQC PCF 指标目录，按 `(PCF ID, Metric ID)` 唯一，跨变体共用 |
 | `process_benchmark_map` | 公司流程 → 标准分类的多对多映射 |
 
 ---
@@ -510,15 +528,19 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 |---|---|---|
 | GET | `/process-map/tree` | L1→L4 架构树，支持 `root_code` / `max_level` / `improvement_only` |
 | GET | `/process-map/flat` | 扁平清单，支持 `level` / `keyword` |
-| GET | `/process-map/heatmap` | 改善优先级热力图（CRITICAL / HIGH / MEDIUM / LOW） |
+| GET | `/process-map/heatmap` | 改善优先级热力图（CRITICAL / HIGH / MEDIUM / LOW），草稿不参与排名 |
+| POST | `/process-map/pcf/preview` | 预览从 PCF 勾选元素生成的数量（不落库，MANAGER+） |
+| POST | `/process-map/pcf/generate` | 按勾选生成 L1–L4 架构草稿（幂等，MANAGER+） |
+| POST | `/process-map/drafts/promote` | 确认草稿为正式流程（MANAGER+） |
 | GET/POST/PATCH/DELETE | `/process-map[/{id}]` | 流程节点 CRUD |
 
 ### 对标框架
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/benchmark/frameworks` | 框架清单（SCOR / APQC PCF），含分类数与已映射流程数 |
-| GET | `/benchmark/frameworks/{code}/tree` | 标准分类树，`max_level=1–5` |
-| GET | `/benchmark/frameworks/{code}/coverage` | 公司某层流程的覆盖率与缺口，`process_level=1–4` |
+| GET | `/benchmark/frameworks` | 框架清单（SCOR + 三套 APQC PCF v8.0），含行业、主框架标记、分类数、已映射流程数与署名 |
+| GET | `/benchmark/frameworks/{code}/tree` | 标准分类树，`max_level=1–5`，返回中英文名、PCF ID 与指标数 |
+| GET | `/benchmark/frameworks/{code}/coverage` | 公司某层流程的覆盖率与缺口，`process_level=1–4`；行业变体按 PCF ID 继承主框架映射 |
+| GET | `/benchmark/categories/{id}/metrics` | 分类元素挂载的 PCF 指标（指标 ID、公式、单位） |
 | GET | `/benchmark/processes/{id}/mappings` | 单个流程在所有框架下的映射 |
 | POST | `/benchmark/mappings` | 新增流程 → 标准分类映射（MANAGER+） |
 | DELETE | `/benchmark/mappings/{id}` | 删除映射（MANAGER+） |
@@ -786,14 +808,24 @@ PCE 6.8%   等待占比 87.6%
 
 ---
 
-## 对标框架：SCOR 与 APQC PCF 可切换
+## 对标框架：SCOR + APQC PCF v8.0（主框架 + 行业配置）
 
 **为什么不做两套流程树**：SCOR 是供应链专用模型（Plan / Source / Make / Deliver /
 Return / Enable），APQC PCF 是跨行业企业流程框架（13 个 L1，含战略、研发、人事）。
 如果把两套分类直接混进 `process_arch`，同一份公司流程会被复制成两棵互不相干的树，
 项目、流程模型、KPI 的引用也会跟着框架漂移。
 
-当前采用**交叉映射**：
+**APQC PCF v8.0 是分类宪法，不是企业流程主数据**：
+
+- **跨行业版**（2,017 个元素，L1–L5）是主框架，作为默认分类、编码与指标口径；
+- **消费品版**（2,039）与**消费电子版**（2,047）是行业配置，共享全部 PCF ID，
+  只额外增加行业专属元素；
+- **中英文对照**：L1–L3 的 449 个元素有中文（`name_zh`），L4/L5 没有中文来源时
+  `name_zh` 为空、展示回落 `name_en`，不会用中文覆盖英文；
+- **PCF ID（`external_id`）是跨变体稳定键**，Hierarchy ID 会因行业元素插入而漂移
+  （例如 `2.3.4` 在跨行业版和消费电子版指向不同元素），所有关联都按 PCF ID 做；
+- **指标目录**：3,453 条指标按 PCF ID 挂到分类上，跨变体共用；
+- **署名**：APQC/IBM 的授权要求随框架保留 `attribution`，页面上可展开查看。
 
 ```text
 process_arch（公司唯一流程架构，L1–L4）
@@ -801,15 +833,19 @@ process_arch（公司唯一流程架构，L1–L4）
         ▼
 process_benchmark_map
         │
-        ├── benchmark_category ── benchmark_framework(SCOR)
-        └── benchmark_category ── benchmark_framework(APQC_PCF)
+        ├── benchmark_framework(SCOR) ────────── benchmark_category
+        ├── benchmark_framework(APQC_PCF 跨行业) ─ benchmark_category ── benchmark_metric
+        ├── benchmark_framework(APQC_PCF_CP 消费品) ─ benchmark_category
+        └── benchmark_framework(APQC_PCF_CE 消费电子) ─ benchmark_category
 ```
 
-- 切换框架只改变**参照树与覆盖率**，不改变业务数据；同一个流程可以同时映射到两套框架。
+- 切换框架只改变**参照树与覆盖率**，不改变业务数据；同一个流程可以同时映射到多套框架。
 - 覆盖率按**后代聚合**：流程自身或任一后代映射到该框架，即视为覆盖。所以同一份映射
   在 L1 / L2 / L3 任一层都能看到有意义的覆盖率，不会出现「下层映射了、上层 0%」。
+- **行业变体继承主框架映射**：流程映射到跨行业版的 `4.2`（PCF ID `10216`）后，
+  消费品/消费电子版中同一 PCF ID 自动计入覆盖，不需要为每个变体重复维护。
 - L1/L2 覆盖率接口的参数是 `process_level`；流程地图右上角的框架选择器做的就是这个切换，
-  选中后展示各 L1 分类的覆盖数、未覆盖流程，点分类行可看明细。
+  选中后展示各 L1 分类的覆盖数、未覆盖流程；点分类行可看明细与 PCF 指标。
 - L4 活动默认继承所属 L3 的对标分类（例如「生产计划排程」下的 4 个活动自动映射到
   SCOR `P3` / APQC `4.3`），不需要逐个维护。
 
@@ -818,13 +854,60 @@ process_benchmark_map
 | 框架 | 已覆盖 | 覆盖率 | 未覆盖 |
 |---|---|---|---|
 | SCOR | 24 / 28 | 85.7% | 新产品开发立项、工艺设计变更、试制与验证、费用报销 |
-| APQC PCF | 28 / 28 | 100% | — |
+| APQC PCF 跨行业（主框架） | 28 / 28 | 100% | — |
+| APQC PCF 消费品 | 28 / 28 | 100% | 继承主框架映射 |
+| APQC PCF 消费电子 | 28 / 28 | 100% | 继承主框架映射 |
 
 SCOR 的缺口不是数据缺陷，而是框架边界：研发与费用报销本来就不属于供应链运作。
-这也验证了「两套框架适配不同」——切换后看到的不是同一份结果的换皮。
+这也验证了「多套框架适配不同」——切换后看到的不是同一份结果的换皮。
 
-> ⚠️ 内置的只是 L1/L2 **基线分类**，用于演示映射机制。正式对标前应替换为
-> ASCM / APQC 的授权版本全文，并补齐到 L3–L5；不要把这份数据当作官方框架全文。
+**数据来源与升级**：
+
+- `app/seed/data/pcf_v80.json` 由 `scripts/import_pcf.py` 从 APQC 官方 Excel 生成，
+  不要手改；重新生成命令见「演示数据」一节。
+- 存量库升级到 v8.0：`python -m scripts.seed --benchmarks --reset`（只重建对标数据，
+  不动业务数据）。旧的 APQC v7.2.1 映射已按 PCF ID/名称迁移到 v8.0。
+- 许可：APQC/IBM 授予使用、复制、修改和派生许可，要求保留署名；`attribution`
+  随框架入库，并在流程地图的框架卡片中展示。
+
+### 从 PCF 生成企业流程架构草稿
+
+流程地图右上角的「+ 从 PCF 生成」把分类树变成可编辑的企业架构草稿：
+
+1. 选择框架（跨行业 / 消费品 / 消费电子）与是否同时生成 L4 活动；
+2. 勾选 L1/L2 会整组选中其下全部 L3，勾选 L3 只生成该流程；
+3. 「预览」显示将新建/复用的 L1–L4 数量，不落库；
+4. 「生成草稿」只补缺失节点，已有来源或同名节点会复用，可重复执行。
+
+生成规则：
+
+- 只写 `process_arch`（L1–L4），PCF 的 L5 任务不进入企业架构；
+- 生成物 `is_draft=true`，地图上标为「PCF 草稿」，可单个或批量确认；
+- `source_framework_code + source_external_id` 记录来源，重复生成按 PCF ID 命中；
+- **草稿不计入对标覆盖率、驾驶舱流程总数、健康度排名和基线覆盖率**，确认后才成为正式流程；
+- 码规则为 `PCF<PCF ID>`（冲突时追加 `-1`、`-2`），名称优先用中文，描述保留英文原名与官方定义。
+
+### PCF 分类浏览与查询
+
+页面「PCF 分类框架」提供左侧 L1–L5 可展开树 + 搜索，右侧展示中英文名、PCF ID、
+Hierarchy ID、官方定义、PCF 指标和公司流程覆盖数；默认主框架跨行业版，可切换
+消费品/消费电子变体。
+
+命令行查询（适合学习、批量导出和写 SQL）：
+
+```bash
+python scripts/pcf_query.py                     # 完整 L1–L5 树
+python scripts/pcf_query.py --level 3           # 只看 L3 流程
+python scripts/pcf_query.py --keyword 采购      # 按编码/PCF ID/中英文名搜索
+python scripts/pcf_query.py --metrics           # 只看有指标的元素
+python scripts/pcf_query.py --metrics-for 10216 # 某元素的指标明细
+python scripts/pcf_query.py --json > pcf.json   # JSON 导出
+python scripts/pcf_query.py --csv > pcf.csv     # CSV 导出
+python scripts/pcf_query.py --sql               # 递归 CTE 与指标 SQL
+```
+
+> 识别口径：**PCF ID 跨版本稳定，Hierarchy ID 会漂移**。例如 `2.3.4` 在跨行业版和
+> 消费电子版指向不同元素；跨版本对比、指标挂载和映射都必须用 PCF ID。
 
 ---
 
@@ -925,7 +1008,7 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 
 已完成：前端接后端、用户与权限、甘特图与里程碑、流程模型并发控制、时间语义统一、
 周期测算改为按图求期望值、切换 Docker PostgreSQL、引入 Alembic 迁移、前端模块化、
-对标框架（SCOR / APQC PCF）的后端交叉映射、流程执行第一阶段（实例 + 任务队列 + 分支推进）。还剩：
+对标框架（SCOR + APQC PCF v8.0 跨行业/消费品/消费电子）的后端交叉映射与指标目录、流程执行第一阶段（实例 + 任务队列 + 分支推进）。还剩：
 
 1. **流程挖掘对接**：接入 ERP/OA 日志，自动发现真实路径（`PROCESS-MINING` 工具已就位，缺数据管道）。
 2. **权限细化**：OWNER 归属已改为 `owner_user_id` 外键（项目 / 流程模型），

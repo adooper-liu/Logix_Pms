@@ -36,6 +36,7 @@ def test_frontend_has_modules():
     assert {
         "dashboard.js",
         "map.js",
+        "pcf.js",
         "workflow.js",
         "projects.js",
         "toolbox.js",
@@ -69,6 +70,7 @@ def test_view_modules_are_registered():
     for view in (
         "dashboard",
         "map",
+        "pcf",
         "workflow",
         "projects",
         "toolbox",
@@ -83,10 +85,43 @@ def test_view_modules_are_registered():
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
 
 
+def test_knowledge_view_wires_pagination():
+    """知识库标题写「N 条」，就必须把 page 传下去并提供翻页入口。
+
+    回归背景：page_size 固定 50 且不传 page，第 51 条以后永远看不到。
+    """
+    src = (JS_ROOT / "views" / "knowledge.js").read_text(encoding="utf-8")
+    assert "'page=' +" in src, "knowledge.js 没有把 page 传给后端"
+    assert "setKPage" in src, "knowledge.js 没有翻页动作"
+    assert "上一页" in src and "下一页" in src, "knowledge.js 没有渲染翻页按钮"
+
+
+def test_view_exports_do_not_collide():
+    """视图导出的函数会被 Object.assign(window, ...) 合并；重名会静默覆盖。
+
+    真实事故：pcf.js 和 map.js 都导出 togglePcfNode，后者覆盖前者，
+    向导里的 checkbox 因此点了没反应。这里提前拦住同类问题。
+    """
+    owners: dict[str, str] = {}
+    export_re = re.compile(r"export\s*\{([^}]*)\}", re.S)
+    for module in sorted((JS_ROOT / "views").glob("*.js")):
+        for match in export_re.finditer(module.read_text(encoding="utf-8")):
+            for raw in match.group(1).split(","):
+                name = raw.strip().split(" as ")[-1].strip()
+                if not name:
+                    continue
+                assert name not in owners, (
+                    f"{name} 同时由 {owners[name]} 和 {module.name} 导出；"
+                    "main.js 会把它们挂到 window，后者会覆盖前者"
+                )
+                owners[name] = module.name
+
+
 def test_every_view_module_exports_a_renderer():
     renderers = {
         "dashboard.js": "renderDashboard",
         "map.js": "renderMap",
+        "pcf.js": "renderPcf",
         "workflow.js": "renderWorkflow",
         "projects.js": "renderProjects",
         "toolbox.js": "renderToolbox",

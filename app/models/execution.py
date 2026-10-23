@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -111,6 +112,9 @@ class ProcessTask(Base):
     form_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # 实际工时累计（分钟），由 task_worklog 的写入同步维护，供列表直接展示
+    actual_minutes: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -136,6 +140,12 @@ class ProcessTask(Base):
         back_populates="task",
         cascade="all, delete-orphan",
         order_by="ProcessTaskEvent.id",
+    )
+    worklogs: Mapped[List["TaskWorklog"]] = relationship(
+        "TaskWorklog",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskWorklog.id",
     )
 
     __table_args__ = (
@@ -363,4 +373,37 @@ class NodeAssignment(Base):
 
     __table_args__ = (
         UniqueConstraint("process_id", "node_key", name="uq_node_assignment_process_node"),
+    )
+
+
+class TaskWorklog(Base):
+    """任务实际工时记录：处理 / 等待 / 返工。
+
+    完成任务时可以带一条 HANDLE 记录；之后也可以手工补录。
+    `process_task.actual_minutes` 是这些记录的汇总，列表查询不用再聚合。
+    """
+
+    __tablename__ = "task_worklog"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("process_task.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    work_type: Mapped[str] = mapped_column(String(16), default="HANDLE")
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    effort_minutes: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    task: Mapped["ProcessTask"] = relationship("ProcessTask", back_populates="worklogs")
+    user: Mapped[Optional["User"]] = relationship("User")  # noqa: F821
+
+    __table_args__ = (
+        Index("ix_task_worklog_task_created", "task_id", "created_at"),
+        Index("ix_task_worklog_user_created", "user_id", "created_at"),
     )

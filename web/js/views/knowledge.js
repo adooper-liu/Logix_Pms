@@ -16,7 +16,7 @@ const renderKnowledge = () => {
   if (k.type) qs.push('type=' + k.type);
   if (k.tag) qs.push('tag=' + encodeURIComponent(k.tag));
   if (k.keyword) qs.push('keyword=' + encodeURIComponent(k.keyword));
-  qs.push('sort=' + k.sort, 'page_size=50');
+  qs.push('sort=' + k.sort, 'page=' + (k.page || 1), 'page_size=50');
 
   return renderAsync('knowledge',
     () => Promise.all([GET('/knowledge?' + qs.join('&')), GET('/knowledge/meta/tags')])
@@ -39,6 +39,17 @@ const renderKnowledge = () => {
       const typeTab = (v, label) =>
         '<button class="' + (k.type === v ? 'on' : '') + '" onclick="setK(\'type\',\'' + v + '\')">' +
         label + '</button>';
+      const pageSize = d.page.page_size || 50;
+      const pages = Math.max(1, Math.ceil(d.page.total / pageSize));
+      const current = Math.min(Math.max(1, d.page.page || k.page || 1), pages);
+      const pager = pages > 1 ? `
+        <div class="pager">
+          <button class="btn-sm" ${current <= 1 ? 'disabled' : ''}
+            onclick="setKPage(${current - 1})">上一页</button>
+          <span class="tiny">第 ${current} / ${pages} 页 · 共 ${d.page.total} 条</span>
+          <button class="btn-sm" ${current >= pages ? 'disabled' : ''}
+            onclick="setKPage(${current + 1})">下一页</button>
+        </div>` : '';
 
       viewEl().innerHTML = `
         <div class="card page-head">
@@ -68,6 +79,7 @@ const renderKnowledge = () => {
         </div>
 
         <div class="grid g3">${cards}</div>
+        ${pager}
 
         <div class="card">
           <h2>按问题找工具</h2>
@@ -84,10 +96,15 @@ const renderKnowledge = () => {
 
 function setK(key, value) {
   state.knowledge[key] = value;
+  state.knowledge.page = 1;
+  RENDERERS.knowledge();
+}
+function setKPage(page) {
+  state.knowledge.page = Math.max(1, page);
   RENDERERS.knowledge();
 }
 function clearK() {
-  state.knowledge = { type: '', sort: state.knowledge.sort, keyword: '', tag: '' };
+  state.knowledge = { type: '', sort: state.knowledge.sort, keyword: '', tag: '', page: 1 };
   document.getElementById('searchInput').value = '';
   RENDERERS.knowledge();
 }
@@ -208,4 +225,4 @@ async function kbMatch() {
 }
 
 
-export { renderKnowledge, clearK, kbMatch, newKnowledgeModal, openKnowledge, setK, submitKnowledge };
+export { renderKnowledge, clearK, kbMatch, newKnowledgeModal, openKnowledge, setK, setKPage, submitKnowledge };

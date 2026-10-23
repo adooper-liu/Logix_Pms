@@ -7,6 +7,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
     CurrentUser,
@@ -15,7 +16,18 @@ from app.api.deps import (
     WriteUser,
     ensure_can_edit_owned,
 )
-from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
+from app.models.enums import ToolLevel
+from app.models.org import Position
+from app.models.process import (
+    NodeTool,
+    ProcessArch,
+    ProcessEdge,
+    ProcessModelVersion,
+    ProcessNode,
+)
+from app.models.tool import Tool
+from app.schemas.common import DeleteResult
+from app.schemas.node_tool import NodeToolCreate, NodeToolOut
 from app.schemas.process import (
     BpmnImportRequest,
     DesignAnalysis,
@@ -196,6 +208,16 @@ def update_node_metrics(
     if target is None:
         raise HTTPException(status_code=404, detail=f"节点 {node_key} 不存在")
     updates = payload.model_dump(exclude_unset=True, exclude={"expected_version"})
+    if updates.get("process_arch_id") is not None:
+        activity = db.get(ProcessArch, updates["process_arch_id"])
+        if activity is None or activity.level != 4 or activity.parent_id != process_id:
+            raise HTTPException(
+                status_code=400,
+                detail="process_arch_id 必须是该流程下的 L4 活动",
+            )
+    if updates.get("owner_position_id") is not None:
+        if db.get(Position, updates["owner_position_id"]) is None:
+            raise HTTPException(status_code=400, detail="负责人岗位不存在")
     target.update(updates)
 
     model_payload = ProcessModelIn(
@@ -207,7 +229,7 @@ def update_node_metrics(
     if validation["errors"]:
         raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
     version = model_service.save_draft(
-        db, process, model_payload, user, note="更新节点指标", keep_bpmn=True
+        db, process, model_payload, user, note="更新节点属性", keep_bpmn=True
     )
     audit_service.record(
         db,
@@ -215,7 +237,7 @@ def update_node_metrics(
         "UPDATE",
         "process_design",
         process_id,
-        f"更新节点指标 {process.code}/{node_key}（v{version.version}）",
+        f"更新节点属性 {process.code}/{node_key}（v{version.version}）",
     )
     db.commit()
     return _load_model(db, process_id)
@@ -294,10 +316,12 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             "is_value_added",
         ):
             node[field] = old.get(field, node[field])
-        # 负责人以快照为准：新属性栏通过 PATCH 写快照，画布里的旧 pms:ownerRole
-        # 可能还没同步，不能反过来覆盖刚保存的值。
+        # 负责人/活动 ID 以快照为准：新属性栏通过 PATCH 写快照，画布里的旧
+        # pms:ownerRole / 无活动扩展可能还没同步，不能反过来覆盖刚保存的值。
         if old:
             node["owner_role"] = old.get("owner_role")
+            node["process_arch_id"] = old.get("process_arch_id")
+            node["owner_position_id"] = old.get("owner_position_id")
     for edge in parsed["edges"]:
         explicit = edge.pop("_probability_explicit", False)
         old = old_edges.get((edge["source_key"], edge["target_key"]))
@@ -559,3 +583,136 @@ def analyze_inline(payload: ProcessModelIn):
         nodes.append(node)
     edges = [ProcessEdge(**e.model_dump(mode="json")) for e in payload.edges]
     return designer.analyze(0, nodes, edges)
+
+
+# ---------------------------------------------------------------- 活动级工具绑定
+
+TOOL_LEVEL_LABELS = {
+    ToolLevel.REQUIRED.value: "必需",
+    ToolLevel.RECOMMENDED.value: "推荐",
+    ToolLevel.OPTIONAL.value: "可选",
+}
+
+
+def _require_design_node(db: DbSession, process_id: int, node_key: str):
+    process = _require_process(db, process_id)
+    nodes, _edges = model_service.rows_from_snapshot(
+        process_id, model_service.current_snapshot(db, process_id)
+    )
+    if not any(node.node_key == node_key for node in nodes):
+        raise HTTPException(status_code=404, detail=f"节点 {node_key} 不存在于该流程")
+    return process
+
+
+def _node_tool_out(row: NodeTool) -> NodeToolOut:
+    return NodeToolOut(
+        id=row.id,
+        process_id=row.process_id,
+        node_key=row.node_key,
+        tool_code=row.tool_code,
+        tool_name=row.tool_name,
+        level=row.level,
+        level_label=TOOL_LEVEL_LABELS.get(row.level, row.level),
+        note=row.note,
+    )
+
+
+@router.get(
+    "/processes/{process_id}/design/nodes/{node_key}/tools",
+    response_model=List[NodeToolOut],
+    summary="节点推荐工具绑定",
+)
+def list_node_tools(process_id: int, node_key: str, db: DbSession, user: CurrentUser):
+    _require_design_node(db, process_id, node_key)
+    rows = db.scalars(
+        select(NodeTool)
+        .options(joinedload(NodeTool.tool))
+        .where(NodeTool.process_id == process_id, NodeTool.node_key == node_key)
+        .order_by(NodeTool.id)
+    ).all()
+    return [_node_tool_out(row) for row in rows]
+
+
+@router.post(
+    "/processes/{process_id}/design/nodes/{node_key}/tools",
+    response_model=NodeToolOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="为节点绑定工具（Owner/Manager）",
+)
+def add_node_tool(
+    process_id: int,
+    node_key: str,
+    payload: NodeToolCreate,
+    db: DbSession,
+    user: WriteUser,
+):
+    process = _require_design_node(db, process_id, node_key)
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
+    tool = db.scalar(select(Tool).where(Tool.code == payload.tool_code))
+    if tool is None:
+        raise HTTPException(status_code=400, detail=f"工具 {payload.tool_code} 不存在")
+    existing = db.scalar(
+        select(NodeTool).where(
+            NodeTool.process_id == process_id,
+            NodeTool.node_key == node_key,
+            NodeTool.tool_code == payload.tool_code,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="该工具已经绑定到这个节点")
+    row = NodeTool(
+        process_id=process_id,
+        node_key=node_key,
+        tool_code=payload.tool_code,
+        level=payload.level.value,
+        note=payload.note,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "node_tool",
+        row.id,
+        f"节点工具绑定 {process.code}/{node_key} → {payload.tool_code}（{payload.level.value}）",
+    )
+    db.commit()
+    db.refresh(row)
+    return _node_tool_out(row)
+
+
+@router.delete(
+    "/processes/{process_id}/design/nodes/{node_key}/tools/{tool_code}",
+    response_model=DeleteResult,
+    summary="解除节点工具绑定（Owner/Manager）",
+)
+def delete_node_tool(
+    process_id: int,
+    node_key: str,
+    tool_code: str,
+    db: DbSession,
+    user: WriteUser,
+):
+    process = _require_design_node(db, process_id, node_key)
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
+    row = db.scalar(
+        select(NodeTool).where(
+            NodeTool.process_id == process_id,
+            NodeTool.node_key == node_key,
+            NodeTool.tool_code == tool_code,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="该节点没有绑定这个工具")
+    db.delete(row)
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "node_tool",
+        None,
+        f"解除节点工具绑定 {process.code}/{node_key} → {tool_code}",
+    )
+    db.commit()
+    return DeleteResult(deleted=1)

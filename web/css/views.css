@@ -113,7 +113,56 @@
   border-bottom:1px solid var(--line)}
 .bpmn-drawer-head .btn-sm{margin-left:auto}
 .bpmn-drawer-body{flex:1;min-height:0;overflow:auto;padding:12px}
-.bpmn-drawer .btn-sm{white-space:nowrap}
+.bpmn-node-extra{border-top:1px solid var(--line-soft);margin-top:12px;padding-top:10px}
+.bpmn-node-row{font-size:12px;padding:4px 0;border-bottom:1px solid var(--line-soft)}
+.bpmn-node-row:last-child{border-bottom:none}
+
+/* ===== PCF 架构草稿向导 ===== */
+.pcf-tree{max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:10px;
+  padding:8px 10px;background:var(--panel-2)}
+.pcf-node{margin:2px 0}
+.pcf-node>summary{cursor:pointer;padding:3px 0;font-size:12.5px}
+.pcf-label{display:flex;align-items:flex-start;gap:6px;font-size:12.5px;cursor:pointer}
+.pcf-label input{margin-top:2px;flex-shrink:0}
+.pcf-label .tiny{color:var(--sub);font-size:11px}
+.pcf-leaf{padding:2px 0 2px 20px}
+.pcf-preview{border:1px solid var(--line);border-radius:9px;padding:10px 12px;
+  font-size:12.5px;margin-top:10px;background:var(--panel-2)}
+
+/* ===== PCF 分类浏览 ===== */
+.pcf-levels{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.pcf-level{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--panel-2)}
+.pcf-level b{display:block;font-size:12.5px;margin-bottom:2px}
+.pcf-level .tiny{line-height:1.5}
+.pcf-layout{display:grid;grid-template-columns:minmax(420px,1.15fr) minmax(360px,.85fr);
+  gap:14px;align-items:start}
+.pcf-tree-card{display:flex;flex-direction:column;min-height:540px}
+.pcf-rows{flex:1;overflow:auto;max-height:68vh;border-top:1px solid var(--line-soft);
+  margin-top:8px}
+.pcf-row{display:flex;align-items:center;gap:7px;padding:5px 6px;font-size:12.5px;
+  border-bottom:1px solid var(--line-soft);cursor:pointer}
+.pcf-row:hover{background:var(--panel-hover)}
+.pcf-row.on{background:var(--brand-soft)}
+.pcf-caret{border:none;background:none;color:var(--sub);cursor:pointer;width:18px;
+  padding:0;font-size:11px;flex-shrink:0}
+.pcf-caret.empty{visibility:hidden}
+.pcf-row-name{font-weight:500;white-space:nowrap}
+.pcf-row-en{color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.pcf-detail{position:sticky;top:12px;max-height:80vh;overflow:auto}
+.pcf-breadcrumb{font-size:11.5px;color:var(--sub);margin-bottom:6px;line-height:1.6}
+.pcf-detail h3{margin:2px 0}
+.pcf-en{color:var(--sub);font-size:12.5px;margin-bottom:9px}
+.pcf-section{border-top:1px solid var(--line-soft);margin-top:12px;padding-top:10px}
+.pcf-section h4{margin:0 0 6px;font-size:12.5px}
+.pcf-note{background:var(--panel-3);border-radius:9px;padding:10px 12px;font-size:12px;
+  color:var(--sub);margin-top:12px;line-height:1.6}
+.pcf-metrics{max-height:280px;overflow:auto}
+@media(max-width:1000px){
+  .pcf-levels{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pcf-layout{grid-template-columns:1fr}
+  .pcf-detail{position:static;max-height:none}
+}.bpmn-drawer .btn-sm{white-space:nowrap}
 .bpmn-drawer .bpmn-lint{max-height:none;margin:0;border:none;border-radius:0;
   background:transparent;padding:0}
 .bpmn-lint-toggle.has-error{color:var(--bad-strong);border-color:var(--bad-strong)}
@@ -121,6 +170,8 @@
 .designer-card.fullscreen{position:fixed;inset:0;z-index:80;margin:0;border-radius:0;
   padding:16px;background:var(--panel);display:flex;flex-direction:column;gap:10px;overflow:auto}
 .designer-card.fullscreen .bpmn-canvas{flex:1;height:auto;min-height:420px}
+/* 全屏时校验结果不占满剩余高度，避免把画布挤得比非全屏还小 */
+.designer-card.fullscreen .designer-validation{max-height:120px;overflow:auto;flex:0 0 auto}
 .drawio-frame{width:100%;height:65vh;min-height:420px;border:1px solid var(--line);
   border-radius:10px;background:var(--panel)}
 .modal:has(.drawio-frame){max-width:96vw;width:96vw;height:92vh;max-height:92vh;

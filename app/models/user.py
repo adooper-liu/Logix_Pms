@@ -44,6 +44,11 @@ class User(Base):
         nullable=True,
         index=True,
     )
+    position_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("position.id", ondelete="SET NULL", name="fk_app_user_position"),
+        nullable=True,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -51,6 +56,7 @@ class User(Base):
 
     audits: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user")
     org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821
+    position: Mapped[Optional["Position"]] = relationship("Position")  # noqa: F821
 
     @property
     def role_label(self) -> str:
@@ -59,6 +65,10 @@ class User(Base):
     @property
     def org_unit_name(self) -> Optional[str]:
         return self.org_unit.name if self.org_unit else None
+
+    @property
+    def position_name(self) -> Optional[str]:
+        return self.position.name if self.position else None
 
 
 class AuditLog(Base):

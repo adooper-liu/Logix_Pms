@@ -265,6 +265,8 @@ def validate_model(nodes: Sequence[ProcessNode], edges: Sequence[ProcessEdge]) -
     for node in nodes:
         if node.node_type != NodeType.START.value and node.node_key not in targets:
             warnings.append(f"节点「{node.name}」没有入边，可能是不可达节点")
+        if getattr(node, "process_arch_id", None) is None:
+            warnings.append(f"节点「{node.name}」未关联 L4 活动，无法按活动汇总工作量与绩效")
     return {"errors": errors, "warnings": warnings}
 
 

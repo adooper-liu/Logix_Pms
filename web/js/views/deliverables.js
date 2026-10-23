@@ -393,6 +393,7 @@ async function loadDocuments() {
         <p>${esc(doc.process_code || '')} ${esc(doc.process_name || '')}
           · ${esc(doc.category_label || doc.category)} · ${esc(doc.scope_label || '集团通用')}
           · ${esc(doc.variation_policy_label || doc.variation_policy)}
+          ${doc.node_key ? ' · 活动 ' + esc(doc.node_key) : ''}
           · ${doc.version_count} 个版本</p>
         <div class="between" style="margin-top:8px">
           <span class="tag ${doc.effective_version ? 't-grn' : 't-gry'}">
@@ -610,10 +611,13 @@ function openNewDocument() {
   const processes = state.processes || [];  const cats = (state.docMeta && state.docMeta.category_labels) || {};
   openModal('新建流程标准文件', `
     <div class="field"><label>所属流程</label><select class="sel" id="ndProcess"
-      onchange="refreshVariantCandidates()">
+      onchange="refreshVariantCandidates();refreshDocumentNodes()">
       ${processes.map((p) => `<option value="${p.id}"
         ${String(state.deliverables.documentProcessId) === String(p.id) ? 'selected' : ''}>
         ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
+    </select></div>
+    <div class="field"><label>关联活动（可选）</label><select class="sel" id="ndNode">
+      <option value="">流程级（不限定活动）</option>
     </select></div>
     <div class="field"><label>标题</label><input id="ndTitle" placeholder="如：采购申请单模板"></div>
     <div class="field"><label>适用范围</label><select class="sel" id="ndOrg"
@@ -640,6 +644,28 @@ function openNewDocument() {
   `<button class="btn btn-g" onclick="closeModal()">取消</button>
    <button class="btn btn-p" onclick="submitNewDocument()">创建</button>`);
   refreshVariantCandidates();
+  refreshDocumentNodes();
+}
+
+async function refreshDocumentNodes() {
+  const processSelect = document.getElementById('ndProcess');
+  const nodeSelect = document.getElementById('ndNode');
+  if (!processSelect || !nodeSelect) return;
+  const processId = processSelect.value;
+  if (!processId) {
+    nodeSelect.innerHTML = '<option value="">流程级（不限定活动）</option>';
+    return;
+  }
+  nodeSelect.innerHTML = '<option value="">加载中…</option>';
+  try {
+    const model = await GET('/processes/' + processId + '/design');
+    const nodes = model.nodes || [];
+    nodeSelect.innerHTML = '<option value="">流程级（不限定活动）</option>' + nodes.map(
+      (node) => `<option value="${esc(node.node_key)}">${esc(node.node_key)} · ${
+        esc(node.name)}</option>`).join('');
+  } catch (e) {
+    nodeSelect.innerHTML = '<option value="">加载失败</option>';
+  }
 }
 
 async function refreshVariantCandidates() {
@@ -680,6 +706,7 @@ async function submitNewDocument() {
     category: document.getElementById('ndCategory').value,
     variation_policy: document.getElementById('ndPolicy').value,
     description: document.getElementById('ndDesc').value.trim() || null,
+    node_key: document.getElementById('ndNode').value || null,
   };
   const org = document.getElementById('ndOrg').value;
   payload.org_unit_id = org ? Number(org) : null;
@@ -1443,7 +1470,8 @@ export {
   openDeliverableUpload, submitDeliverableUpload, openDeliverable,
   transitionDeliverable, restoreDeliverable, dlDeliverableVersion,
   setDocProcess, setDocCategory, setDocOrg, openDocument, openNewDocument,
-  submitNewDocument, refreshVariantCandidates, openDocumentUpload, submitDocumentUpload,
+  submitNewDocument, refreshVariantCandidates, refreshDocumentNodes, openDocumentUpload,
+  submitDocumentUpload,
   transitionDocument, dlDocumentVersion,
   openDocumentImpact, openRebase, submitRebase,
   openPromote, syncPromoteLabel, submitPromote,

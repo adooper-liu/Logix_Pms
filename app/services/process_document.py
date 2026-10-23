@@ -38,6 +38,7 @@ from app.schemas.process_document import (
 from app.services import deliverable as deliverable_service
 from app.services import org_scope, process_scope
 from app.services import org_unit as org_service
+from app.services import process_model as model_service
 from app.services import storage as storage_service
 
 CATEGORY_LABELS: Dict[str, str] = {
@@ -79,6 +80,17 @@ def require_process(db: Session, process_id: int) -> ProcessArch:
     if process is None:
         raise ProcessDocumentError(f"流程节点 {process_id} 不存在")
     return process
+
+
+def validate_node_key(db: Session, process_id: int, node_key: Optional[str]) -> None:
+    """活动级标准文件必须指向当前设计模型里真实存在的节点。"""
+    if not node_key:
+        return
+    nodes, _edges = model_service.rows_from_snapshot(
+        process_id, model_service.current_snapshot(db, process_id)
+    )
+    if not any(node.node_key == node_key for node in nodes):
+        raise ProcessDocumentError(f"活动 {node_key} 不存在于该流程")
 
 
 def next_document_code(db: Session, process_code: str) -> str:
@@ -871,6 +883,7 @@ def document_out(db: Session, document: ProcessDocument) -> ProcessDocumentOut:
         process_id=document.process_id,
         process_code=document.process.code if document.process else None,
         process_name=document.process.name if document.process else None,
+        node_key=document.node_key,
         code=document.code,
         title=document.title,
         category=document.category,

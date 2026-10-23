@@ -63,7 +63,12 @@ def build_overview(db: Session, board_limit: int = 8) -> DashboardOverview:
         and p.end_date.year == this_year
     ]
 
-    process_total = db.scalar(select(func.count()).select_from(ProcessArch)) or 0
+    process_total = (
+        db.scalar(
+            select(func.count()).select_from(ProcessArch).where(ProcessArch.is_draft.is_(False))
+        )
+        or 0
+    )
     improvement_targets = (
         db.scalar(
             select(func.count())
@@ -233,7 +238,12 @@ def _project_active(projects: List[Project], project_id: int) -> bool:
 
 
 def _health_alerts(db: Session, limit: int = 8) -> List[HealthAlert]:
-    rows = db.scalars(select(ProcessArch).where(ProcessArch.level >= 2)).all()
+    rows = db.scalars(
+        select(ProcessArch).where(
+            ProcessArch.level >= 2,
+            ProcessArch.is_draft.is_(False),
+        )
+    ).all()
     alerts: List[HealthAlert] = []
     for p in rows:
         reasons: List[str] = []

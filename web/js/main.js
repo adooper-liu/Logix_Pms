@@ -23,6 +23,7 @@ import {
 
 import * as dashboard from './views/dashboard.js';
 import * as mapView from './views/map.js';
+import * as pcfView from './views/pcf.js';
 import * as workflowView from './views/workflow.js';
 import * as projectsView from './views/projects.js';
 import * as executionView from './views/execution.js';
@@ -36,6 +37,7 @@ import * as sketchesView from './views/sketches.js';
 
 register('dashboard', dashboard.renderDashboard);
 register('map', mapView.renderMap);
+register('pcf', pcfView.renderPcf);
 register('workflow', workflowView.renderWorkflow);
 register('projects', projectsView.renderProjects);
 register('execution', executionView.renderExecution);
@@ -71,6 +73,7 @@ Object.assign(window, {
   // 业务操作
   ...dashboard,
   ...mapView,
+  ...pcfView,
   ...workflowView,
   ...projectsView,
   ...executionView,

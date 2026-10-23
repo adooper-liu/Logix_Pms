@@ -7,7 +7,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
-from app.api.deps import DbSession, ManagerUser
+from app.api.deps import CurrentUser, DbSession, ManagerUser
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.process import ProcessArch
 from app.schemas.benchmark import (
@@ -15,6 +15,7 @@ from app.schemas.benchmark import (
     BenchmarkFrameworkOut,
     BenchmarkMappingCreate,
     BenchmarkMappingOut,
+    CategoryMetricsOut,
     FrameworkCoverageOut,
     ProcessBenchmarkOut,
 )
@@ -45,7 +46,7 @@ def list_frameworks(db: DbSession):
 def get_category_tree(
     code: str,
     db: DbSession,
-    max_level: int = Query(default=4, ge=1, le=5),
+    max_level: int = Query(default=5, ge=1, le=5),
 ):
     framework = _get_framework(db, code)
     return benchmark_service.category_tree(db, framework, max_level=max_level)
@@ -63,6 +64,18 @@ def get_coverage(
 ):
     framework = _get_framework(db, code)
     return benchmark_service.coverage(db, framework, process_level=process_level)
+
+
+@router.get(
+    "/categories/{category_id}/metrics",
+    response_model=CategoryMetricsOut,
+    summary="分类元素挂载的 PCF 指标",
+)
+def get_category_metrics(category_id: int, db: DbSession, user: CurrentUser):
+    category = db.get(BenchmarkCategory, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="标准分类不存在")
+    return benchmark_service.category_metrics(db, category)
 
 
 @router.get(

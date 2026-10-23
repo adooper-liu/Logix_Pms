@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
@@ -36,6 +37,9 @@ from app.schemas.execution import (
     TaskCompleteRequest,
     TaskEventOut,
     TaskOut,
+    WorkloadSummary,
+    WorklogCreate,
+    WorklogOut,
 )
 from app.services import audit as audit_service
 from app.services import escalation as escalation_service
@@ -49,6 +53,11 @@ from app.services import org_unit as org_service
 from app.services import process_model as model_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
+
+
+@router.get("/meta", summary="执行配置与工时类型标签")
+def execution_meta():
+    return {"worklog_type_labels": execution_service.WORKLOG_TYPE_LABELS}
 
 
 def _validate_assignee(db, user_id: int, label: str) -> User:
@@ -725,6 +734,71 @@ def get_task(task_id: int, db: DbSession):
 def list_task_events(task_id: int, db: DbSession, user: CurrentUser):
     execution_service.get_task(db, task_id)
     return execution_service.list_task_events(db, task_id)
+
+
+@router.get(
+    "/tasks/{task_id}/worklogs",
+    response_model=List[WorklogOut],
+    summary="任务工时记录",
+)
+def list_task_worklogs(task_id: int, db: DbSession, user: CurrentUser):
+    execution_service.get_task(db, task_id)
+    return [
+        execution_service.worklog_out(row)
+        for row in execution_service.list_task_worklogs(db, task_id)
+    ]
+
+
+@router.post(
+    "/tasks/{task_id}/worklogs",
+    response_model=WorklogOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="补录任务实际工时",
+)
+def add_task_worklog(
+    task_id: int,
+    payload: WorklogCreate,
+    db: DbSession,
+    user: WriteUser,
+):
+    task = execution_service.get_task(db, task_id)
+    row = execution_service.record_worklog(db, task, user, payload)
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_task",
+        task.id,
+        f"登记工时 {task.name}（{task.instance.code}）：{row.effort_minutes} 分钟"
+        f"（{row.work_type}）",
+    )
+    db.commit()
+    db.refresh(row)
+    return execution_service.worklog_out(row)
+
+
+@router.get(
+    "/workload",
+    response_model=WorkloadSummary,
+    summary="工作量汇总（按人聚合，MANAGER+）",
+)
+def workload_summary(
+    db: DbSession,
+    user: ManagerUser,
+    from_date: Optional[date] = Query(default=None, alias="from"),
+    to_date: Optional[date] = Query(default=None, alias="to"),
+    user_id: Optional[int] = None,
+    org_unit_id: Optional[int] = None,
+    process_id: Optional[int] = None,
+):
+    return execution_service.workload_summary(
+        db,
+        from_date=from_date,
+        to_date=to_date,
+        user_id=user_id,
+        org_unit_id=org_unit_id,
+        process_id=process_id,
+    )
 
 
 @router.post("/tasks/{task_id}/claim", response_model=TaskOut, summary="认领任务")

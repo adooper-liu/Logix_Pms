@@ -8,13 +8,13 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.core.security import verify_password
-from app.models.benchmark import BenchmarkCategory, BenchmarkFramework
+from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, BenchmarkMetric
 from app.models.execution import ProcessInstance
 from app.models.process import ProcessArch
 from app.models.project import Project, WorkflowTemplate
 from app.models.tool import Tool
 from app.models.user import User
-from app.seed import benchmark_data, corpus
+from app.seed import benchmark_data, corpus, pcf_data
 from app.seed.runner import bootstrap_production, seed_if_empty
 
 
@@ -38,11 +38,15 @@ def test_bootstrap_seeds_reference_and_admin_only(tmp_path):
         assert db.scalar(select(func.count()).select_from(User)) == 1
         assert db.scalar(select(func.count()).select_from(WorkflowTemplate)) == len(corpus.WORKFLOW)
         assert db.scalar(select(func.count()).select_from(Tool)) == len(corpus.TOOLS)
+        pcf_dataset = pcf_data.load_pcf_v80()
         assert db.scalar(select(func.count()).select_from(BenchmarkFramework)) == len(
             benchmark_data.BENCHMARK_FRAMEWORKS
-        )
+        ) + len(pcf_dataset["frameworks"])
         assert db.scalar(select(func.count()).select_from(BenchmarkCategory)) == len(
             benchmark_data.BENCHMARK_CATEGORIES
+        ) + sum(len(framework["categories"]) for framework in pcf_dataset["frameworks"])
+        assert db.scalar(select(func.count()).select_from(BenchmarkMetric)) == len(
+            pcf_dataset["metrics"]
         )
 
         # 演示业务数据一行都不能进来

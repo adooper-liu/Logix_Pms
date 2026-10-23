@@ -1,7 +1,7 @@
 /* 视图：map */
 import { esc, num, bar, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
-import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
@@ -97,6 +97,7 @@ const renderMap = () => {
     const levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     flat.forEach((n) => { levelCounts[n.level] = (levelCounts[n.level] || 0) + 1; });
     const targetCount = flat.filter((n) => n.is_improvement_target).length;
+    const draftCount = flat.filter((n) => n.is_draft).length;
     const healthValues = flat
       .map((n) => n.health_score)
       .filter((v) => v !== null && v !== undefined);
@@ -136,6 +137,7 @@ const renderMap = () => {
               <span class="map-code">${esc(n.code)}</span>
               <b>${esc(n.name)}</b>
               ${n.is_improvement_target ? '<span class="tag t-red">待改善</span>' : ''}
+              ${n.is_draft ? '<span class="tag t-pur">PCF 草稿</span>' : ''}
             </div>
             ${n.description ? '<div class="tiny map-desc">' + esc(n.description) + '</div>' : ''}
           </td>
@@ -149,6 +151,9 @@ const renderMap = () => {
             ${HEAT_LABEL[heat]} ${num(n.priority_score, 0)}</span></td>
           <td>${hasKids ? (n.children || []).length + ' 项' : '—'}</td>
           <td class="map-go">
+            ${n.is_draft && canManage()
+              ? '<a class="link" onclick="event.stopPropagation();promoteDrafts([' + n.id
+                + '])">确认</a> · ' : ''}
             ${n.level === 3 && canWrite()
               ? '<a class="link" onclick="event.stopPropagation();startProjectFromProcess('
                 + n.id + ', \'' + esc(n.name) + '\')">立项</a> · ' : ''}
@@ -160,10 +165,13 @@ const renderMap = () => {
       : '该层级下没有流程（或没有匹配结果）');
 
     const bench = state.map.benchmark;
+    const selectedFramework = (state.map.frameworks || []).find(
+      (f) => f.code === state.map.benchmarkFramework);
     const frameworkOptions = (state.map.frameworks || []).map((f) =>
       '<option value="' + f.code + '"' +
       (state.map.benchmarkFramework === f.code ? ' selected' : '') + '>' +
-      esc(f.name) + (f.version ? ' ' + esc(f.version) : '') + '</option>').join('');
+      esc(f.name) + (f.is_primary ? ' · 主框架' : '') +
+      (f.version ? ' ' + esc(f.version) : '') + '</option>').join('');
     const benchCard = state.map.benchmarkFramework && bench ? `
       <div class="card">
         <div class="between mb">
@@ -176,7 +184,9 @@ const renderMap = () => {
           ${bar(bench.coverage_rate * 100, null, 120)}
         </div>
         <div class="map-bench-pills">${bench.by_top_category.map((c, i) => `
-          <button class="map-bench-pill" onclick="openCoverageCategory(${i})" title="${esc(c.name)}">
+          <button class="map-bench-pill" onclick="openCoverageCategory(${i})"
+            title="${esc(c.name)}${c.name_en ? ' / ' + esc(c.name_en) : ''}${
+              c.metric_count ? ' · ' + c.metric_count + ' 项指标' : ''}">
             <b>${esc(c.code)}</b><span>${esc(c.name)}</span><i>${c.mapped_count}</i>
           </button>`).join('')}</div>
         ${bench.unmapped_processes.length
@@ -184,7 +194,13 @@ const renderMap = () => {
             .map((p) => esc(p.code) + ' ' + esc(p.name)).join('、') +
             '（不在该框架的适用范围）</div>'
           : '<div class="note">所有 L3 流程都能在该框架中找到对应分类。</div>'}
-        <div class="note">覆盖率按后代聚合；点击分类可查看明细。</div>
+        <div class="note">覆盖率按后代聚合；点击分类可查看明细与 PCF 指标。</div>
+        ${selectedFramework && selectedFramework.description
+          ? `<div class="note">${esc(selectedFramework.description)}</div>` : ''}
+        ${selectedFramework && selectedFramework.attribution
+          ? `<details class="note"><summary>分类框架来源与署名</summary>
+              <div class="tiny" style="white-space:pre-wrap;margin-top:6px">${
+                esc(selectedFramework.attribution)}</div></details>` : ''}
       </div>` : '';
 
     viewEl().innerHTML = `
@@ -202,7 +218,12 @@ const renderMap = () => {
               ${frameworkOptions}
             </select>
             ${canManage()
-              ? '<button class="btn btn-p" onclick="newProcessModal()">+ 新建流程</button>'
+              ? '<button class="btn-sm" onclick="openPcfDraftWizard()">+ 从 PCF 生成</button>'
+                + (draftCount
+                  ? `<button class="btn-sm" onclick="promoteAllDrafts()">确认全部草稿（${
+                    draftCount}）</button>`
+                  : '')
+                + '<button class="btn btn-p" onclick="newProcessModal()">+ 新建流程</button>'
               : '<span class="tiny">当前角色只读</span>'}
           </div>
         </div>
@@ -275,6 +296,9 @@ const renderMap = () => {
         walk(n.children || []);
       });
       walk(tree);
+    }
+    if (!state.map.orgs) {
+      state.map.orgs = await GET('/org-units');
     }
     if (state.map.benchmarkFramework && !state.map.benchmark) {
       state.map.benchmark = await GET(
@@ -446,6 +470,247 @@ function toggleImprovement() {
   RENDERERS.map();
 }
 
+/* -------------------------------------------------- 从 PCF 生成架构草稿 */
+
+const pcfDraft = {
+  gen: 0,
+  framework: 'APQC_PCF',
+  tree: [],
+  selected: new Set(),
+  open: new Set(),
+  keyword: '',
+};
+
+function pcfFrameworkOptions() {
+  return (state.map.frameworks || [])
+    .filter((f) => f.code === 'APQC_PCF' || f.base_framework_code === 'APQC_PCF')
+    .map((f) => `<option value="${f.code}"${
+      f.code === pcfDraft.framework ? ' selected' : ''}>${esc(f.name)}${
+      f.version ? ' ' + esc(f.version) : ''}</option>`)
+    .join('');
+}
+
+function openPcfDraftWizard() {
+  const primary = (state.map.frameworks || []).find((f) => f.is_primary);
+  pcfDraft.framework = primary ? primary.code : 'APQC_PCF';
+  pcfDraft.selected = new Set();
+  pcfDraft.open = new Set();
+  pcfDraft.keyword = '';
+  pcfDraft.tree = [];
+  pcfDraft.gen = openModal('从 PCF 生成流程架构草稿', `
+    <div class="row2">
+      <div class="field"><label>分类框架</label>
+        <select class="sel" id="pcfFramework" onchange="setPcfDraftFramework(this.value)">
+          ${pcfFrameworkOptions()}
+        </select></div>
+      <div class="field"><label>生成范围</label>
+        <label class="pcf-label"><input type="checkbox" id="pcfActivities" checked>
+          <span>同时生成 L4 活动（不勾选只生成 L3）</span></label></div>
+    </div>
+    <div class="field"><label>搜索分类</label>
+      <input id="pcfSearch" placeholder="按编码、中文名或英文名过滤"
+        oninput="filterPcfDraftTree(this.value)"></div>
+    <div id="pcfTree" class="pcf-tree"><div class="empty">加载中…</div></div>
+    <div id="pcfPreview" class="pcf-preview">勾选 L1/L2 会选中其下全部 L3；生成时自动补齐上级 L1/L2。</div>`,
+  `<button class="btn btn-g" onclick="closeModal()">取消</button>
+   <button class="btn btn-g" onclick="previewPcfDraft()">预览</button>
+   <button class="btn btn-p" onclick="generatePcfDraft()">生成草稿</button>`, true);
+  loadPcfDraftTree(pcfDraft.gen);
+}
+
+async function loadPcfDraftTree(gen) {
+  try {
+    const tree = await GET(
+      '/benchmark/frameworks/' + encodeURIComponent(pcfDraft.framework) + '/tree?max_level=3');
+    if (!modalAlive(gen)) return;
+    pcfDraft.tree = tree;
+    renderPcfDraftTree();
+    resetPcfPreview();
+  } catch (e) {
+    if (modalAlive(gen)) {
+      document.getElementById('pcfTree').innerHTML =
+        `<div class="empty">${esc(e.message)}</div>`;
+    }
+  }
+}
+
+function setPcfDraftFramework(code) {
+  pcfDraft.framework = code;
+  pcfDraft.selected = new Set();
+  pcfDraft.tree = [];
+  const box = document.getElementById('pcfTree');
+  if (box) box.innerHTML = '<div class="empty">加载中…</div>';
+  resetPcfPreview();
+  loadPcfDraftTree(pcfDraft.gen);
+}
+
+function pcfNodeMatches(node, keyword) {
+  if (!keyword) return true;
+  const text = [node.code, node.name, node.name_en, node.external_id]
+    .filter(Boolean).join(' ').toLowerCase();
+  return text.includes(keyword);
+}
+
+/** 取节点下全部 L3 的 PCF ID；L3 自身返回自己。 */
+function pcfLeafIds(node, out) {
+  if (node.level === 3) {
+    if (node.external_id) out.push(node.external_id);
+    return out;
+  }
+  (node.children || []).forEach((child) => pcfLeafIds(child, out));
+  return out;
+}
+
+function pcfGroupSelected(node) {
+  const ids = pcfLeafIds(node, []);
+  return ids.length > 0 && ids.every((id) => pcfDraft.selected.has(id));
+}
+
+function pcfLeafHtml(node) {
+  const checked = pcfDraft.selected.has(node.external_id) ? ' checked' : '';
+  return `<div class="pcf-leaf"><label class="pcf-label" onclick="event.stopPropagation()">
+    <input type="checkbox"${checked} onchange="togglePcfNode('${esc(node.external_id)}', this.checked)">
+    <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
+    ${node.name_en ? `<span class="tiny">${esc(node.name_en)}</span>` : ''}
+  </label></div>`;
+}
+
+function pcfGroupHtml(node, keyword) {
+  const selfMatch = pcfNodeMatches(node, keyword);
+  const children = (node.children || []).filter((child) =>
+    selfMatch || pcfNodeMatches(child, keyword)
+    || (child.children || []).some((leaf) => pcfNodeMatches(leaf, keyword)));
+  if (!children.length) return '';
+  const checked = pcfGroupSelected(node) ? ' checked' : '';
+  const body = children.map((child) => (child.level === 3
+    ? (selfMatch || pcfNodeMatches(child, keyword) ? pcfLeafHtml(child) : '')
+    : pcfGroupHtml(child, selfMatch ? '' : keyword))).join('');
+  if (!body) return '';
+  const openAttr = keyword || pcfDraft.open.has(node.external_id) ? ' open' : '';
+  return `<details class="pcf-node"${openAttr} data-pcf="${esc(node.external_id)}"
+    ontoggle="rememberPcfOpen(this)">
+    <summary><label class="pcf-label" onclick="event.stopPropagation()">
+      <input type="checkbox"${checked} onchange="togglePcfNode('${esc(node.external_id)}', this.checked)">
+      <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
+      ${node.name_en ? `<span class="tiny">${esc(node.name_en)}</span>` : ''}
+    </label></summary>${body}</details>`;
+}
+
+function rememberPcfOpen(details) {
+  const code = details.getAttribute('data-pcf');
+  if (!code) return;
+  if (details.open) pcfDraft.open.add(code);
+  else pcfDraft.open.delete(code);
+}
+
+function renderPcfDraftTree() {
+  const box = document.getElementById('pcfTree');
+  if (!box) return;
+  const keyword = (pcfDraft.keyword || '').trim().toLowerCase();
+  const html = pcfDraft.tree
+    .filter((node) => pcfNodeMatches(node, keyword) || (node.children || []).some(
+      (child) => pcfNodeMatches(child, keyword)
+        || (child.children || []).some((leaf) => pcfNodeMatches(leaf, keyword))))
+    .map((node) => pcfGroupHtml(node, keyword)).join('');
+  box.innerHTML = html || '<div class="empty">没有匹配的分类</div>';
+}
+
+function filterPcfDraftTree(value) {
+  pcfDraft.keyword = value;
+  renderPcfDraftTree();
+}
+
+function findPcfNode(nodes, externalId) {
+  for (const node of nodes) {
+    if (node.external_id === externalId) return node;
+    const hit = findPcfNode(node.children || [], externalId);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function togglePcfNode(externalId, checked) {
+  const node = findPcfNode(pcfDraft.tree, externalId);
+  if (!node) return;
+  const ids = pcfLeafIds(node, []);
+  ids.forEach((id) => (checked ? pcfDraft.selected.add(id) : pcfDraft.selected.delete(id)));
+  renderPcfDraftTree();
+  resetPcfPreview();
+}
+
+function resetPcfPreview() {
+  const box = document.getElementById('pcfPreview');
+  if (box) {
+    box.textContent = `已选 ${pcfDraft.selected.size} 个 L3 分类；`
+      + '生成时自动补齐上级 L1/L2。';
+  }
+}
+
+function pcfRequestPayload() {
+  const activities = document.getElementById('pcfActivities');
+  return {
+    framework_code: pcfDraft.framework,
+    external_ids: Array.from(pcfDraft.selected),
+    include_activities: !activities || activities.checked,
+  };
+}
+
+async function previewPcfDraft() {
+  if (!pcfDraft.selected.size) return toast('请至少勾选一个 L3 分类', true);
+  try {
+    const data = await POST('/process-map/pcf/preview', pcfRequestPayload());
+    const byLevel = data.by_level || {};
+    const text = [1, 2, 3, 4].map((level) => {
+      const row = byLevel[String(level)] || { create: 0, reuse: 0 };
+      return `L${level} 新建 ${row.create} / 复用 ${row.reuse}`;
+    }).join(' · ');
+    const box = document.getElementById('pcfPreview');
+    if (box) {
+      box.innerHTML = `<b>将新建 ${data.create_count} 个、复用 ${data.reuse_count} 个</b>`
+        + `<div class="tiny">${text}</div>`
+        + `<div class="tiny">${esc(data.framework_name)} ${esc(data.framework_version || '')}</div>`;
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function generatePcfDraft() {
+  if (!pcfDraft.selected.size) return toast('请至少勾选一个 L3 分类', true);
+  if (!confirm(`按当前选择生成 ${pcfDraft.selected.size} 个 L3 分类的流程草稿？`)) return;
+  try {
+    const data = await POST('/process-map/pcf/generate', pcfRequestPayload());
+    closeModal();
+    invalidateProcessCaches();
+    toast(data.create_count
+      ? `已生成 ${data.create_count} 个草稿${data.reuse_count ? `，复用 ${data.reuse_count} 个` : ''}`
+      : `没有新增节点（${data.reuse_count} 个已存在）`);
+    RENDERERS.map();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function promoteDrafts(ids) {
+  if (!ids || !ids.length) return;
+  if (!confirm(`确认 ${ids.length} 个流程草稿？确认后按正式流程参与统计。`)) return;
+  try {
+    const data = await POST('/process-map/drafts/promote', { process_ids: ids });
+    toast(`已确认 ${data.updated} 个草稿`);
+    invalidateProcessCaches();
+    RENDERERS.map();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function promoteAllDrafts() {
+  const ids = flattenTree(state.map.tree || [])
+    .filter((node) => node.is_draft)
+    .map((node) => node.id);
+  promoteDrafts(ids);
+}
+
 /* -------------------------------------------------- 对标框架切换 */
 
 async function setBenchmarkFramework(code) {
@@ -469,12 +734,45 @@ function openCoverageCategory(index) {
   if (!c) return;
   const rows = c.processes.map((p) => `
     <tr><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>L${p.level}</td></tr>`).join('');
-  openModal(`${c.code} ${c.name} · 覆盖流程`, c.processes.length ? `
+  const description = c.description
+    ? `<div class="note">${esc(c.description)}</div>` : '';
+  const processTable = c.processes.length ? `
     <table class="tbl">
       <thead><tr><th>编码</th><th>流程</th><th>层级</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>` : '<div class="empty">该分类下没有已映射流程</div>',
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+    </table>` : '<div class="empty">该分类下没有已映射流程</div>';
+  const metricButton = c.external_id && c.metric_count
+    ? `<button class="btn btn-g" onclick="openCategoryMetrics(${index})">查看 PCF 指标（${
+      c.metric_count}）</button>` : '';
+  openModal(`${c.code} ${c.name}${c.name_en ? ' · ' + c.name_en : ''} · 覆盖流程`,
+    description + processTable,
+    metricButton + '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+}
+
+async function openCategoryMetrics(index) {
+  const c = state.map.benchmark && state.map.benchmark.by_top_category[index];
+  if (!c) return;
+  const gen = openModal('加载指标…', '<div class="empty">加载中…</div>');
+  try {
+    const data = await GET('/benchmark/categories/' + c.category_id + '/metrics');
+    if (!modalAlive(gen)) return;
+    const rows = data.metrics.map((m) => `
+      <tr><td class="tiny">${esc(m.metric_id)}</td>
+        <td>${esc(m.name)}</td>
+        <td class="tiny">${esc(m.metric_category || '—')}</td>
+        <td class="tiny">${esc(m.formula || '—')}</td>
+        <td class="tiny">${esc(m.unit || '—')}</td></tr>`).join('')
+      || emptyRow(5, '该分类没有配置 PCF 指标');
+    openModal(`${data.code} ${data.name} · PCF 指标`, `
+      ${data.name_en ? `<div class="note">${esc(data.name_en)}</div>` : ''}
+      <table class="tbl">
+        <thead><tr><th>指标 ID</th><th>指标</th><th>类别</th><th>公式</th><th>单位</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`,
+    '<button class="btn btn-g" onclick="closeModal()">关闭</button>', true);
+  } catch (e) {
+    if (modalAlive(gen)) toast(e.message, true);
+  }
 }
 
 /* -------------------------------------------------- 流程架构的写入口 */
@@ -492,6 +790,12 @@ function flattenTree(list, out) {
   const acc = out || [];
   (list || []).forEach((n) => { acc.push(n); flattenTree(n.children, acc); });
   return acc;
+}
+
+function mapOrgOptions(selected) {
+  return (state.map.orgs || []).map((org) =>
+    `<option value="${org.id}"${String(selected) === String(org.id) ? ' selected' : ''}>${
+      esc(org.code)} · ${esc(org.name)}</option>`).join('');
 }
 
 function processParentOptions(level) {
@@ -530,8 +834,11 @@ function newProcessModal() {
     </div>
     <div class="row2">
       <div class="field"><label>流程 Owner</label><input id="pfOwner" placeholder="如：采购部-陈经理"></div>
-      <div class="field"><label>责任部门</label><input id="pfDepartment" placeholder="如：采购部"></div>
+      <div class="field"><label>归属组织</label>
+        <select class="sel" id="pfOrg"><option value="">未指定</option>${mapOrgOptions(null)}</select></div>
     </div>
+    <div class="field"><label>责任部门（展示标签）</label>
+      <input id="pfDepartment" placeholder="如：采购部"></div>
     <div class="field"><label>流程说明</label><textarea id="pfDesc" placeholder="这条流程从哪开始、到哪结束"></textarea></div>
     <div class="row3">
       <div class="field"><label>战略重要性（0–5）</label>
@@ -560,9 +867,12 @@ function editProcessModal(processId) {
     <div class="row2">
       <div class="field"><label>流程 Owner</label>
         <input id="pfOwner" value="${esc(node.owner || '')}"></div>
-      <div class="field"><label>责任部门</label>
-        <input id="pfDepartment" value="${esc(node.department || '')}"></div>
+      <div class="field"><label>归属组织</label>
+        <select class="sel" id="pfOrg"><option value="">未指定</option>${
+          mapOrgOptions(node.org_unit_id)}</select></div>
     </div>
+    <div class="field"><label>责任部门（展示标签）</label>
+      <input id="pfDepartment" value="${esc(node.department || '')}"></div>
     <div class="field"><label>流程说明</label>
       <textarea id="pfDesc">${esc(node.description || '')}</textarea></div>
     <div class="row3">
@@ -601,6 +911,7 @@ async function saveProcess(processId) {
     name: val('pfName').trim(),
     owner: val('pfOwner').trim() || null,
     department: val('pfDepartment').trim() || null,
+    org_unit_id: val('pfOrg') ? Number(val('pfOrg')) : null,
     description: val('pfDesc').trim() || null,
     strategic_importance: Number(val('pfSi') || 3),
     pain_score: Number(val('pfPain') || 3),
@@ -657,4 +968,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, dlMapDocument, editProcessModal, flattenTree, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCoverageCategory, openDocManager, processParentOptions, refreshParentOptions, saveProcess, setBenchmarkFramework, startProjectFromProcess, toggleImprovement, toggleMapNav };
+export { renderMap, deleteProcess, dlMapDocument, editProcessModal, filterPcfDraftTree, flattenTree, generatePcfDraft, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCategoryMetrics, openCoverageCategory, openDocManager, openPcfDraftWizard, pcfRequestPayload, previewPcfDraft, processParentOptions, promoteAllDrafts, promoteDrafts, refreshParentOptions, rememberPcfOpen, saveProcess, setBenchmarkFramework, setPcfDraftFramework, startProjectFromProcess, toggleImprovement, toggleMapNav, togglePcfNode };

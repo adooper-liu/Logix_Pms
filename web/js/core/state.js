@@ -18,7 +18,11 @@ export const state = {
   /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
   toolboxFilter: null,
   designer: { processId: null, processCode: null, model: null, analysis: null, tab: 'model' },
-  knowledge: { type: '', sort: 'recent', keyword: '', tag: '' },
+  knowledge: { type: '', sort: 'recent', keyword: '', tag: '', page: 1 },
+  pcf: {
+    framework: 'APQC_PCF', frameworks: null, tree: null, treeFramework: null,
+    expanded: new Set(), selectedId: null, keyword: '',
+  },
   monitor: { status: '', tab: 'overview' },
   execution: { tab: 'tasks', filter: 'open' },
   deliverables: {
@@ -38,6 +42,7 @@ export const TITLES = {
   designer: '流程设计器',
   monitor: '运营监控与KPI',
   knowledge: '流程知识库',
+  pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',
   orgs: '组织与人员',
   sketches: '架构草图',

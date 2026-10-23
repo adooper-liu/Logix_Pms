@@ -126,6 +126,8 @@ class TaskOut(BaseModel):
     form_schema: List[Dict] = []
     form_name: Optional[str] = None
     comment: Optional[str] = None
+    standard_minutes: float = Field(default=0, description="节点标准作业时间（设计值）")
+    actual_minutes: float = Field(default=0, description="已登记的实际工时合计")
     next_options: List[NextOption] = []
 
 
@@ -189,6 +191,48 @@ class TaskCompleteRequest(BaseModel):
         default=None, description="节点有多条出边时必填，指定下一节点"
     )
     comment: Optional[str] = None
+    effort_minutes: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=10080,
+        description="本次实际工时（分钟）；填写后会生成一条 HANDLE 工时记录",
+    )
+
+
+class WorklogCreate(BaseModel):
+    work_type: str = Field(default="HANDLE", max_length=16)
+    effort_minutes: Optional[float] = Field(default=None, ge=0, le=10080)
+    started_at: Optional[UtcDateTime] = None
+    ended_at: Optional[UtcDateTime] = None
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class WorklogOut(BaseModel):
+    id: int
+    task_id: int
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    work_type: str
+    work_type_label: str
+    started_at: Optional[UtcDateTime] = None
+    ended_at: Optional[UtcDateTime] = None
+    effort_minutes: float
+    note: Optional[str] = None
+    created_at: UtcDateTime
+
+
+class WorkloadSummaryRow(BaseModel):
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    task_count: int = 0
+    effort_minutes: float = 0
+
+
+class WorkloadSummary(BaseModel):
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+    total_minutes: float = 0
+    rows: List[WorkloadSummaryRow] = []
 
 
 class TaskAssignRequest(BaseModel):

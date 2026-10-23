@@ -409,7 +409,12 @@ def governance_summary(db: Session) -> GovernanceSummary:
     latest_diff = diff_baseline(db, latest_baseline).counts if latest_baseline else {}
 
     processes_total = (
-        db.scalar(select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 3)) or 0
+        db.scalar(
+            select(func.count())
+            .select_from(ProcessArch)
+            .where(ProcessArch.level == 3, ProcessArch.is_draft.is_(False))
+        )
+        or 0
     )
     processes_covered = (
         db.scalar(

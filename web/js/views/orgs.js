@@ -40,13 +40,15 @@ const renderOrgs = () => {
       GET('/org-units/meta'),
       GET('/auth/users'),
       GET('/auth/meta'),
+      GET('/positions?active_only=false'),
     ]),
-    ([tree, flat, orgMeta, users, authMeta]) => {
+    ([tree, flat, orgMeta, users, authMeta, positions]) => {
       state.adminTree = tree;
       state.adminOrgs = flat;
       state.adminOrgMeta = orgMeta;
       state.adminUsers = users;
       state.adminAuthMeta = authMeta;
+      state.adminPositions = positions;
       paintShell();
     });
 };
@@ -64,10 +66,13 @@ function paintShell() {
           组织架构（${(state.adminOrgs || []).length}）</button>
         <button class="${a.tab === 'user' ? 'on' : ''}" onclick="setAdminTab('user')">
           人员与角色（${(state.adminUsers || []).length}）</button>
+        <button class="${a.tab === 'position' ? 'on' : ''}" onclick="setAdminTab('position')">
+          岗位（${(state.adminPositions || []).length}）</button>
       </div>
     </div>
     <div id="adminBody"></div>`;
   if (a.tab === 'org') paintOrgTab();
+  else if (a.tab === 'position') paintPositionTab();
   else paintUserTab();
 }
 
@@ -221,6 +226,121 @@ async function deleteOrgAction(orgId, name) {
   }
 }
 
+/* -------------------------------------------------- 岗位 */
+
+function positionOptions(selected) {
+  return (state.adminPositions || []).filter((row) => row.is_active)
+    .map((row) => `<option value="${row.id}" ${
+      String(selected) === String(row.id) ? 'selected' : ''}>${esc(row.code)} · ${
+      esc(row.name)}</option>`).join('');
+}
+
+function paintPositionTab() {
+  const body = document.getElementById('adminBody');
+  const rows = state.adminPositions || [];
+  const table = rows.map((row) => `
+    <tr>
+      <td><span class="map-code">${esc(row.code)}</span></td>
+      <td><b>${esc(row.name)}</b>${row.description
+        ? `<div class="tiny">${esc(row.description)}</div>` : ''}</td>
+      <td>${esc(row.org_unit_name || '集团通用')}</td>
+      <td>${row.is_active
+        ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
+      <td><button class="btn-sm" onclick="openPositionEdit(${row.id})">编辑</button>
+        <button class="btn-sm" onclick="deletePositionAction(${row.id})">删除</button></td>
+    </tr>`).join('') || emptyRow(5, '还没有岗位，先建一个岗位再绑定人员和流程节点');
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="between mb">
+        <div><h3 style="margin:0">岗位主数据</h3>
+          <div class="tiny">岗位连接人员与流程活动；被引用时只能停用，不能删除</div></div>
+        <button class="btn btn-p" onclick="openPositionCreate()">+ 新建岗位</button>
+      </div>
+      <table class="tbl">
+        <thead><tr><th>编码</th><th>岗位</th><th>所属组织</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>${table}</tbody>
+      </table>
+    </div>`;
+}
+
+function positionModal(row) {
+  return `
+    <div class="row2">
+      <div class="field"><label>岗位编码 *</label>
+        <input id="posCode" value="${esc(row ? row.code : '')}" ${row ? 'readonly' : ''}
+          placeholder="如 POS-009"></div>
+      <div class="field"><label>岗位名称 *</label>
+        <input id="posName" value="${esc(row ? row.name : '')}" placeholder="如 采购计划员"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>所属组织</label>
+        <select class="sel" id="posOrg"><option value="">集团通用</option>${
+          orgOptions(row ? row.org_unit_id : null)}</select></div>
+      <div class="field"><label>状态</label>
+        <select class="sel" id="posActive">
+          <option value="true" ${!row || row.is_active ? 'selected' : ''}>启用</option>
+          <option value="false" ${row && !row.is_active ? 'selected' : ''}>停用</option>
+        </select></div>
+    </div>
+    <div class="field"><label>说明</label>
+      <textarea id="posDesc">${esc(row ? row.description || '' : '')}</textarea></div>
+    <div class="note">岗位被人员或流程节点引用后不能删除；组织调整时优先停用。</div>`;
+}
+
+function openPositionCreate() {
+  openModal('新建岗位', positionModal(null),
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitPosition(null)">创建</button>`);
+}
+
+function openPositionEdit(positionId) {
+  const row = (state.adminPositions || []).find((item) => item.id === positionId);
+  if (!row) return;
+  openModal('编辑岗位 · ' + row.code, positionModal(row),
+    `<button class="btn btn-g" onclick="closeModal()">取消</button>
+     <button class="btn btn-p" onclick="submitPosition(${row.id})">保存</button>`);
+}
+
+async function submitPosition(positionId) {
+  const code = document.getElementById('posCode').value.trim();
+  const name = document.getElementById('posName').value.trim();
+  if (!name) return toast('岗位名称必填', true);
+  const org = document.getElementById('posOrg').value;
+  const payload = {
+    name,
+    org_unit_id: org ? Number(org) : null,
+    description: document.getElementById('posDesc').value.trim() || null,
+    is_active: document.getElementById('posActive').value === 'true',
+  };
+  try {
+    if (positionId) {
+      await PATCH('/positions/' + positionId, payload);
+      toast('岗位已更新');
+    } else {
+      if (!code) return toast('岗位编码必填', true);
+      await POST('/positions', { code, ...payload });
+      toast('岗位已创建');
+    }
+    closeModal();
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deletePositionAction(positionId) {
+  const row = (state.adminPositions || []).find((item) => item.id === positionId);
+  if (!row || !confirm(`删除岗位「${row.name}」？`)) return;
+  try {
+    await DEL('/positions/' + positionId);
+    toast('岗位已删除');
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 /* -------------------------------------------------- 人员与角色 */
 
 function filteredUsers() {
@@ -249,12 +369,13 @@ function paintUserTab() {
       <td><b>${esc(user.display_name)}</b><div class="tiny">${esc(user.username)}</div></td>
       <td><span class="tag t-blu">${esc(user.role_label || user.role)}</span></td>
       <td>${esc(user.org_unit_name || '未分配')}</td>
+      <td>${esc(user.position_name || '未分配')}</td>
       <td>${esc(user.department || '—')}</td>
       <td>${user.is_active
         ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
       <td>${user.last_login_at ? dtShort(user.last_login_at) : '从未登录'}</td>
       <td><button class="btn-sm" onclick="openUserEdit(${user.id})">编辑</button></td>
-    </tr>`).join('') || emptyRow(7, '没有符合条件的人员');
+    </tr>`).join('') || emptyRow(8, '没有符合条件的人员');
 
   body.innerHTML = `
     <div class="card">
@@ -283,7 +404,7 @@ function paintUserTab() {
         <span class="tiny">${users.length} / ${(state.adminUsers || []).length} 人</span>
       </div>
       <table class="tbl">
-        <thead><tr><th>人员</th><th>角色</th><th>组织</th><th>部门</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
+        <thead><tr><th>人员</th><th>角色</th><th>组织</th><th>岗位</th><th>部门</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="note mt">停用账号不会删除历史审计；最后一个启用的管理员不能被停用或降级。</div>
@@ -318,8 +439,11 @@ function openUserCreate() {
       <div class="field"><label>归属组织</label><select class="sel" id="auOrg">
         <option value="">未分配</option>${orgOptions(null)}
       </select></div>
-      <div class="field"><label>部门（可选）</label><input id="auDept" placeholder="部门标签"></div>
+      <div class="field"><label>岗位</label><select class="sel" id="auPosition">
+        <option value="">未分配</option>${positionOptions(null)}
+      </select></div>
     </div>
+    <div class="field"><label>部门（可选）</label><input id="auDept" placeholder="部门标签"></div>
     <div class="note">人员归属组织决定其可见的集团/分公司标准，不影响项目归属权限。</div>`,
   `<button class="btn btn-g" onclick="closeModal()">取消</button>
    <button class="btn btn-p" onclick="submitUserCreate()">创建</button>`);
@@ -333,6 +457,7 @@ async function submitUserCreate() {
     return toast('请填写用户名、姓名，口令至少 6 位', true);
   }
   const org = document.getElementById('auOrg').value;
+  const position = document.getElementById('auPosition').value;
   const payload = {
     username,
     display_name: displayName,
@@ -340,6 +465,7 @@ async function submitUserCreate() {
     role: document.getElementById('auRole').value,
     department: document.getElementById('auDept').value.trim() || null,
     org_unit_id: org ? Number(org) : null,
+    position_id: position ? Number(position) : null,
   };
   try {
     const user = await POST('/auth/users', payload);
@@ -367,15 +493,20 @@ function openUserEdit(userId) {
       </select></div>
     </div>
     <div class="row2">
+      <div class="field"><label>岗位</label><select class="sel" id="uePosition">
+        <option value="">未分配</option>${positionOptions(user.position_id)}
+      </select></div>
       <div class="field"><label>部门（可选）</label>
         <input id="ueDept" value="${esc(user.department || '')}"></div>
+    </div>
+    <div class="row2">
       <div class="field"><label>状态</label><select class="sel" id="ueActive">
         <option value="true" ${user.is_active ? 'selected' : ''}>启用</option>
         <option value="false" ${user.is_active ? '' : 'selected'}>停用</option>
       </select></div>
+      <div class="field"><label>重置口令（可选）</label><input id="uePassword" type="password"
+        placeholder="留空表示不修改"></div>
     </div>
-    <div class="field"><label>重置口令（可选）</label><input id="uePassword" type="password"
-      placeholder="留空表示不修改"></div>
     <div class="note">用户名不可修改；停用后无法登录，但历史审计与项目归属保留。</div>`,
   `<button class="btn btn-g" onclick="closeModal()">取消</button>
    <button class="btn btn-p" onclick="submitUserEdit(${user.id})">保存</button>`);
@@ -387,6 +518,8 @@ async function submitUserEdit(userId) {
     role: document.getElementById('ueRole').value,
     org_unit_id: document.getElementById('ueOrg').value
       ? Number(document.getElementById('ueOrg').value) : null,
+    position_id: document.getElementById('uePosition').value
+      ? Number(document.getElementById('uePosition').value) : null,
     department: document.getElementById('ueDept').value.trim() || null,
     is_active: document.getElementById('ueActive').value === 'true',
   };
@@ -406,5 +539,6 @@ async function submitUserEdit(userId) {
 export {
   renderOrgs, setAdminTab, openOrgCreate, submitOrgCreate, openOrgEdit, submitOrgEdit,
   toggleOrgActive, deleteOrgAction, setUserFilter, openUserCreate, submitUserCreate,
-  openUserEdit, submitUserEdit,
+  openUserEdit, submitUserEdit, openPositionCreate, openPositionEdit, submitPosition,
+  deletePositionAction,
 };
