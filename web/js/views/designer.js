@@ -133,15 +133,15 @@ function paintDesigner() {
             model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
               : '编辑后自动保存草稿'}</span>
         </div>
-        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看/编辑 PMS 指标 · 自动保存草稿</div>
+        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看/编辑 PMS 指标与执行配置 · 自动保存草稿</div>
       </div>
       <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
       <div id="bpmnSelection" class="bpmn-selection">
-        <div class="tiny muted">选中一个元素查看/编辑 PMS 指标</div>
+        <div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>
       </div>
       <div id="bpmnLint" class="bpmn-lint"></div>
-      <div class="note" style="margin-top:8px">执行引擎暂不支持并行网关、子流程、边界事件；
-        画出这些元素后保存会被拒绝。bpmnlint 会额外提示 BPMN 建模问题。</div>
+      <div class="note" style="margin-top:8px">执行引擎只支持串行流程：调色板与「更改元素」菜单已隐藏
+        并行网关、子流程和边界事件。从外部导入包含这些构造的 BPMN 文件时，保存仍会被拒绝并给出提示。</div>
       ${validationHtml(st.model)}
     </div>`;
 
@@ -357,6 +357,76 @@ function loadBpmnAutoLayout() {
   return bpmnLayoutPromise;
 }
 
+/* 执行引擎只支持串行流程：这些构造一旦画出，保存会被后端拒绝。
+ * 在调色板、上下文菜单和「更改元素」菜单里直接隐藏，避免用户白画一遍。 */
+const UNSUPPORTED_REPLACE_FRAGMENTS = [
+  'parallel-gateway', 'complex-gateway', 'event-based-gateway',
+  'transaction', 'subprocess', 'boundary',
+];
+
+function isUnsupportedReplaceEntry(key) {
+  return key.startsWith('replace-with-')
+    && UNSUPPORTED_REPLACE_FRAGMENTS.some((fragment) => key.includes(fragment));
+}
+
+function PmsPaletteProvider(palette, create, elementFactory) {
+  this._create = create;
+  this._elementFactory = elementFactory;
+  palette.registerProvider(500, this);
+}
+PmsPaletteProvider.$inject = ['palette', 'create', 'elementFactory'];
+PmsPaletteProvider.prototype.getPaletteEntries = function () {
+  const create = this._create;
+  const elementFactory = this._elementFactory;
+  const startWait = (event) => {
+    create.start(event, elementFactory.createShape({ type: 'bpmn:IntermediateCatchEvent' }));
+  };
+  // 返回函数而不是对象：在默认调色板（优先级 1000）之后执行，才能删掉既有条目
+  return function (entries) {
+    delete entries['create.subprocess-expanded'];
+    // 默认条目会创建抛出事件；拖到活动上还会变成执行引擎不支持的边界事件
+    delete entries['create.intermediate-event'];
+    entries['create.pms-wait-event'] = {
+      group: 'event',
+      className: 'bpmn-icon-intermediate-event-none',
+      title: '创建等待事件（中间捕获事件）',
+      action: { dragstart: startWait, click: startWait },
+    };
+    return entries;
+  };
+};
+
+function PmsContextPadProvider(contextPad) {
+  contextPad.registerProvider(500, this);
+}
+PmsContextPadProvider.$inject = ['contextPad'];
+PmsContextPadProvider.prototype.getContextPadEntries = function () {
+  return function (entries) {
+    delete entries['append.intermediate-event'];
+    return entries;
+  };
+};
+
+function PmsReplaceMenuProvider(popupMenu) {
+  popupMenu.registerProvider('bpmn-replace', 500, this);
+}
+PmsReplaceMenuProvider.$inject = ['popupMenu'];
+PmsReplaceMenuProvider.prototype.getPopupMenuEntries = function () {
+  return function (entries) {
+    Object.keys(entries).forEach((key) => {
+      if (isUnsupportedReplaceEntry(key)) delete entries[key];
+    });
+    return entries;
+  };
+};
+
+const PMS_BPMN_GUARDS = {
+  __init__: ['pmsPaletteProvider', 'pmsContextPadProvider', 'pmsReplaceMenuProvider'],
+  pmsPaletteProvider: ['type', PmsPaletteProvider],
+  pmsContextPadProvider: ['type', PmsContextPadProvider],
+  pmsReplaceMenuProvider: ['type', PmsReplaceMenuProvider],
+};
+
 async function mountBpmnEditor() {
   const st = state.designer;
   const container = document.getElementById('bpmnCanvas');
@@ -372,7 +442,7 @@ async function mountBpmnEditor() {
     return;
   }
   destroyBpmnModeler();
-  const modeler = new window.BpmnJS({ container });
+  const modeler = new window.BpmnJS({ container, additionalModules: [PMS_BPMN_GUARDS] });
   st.bpmnModeler = modeler;
   window.__bpmnSpike = { modeler, lint: window.BpmnLint };
   st.bpmnSelection = [];
@@ -395,13 +465,76 @@ async function mountBpmnEditor() {
   }
 }
 
+function roleOptionHtml(roles, selected) {
+  return roles.map((role) =>
+    `<option value="${esc(role.value)}"${selected === role.value ? ' selected' : ''}>${
+      esc(role.label)}</option>`).join('');
+}
+
+function orgOptionHtml(orgs, selected) {
+  return orgs.map((org) =>
+    `<option value="${org.id}"${selected === org.id ? ' selected' : ''}>${
+      esc(org.name)}</option>`).join('');
+}
+
+function userOptionHtml(users, selected) {
+  return users.map((user) =>
+    `<option value="${user.id}"${selected === user.id ? ' selected' : ''}>${
+      esc(user.display_name)} · ${esc(user.role_label || user.role)}</option>`).join('');
+}
+
+async function fetchAssignmentContext(processId) {
+  const [assignments, users, orgs, meta] = await Promise.all([
+    GET('/execution/assignments?process_id=' + processId),
+    GET('/execution/assignees'),
+    GET('/org-units'),
+    GET('/auth/meta'),
+  ]);
+  return {
+    processId,
+    assignments: new Map(assignments.map((item) => [item.node_key, item])),
+    users,
+    orgs,
+    roles: meta.roles || [],
+  };
+}
+
+/** 分派配置是流程级数据：选中节点时按需加载并缓存，避免每次改选都打四个接口。 */
+function assignmentContext(processId) {
+  const st = state.designer;
+  if (st.assignmentCtx && st.assignmentCtx.processId === processId) {
+    return Promise.resolve(st.assignmentCtx);
+  }
+  if (st.assignmentPending && st.assignmentPending.processId === processId) {
+    return st.assignmentPending.promise;
+  }
+  const clearPending = () => {
+    if (st.assignmentPending && st.assignmentPending.processId === processId) {
+      st.assignmentPending = null;
+    }
+  };
+  const promise = fetchAssignmentContext(processId)
+    .then((ctx) => {
+      clearPending();
+      // 加载期间可能已经切到别的流程，别把旧流程的配置写进缓存
+      if (state.designer.processId === processId) st.assignmentCtx = ctx;
+      return ctx;
+    })
+    .catch((error) => {
+      clearPending();
+      throw error;
+    });
+  st.assignmentPending = { processId, promise };
+  return promise;
+}
+
 function renderBpmnSelection(selection) {
   const panel = document.getElementById('bpmnSelection');
   if (!panel) return;
   const element = (selection || [])[0];
   const bo = element && element.businessObject;
   if (!bo) {
-    panel.innerHTML = '<div class="tiny muted">选中一个元素查看/编辑 PMS 指标</div>';
+    panel.innerHTML = '<div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>';
     return;
   }
   const st = state.designer;
@@ -409,6 +542,8 @@ function renderBpmnSelection(selection) {
     .find((item) => item.node_key === bo.id);
   const type = String(bo.$type || '').replace('bpmn:', '');
   const editable = !!st.editable && !!node;
+  // 分派配置的写接口要求 MANAGER+，权限比 PMS 指标更窄
+  const canConfigExec = editable && canManage();
   const ro = editable ? '' : ' readonly';
   panel.innerHTML = `
     <div class="between mb">
@@ -438,7 +573,68 @@ function renderBpmnSelection(selection) {
             <button class="btn-sm btn-p" onclick="saveBpmnMetrics('${esc(node.node_key)}')">保存指标</button></div>`
         : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`
       : '<div class="tiny muted">该元素没有 PMS 测算数据</div>'}
-    <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标在下方单独保存。</div>`;
+    ${canConfigExec
+      ? '<div id="bpmnAssignSlot" class="bpmn-assign-slot">'
+        + '<div class="tiny muted">正在加载执行配置…</div></div>'
+      : ''}
+    <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标与执行配置各自单独保存。</div>`;
+  if (canConfigExec) renderBpmnAssignment(bo.id);
+}
+
+async function renderBpmnAssignment(nodeKey) {
+  const st = state.designer;
+  const processId = st.processId;
+  const slot = document.getElementById('bpmnAssignSlot');
+  if (!slot) return;
+  // 加载或保存期间用户可能改选了别的元素：只更新仍然属于当前选中的槽位
+  const stillSelected = () => {
+    const current = (st.bpmnSelection || [])[0];
+    const currentId = current && current.businessObject ? current.businessObject.id : null;
+    return slot.isConnected && currentId === nodeKey && st.processId === processId;
+  };
+  let ctx;
+  try {
+    ctx = await assignmentContext(processId);
+  } catch (e) {
+    if (stillSelected()) {
+      slot.innerHTML = `<div class="note">执行配置加载失败：${esc(e.message)}</div>`;
+    }
+    return;
+  }
+  if (!stillSelected()) return;
+  const assignment = ctx.assignments.get(nodeKey) || {};
+  slot.innerHTML = `
+    <div class="designer-exec-config bpmn-assign">
+      <div class="between mb"><h3 style="margin:0">执行配置</h3>
+        <button class="btn-sm btn-p" onclick="saveBpmnAssignment('${esc(nodeKey)}')">
+          保存执行配置</button></div>
+      <div class="desc" style="margin:0 0 8px">候选角色 / 组织 / 默认处理人 / 节点时限 / 升级；
+        只影响发布后的新实例</div>
+      <div class="row2">
+        <div class="field"><label>候选角色</label>
+          <select id="baRole"><option value="">不限</option>${
+            roleOptionHtml(ctx.roles, assignment.role)}</select></div>
+        <div class="field"><label>限定组织</label>
+          <select id="baOrg"><option value="">不限</option>${
+            orgOptionHtml(ctx.orgs, assignment.org_unit_id)}</select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>默认处理人</label>
+          <select id="baAssignee"><option value="">公共队列</option>${
+            userOptionHtml(ctx.users, assignment.default_assignee_user_id)}</select></div>
+        <div class="field"><label>节点时限（小时）</label>
+          <input id="baDue" type="number" min="0" max="8760"
+            value="${assignment.due_hours ?? ''}" placeholder="跟随流程"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>升级时限（小时）</label>
+          <input id="baEscHours" type="number" min="0" max="8760"
+            value="${assignment.escalation_hours ?? ''}" placeholder="跟随流程"></div>
+        <div class="field"><label>升级处理人</label>
+          <select id="baEscUser"><option value="">跟随流程</option>${
+            userOptionHtml(ctx.users, assignment.escalation_user_id)}</select></div>
+      </div>
+    </div>`;
 }
 
 async function saveBpmnMetrics(nodeKey) {
@@ -515,12 +711,154 @@ async function runBpmnLint() {
         });
       });
     });
+    // 错误优先，方便先处理会阻塞发布的问题；同级别保持规则原始顺序
+    issues.sort((a, b) => (a.category === 'error' ? 0 : 1) - (b.category === 'error' ? 0 : 1));
     st.bpmnLint = issues;
     renderBpmnLint();
   } catch (e) {
     toast(e.message, true);
   }
 }
+
+/* bpmnlint 的规则名和英文消息对业务用户不友好，这里逐条翻译成「问题 + 建议」。
+ * 未收录的规则保留原始消息，但仍以中文标题呈现，避免界面突然冒出英文。 */
+const BPMN_LINT_HELP = {
+  'start-event-required': {
+    title: '缺少开始节点',
+    detail: '整个流程没有开始事件。运行时只能按「唯一入口」推断起点，流程一复杂就可能推错。',
+    action: '从调色板添加开始事件，并把第一条活动连到它。',
+  },
+  'end-event-required': {
+    title: '缺少结束节点',
+    detail: '整个流程没有结束事件。任务走完后实例无法明确结束。',
+    action: '添加结束事件，并把最终活动连到它。',
+  },
+  'no-implicit-start': {
+    title: '节点被当作隐式起点',
+    detail: '这个节点没有上游连线，运行时会被当成流程入口。',
+    action: '如果它确实是起点，建议改成开始事件；否则补上上游连线。',
+  },
+  'no-implicit-end': {
+    title: '节点被当作隐式终点',
+    detail: '这个节点没有下游连线，执行到这里实例会直接结束。',
+    action: '如果流程还要继续，补下游连线；如果到此结束，接一个结束事件。',
+  },
+  'fake-join': {
+    title: '多路汇入没有网关',
+    detail: '有多条上游连线直接汇入这个节点，中间没有汇合网关，执行语义不明确。',
+    action: '在汇入处加一个排他网关，让分支先汇合再进入该节点。',
+  },
+  'no-implicit-split': {
+    title: '节点被当作隐式分支',
+    detail: '这个节点有多条下游连线，但没有用网关明确分支。',
+    action: '改用判断（排他）网关分支，执行引擎才能按条件路由。',
+  },
+  'superfluous-label': {
+    title: '连线标签不会生效',
+    detail: '这条连线填了标签，但起点不是判断或审批节点，标签不会参与运行时路由。',
+    action: '删除标签；如果要按条件走不同分支，请把起点改为判断节点并配置条件。',
+  },
+  'conditional-flows': {
+    title: '分支缺少条件',
+    detail: '从判断节点分出的连线没有配置条件表达式。',
+    action: '为每条分支补上条件，并设置一条默认分支兜底。',
+  },
+  'no-disconnected': {
+    title: '元素没有接入流程',
+    detail: '这个元素与主流程没有连线，运行时永远不会执行。',
+    action: '用连线把它接入流程，或删除它。',
+  },
+  'label-required': {
+    title: '元素缺少名称',
+    detail: '这个元素还没有名称，任务列表和运行记录里无法辨认。',
+    action: '双击元素补上名称。',
+  },
+  'no-duplicate-sequence-flows': {
+    title: '存在重复连线',
+    detail: '同一对节点之间有多条完全相同的连线。',
+    action: '删除重复的连线，只保留一条。',
+  },
+  'superfluous-gateway': {
+    title: '网关是多余的',
+    detail: '这个网关只有一个入边和一个出边，没有起到分支或汇合作用。',
+    action: '删除网关，直接把前后两个节点连起来。',
+  },
+  'no-gateway-join-fork': {
+    title: '网关同时分流和汇合',
+    detail: '同一个网关既做分支又做汇合，执行语义容易混淆。',
+    action: '拆成两个网关：前面负责分流，后面负责汇合。',
+  },
+  'single-blank-start-event': {
+    title: '开始事件不唯一',
+    detail: '流程里有多个无类型开始事件，运行时无法确定从哪个开始。',
+    action: '只保留一个无类型开始事件；其余改成带触发类型的开始事件或删除。',
+  },
+  'single-event-definition': {
+    title: '事件定义重复',
+    detail: '同一个事件配置了多个事件定义（例如同时是消息和定时），运行时无法判断用哪个。',
+    action: '只保留一个事件定义。',
+  },
+  'sub-process-blank-start-event': {
+    title: '子流程开始事件不规范',
+    detail: '子流程里有不带事件定义的开始事件。',
+    action: '为子流程的开始事件补上事件定义，或改用普通开始事件。',
+  },
+  'event-sub-process-typed-start-event': {
+    title: '事件子流程缺少事件定义',
+    detail: '事件子流程的开始事件需要消息、定时或信号等事件定义。',
+    action: '给开始事件补上对应的事件定义。',
+  },
+  'event-based-gateway': {
+    title: '不支持事件网关',
+    detail: '执行引擎只做串行流程，事件网关不在支持范围内。',
+    action: '改用排他网关，或把等待改成中间捕获事件。',
+  },
+  'no-complex-gateway': {
+    title: '不支持复杂网关',
+    detail: '执行引擎只做串行流程，复杂网关不在支持范围内。',
+    action: '改用排他网关。',
+  },
+  'no-inclusive-gateway': {
+    title: '不推荐包容网关',
+    detail: '包容网关的多路执行语义与当前单令牌执行引擎不一致。',
+    action: '改用排他网关。',
+  },
+  'ad-hoc-sub-process': {
+    title: '不支持 Ad-hoc 子流程',
+    detail: '执行引擎不支持 Ad-hoc 子流程。',
+    action: '删掉子流程，把内部活动展开到主流程。',
+  },
+  'link-event': {
+    title: '链接事件缺少名称',
+    detail: '链接事件没有填写链接名称，无法与配对的另一个链接事件对应。',
+    action: '在属性里补上链接名称。',
+  },
+  'no-overlapping-elements': {
+    title: '元素在画布上重叠',
+    detail: '两个元素的位置重叠，容易看错连线关系。',
+    action: '拖动分开，或使用「自动布局」重新排列。',
+  },
+  'superfluous-termination': {
+    title: '终止事件是多余的',
+    detail: '终止事件后面没有其他元素，终止语义没有实际作用。',
+    action: '改成普通结束事件。',
+  },
+  'no-bpmndi': {
+    title: '缺少图形信息',
+    detail: '元素没有对应的 BPMN DI 坐标，画布上无法定位。',
+    action: '在 bpmn-js 里重新保存一次，让图形信息补齐。',
+  },
+  'rule-error': {
+    title: '校验规则执行失败',
+    detail: '这条规则本身报错，通常是模型结构异常。',
+    action: '保存后重试；仍然失败请反馈给流程管理科。',
+  },
+  global: {
+    title: '使用了全局任务',
+    detail: '全局任务不是可执行的流程节点。',
+    action: '改成普通任务或删除。',
+  },
+};
 
 function renderBpmnLint() {
   const box = document.getElementById('bpmnLint');
@@ -537,13 +875,26 @@ function renderBpmnLint() {
       <span class="tiny">${errors} 错误 · ${warns} 警告</span></div>
     ${issues.map((issue, index) => {
       const element = issue.meta && issue.meta.element;
-      const label = element ? (element.name || element.id) : '流程级';
+      const bo = element && element.businessObject;
+      const isProcess = bo && (bo.$type === 'bpmn:Process' || bo.$type === 'bpmn:Collaboration');
+      const label = element && !isProcess ? ((bo && (bo.name || bo.id)) || element.id) : '整个流程';
       const category = issue.category === 'error' ? 'error' : 'warn';
-      return `<div class="bpmn-lint-item ${category}" onclick="selectLintIssue(${index})">
-        <span class="tag ${category === 'error' ? 't-red' : 't-yel'}">${
-          category === 'error' ? '错误' : '警告'}</span>
-        <b>${esc(issue.rule || '')}</b> · ${esc(issue.message || '')}
-        <span class="tiny">（${esc(label)}）</span></div>`;
+      const help = BPMN_LINT_HELP[issue.rule];
+      const title = help ? help.title : '建模规范提示';
+      const detail = help ? help.detail : (issue.message || '');
+      const raw = issue.rule + (issue.message ? '：' + issue.message : '');
+      return `<div class="bpmn-lint-item ${category}" onclick="selectLintIssue(${index})"
+          title="${esc(raw)}">
+        <div class="bpmn-lint-head">
+          <span class="tag ${category === 'error' ? 't-red' : 't-yel'}">${
+            category === 'error' ? '错误' : '警告'}</span>
+          <b>${esc(title)}</b>
+          <span class="tiny muted">${esc(label)}</span>
+        </div>
+        <div class="bpmn-lint-detail">${esc(detail)}</div>
+        ${help && help.action
+          ? `<div class="bpmn-lint-action muted">建议：${esc(help.action)}</div>` : ''}
+      </div>`;
     }).join('')}`;
 }
 
@@ -557,6 +908,216 @@ function selectLintIssue(index) {
   modeler.get('canvas').scrollToElement(element);
 }
 
+const BPMN_NS = 'http://www.omg.org/spec/BPMN/20100524/MODEL';
+const BPMNDI_NS = 'http://www.omg.org/spec/BPMN/20100524/DI';
+const DC_NS = 'http://www.omg.org/spec/DD/20100524/DC';
+const DI_NS = 'http://www.omg.org/spec/DD/20100524/DI';
+
+function bpmnXmlDoc(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) {
+    throw new Error('BPMN XML 解析失败，无法自动布局');
+  }
+  return doc;
+}
+
+function directChildren(element, name) {
+  return Array.from(element.children).filter((child) => child.localName === name);
+}
+
+function roundCoord(value) {
+  return Math.round(value * 10) / 10;
+}
+
+/** bpmn-moddle 不会从 sequenceFlow 反推 incoming/outgoing。
+ *  缺少这两个引用时，bpmn-auto-layout 会把所有节点排成一列。 */
+function ensureFlowRefs(xml) {
+  const doc = bpmnXmlDoc(xml);
+  const processEl = doc.getElementsByTagNameNS(BPMN_NS, 'process')[0];
+  if (!processEl) return xml;
+  const incoming = new Map();
+  const outgoing = new Map();
+  const push = (map, key, value) => {
+    if (!key || !value) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  };
+  directChildren(processEl, 'sequenceFlow').forEach((flow) => {
+    push(outgoing, flow.getAttribute('sourceRef'), flow.getAttribute('id'));
+    push(incoming, flow.getAttribute('targetRef'), flow.getAttribute('id'));
+  });
+  Array.from(processEl.children).forEach((element) => {
+    const id = element.getAttribute('id');
+    if (!id || (!incoming.has(id) && !outgoing.has(id))) return;
+    if (directChildren(element, 'incoming').length
+      || directChildren(element, 'outgoing').length) return;
+    (incoming.get(id) || []).forEach((flowId) => {
+      const ref = doc.createElementNS(BPMN_NS, 'bpmn:incoming');
+      ref.textContent = flowId;
+      element.appendChild(ref);
+    });
+    (outgoing.get(id) || []).forEach((flowId) => {
+      const ref = doc.createElementNS(BPMN_NS, 'bpmn:outgoing');
+      ref.textContent = flowId;
+      element.appendChild(ref);
+    });
+  });
+  return new XMLSerializer().serializeToString(doc);
+}
+
+/** bpmn-auto-layout 只排 flowElements，会丢掉泳道 DI。
+ *  这里保留它算出的横向顺序，按泳道重新分配纵向区域并补回泳道 DI 与连线折点。 */
+function restoreLanes(xml) {
+  const doc = bpmnXmlDoc(xml);
+  const processEl = doc.getElementsByTagNameNS(BPMN_NS, 'process')[0];
+  const plane = doc.getElementsByTagNameNS(BPMNDI_NS, 'BPMNPlane')[0];
+  if (!processEl || !plane) return xml;
+  const laneSet = directChildren(processEl, 'laneSet')[0];
+  if (!laneSet) return xml;
+
+  const shapes = new Map();
+  directChildren(plane, 'BPMNShape').forEach((shape) => {
+    const id = shape.getAttribute('bpmnElement');
+    const bounds = directChildren(shape, 'Bounds')[0];
+    if (!id || !bounds) return;
+    shapes.set(id, {
+      id,
+      bounds,
+      x: Number(bounds.getAttribute('x')) || 0,
+      y: Number(bounds.getAttribute('y')) || 0,
+      width: Number(bounds.getAttribute('width')) || 0,
+      height: Number(bounds.getAttribute('height')) || 0,
+    });
+  });
+
+  const flows = new Map();
+  directChildren(processEl, 'sequenceFlow').forEach((flow) => {
+    flows.set(flow.getAttribute('id'), {
+      source: flow.getAttribute('sourceRef'),
+      target: flow.getAttribute('targetRef'),
+    });
+  });
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  const laneRows = directChildren(laneSet, 'lane').map((lane) => {
+    const members = directChildren(lane, 'flowNodeRef')
+      .map((ref) => shapes.get((ref.textContent || '').trim()))
+      .filter(Boolean);
+    members.forEach((item) => {
+      minX = Math.min(minX, item.x);
+      maxX = Math.max(maxX, item.x + item.width);
+    });
+    // 自动布局把并行分支放在不同行；同泳道内保留这些行，避免节点重叠
+    const rows = [];
+    members.slice().sort((a, b) => a.y - b.y || a.x - b.x).forEach((item) => {
+      const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 5);
+      if (row) row.items.push(item);
+      else rows.push({ y: item.y, items: [item] });
+    });
+    return { lane, rows };
+  }).filter((entry) => entry.rows.length);
+  if (!laneRows.length) return xml;
+
+  const PAD_X = 90;
+  const PAD_Y = 24;
+  const ROW_GAP = 24;
+  const LANE_GAP = 18;
+  // 左侧留出泳道标题栏（bpmn-js 约 30px）和调色板覆盖区
+  const SHIFT_X = 80;
+  const left = minX + SHIFT_X - PAD_X;
+  const width = maxX - minX + PAD_X * 2;
+  const deltaY = new Map();
+  const laneShapes = [];
+  let cursor = 40;
+  laneRows.forEach(({ lane, rows }) => {
+    const rowHeights = rows.map((row) => Math.max(...row.items.map((item) => item.height)));
+    const height = PAD_Y * 2
+      + rowHeights.reduce((sum, value) => sum + value, 0)
+      + ROW_GAP * (rows.length - 1);
+    laneShapes.push({
+      id: lane.getAttribute('id'),
+      x: left,
+      y: cursor,
+      width,
+      height,
+    });
+    let rowTop = cursor + PAD_Y;
+    rows.forEach((row, rowIndex) => {
+      const rowHeight = rowHeights[rowIndex];
+      row.items.forEach((item) => {
+        const y = rowTop + (rowHeight - item.height) / 2;
+        deltaY.set(item.id, y - item.y);
+        item.bounds.setAttribute('x', String(roundCoord(item.x + SHIFT_X)));
+        item.bounds.setAttribute('y', String(roundCoord(y)));
+      });
+      rowTop += rowHeight + ROW_GAP;
+    });
+    cursor += height + LANE_GAP;
+  });
+
+  // 泳道要画在节点下面，所以插到第一个节点形状之前
+  const firstShape = directChildren(plane, 'BPMNShape')[0] || null;
+  laneShapes.forEach((lane) => {
+    const shape = doc.createElementNS(BPMNDI_NS, 'bpmndi:BPMNShape');
+    shape.setAttribute('id', 'Shape_' + lane.id);
+    shape.setAttribute('bpmnElement', lane.id);
+    shape.setAttribute('isHorizontal', 'true');
+    const bounds = doc.createElementNS(DC_NS, 'dc:Bounds');
+    bounds.setAttribute('x', String(roundCoord(lane.x)));
+    bounds.setAttribute('y', String(roundCoord(lane.y)));
+    bounds.setAttribute('width', String(roundCoord(lane.width)));
+    bounds.setAttribute('height', String(roundCoord(lane.height)));
+    shape.appendChild(bounds);
+    plane.insertBefore(shape, firstShape);
+  });
+
+  // 节点换了纵向位置，连线折点也要跟着走，否则终点会脱离节点
+  directChildren(plane, 'BPMNEdge').forEach((edge) => {
+    const flow = flows.get(edge.getAttribute('bpmnElement'));
+    if (!flow) return;
+    const dyS = deltaY.get(flow.source) || 0;
+    const dyT = deltaY.get(flow.target) || 0;
+    if (!dyS && !dyT) return;
+    const points = directChildren(edge, 'waypoint');
+    if (!points.length) return;
+    points.forEach((point) => {
+      const x = (Number(point.getAttribute('x')) || 0) + SHIFT_X;
+      point.setAttribute('x', String(roundCoord(x)));
+    });
+    if (points.length === 2 && dyS !== dyT) {
+      const x1 = Number(points[0].getAttribute('x')) || 0;
+      const y1 = (Number(points[0].getAttribute('y')) || 0) + dyS;
+      const x2 = Number(points[1].getAttribute('x')) || 0;
+      const y2 = (Number(points[1].getAttribute('y')) || 0) + dyT;
+      points[0].setAttribute('y', String(roundCoord(y1)));
+      points[1].setAttribute('y', String(roundCoord(y2)));
+      if (Math.abs(x2 - x1) > 1) {
+        // 跨泳道的直线会斜穿泳道边界，补两个折点变成正交走线
+        const midX = roundCoord((x1 + x2) / 2);
+        const bend1 = doc.createElementNS(DI_NS, 'di:waypoint');
+        bend1.setAttribute('x', String(midX));
+        bend1.setAttribute('y', String(roundCoord(y1)));
+        const bend2 = doc.createElementNS(DI_NS, 'di:waypoint');
+        bend2.setAttribute('x', String(midX));
+        bend2.setAttribute('y', String(roundCoord(y2)));
+        edge.insertBefore(bend2, points[1]);
+        edge.insertBefore(bend1, bend2);
+      }
+      return;
+    }
+    // 有折点的路径：前半段跟随起点、后半段跟随终点，保持水平/垂直线段
+    const middle = (points.length - 1) / 2;
+    points.forEach((point, index) => {
+      const dy = index < middle ? dyS : dyT;
+      const y = (Number(point.getAttribute('y')) || 0) + dy;
+      point.setAttribute('y', String(roundCoord(y)));
+    });
+  });
+
+  return new XMLSerializer().serializeToString(doc);
+}
+
 async function autoLayoutBpmn() {
   const modeler = state.designer.bpmnModeler;
   if (!modeler) return;
@@ -564,9 +1125,9 @@ async function autoLayoutBpmn() {
   try {
     await loadBpmnAutoLayout();
     const { xml } = await modeler.saveXML({ format: true });
-    const layouted = await window.BpmnAutoLayout.layoutProcess(xml);
+    const layouted = await window.BpmnAutoLayout.layoutProcess(ensureFlowRefs(xml));
     state.designer.bpmnImporting = true;
-    await modeler.importXML(layouted);
+    await modeler.importXML(restoreLanes(layouted));
     state.designer.bpmnImporting = false;
     state.designer.bpmnSelection = [];
     renderBpmnSelection([]);
@@ -589,10 +1150,11 @@ function toggleBpmnFullscreen() {
   card.classList.toggle('fullscreen', enter);
   const resize = () => {
     const modeler = state.designer.bpmnModeler;
-    if (modeler) {
-      modeler.get('canvas').resized();
-      modeler.get('canvas').zoom('fit-viewport');
-    }
+    const container = document.getElementById('bpmnCanvas');
+    // 全屏切换的瞬间容器可能还没有布局尺寸：此时 fit-viewport 会算出非有限值
+    if (!modeler || !container || container.clientWidth < 1 || container.clientHeight < 1) return;
+    modeler.get('canvas').resized();
+    modeler.get('canvas').zoom('fit-viewport');
   };
   if (enter) {
     state.designer.bpmnFullscreenHandler = (event) => {
@@ -1354,6 +1916,8 @@ function switchProcess(id) {
   state.designer.fitted = false;
   state.designer.history = [];
   state.designer.future = [];
+  state.designer.assignmentCtx = null;
+  state.designer.assignmentPending = null;
   RENDERERS.designer();
 }
 
@@ -1433,6 +1997,9 @@ async function reloadDesign() {
     st.analysis = analysis;
     st.history = [];
     st.future = [];
+    // 冲突重载可能带回别人的结构改动，分派配置也跟着重新拉取
+    st.assignmentCtx = null;
+    st.assignmentPending = null;
     paintDesigner();
   } catch (e) {
     toast(e.message, true);
@@ -1485,36 +2052,15 @@ async function editNode(nodeKey) {
   const pid = state.designer.processId;
 
   let assignment = null;
-  let users = [];
-  let orgs = [];
-  let roles = [];
   let executionBlock = '';
   if (canManage()) {
     try {
-      const [assignments, assignees, orgRows, meta] = await Promise.all([
-        GET('/execution/assignments?process_id=' + pid),
-        GET('/execution/assignees'),
-        GET('/org-units'),
-        GET('/auth/meta'),
-      ]);
-      assignment = assignments.find((x) => x.node_key === nodeKey) || {};
-      users = assignees;
-      orgs = orgRows;
-      roles = meta.roles || [];
-      const roleOpts = roles.map((r) =>
-        `<option value="${esc(r.value)}"${assignment.role === r.value ? ' selected' : ''}>${
-          esc(r.label)}</option>`).join('');
-      const orgOpts = orgs.map((o) =>
-        `<option value="${o.id}"${assignment.org_unit_id === o.id ? ' selected' : ''}>${
-          esc(o.name)}</option>`).join('');
-      const userOpts = users.map((u) =>
-        `<option value="${u.id}"${assignment.default_assignee_user_id === u.id
-          ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
-      ).join('');
-      const escUserOpts = users.map((u) =>
-        `<option value="${u.id}"${assignment.escalation_user_id === u.id
-          ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
-      ).join('');
+      const ctx = await assignmentContext(pid);
+      assignment = ctx.assignments.get(nodeKey) || {};
+      const roleOpts = roleOptionHtml(ctx.roles, assignment.role);
+      const orgOpts = orgOptionHtml(ctx.orgs, assignment.org_unit_id);
+      const userOpts = userOptionHtml(ctx.users, assignment.default_assignee_user_id);
+      const escUserOpts = userOptionHtml(ctx.users, assignment.escalation_user_id);
       executionBlock = `
         <div class="designer-exec-config">
           <div class="between mb"><h3 style="margin:0">执行配置</h3>
@@ -1592,31 +2138,66 @@ async function editNode(nodeKey) {
      <button class="btn btn-p" onclick="saveNode('${nodeKey}')">保存节点</button>`);
 }
 
-async function saveNodeAssignment(nodeKey) {
-  const pid = state.designer.processId;
+/** 从表单读取分派配置；bpmn 属性面板与节点弹窗共用，字段 id 由调用方传入。 */
+function readAssignmentPayload(nodeKey, ids) {
+  const value = (id) => document.getElementById(id).value;
   const numOrNull = (id) => {
-    const raw = document.getElementById(id).value.trim();
+    const raw = value(id).trim();
     if (raw === '') return null;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0 || value > 8760) {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 8760) {
       throw new Error('时限应为 0–8760 小时');
     }
-    return value;
+    return parsed;
   };
+  const idOrNull = (id) => (value(id) ? Number(value(id)) : null);
+  return {
+    process_id: state.designer.processId,
+    node_key: nodeKey,
+    role: value(ids.role) || null,
+    org_unit_id: idOrNull(ids.org),
+    default_assignee_user_id: idOrNull(ids.assignee),
+    due_hours: numOrNull(ids.due),
+    escalation_hours: numOrNull(ids.escalationHours),
+    escalation_user_id: idOrNull(ids.escalationUser),
+  };
+}
+
+async function persistAssignment(nodeKey, ids) {
+  const payload = readAssignmentPayload(nodeKey, ids);
+  const saved = await PUT('/execution/assignments', payload);
+  const st = state.designer;
+  if (saved && st.assignmentCtx && st.assignmentCtx.processId === payload.process_id) {
+    st.assignmentCtx.assignments.set(nodeKey, saved);
+  }
+  return saved;
+}
+
+async function saveBpmnAssignment(nodeKey) {
   try {
-    const role = document.getElementById('edRole').value || null;
-    const org = document.getElementById('edOrg').value;
-    const assignee = document.getElementById('edAssignee').value;
-    const escUser = document.getElementById('edEscUser').value;
-    await PUT('/execution/assignments', {
-      process_id: pid,
-      node_key: nodeKey,
-      role,
-      org_unit_id: org ? Number(org) : null,
-      default_assignee_user_id: assignee ? Number(assignee) : null,
-      due_hours: numOrNull('edDue'),
-      escalation_hours: numOrNull('edEscHours'),
-      escalation_user_id: escUser ? Number(escUser) : null,
+    await persistAssignment(nodeKey, {
+      role: 'baRole',
+      org: 'baOrg',
+      assignee: 'baAssignee',
+      due: 'baDue',
+      escalationHours: 'baEscHours',
+      escalationUser: 'baEscUser',
+    });
+    toast('节点执行配置已保存');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function saveNodeAssignment(nodeKey) {
+  try {
+    await persistAssignment(nodeKey, {
+      role: 'edRole',
+      org: 'edOrg',
+      assignee: 'edAssignee',
+      due: 'edDue',
+      escalationHours: 'edEscHours',
+      escalationUser: 'edEscUser',
     });
     toast('节点执行配置已保存');
   } catch (e) {
@@ -1673,7 +2254,8 @@ export {
   openNodeEditor, openVersionHistory, paintDesigner, paintMetrics,
   paintSuggestions, persistDesign, publishDesign, reanalyze, redoDesigner,
   rejectReview, reloadDesign, renderDesigner, rollbackVersion, runBpmnLint,
-  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, selectLintIssue,
+  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, saveBpmnAssignment,
+  selectLintIssue,
   setDesignerTab, submitReview, switchProcess, toggleBpmnFullscreen,
   toggleDesignerMode, undoDesigner,
 };

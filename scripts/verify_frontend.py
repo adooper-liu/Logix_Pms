@@ -448,6 +448,70 @@ def main() -> int:
             assert "组织编码" in page.inner_text("#mBody")
             close_modal()
 
+        # 草图：draw.io embed 的 proto=json 收发的是 JSON 字符串
+        def sketch_drawio_protocol() -> None:
+            created = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const r = await fetch('/api/v1/sketches', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t},
+                    body: JSON.stringify({title: 'E2E 草图协议'}),
+                  });
+                  return await r.json();
+                }"""
+            )
+            sketch_id = created["id"]
+            try:
+                goto("sketches")
+                row = page.locator("#view tr").filter(has_text="E2E 草图协议")
+                row.locator('button:has-text("打开")').click()
+                page.wait_for_selector("#drawioFrame", timeout=8000)
+                page.wait_for_timeout(600)
+                origin = page.evaluate(
+                    """async () => {
+                      const t = localStorage.getItem('psm_token');
+                      const meta = await fetch('/api/v1/sketches/meta', {
+                        headers: {'Authorization': 'Bearer ' + t},
+                      }).then(r => r.json());
+                      const origin = new URL(meta.embed_url, location.origin).origin;
+                      const frame = document.getElementById('drawioFrame');
+                      const send = (payload) => window.dispatchEvent(new MessageEvent('message', {
+                        data: JSON.stringify(payload), origin, source: frame.contentWindow,
+                      }));
+                      send({event: 'init'});
+                      send({
+                        event: 'save',
+                        xml: '<mxfile host="e2e"><diagram id="d1">E2E-OK</diagram></mxfile>',
+                      });
+                      return origin;
+                    }"""
+                )
+                assert origin, "没有取到 draw.io embed 来源"
+                page.wait_for_timeout(1200)
+                assert "草图已保存" in page.inner_text("#toast")
+                detail = page.evaluate(
+                    """async (id) => {
+                      const t = localStorage.getItem('psm_token');
+                      return await fetch('/api/v1/sketches/' + id, {
+                        headers: {'Authorization': 'Bearer ' + t},
+                      }).then(r => r.json());
+                    }""",
+                    sketch_id,
+                )
+                assert "E2E-OK" in (detail.get("mxfile_xml") or ""), detail.get("mxfile_xml")
+                page.click('#mFoot button:has-text("关闭")')
+            finally:
+                page.evaluate(
+                    """async (id) => {
+                      const t = localStorage.getItem('psm_token');
+                      await fetch('/api/v1/sketches/' + id, {
+                        method: 'DELETE', headers: {'Authorization': 'Bearer ' + t},
+                      });
+                    }""",
+                    sketch_id,
+                )
+
         # 架构树计数：L1「研发设计」下含 9 个 L4 活动
         def map_tree_counts() -> None:
             goto("map")
@@ -516,15 +580,69 @@ def main() -> int:
             page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
             assert page.locator("#bpmnCanvas .djs-element").count() >= 5
             assert page.locator(".bjs-powered-by").count() == 1, "bpmn.io 水印必须保留"
+            # 执行引擎不支持的构造不应出现在调色板里；等待事件单独提供
+            assert (
+                page.locator('#bpmnCanvas [data-action="create.subprocess-expanded"]').count() == 0
+            ), "调色板仍提供子流程"
+            assert (
+                page.locator('#bpmnCanvas [data-action="create.intermediate-event"]').count() == 0
+            ), "调色板仍提供抛出/边界中间事件"
+            assert page.locator('#bpmnCanvas [data-action="create.pms-wait-event"]').count() == 1, (
+                "缺少等待事件入口"
+            )
+            # 选中活动节点后，属性区应能直接维护节点分派 / SLA
+            page.click('#bpmnCanvas [data-element-id="n3"]')
+            page.wait_for_timeout(400)
+            assert (
+                page.locator('#bpmnCanvas [data-action="append.intermediate-event"]').count() == 0
+            ), "上下文菜单仍能追加中间事件"
+            assert page.locator('#bpmnCanvas [data-action="replace"]').count() == 1
+            page.click('#bpmnCanvas [data-action="replace"]')
+            page.wait_for_selector(".djs-popup [data-id]", timeout=5000)
+            replace_ids = page.eval_on_selector_all(
+                ".djs-popup [data-id]", "els => els.map(e => e.dataset.id)"
+            )
+            blocked = (
+                "parallel-gateway",
+                "complex-gateway",
+                "event-based-gateway",
+                "subprocess",
+                "boundary",
+                "transaction",
+            )
+            assert not [key for key in replace_ids if any(x in key for x in blocked)], replace_ids
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            page.wait_for_selector("#bpmnSelection #baRole", timeout=8000)
+            assert page.locator("#bpmnSelection .bpmn-assign").count() == 1
+            page.fill("#baDue", "24")
+            page.click('#bpmnSelection button:has-text("保存执行配置")')
+            page.wait_for_timeout(1200)
+            assert "节点执行配置已保存" in page.inner_text("#toast")
+            # 还原为空，避免自检留下演示配置
+            page.fill("#baDue", "")
+            page.click('#bpmnSelection button:has-text("保存执行配置")')
+            page.wait_for_timeout(1200)
             page.click('#view button:has-text("运行校验")')
             page.wait_for_selector(".bpmn-lint-item", timeout=8000)
             assert page.locator(".bpmn-lint-item").count() >= 1
+            lint_text = page.inner_text("#bpmnLint")
+            assert "缺少开始节点" in lint_text, lint_text[:200]
+            assert "Process is missing" not in lint_text, "校验结果仍在显示原始英文规则消息"
             page.click('#view button:has-text("全屏")')
             page.wait_for_timeout(400)
             assert page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             assert not page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
+            # 自动布局必须保留泳道；bpmn-auto-layout 本身只排 flowElements
+            page.once("dialog", lambda dialog: dialog.accept())
+            page.click('#view button:has-text("自动布局")')
+            page.wait_for_timeout(5000)
+            assert "已自动布局并保存" in page.inner_text("#toast")
+            assert page.locator('#bpmnCanvas [data-element-id^="Lane_"]').count() >= 1, (
+                "自动布局后泳道丢失"
+            )
             page.click('#view button:has-text("简洁画布")')
             page.wait_for_selector("#designerCanvas")
             page.screenshot(path=str(out_dir / "interaction-designer-bpmnjs.png"), full_page=True)
@@ -1020,6 +1138,7 @@ def main() -> int:
         check("交付物与模板库", deliverables_view)
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
+        check("草图 draw.io 消息协议", sketch_drawio_protocol)
         check("设计器改节点并重算", designer_edit_node)
         check("设计器专业 BPMN 画布（bpmn-js）", designer_bpmn_spike)
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)

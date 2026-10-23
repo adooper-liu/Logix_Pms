@@ -43,10 +43,13 @@ draw.io 是通用图表工具，保存 mxGraph/mxfile，适合自由布局和复
 前端通过 iframe 加载 `DRAWIO_EMBED_URL`，使用 draw.io embed 的 `postMessage` 协议：
 
 1. iframe 发出 `{ event: 'init' }`
-2. 页面回发 `{ action: 'load', xml: mxfile_xml }`
-3. 用户保存时 iframe 发出 `{ event: 'save', xml }`
+2. 页面回发 `{ action: 'load', xml: mxfile_xml, autosave: 1 }`
+3. 用户保存时 iframe 发出 `{ event: 'save', xml }`（自动保存为 `event: 'autosave'`）
 4. 页面 `PATCH /sketches/{id}` 保存 XML
 5. `{ event: 'exit' }` 关闭弹窗
+
+注意：`proto=json` 模式下，两个方向的消息体都是 **JSON 字符串**（`JSON.stringify` 后的
+`postMessage`），不是对象。前端同时兼容对象形式，便于自托管实例或协议升级。
 
 默认配置：
 

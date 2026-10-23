@@ -83,7 +83,8 @@
 .bpmn-canvas.readonly .djs-palette,.bpmn-canvas.readonly .djs-context-pad{display:none}
 .bpmn-selection{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
   margin-top:10px;background:var(--panel-2)}
-.bpmn-lint{margin-top:10px;max-height:180px;overflow:auto;border:1px solid var(--line);
+.bpmn-selection .designer-exec-config{margin:12px 0 0;background:var(--panel)}
+.bpmn-lint{margin-top:10px;max-height:320px;overflow:auto;border:1px solid var(--line);
   border-radius:10px;padding:8px 10px;background:var(--panel-2)}
 .bpmn-lint-item{padding:5px 4px;border-bottom:1px solid var(--line-soft);cursor:pointer;
   font-size:12px;line-height:1.5}
@@ -91,9 +92,12 @@
 .bpmn-lint-item:hover{background:var(--panel-hover)}
 .bpmn-lint-item.error{color:var(--bad-strong)}
 .bpmn-lint-item.warn{color:var(--warn-strong)}
+.bpmn-lint-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.bpmn-lint-detail{margin-top:3px;line-height:1.55}
+.bpmn-lint-action{margin-top:2px;line-height:1.5}
 .designer-card.fullscreen{position:fixed;inset:0;z-index:80;margin:0;border-radius:0;
   padding:16px;background:var(--panel);display:flex;flex-direction:column;gap:10px;overflow:auto}
-.designer-card.fullscreen .bpmn-canvas{flex:1;height:auto;min-height:0}
+.designer-card.fullscreen .bpmn-canvas{flex:1;height:auto;min-height:420px}
 .drawio-frame{width:100%;height:65vh;min-height:420px;border:1px solid var(--line);
   border-radius:10px;background:var(--panel)}
 .modal:has(.drawio-frame){max-width:96vw;width:96vw;height:92vh;max-height:92vh;

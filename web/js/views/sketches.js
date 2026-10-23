@@ -26,6 +26,19 @@ function embedOrigin(url) {
   }
 }
 
+/** draw.io embed 的 proto=json 模式收发的是 JSON 字符串，不是对象。
+ *  两种都接受，避免协议升级或自托管实例差异导致消息被静默丢弃。 */
+function parseEmbedMessage(data) {
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch (e) {
+      return null;
+    }
+  }
+  return data && typeof data === 'object' ? data : null;
+}
+
 function processLabel(row) {
   return 'L' + row.level + ' ' + row.code + ' ' + row.name;
 }
@@ -192,14 +205,15 @@ async function openSketchEditor(id) {
     if (!checkAlive()) return;
     if (event.source !== frame.contentWindow) return;
     if (origin !== 'null' && event.origin !== origin) return;
-    const data = event.data;
+    const data = parseEmbedMessage(event.data);
     if (!data || !data.event) return;
     if (data.event === 'init') {
-      frame.contentWindow.postMessage({
+      frame.contentWindow.postMessage(JSON.stringify({
         action: 'load',
         xml: sketch.mxfile_xml || EMPTY_MXFILE,
         title: sketch.title,
-      }, origin);
+        autosave: 1,
+      }), origin);
     } else if (data.event === 'save' || data.event === 'autosave') {
       saveXml(data.xml);
     } else if (data.event === 'exit') {
