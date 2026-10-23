@@ -122,24 +122,42 @@ function paintDesigner() {
 
   const bpmnPane = `
     <div class="card designer-card" id="bpmnCard">
-      <div class="between mb designer-toolbar">
-        <div class="gap">
+      <div class="mb designer-toolbar bpmn-toolbar">
+        <div class="gap bpmn-toolbar-left">
           <span class="tiny">专业 BPMN 2.0 画布（bpmn-js）</span>
           <button class="btn-sm" onclick="runBpmnLint()">运行校验</button>
           <button class="btn-sm" onclick="autoLayoutBpmn()">自动布局</button>
           <button class="btn-sm" onclick="toggleBpmnFullscreen()">全屏</button>
-          <button class="btn-sm" onclick="fitBpmnViewport()">适应画布</button>
+          <button class="btn-sm" id="bpmnPropsToggle"
+            onclick="toggleBpmnSidebar('props')">属性</button>
+          <button class="btn-sm bpmn-lint-toggle" id="bpmnLintToggle"
+            onclick="toggleBpmnSidebar('lint')">校验问题</button>
           <span class="tiny" id="bpmnSaveState">${
             model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
               : '编辑后自动保存草稿'}</span>
         </div>
-        <div class="tiny">调色板拖拽 · 双击改名 · 选中元素查看/编辑 PMS 指标与执行配置 · 自动保存草稿</div>
+        <button class="btn-sm bpmn-fit-btn" onclick="fitBpmnViewport()">适应画布</button>
+        <div class="tiny bpmn-toolbar-hint">单击选中 · 双击改名 · 点「属性」查看/编辑指标与执行配置</div>
       </div>
       <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
-      <div id="bpmnSelection" class="bpmn-selection">
-        <div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>
+      <div id="bpmnSidebar" class="bpmn-drawer" aria-hidden="true">
+        <div class="bpmn-drawer-head">
+          <div class="seg bpmn-drawer-tabs">
+            <button id="bpmnTabProps" class="on"
+              onclick="showBpmnSidebarTab('props')">属性</button>
+            <button id="bpmnTabLint" onclick="showBpmnSidebarTab('lint')">校验</button>
+          </div>
+          <button class="btn-sm" onclick="closeBpmnSidebar()">收起</button>
+        </div>
+        <div class="bpmn-drawer-body">
+          <div id="bpmnPropsPanel" class="bpmn-drawer-pane">
+            <div class="tiny muted">选中一个元素查看/编辑 PMS 指标与执行配置</div>
+          </div>
+          <div id="bpmnLintPanel" class="bpmn-drawer-pane hide">
+            <div id="bpmnLint" class="bpmn-lint"></div>
+          </div>
+        </div>
       </div>
-      <div id="bpmnLint" class="bpmn-lint"></div>
       <div class="note" style="margin-top:8px">执行引擎只支持串行流程：调色板与「更改元素」菜单已隐藏
         并行网关、子流程和边界事件。从外部导入包含这些构造的 BPMN 文件时，保存仍会被拒绝并给出提示。</div>
       ${validationHtml(st.model)}
@@ -173,38 +191,44 @@ function paintDesigner() {
   const publishable = canManage() && (model.status === 'DRAFT' || model.status === 'IN_REVIEW');
 
   viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div>
-          <h2>流程设计器<span class="module-badge">建模与测算</span> · ${esc(model.process_name || '')}</h2>
-          <div class="desc">${statusBadge}
-            运行时版本 ${model.published_version ? 'v' + model.published_version : '尚未发布'} ·
-            泳道式建模 · 改动保存为草稿，发布后才影响新实例</div>
+    <div class="card page-head designer-head">
+      <div class="designer-head-top">
+        <div class="designer-head-main">
+          <div class="designer-head-title">
+            <h2>流程设计器<span class="module-badge">建模与测算</span> · ${esc(model.process_name || '')}
+              ${statusBadge}
+              <span class="tiny">运行时版本 ${
+                model.published_version ? 'v' + model.published_version : '尚未发布'}</span></h2>
+          </div>
+          ${tabBar}
         </div>
-        <div class="gap">
-          <select class="sel" onchange="switchProcess(this.value)">${opts}</select>
-          ${editable
-            ? `<button class="btn btn-g" onclick="toggleDesignerMode()">${
-              st.mode === 'bpmn' ? '简洁画布' : '专业 BPMN 画布'}</button>` : ''}
-          <button class="btn btn-g" onclick="openVersionHistory()">版本历史</button>
-          ${model.status === 'DRAFT' && editable
-            ? '<button class="btn btn-g" onclick="submitReview()">提交评审</button>' : ''}
-          ${model.status === 'IN_REVIEW' && canManage()
-            ? '<button class="btn btn-g" onclick="rejectReview()">驳回</button>' : ''}
+        <div class="designer-head-primary">
+          <select class="sel sel-sm" onchange="switchProcess(this.value)">${opts}</select>
           ${publishable
-            ? '<button class="btn btn-p" onclick="publishDesign()">发布到运行时</button>' : ''}
-          <button class="btn btn-g" onclick="exportBpmn()">导出 BPMN</button>
-          ${editable ? '<button class="btn btn-g" onclick="importBpmn()">导入 BPMN</button>' : ''}
-          ${inReview
-            ? '<span class="tiny" style="align-self:center">评审中，暂不可编辑</span>'
-            : editable
-              ? '<button class="btn btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
-              : '<span class="tiny" style="align-self:center">只读（你不是这条流程的 Owner）</span>'}
-          <a class="link-btn" onclick="go('execution')">去流程执行 →</a>
-          <button class="btn btn-p" onclick="reanalyze()">重新测算</button>
+            ? '<button class="btn-sm btn-p" onclick="publishDesign()">发布到运行时</button>' : ''}
+          <button class="btn-sm btn-p" onclick="reanalyze()">重新测算</button>
         </div>
       </div>
-      <div class="mt">${tabBar}</div>
+      <div class="designer-head-bar">
+        <div class="designer-head-actions">
+          ${editable
+            ? `<button class="btn-sm btn-g" onclick="toggleDesignerMode()">${
+              st.mode === 'bpmn' ? '简洁画布' : '专业 BPMN 画布'}</button>` : ''}
+          <button class="btn-sm btn-g" onclick="openVersionHistory()">版本历史</button>
+          ${model.status === 'DRAFT' && editable
+            ? '<button class="btn-sm btn-g" onclick="submitReview()">提交评审</button>' : ''}
+          ${model.status === 'IN_REVIEW' && canManage()
+            ? '<button class="btn-sm btn-g" onclick="rejectReview()">驳回</button>' : ''}
+          <button class="btn-sm btn-g" onclick="exportBpmn()">导出 BPMN</button>
+          ${editable ? '<button class="btn-sm btn-g" onclick="importBpmn()">导入 BPMN</button>' : ''}
+          ${inReview
+            ? '<span class="tiny">评审中，暂不可编辑</span>'
+            : editable
+              ? '<button class="btn-sm btn-g" onclick="addLaneNode()">+ 添加泳道节点</button>'
+              : '<span class="tiny">只读（你不是这条流程的 Owner）</span>'}
+          <a class="link-btn link-btn-sm" onclick="go('execution')">去流程执行 →</a>
+        </div>
+      </div>
     </div>
     ${tab === 'analysis' ? analysisPane : modelPane}`;
   if (tab !== 'analysis') {
@@ -261,7 +285,46 @@ function toggleDesignerMode() {
 
 function fitBpmnViewport() {
   const modeler = state.designer.bpmnModeler;
-  if (modeler) modeler.get('canvas').zoom('fit-viewport');
+  const container = document.getElementById('bpmnCanvas');
+  if (!modeler) return;
+  const canvas = modeler.get('canvas');
+  if (!container) {
+    canvas.zoom('fit-viewport');
+    return;
+  }
+  const inner = canvas.viewbox().inner;
+  const rect = container.getBoundingClientRect();
+  if (!inner || !inner.width || !inner.height || !rect.width || !rect.height) {
+    canvas.zoom('fit-viewport');
+    return;
+  }
+  // 调色板和右侧属性栏都浮在画布上：适应画布时要给它们留出空间
+  const PAD = 24;
+  const palette = container.querySelector('.djs-palette');
+  const paletteRect = palette ? palette.getBoundingClientRect() : null;
+  const sidebar = document.getElementById('bpmnSidebar');
+  const sidebarOpen = sidebar && sidebar.classList.contains('open');
+  // 侧栏有 200ms 滑入动画，此时 getBoundingClientRect().left 还在移动；
+  // 用布局宽度计算最终占位，避免动画期间适应画布算少。
+  const sidebarWidth = sidebarOpen ? Math.max(sidebar.offsetWidth, 0) : 0;
+  const leftInset = (paletteRect ? paletteRect.right - rect.left : 48) + PAD;
+  const rightInset = (sidebarWidth ? sidebarWidth + 12 : 0) + PAD;
+  const availW = Math.max(160, rect.width - leftInset - rightInset);
+  const availH = Math.max(160, rect.height - PAD * 2);
+  const scale = Math.min(1, availW / inner.width, availH / inner.height);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    canvas.zoom('fit-viewport');
+    return;
+  }
+  const offsetX = (leftInset - rightInset) / 2;
+  const viewWidth = rect.width / scale;
+  const viewHeight = rect.height / scale;
+  canvas.viewbox({
+    x: inner.x + inner.width / 2 - viewWidth / 2 - offsetX / scale,
+    y: inner.y + inner.height / 2 - viewHeight / 2,
+    width: viewWidth,
+    height: viewHeight,
+  });
 }
 
 function setBpmnSaveState(text) {
@@ -388,10 +451,18 @@ PmsPaletteProvider.prototype.getPaletteEntries = function () {
     delete entries['create.intermediate-event'];
     entries['create.pms-wait-event'] = {
       group: 'event',
-      className: 'bpmn-icon-intermediate-event-none',
-      title: '创建等待事件（中间捕获事件）',
+      className: 'bpmn-icon-intermediate-event-none pms-wait-entry',
+      title: '创建等待事件（中间捕获事件，不是结束事件）',
       action: { dragstart: startWait, click: startWait },
     };
+    // 评审/只读时保留调色板可见，但禁止创建元素；导航工具仍可用
+    if (!state.designer.editable) {
+      Object.keys(entries).forEach((key) => {
+        if (key.startsWith('create.') && entries[key]) {
+          entries[key] = { ...entries[key], action: {} };
+        }
+      });
+    }
     return entries;
   };
 };
@@ -449,13 +520,20 @@ async function mountBpmnEditor() {
   st.bpmnImporting = true;
   modeler.on('selection.changed', (event) => {
     st.bpmnSelection = event.newSelection || [];
+    // 只更新属性内容，不自动开关侧栏；侧栏由工具栏「属性」或「收起」控制
     renderBpmnSelection(st.bpmnSelection);
+  });
+  // 画布内双击改名完成后，同步属性栏里的名称字段
+  modeler.on('directEditing.complete', () => {
+    renderBpmnSelection(st.bpmnSelection || []);
   });
   modeler.on('commandStack.changed', scheduleBpmnSave);
   try {
     const xml = await fetchBpmnXml();
     await modeler.importXML(xml);
-    modeler.get('canvas').zoom('fit-viewport');
+    const paletteToggle = container.querySelector('.djs-palette-toggle');
+    if (paletteToggle) paletteToggle.title = '展开/收起工具';
+    fitBpmnViewport();
     st.bpmnImporting = false;
     setBpmnSaveState('草稿 · v' + (st.model.draft_version || st.model.version));
     runBpmnLint();
@@ -529,7 +607,7 @@ function assignmentContext(processId) {
 }
 
 function renderBpmnSelection(selection) {
-  const panel = document.getElementById('bpmnSelection');
+  const panel = document.getElementById('bpmnPropsPanel');
   if (!panel) return;
   const element = (selection || [])[0];
   const bo = element && element.businessObject;
@@ -550,6 +628,13 @@ function renderBpmnSelection(selection) {
       <b>${esc(bo.name || bo.id || '未命名元素')}</b>
       <span class="tag t-blu">${esc(type)}</span>
     </div>
+    <div class="field"><label>名称</label>
+      <input id="bpName" value="${esc(bo.name || '')}" placeholder="未命名"${
+        st.editable ? '' : ' readonly'}></div>
+    ${st.editable
+      ? `<div class="between mb"><span class="tiny muted">双击画布元素可直接改名；这里也可以修改同一名称</span>
+          <button class="btn-sm" onclick="saveBpmnName('${esc(bo.id)}')">保存名称</button></div>`
+      : ''}
     ${node ? `
       <div class="grid g3">
         <div class="field"><label>作业时间（分钟）</label>
@@ -635,6 +720,29 @@ async function renderBpmnAssignment(nodeKey) {
             userOptionHtml(ctx.users, assignment.escalation_user_id)}</select></div>
       </div>
     </div>`;
+}
+
+async function saveBpmnName(elementId) {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  const input = document.getElementById('bpName');
+  if (!modeler || !input) return;
+  const element = modeler.get('elementRegistry').get(elementId);
+  if (!element) return;
+  try {
+    const name = input.value.trim();
+    modeler.get('modeling').updateProperties(element, { name: name || undefined });
+    // updateProperties 会触发防抖保存；这里立即保存并清掉定时器，避免重复提交
+    if (st.bpmnSaveTimer) {
+      clearTimeout(st.bpmnSaveTimer);
+      st.bpmnSaveTimer = null;
+    }
+    const saved = await saveBpmnNow();
+    if (saved) toast('名称已更新');
+    renderBpmnSelection(st.bpmnSelection || []);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function saveBpmnMetrics(nodeKey) {
@@ -730,8 +838,8 @@ const BPMN_LINT_HELP = {
   },
   'end-event-required': {
     title: '缺少结束节点',
-    detail: '整个流程没有结束事件。任务走完后实例无法明确结束。',
-    action: '添加结束事件，并把最终活动连到它。',
+    detail: '整个流程没有结束事件。注意：等待事件（中间捕获/抛出事件）不算结束事件。',
+    action: '从调色板添加粗圆圈的结束事件，并把最终活动连到它。',
   },
   'no-implicit-start': {
     title: '节点被当作隐式起点',
@@ -740,7 +848,7 @@ const BPMN_LINT_HELP = {
   },
   'no-implicit-end': {
     title: '节点被当作隐式终点',
-    detail: '这个节点没有下游连线，执行到这里实例会直接结束。',
+    detail: '这个节点没有下游连线，执行到这里实例会直接结束。若是等待事件，它不会起到结束事件的作用。',
     action: '如果流程还要继续，补下游连线；如果到此结束，接一个结束事件。',
   },
   'fake-join': {
@@ -860,19 +968,65 @@ const BPMN_LINT_HELP = {
   },
 };
 
+function showBpmnSidebarTab(tab) {
+  const sidebar = document.getElementById('bpmnSidebar');
+  if (!sidebar) return;
+  state.designer.bpmnSidebarTab = tab;
+  sidebar.classList.add('open');
+  sidebar.setAttribute('aria-hidden', 'false');
+  const props = tab === 'props';
+  const propsPanel = document.getElementById('bpmnPropsPanel');
+  const lintPanel = document.getElementById('bpmnLintPanel');
+  const propsTab = document.getElementById('bpmnTabProps');
+  const lintTab = document.getElementById('bpmnTabLint');
+  if (propsPanel) propsPanel.classList.toggle('hide', !props);
+  if (lintPanel) lintPanel.classList.toggle('hide', props);
+  if (propsTab) propsTab.classList.toggle('on', props);
+  if (lintTab) lintTab.classList.toggle('on', !props);
+}
+
+function toggleBpmnSidebar(tab) {
+  const sidebar = document.getElementById('bpmnSidebar');
+  if (!sidebar) return;
+  const open = sidebar.classList.contains('open');
+  if (!open) {
+    showBpmnSidebarTab(tab || state.designer.bpmnSidebarTab || 'props');
+    return;
+  }
+  if (tab && tab !== state.designer.bpmnSidebarTab) {
+    showBpmnSidebarTab(tab);
+    return;
+  }
+  closeBpmnSidebar();
+}
+
+function closeBpmnSidebar() {
+  const sidebar = document.getElementById('bpmnSidebar');
+  if (!sidebar) return;
+  sidebar.classList.remove('open');
+  sidebar.setAttribute('aria-hidden', 'true');
+}
+
 function renderBpmnLint() {
   const box = document.getElementById('bpmnLint');
   if (!box) return;
   const issues = state.designer.bpmnLint || [];
-  if (!issues.length) {
-    box.innerHTML = '<div class="tiny muted">bpmnlint 未发现问题</div>';
-    return;
-  }
   const errors = issues.filter((i) => i.category === 'error').length;
   const warns = issues.filter((i) => i.category !== 'error').length;
+  const toggle = document.getElementById('bpmnLintToggle');
+  if (toggle) {
+    toggle.textContent = issues.length ? `校验问题 ${issues.length}` : '校验问题 无';
+    toggle.classList.toggle('has-error', errors > 0);
+    toggle.classList.toggle('has-warn', errors === 0 && warns > 0);
+  }
+  const summary = `<div class="between mb"><b>建模校验</b>
+    <span class="tiny">${errors} 错误 · ${warns} 警告</span></div>`;
+  if (!issues.length) {
+    box.innerHTML = `${summary}<div class="tiny muted">bpmnlint 未发现问题</div>`;
+    return;
+  }
   box.innerHTML = `
-    <div class="between mb"><b>建模校验</b>
-      <span class="tiny">${errors} 错误 · ${warns} 警告</span></div>
+    ${summary}
     ${issues.map((issue, index) => {
       const element = issue.meta && issue.meta.element;
       const bo = element && element.businessObject;
@@ -906,6 +1060,8 @@ function selectLintIssue(index) {
   if (!modeler) return;
   modeler.get('selection').select(element);
   modeler.get('canvas').scrollToElement(element);
+  // 跳到属性页签，方便直接修改刚定位到的节点
+  showBpmnSidebarTab('props');
 }
 
 const BPMN_NS = 'http://www.omg.org/spec/BPMN/20100524/MODEL';
@@ -927,6 +1083,40 @@ function directChildren(element, name) {
 
 function roundCoord(value) {
   return Math.round(value * 10) / 10;
+}
+
+/** 把折线强制成正交走线，并去掉重复点/共线中间点。
+ *  自动布局的折点在泳道重排后可能变成斜线，斜穿泳道很难看。 */
+function orthogonalizePath(points) {
+  if (points.length < 2) return points;
+  const fixed = [points[0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const prev = fixed[fixed.length - 1];
+    const point = points[index];
+    const dx = point.x - prev.x;
+    const dy = point.y - prev.y;
+    if (Math.abs(dx) > 0.5 && Math.abs(dy) > 0.5) {
+      fixed.push(Math.abs(dx) >= Math.abs(dy)
+        ? { x: point.x, y: prev.y }
+        : { x: prev.x, y: point.y });
+    }
+    fixed.push(point);
+  }
+  const result = [];
+  fixed.forEach((point) => {
+    const last = result[result.length - 1];
+    if (last && Math.abs(last.x - point.x) < 0.5 && Math.abs(last.y - point.y) < 0.5) return;
+    result.push(point);
+  });
+  for (let index = result.length - 2; index >= 1; index -= 1) {
+    const a = result[index - 1];
+    const b = result[index];
+    const c = result[index + 1];
+    const sameX = Math.abs(a.x - b.x) < 0.5 && Math.abs(b.x - c.x) < 0.5;
+    const sameY = Math.abs(a.y - b.y) < 0.5 && Math.abs(b.y - c.y) < 0.5;
+    if (sameX || sameY) result.splice(index, 1);
+  }
+  return result;
 }
 
 /** bpmn-moddle 不会从 sequenceFlow 反推 incoming/outgoing。
@@ -1072,46 +1262,32 @@ function restoreLanes(xml) {
     plane.insertBefore(shape, firstShape);
   });
 
-  // 节点换了纵向位置，连线折点也要跟着走，否则终点会脱离节点
+  // 节点换了纵向位置，连线折点也要跟着走，并强制成正交走线
   directChildren(plane, 'BPMNEdge').forEach((edge) => {
     const flow = flows.get(edge.getAttribute('bpmnElement'));
     if (!flow) return;
     const dyS = deltaY.get(flow.source) || 0;
     const dyT = deltaY.get(flow.target) || 0;
-    if (!dyS && !dyT) return;
     const points = directChildren(edge, 'waypoint');
     if (!points.length) return;
-    points.forEach((point) => {
-      const x = (Number(point.getAttribute('x')) || 0) + SHIFT_X;
-      point.setAttribute('x', String(roundCoord(x)));
-    });
-    if (points.length === 2 && dyS !== dyT) {
-      const x1 = Number(points[0].getAttribute('x')) || 0;
-      const y1 = (Number(points[0].getAttribute('y')) || 0) + dyS;
-      const x2 = Number(points[1].getAttribute('x')) || 0;
-      const y2 = (Number(points[1].getAttribute('y')) || 0) + dyT;
-      points[0].setAttribute('y', String(roundCoord(y1)));
-      points[1].setAttribute('y', String(roundCoord(y2)));
-      if (Math.abs(x2 - x1) > 1) {
-        // 跨泳道的直线会斜穿泳道边界，补两个折点变成正交走线
-        const midX = roundCoord((x1 + x2) / 2);
-        const bend1 = doc.createElementNS(DI_NS, 'di:waypoint');
-        bend1.setAttribute('x', String(midX));
-        bend1.setAttribute('y', String(roundCoord(y1)));
-        const bend2 = doc.createElementNS(DI_NS, 'di:waypoint');
-        bend2.setAttribute('x', String(midX));
-        bend2.setAttribute('y', String(roundCoord(y2)));
-        edge.insertBefore(bend2, points[1]);
-        edge.insertBefore(bend1, bend2);
-      }
-      return;
-    }
-    // 有折点的路径：前半段跟随起点、后半段跟随终点，保持水平/垂直线段
     const middle = (points.length - 1) / 2;
-    points.forEach((point, index) => {
-      const dy = index < middle ? dyS : dyT;
-      const y = (Number(point.getAttribute('y')) || 0) + dy;
-      point.setAttribute('y', String(roundCoord(y)));
+    let coords = points.map((point, index) => ({
+      x: (Number(point.getAttribute('x')) || 0) + SHIFT_X,
+      y: (Number(point.getAttribute('y')) || 0) + (index < middle ? dyS : dyT),
+    }));
+    // 首尾点严格跟随源/目标节点，避免终点脱离节点
+    coords[0] = { ...coords[0], y: (Number(points[0].getAttribute('y')) || 0) + dyS };
+    coords[coords.length - 1] = {
+      ...coords[coords.length - 1],
+      y: (Number(points[points.length - 1].getAttribute('y')) || 0) + dyT,
+    };
+    coords = orthogonalizePath(coords);
+    points.forEach((point) => edge.removeChild(point));
+    coords.forEach((point) => {
+      const waypoint = doc.createElementNS(DI_NS, 'di:waypoint');
+      waypoint.setAttribute('x', String(roundCoord(point.x)));
+      waypoint.setAttribute('y', String(roundCoord(point.y)));
+      edge.appendChild(waypoint);
     });
   });
 
@@ -1131,7 +1307,7 @@ async function autoLayoutBpmn() {
     state.designer.bpmnImporting = false;
     state.designer.bpmnSelection = [];
     renderBpmnSelection([]);
-    modeler.get('canvas').zoom('fit-viewport');
+    fitBpmnViewport();
     const saved = await saveBpmnNow();
     if (saved) {
       await runBpmnLint();
@@ -1148,13 +1324,15 @@ function toggleBpmnFullscreen() {
   if (!card) return;
   const enter = !card.classList.contains('fullscreen');
   card.classList.toggle('fullscreen', enter);
+  // 全屏优先保证画布高度：属性/校验侧栏默认收起，用工具栏按钮随时打开
+  if (enter) closeBpmnSidebar();
   const resize = () => {
     const modeler = state.designer.bpmnModeler;
     const container = document.getElementById('bpmnCanvas');
     // 全屏切换的瞬间容器可能还没有布局尺寸：此时 fit-viewport 会算出非有限值
     if (!modeler || !container || container.clientWidth < 1 || container.clientHeight < 1) return;
     modeler.get('canvas').resized();
-    modeler.get('canvas').zoom('fit-viewport');
+    fitBpmnViewport();
   };
   if (enter) {
     state.designer.bpmnFullscreenHandler = (event) => {
@@ -2254,8 +2432,9 @@ export {
   openNodeEditor, openVersionHistory, paintDesigner, paintMetrics,
   paintSuggestions, persistDesign, publishDesign, reanalyze, redoDesigner,
   rejectReview, reloadDesign, renderDesigner, rollbackVersion, runBpmnLint,
-  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, saveBpmnAssignment,
+  saveEdge, saveNode, saveNodeAssignment, saveBpmnMetrics, saveBpmnName,
+  saveBpmnAssignment,
   selectLintIssue,
-  setDesignerTab, submitReview, switchProcess, toggleBpmnFullscreen,
-  toggleDesignerMode, undoDesigner,
+  closeBpmnSidebar, setDesignerTab, showBpmnSidebarTab, submitReview, switchProcess,
+  toggleBpmnFullscreen, toggleBpmnSidebar, toggleDesignerMode, undoDesigner,
 };

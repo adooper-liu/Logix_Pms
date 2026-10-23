@@ -68,6 +68,11 @@
 .designer-edge.draft{stroke:var(--brand);stroke-dasharray:5 4}
 .designer-edge-label{font-size:11px;fill:var(--sub);text-anchor:middle;pointer-events:none}
 .designer-toolbar .designer-sep{width:1px;height:20px;background:var(--line);margin:0 4px}
+.bpmn-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;gap:12px}
+.bpmn-toolbar-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.bpmn-toolbar-hint{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bpmn-fit-btn{justify-self:center}
 .designer-validation{margin-top:10px;display:flex;flex-direction:column;gap:4px}
 .designer-issue{font-size:12px;padding:4px 8px;border-radius:6px}
 .designer-issue.error{background:var(--bad-soft);color:var(--bad-strong)}
@@ -80,10 +85,24 @@
 .bpmn-canvas{height:clamp(640px, calc(100vh - 230px), 980px);
   border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
 .bpmn-canvas .djs-container{background:var(--panel)}
-.bpmn-canvas.readonly .djs-palette,.bpmn-canvas.readonly .djs-context-pad{display:none}
-.bpmn-selection{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
-  margin-top:10px;background:var(--panel-2)}
-.bpmn-selection .designer-exec-config{margin:12px 0 0;background:var(--panel)}
+.bpmn-canvas.readonly .djs-context-pad{display:none}
+/* 只读时调色板仍然显示（可折叠），但创建类工具置灰不可点 */
+.bpmn-canvas.readonly .djs-palette .entry{opacity:.45;cursor:not-allowed}
+.bpmn-canvas.readonly .djs-palette .entry:hover{color:var(--palette-entry-color)}
+/* bpmn-js 默认在展开时隐藏折叠按钮；这里始终保留，作为「收起 / 工具」开关 */
+.bpmn-canvas .djs-palette .djs-palette-toggle{display:block;height:22px;line-height:22px;
+  font-size:11px;color:var(--sub);border-top:1px solid var(--line-soft)}
+.bpmn-canvas .djs-palette .entry{position:relative}
+.bpmn-canvas .djs-palette .pms-wait-entry::after{content:'等';position:absolute;right:4px;
+  bottom:1px;font-size:9px;line-height:1;color:var(--sub);pointer-events:none}
+.bpmn-canvas .djs-palette.open .djs-palette-toggle::before{content:'收起'}
+.bpmn-canvas .djs-palette:not(.open) .djs-palette-toggle{height:46px;line-height:46px;
+  border-top:none;font-size:12px}
+.bpmn-canvas .djs-palette:not(.open) .djs-palette-toggle::before{
+  content:'';display:block;width:22px;height:22px;margin:12px auto;
+  background-color:currentColor;
+  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z'/></svg>") center/contain no-repeat;
+  mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z'/></svg>") center/contain no-repeat}
 .bpmn-lint{margin-top:10px;max-height:320px;overflow:auto;border:1px solid var(--line);
   border-radius:10px;padding:8px 10px;background:var(--panel-2)}
 .bpmn-lint-item{padding:5px 4px;border-bottom:1px solid var(--line-soft);cursor:pointer;
@@ -95,6 +114,38 @@
 .bpmn-lint-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .bpmn-lint-detail{margin-top:3px;line-height:1.55}
 .bpmn-lint-action{margin-top:2px;line-height:1.5}
+.designer-card{position:relative}
+/* 设计器页头：紧凑两行，主操作在右上，其余操作统一小号 */
+.designer-head{padding:12px 16px}
+.designer-head-top{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap}
+.designer-head-main{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
+.designer-head-title{min-width:0}
+.designer-head-title h2{margin:0;font-size:15px;line-height:1.4;display:flex;align-items:center;
+  gap:6px;flex-wrap:wrap}
+.designer-head-title .module-badge{margin-left:0}
+.designer-head-primary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.designer-head-bar{display:flex;align-items:center;justify-content:flex-end;gap:10px;
+  margin-top:6px;padding-top:6px;border-top:1px solid var(--line-soft);flex-wrap:wrap}
+.designer-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.designer-head .btn-sm,.designer-head .link-btn{white-space:nowrap}
+.designer-head .seg button{padding:5px 11px;font-size:12px}
+.sel-sm{padding:5px 9px;font-size:12px;border-radius:7px;max-width:280px}
+.link-btn-sm{padding:5px 10px;font-size:12px;line-height:1}
+.bpmn-drawer{position:absolute;top:56px;right:12px;bottom:12px;width:min(440px,92%);
+  display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow-xl);z-index:120;
+  visibility:hidden;transform:translateX(calc(100% + 24px));
+  transition:transform .2s ease,visibility 0s linear .2s}
+.bpmn-drawer.open{visibility:visible;transform:translateX(0);transition:transform .2s ease}
+.bpmn-drawer-head{display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-bottom:1px solid var(--line)}
+.bpmn-drawer-head .btn-sm{margin-left:auto}
+.bpmn-drawer-body{flex:1;min-height:0;overflow:auto;padding:12px}
+.bpmn-drawer .bpmn-lint{max-height:none;margin:0;border:none;border-radius:0;
+  background:transparent;padding:0}
+.bpmn-lint-toggle.has-error{color:var(--bad-strong);border-color:var(--bad-strong)}
+.bpmn-lint-toggle.has-warn{color:var(--warn-strong);border-color:var(--warn-strong)}
 .designer-card.fullscreen{position:fixed;inset:0;z-index:80;margin:0;border-radius:0;
   padding:16px;background:var(--panel);display:flex;flex-direction:column;gap:10px;overflow:auto}
 .designer-card.fullscreen .bpmn-canvas{flex:1;height:auto;min-height:420px}

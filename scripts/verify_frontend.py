@@ -132,6 +132,60 @@ def main() -> int:
                 pass
             page.wait_for_timeout(600)
 
+        def pick_editable_design() -> None:
+            """选一条草稿状态、节点足够且含 n3 的流程，避免本地数据进入评审后自检失效。"""
+            picked = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const rows = await fetch('/api/v1/process-map/flat', {
+                    headers: {'Authorization': 'Bearer ' + t},
+                  }).then(r => r.json());
+                  for (const row of rows) {
+                    if (row.level < 3) continue;
+                    const res = await fetch('/api/v1/processes/' + row.id + '/design', {
+                      headers: {'Authorization': 'Bearer ' + t},
+                    });
+                    if (!res.ok) continue;
+                    const model = await res.json();
+                    const keys = (model.nodes || []).map(n => n.node_key);
+                    if (model.status === 'DRAFT' && keys.includes('n3') && keys.length >= 6) {
+                      return {id: row.id, code: row.code};
+                    }
+                  }
+                  return null;
+                }"""
+            )
+            assert picked, "没有可编辑的演示流程（需要草稿、至少 6 个节点且含 n3）"
+            page.select_option("#view select.sel", value=str(picked["id"]))
+            page.wait_for_timeout(1500)
+
+        def pick_review_design() -> dict | None:
+            """找一条评审中的流程，用于验证只读状态下调色板仍可见。"""
+            picked = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const rows = await fetch('/api/v1/process-map/flat', {
+                    headers: {'Authorization': 'Bearer ' + t},
+                  }).then(r => r.json());
+                  for (const row of rows) {
+                    if (row.level < 3) continue;
+                    const res = await fetch('/api/v1/processes/' + row.id + '/design', {
+                      headers: {'Authorization': 'Bearer ' + t},
+                    });
+                    if (!res.ok) continue;
+                    const model = await res.json();
+                    if (model.status === 'IN_REVIEW' && (model.nodes || []).length) {
+                      return {id: row.id, code: row.code};
+                    }
+                  }
+                  return null;
+                }"""
+            )
+            if picked:
+                page.select_option("#view select.sel", value=str(picked["id"]))
+                page.wait_for_timeout(1500)
+            return picked
+
         # 地图下钻
         def map_drill() -> None:
             goto("map")
@@ -526,8 +580,40 @@ def main() -> int:
             assert count.get_attribute("title") is None, "计数不应再使用浏览器原生 title 提示"
 
         # 设计器：打开节点编辑，改等待时间，指标应变化
+        # 评审中的流程为只读：调色板必须保留可见、可折叠，但创建工具不可用
+        def designer_readonly_palette() -> None:
+            goto("designer")
+            picked = pick_review_design()
+            if not picked:
+                print("NOTICE 当前没有评审中的流程，跳过只读调色板检查")
+                return
+            page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
+            assert page.locator("#bpmnCanvas").evaluate("e => e.classList.contains('readonly')"), (
+                "评审中的流程应为只读"
+            )
+            assert page.locator(".djs-palette").is_visible(), "只读时调色板不应隐藏"
+            opacity = page.eval_on_selector(
+                '.djs-palette [data-action="create.task"]',
+                "e => getComputedStyle(e).opacity",
+            )
+            assert float(opacity) < 1, "只读时创建工具应置灰"
+            before = page.locator("#bpmnCanvas .djs-element").count()
+            page.click('.djs-palette [data-action="create.task"]')
+            page.wait_for_timeout(300)
+            assert page.locator("#bpmnCanvas .djs-element").count() == before, (
+                "只读时不应能创建元素"
+            )
+            page.click(".djs-palette-toggle")
+            page.wait_for_timeout(300)
+            assert not page.locator(".djs-palette").evaluate("e => e.classList.contains('open')")
+            assert page.locator(".djs-palette").is_visible(), "折叠后调色板开关仍应可见"
+            page.click(".djs-palette-toggle")
+            page.wait_for_timeout(300)
+            assert page.locator(".djs-palette").evaluate("e => e.classList.contains('open')")
+
         def designer_edit_node() -> None:
             goto("designer")
+            pick_editable_design()
             if page.locator('#view button:has-text("简洁画布")').count():
                 page.click('#view button:has-text("简洁画布")')
                 page.wait_for_timeout(400)
@@ -571,6 +657,7 @@ def main() -> int:
         # 专业 BPMN 画布（bpmn-js）：加载、调色板、水印、返回简洁画布
         def designer_bpmn_spike() -> None:
             goto("designer")
+            pick_editable_design()
             if page.locator('#view .seg button:has-text("流程模型")').count():
                 page.click('#view .seg button:has-text("流程模型")')
                 page.wait_for_timeout(300)
@@ -593,6 +680,22 @@ def main() -> int:
             # 选中活动节点后，属性区应能直接维护节点分派 / SLA
             page.click('#bpmnCanvas [data-element-id="n3"]')
             page.wait_for_timeout(400)
+            assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
+                "单击不应自动打开属性栏"
+            )
+            # 上下文工具属于画布层，必须被右侧栏盖住，不能浮在栏里
+            layers = page.evaluate(
+                """() => {
+                  const pad = document.querySelector('#bpmnCanvas .djs-context-pad.open');
+                  const side = document.getElementById('bpmnSidebar');
+                  return {
+                    pad: pad ? getComputedStyle(pad).zIndex : null,
+                    side: getComputedStyle(side).zIndex,
+                  };
+                }"""
+            )
+            assert layers["pad"], "选中节点后没有出现上下文工具"
+            assert int(layers["side"]) > int(layers["pad"]), layers
             assert (
                 page.locator('#bpmnCanvas [data-action="append.intermediate-event"]').count() == 0
             ), "上下文菜单仍能追加中间事件"
@@ -613,25 +716,97 @@ def main() -> int:
             assert not [key for key in replace_ids if any(x in key for x in blocked)], replace_ids
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
-            page.wait_for_selector("#bpmnSelection #baRole", timeout=8000)
-            assert page.locator("#bpmnSelection .bpmn-assign").count() == 1
+            # 双击只做画布内改名，不再打开侧栏
+            page.dblclick('#bpmnCanvas [data-element-id="n3"]')
+            page.wait_for_timeout(300)
+            assert page.locator(".djs-direct-editing-parent").count() >= 1, (
+                "双击改名（bpmn-js 原生编辑）被取消了"
+            )
+            assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
+                "双击改名不应同时打开属性栏"
+            )
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            # 属性栏由工具栏按钮显式打开；选中只更新内容
+            page.click("#bpmnPropsToggle")
+            page.wait_for_selector("#bpmnSidebar.open #bpmnPropsPanel #baRole", timeout=8000)
+            assert page.input_value("#bpName").strip(), "属性栏缺少可编辑的名称"
+            # 适应画布必须避开调色板和右侧属性栏
+            page.click('#view button:has-text("适应画布")')
+            page.wait_for_timeout(500)
+            palette_box = page.locator(".djs-palette").bounding_box()
+            leftmost = page.evaluate(
+                """() => Math.min(...[...document.querySelectorAll(
+                  '#bpmnCanvas .djs-shape[data-element-id]')]
+                  .filter(e => !e.getAttribute('data-element-id').startsWith('Lane_'))
+                  .map(e => e.getBoundingClientRect().x))"""
+            )
+            assert palette_box and leftmost > palette_box["x"] + palette_box["width"], (
+                leftmost,
+                palette_box,
+            )
+            side_box = page.locator("#bpmnSidebar").bounding_box()
+            rightmost = page.evaluate(
+                """() => Math.max(...[...document.querySelectorAll(
+                  '#bpmnCanvas .djs-shape[data-element-id]')]
+                  .filter(e => !e.getAttribute('data-element-id').startsWith('Lane_'))
+                  .map(e => e.getBoundingClientRect().right))"""
+            )
+            assert side_box and rightmost < side_box["x"], (rightmost, side_box)
+            # 名称保存（保持原值，避免改写演示数据）
+            page.click('#bpmnSidebar button:has-text("保存名称")')
+            page.wait_for_timeout(1200)
+            assert "名称已更新" in page.inner_text("#toast")
+            assert page.locator("#bpmnSidebar .bpmn-assign").count() == 1
             page.fill("#baDue", "24")
-            page.click('#bpmnSelection button:has-text("保存执行配置")')
+            page.click('#bpmnSidebar button:has-text("保存执行配置")')
             page.wait_for_timeout(1200)
             assert "节点执行配置已保存" in page.inner_text("#toast")
             # 还原为空，避免自检留下演示配置
             page.fill("#baDue", "")
-            page.click('#bpmnSelection button:has-text("保存执行配置")')
+            page.click('#bpmnSidebar button:has-text("保存执行配置")')
             page.wait_for_timeout(1200)
+            # 属性栏可收起，并可从工具栏重新打开
+            page.click('#bpmnSidebar button:has-text("收起")')
+            page.wait_for_timeout(300)
+            assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
+                "属性栏没有收起"
+            )
+            page.click("#bpmnPropsToggle")
+            page.wait_for_selector("#bpmnSidebar.open #baRole", timeout=5000)
             page.click('#view button:has-text("运行校验")')
+            page.click("#bpmnLintToggle")
+            page.wait_for_selector("#bpmnSidebar.open", timeout=5000)
             page.wait_for_selector(".bpmn-lint-item", timeout=8000)
             assert page.locator(".bpmn-lint-item").count() >= 1
             lint_text = page.inner_text("#bpmnLint")
-            assert "缺少开始节点" in lint_text, lint_text[:200]
+            assert any(
+                phrase in lint_text
+                for phrase in (
+                    "缺少开始节点",
+                    "缺少结束节点",
+                    "节点被当作隐式",
+                    "多路汇入没有网关",
+                    "连线标签不会生效",
+                )
+            ), lint_text[:300]
             assert "Process is missing" not in lint_text, "校验结果仍在显示原始英文规则消息"
+            # 适应画布按钮应在工具栏水平居中
+            fit_box = page.locator(".bpmn-fit-btn").bounding_box()
+            bar_box = page.locator(".bpmn-toolbar").bounding_box()
+            assert fit_box and bar_box
+            assert (
+                abs((fit_box["x"] + fit_box["width"] / 2) - (bar_box["x"] + bar_box["width"] / 2))
+                <= 4
+            ), (fit_box, bar_box)
             page.click('#view button:has-text("全屏")')
             page.wait_for_timeout(400)
             assert page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
+            assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
+                "进入全屏后属性/校验侧栏应收起"
+            )
+            canvas_box = page.locator("#bpmnCanvas").bounding_box()
+            assert canvas_box and canvas_box["height"] >= 600, canvas_box
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             assert not page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
@@ -643,6 +818,31 @@ def main() -> int:
             assert page.locator('#bpmnCanvas [data-element-id^="Lane_"]').count() >= 1, (
                 "自动布局后泳道丢失"
             )
+            # 跨泳道重排后连线必须保持正交，不能出现斜穿泳道的线段
+            diagonals = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const pid = window.state.designer.processId;
+                  const xml = await fetch('/api/v1/processes/' + pid + '/bpmn',
+                    { headers: { Authorization: 'Bearer ' + t } }).then(r => r.text());
+                  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+                  const ns = 'http://www.omg.org/spec/BPMN/20100524/DI';
+                  const bad = [];
+                  for (const edge of doc.getElementsByTagNameNS(ns, 'BPMNEdge')) {
+                    const pts = [...edge.children]
+                      .filter(c => c.localName === 'waypoint')
+                      .map(c => ({ x: +c.getAttribute('x'), y: +c.getAttribute('y') }));
+                    for (let i = 1; i < pts.length; i += 1) {
+                      if (Math.abs(pts[i].x - pts[i - 1].x) > 0.5
+                          && Math.abs(pts[i].y - pts[i - 1].y) > 0.5) {
+                        bad.push({ flow: edge.getAttribute('bpmnElement'), from: pts[i - 1], to: pts[i] });
+                      }
+                    }
+                  }
+                  return bad;
+                }"""
+            )
+            assert not diagonals, f"自动布局后仍有斜线连线：{diagonals[:3]}"
             page.click('#view button:has-text("简洁画布")')
             page.wait_for_selector("#designerCanvas")
             page.screenshot(path=str(out_dir / "interaction-designer-bpmnjs.png"), full_page=True)
@@ -1139,6 +1339,7 @@ def main() -> int:
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
         check("草图 draw.io 消息协议", sketch_drawio_protocol)
+        check("设计器只读调色板可见可折叠", designer_readonly_palette)
         check("设计器改节点并重算", designer_edit_node)
         check("设计器专业 BPMN 画布（bpmn-js）", designer_bpmn_spike)
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
