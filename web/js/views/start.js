@@ -110,11 +110,9 @@ function currentCard(step) {
 function upcomingList(steps) {
   if (!steps.length) return '';
   return `
-    <div class="card">
-      <div class="between mb">
-        <h3>后续 ${steps.length} 步</h3>
-        <span class="tiny muted">按顺序推进；展开可看输入、输出与证据</span>
-      </div>
+    <details class="card start-fold">
+      <summary><span>后续 ${steps.length} 个阶段</span>
+        <span class="tiny muted">按顺序推进；展开可看输入、输出与证据</span></summary>
       <div class="start-upcoming">
         ${steps.map((step) => `
           <details class="start-step">
@@ -127,17 +125,15 @@ function upcomingList(steps) {
             <div class="start-step-body">${stepBody(step)}</div>
           </details>`).join('')}
       </div>
-    </div>`;
+    </details>`;
 }
 
 function doneList(steps) {
   if (!steps.length) return '';
   return `
-    <div class="card">
-      <div class="between mb">
-        <h3>已经具备 / 这次先不做（${steps.length}）</h3>
-        <span class="tiny muted">只有“已具备”计入完成；“这次先不做”不算</span>
-      </div>
+    <details class="card start-fold">
+      <summary><span>已经具备 / 这次先不做（${steps.length}）</span>
+        <span class="tiny muted">只有“已具备”计入完成；“这次先不做”不算</span></summary>
       <div class="start-done">
         ${steps.map((step) => `
           <div class="between">
@@ -151,7 +147,7 @@ function doneList(steps) {
             </span>
           </div>`).join('')}
       </div>
-    </div>`;
+    </details>`;
 }
 
 function completionCard(data) {
@@ -204,15 +200,194 @@ function pilotGateCard(data) {
     </div>`;
 }
 
+/* -------------------------------------------------- 三栏八问 */
+
+function evidenceByName(step) {
+  return Object.fromEntries((step.evidence_items || []).map((item) => [item.key, item]));
+}
+
+function valueOf(step, key) {
+  const item = evidenceByName(step)[key];
+  return item ? item.value : 0;
+}
+
+function chipsFor(step, keys) {
+  if (!step) return '';
+  const map = evidenceByName(step);
+  return keys.map((key) => {
+    const item = map[key];
+    if (!item) return '';
+    const tone = item.met ? 't-grn' : item.required ? 't-red' : 't-gry';
+    return `<span class="tag ${tone}">${esc(item.label)} ${item.value}</span>`;
+  }).join(' ');
+}
+
+function missingAll(data) {
+  const seen = new Set();
+  const rows = [];
+  for (const step of data.steps) {
+    for (const item of step.evidence_items || []) {
+      if (!item.required || item.met || seen.has(item.key)) continue;
+      seen.add(item.key);
+      rows.push({ ...item, stepKey: step.key, stepTitle: step.title });
+    }
+  }
+  return rows;
+}
+
+const GAP_GROUPS = [
+  { name: '共同语言', keys: ['l1', 'l2', 'l3', 'pcf_mapped_l3', 'benchmark_maps'] },
+  {
+    name: '角色与权责',
+    keys: ['l3_with_owner', 'governance_roles', 'positions', 'raci_matters', 'invalid_processes'],
+  },
+  { name: '制度与授权', keys: ['effective_documents', 'effective_authorization_rules'] },
+  { name: '方法与工具', keys: ['forms', 'bindings', 'rules', 'node_tools'] },
+  {
+    name: '目标与指标',
+    keys: [
+      'objectives', 'linked_objectives', 'objectives_with_owner', 'objectives_with_baseline',
+      'kpi_cards', 'kpi_records', 'verified_standards', 'capacity_rows',
+    ],
+  },
+  {
+    name: '改善与版本',
+    keys: ['improvement_projects', 'applied_changes', 'open_findings', 'l3_published'],
+  },
+];
+
+function gapGroups(data) {
+  const missing = new Map(missingAll(data).map((item) => [item.key, item]));
+  return GAP_GROUPS.map((group) => ({
+    name: group.name,
+    items: group.keys.map((key) => missing.get(key)).filter(Boolean),
+  }));
+}
+
+function questionCard({ id, no, title, map, status, answer, chips, extra, actions }) {
+  return `
+    <div class="card start-q" id="${id}">
+      <div class="start-q-hd">
+        <span class="start-q-no">${no}</span>
+        <div class="start-q-title"><h3>${esc(title)}</h3>
+          <span class="tiny muted">${esc(map)}</span></div>
+        <div class="start-q-status">${status || ''}</div>
+      </div>
+      <div class="start-q-answer">${answer}</div>
+      ${chips ? `<div class="gap">${chips}</div>` : ''}
+      ${extra || ''}
+      ${actions ? `<div class="gap mt">${actions}</div>` : ''}
+    </div>`;
+}
+
+function blockHeader(tag, title, desc) {
+  return `<div class="start-block-hd"><span class="tag t-blu">${tag}</span>
+    <b>${title}</b><span class="tiny muted">${desc}</span></div>`;
+}
+
+function viewButton(label, view, cls = 'btn btn-g') {
+  return `<button class="${cls}" data-act="start.go" data-view="${esc(view)}">${esc(label)}</button>`;
+}
+
+function navDot(step) {
+  if (!step) return '<span class="nav-dot gray"></span>';
+  return `<span class="nav-dot ${RAIL_TONE[step.status] || 'gray'}"></span>`;
+}
+
+function navItem(target, label, step) {
+  return `<button class="start-nav-item" data-act="start.jump" data-target="${target}">
+    ${navDot(step)}<span>${esc(label)}</span></button>`;
+}
+
 function paint(data) {
+  const byKey = Object.fromEntries(data.steps.map((step) => [step.key, step]));
   const currentIndex = data.steps.findIndex(
     (step) => step.status !== 'READY' && step.status !== 'SKIPPED');
   const done = currentIndex < 0 ? data.steps : data.steps.slice(0, currentIndex);
   const current = currentIndex < 0 ? null : data.steps[currentIndex];
   const upcoming = currentIndex < 0 ? [] : data.steps.slice(currentIndex + 1);
   const pct = data.readiness_pct;
+  const gaps = gapGroups(data);
+  const missing = missingAll(data);
+  const missingCount = missing.length;
 
-  const railFor = (steps) => steps.map((step) => `
+  const strategy = byKey.strategy;
+  const arch = byKey.architecture;
+  const policy = byKey.policy;
+  const design = byKey.process_design;
+  const perf = byKey.performance;
+
+  const q1Missing = (strategy.evidence_items || []).filter((item) => item.required && !item.met);
+  const q1 = questionCard({
+    id: 'q1', no: 'Q1', title: '要什么', map: '战略地图', status: statusTag(strategy),
+    answer: strategy.status === 'READY'
+      ? '目标、目标值和现状基线都已挂到这条流程上。'
+      : `还缺 ${q1Missing.length} 项：${q1Missing.map((item) => esc(item.label)).join('、')}。`,
+    chips: chipsFor(strategy, [
+      'objectives', 'linked_objectives', 'objectives_with_owner', 'objectives_with_baseline',
+    ]),
+    actions: viewButton('去定目标', 'strategy'),
+  });
+
+  const q2 = questionCard({
+    id: 'q2', no: 'Q2', title: '有什么', map: '价值流地图', status: statusTag(arch),
+    answer: `已有 ${valueOf(arch, 'l1')} 个 L1、${valueOf(arch, 'l2')} 个 L2、`
+      + `${valueOf(arch, 'l3')} 个 L3；${valueOf(arch, 'positions')} 个岗位、`
+      + `${valueOf(policy, 'documents')} 份制度/文件、${valueOf(design, 'forms')} 份表单、`
+      + `${valueOf(perf, 'kpi_cards')} 张完整 KPI 卡。`,
+    chips: chipsFor(arch, ['l1', 'l2', 'l3', 'positions'])
+      + chipsFor(policy, ['documents']) + chipsFor(design, ['forms'])
+      + chipsFor(perf, ['kpi_cards']),
+    actions: viewButton('看流程地图', 'map') + viewButton('看组织与人员', 'orgs'),
+  });
+
+  const gapChips = gaps.filter((group) => group.items.length)
+    .map((group) => `<span class="tag t-red">${esc(group.name)} ${group.items.length}</span>`)
+    .join(' ');
+  const topMissing = missing.slice(0, 6)
+    .map((item) => `<span class="tag t-red">${esc(item.label)}</span>`).join(' ');
+  const q3 = questionCard({
+    id: 'q3', no: 'Q3', title: '还缺什么', map: '差距地图',
+    status: missingCount
+      ? `<span class="tag t-yel">还缺 ${missingCount} 项</span>`
+      : '<span class="tag t-grn">必需证据已齐</span>',
+    answer: missingCount
+      ? `还缺 ${missingCount} 项必需证据。先补最影响上线的那几项。`
+      : '必需证据已经齐了；可以继续往下走或直接确认上线。',
+    chips: gapChips || '<span class="tag t-grn">没有必需缺口</span>',
+    extra: `${topMissing ? `<div class="gap mt">${topMissing}</div>` : ''}
+      <div class="start-gap-note">三问法：有没有必要做 · 有没有标准 · 有没有证据</div>`,
+    actions: '<button class="btn btn-g" data-act="start.jump" data-target="q7">看当前阶段</button>',
+  });
+
+  const q4 = questionCard({
+    id: 'q4', no: 'Q4', title: '做什么', map: '流程地图', status: statusTag(arch),
+    answer: `L1 ${valueOf(arch, 'l1')} · L2 ${valueOf(arch, 'l2')} · L3 ${valueOf(arch, 'l3')}；`
+      + `已对应 PCF 的 L3 ${valueOf(arch, 'pcf_mapped_l3')} 个。`,
+    chips: chipsFor(arch, ['l1', 'l2', 'l3', 'pcf_mapped_l3', 'benchmark_maps']),
+    actions: viewButton('去建流程地图', 'map') + viewButton('看 PCF', 'pcf')
+      + '<button class="btn btn-g" data-act="start.guidedPcf">1+3+10 建架构</button>',
+  });
+
+  const q5 = questionCard({
+    id: 'q5', no: 'Q5', title: '输入什么', map: '岗位地图', status: statusTag(arch),
+    answer: `岗位 ${valueOf(arch, 'positions')} 个；RACI 关键事项 `
+      + `${valueOf(arch, 'raci_matters')} 个；权责冲突 ${valueOf(arch, 'invalid_processes')} 个。`,
+    chips: chipsFor(arch, ['positions', 'raci_matters', 'invalid_processes']),
+    extra: '<div class="tiny muted">每个关键事项只能有一个 A；输入、处理、审核、交付都要落到岗位或角色。</div>',
+    actions: viewButton('去配组织', 'orgs') + viewButton('去配权责', 'designer'),
+  });
+
+  const q6 = questionCard({
+    id: 'q6', no: 'Q6', title: '用什么', map: '方法工具箱', status: statusTag(design),
+    answer: `表单 ${valueOf(design, 'forms')} 份 · 规则 ${valueOf(design, 'rules')} 条 · `
+      + `工具绑定 ${valueOf(design, 'node_tools')} 个；累计绑定 ${valueOf(design, 'bindings')} 项。`,
+    chips: chipsFor(design, ['forms', 'rules', 'node_tools', 'bindings']),
+    extra: '<div class="tiny muted">先问问题，再选工具；不能改变现场行为的工具不引入。</div>',
+    actions: viewButton('去画流程', 'designer') + viewButton('看方法工具箱', 'toolbox'),
+  });
+
+  const rail = data.steps.map((step) => `
     <div class="rail-step ${RAIL_TONE[step.status] || 'gray'}${
       current && current.key === step.key ? ' current' : ''}${
       step.pilot ? '' : ' is-improvement'}" title="${esc(step.title)} · ${esc(step.status_label)}">
@@ -220,19 +395,102 @@ function paint(data) {
       <b>${esc(shortTitle(step))}</b>
       <em>${esc(step.status_label)}</em>
     </div>`).join('');
+  const railCard = `
+    <div class="card start-rail-card">
+      <div class="between mb"><h3>执行层：9 个阶段</h3>
+        <span class="tiny muted">当前阶段展开，其余阶段只显示状态</span></div>
+      <div class="start-rail">${rail}</div>
+    </div>`;
 
-  const phaseGroups = [
-    { name: 'A 定方向', range: '阶段 1–3', steps: data.steps.slice(0, 3) },
-    { name: 'B 建体系', range: '阶段 4–6', steps: data.steps.slice(3, 6) },
-    { name: 'C 跑闭环', range: '阶段 7–9', steps: data.steps.slice(6, 9) },
-  ];
+  const q7 = questionCard({
+    id: 'q7', no: 'Q7', title: '输出什么', map: '证据地图',
+    status: current ? statusTag(current) : '<span class="tag t-grn">全部完成</span>',
+    answer: current
+      ? `当前阶段：${esc(current.title)}。下面只展开这一层，其余阶段收起。`
+      : '九个阶段都已具备或标记为本次不做。',
+    extra: current ? '' : completionCard(data),
+    actions: current
+      ? '<button class="btn btn-g" data-act="start.jump" data-target="q8">看退出门和下一步</button>'
+      : '',
+  });
+
+  const gateStatus = data.pilot_confirmed
+    ? '<span class="tag t-grn">已确认上线</span>'
+    : data.pilot_gate_open
+      ? '<span class="tag t-blu">可确认上线</span>'
+      : `<span class="tag t-yel">还差 ${data.pilot_missing_steps.length} 个阶段</span>`;
+  const q8 = questionCard({
+    id: 'q8', no: 'Q8', title: '下一步', map: '下一层地图', status: gateStatus,
+    answer: current
+      ? `当前阶段退出门：${esc(current.exit_criteria)}`
+      : '前 8 个阶段已齐，确认上线后进入日常运营。',
+    extra: `${current && current.next_hint ? `<div class="note mb">${esc(current.next_hint)}</div>` : ''}
+      ${data.skipped_count
+        ? `<div class="note mb">${data.skipped_count} 个阶段标了“这次先不做”：不计入完成，也不挡后续。</div>`
+        : ''}
+      <div class="tiny muted">前 8 个阶段（到“评审与固化”）齐了，第一条流程就能上线；
+        第 9 阶段“改善与复制”在运营中持续做。</div>`,
+    actions: current
+      ? '<button class="btn btn-g" data-act="start.jump" data-target="q7">回到当前阶段</button>'
+      : '',
+  });
+
+  const q3Step = { status: missingCount ? 'IN_PROGRESS' : 'READY' };
+  const q8Step = {
+    status: data.pilot_confirmed ? 'READY' : data.pilot_gate_open ? 'IN_PROGRESS' : 'NOT_STARTED',
+  };
+  const nav = `
+    <div class="card start-nav">
+      <div class="start-nav-layer">地图层</div>
+      ${navItem('q1', 'Q1 要什么', strategy)}
+      ${navItem('q2', 'Q2 有什么', arch)}
+      ${navItem('q3', 'Q3 还缺什么', q3Step)}
+      <div class="start-nav-layer">骨架层</div>
+      ${navItem('q4', 'Q4 做什么', arch)}
+      ${navItem('q5', 'Q5 输入什么', arch)}
+      <div class="start-nav-layer">执行层</div>
+      ${navItem('q6', 'Q6 用什么', design)}
+      ${navItem('q7', 'Q7 输出什么', current || { status: 'READY' })}
+      ${navItem('q8', 'Q8 下一步', q8Step)}
+    </div>`;
+
+  const gateCard = pilotGateCard(data);
+  const aside = `
+    <div class="card start-aside-card">
+      <div class="tiny muted">当前落在哪一层</div>
+      <h3>${current ? esc(shortTitle(current)) : '已完成'}</h3>
+      <div class="gap">${current ? statusTag(current) : ''}
+        ${current && current.estimated ? `<span class="tag t-blu">预计 ${esc(current.estimated)}</span>` : ''}</div>
+      <button class="btn-sm mt" data-act="start.jump" data-target="q7">看当前阶段</button>
+    </div>
+    ${gateCard || `
+      <div class="card start-aside-card">
+        <h3>退出门自检</h3>
+        <div class="tiny muted">还差 ${data.pilot_missing_steps.length} 个阶段：</div>
+        <div class="gap">${data.pilot_missing_steps
+          .map((title) => `<span class="tag t-yel">${esc(title)}</span>`).join('')}</div>
+        <button class="btn-sm mt" data-act="start.jump" data-target="q3">看差距地图</button>
+      </div>`}
+    <div class="card start-aside-card">
+      <h3>能力库</h3>
+      <div class="gap">
+        <button class="btn-sm" data-act="start.go" data-view="pcf">PCF 分类</button>
+        <button class="btn-sm" data-act="start.go" data-view="toolbox">方法工具箱</button>
+        <button class="btn-sm" data-act="start.go" data-view="authorization">授权矩阵</button>
+        <button class="btn-sm" data-act="start.go" data-view="designer">流程设计器</button>
+        <button class="btn-sm" data-act="start.go" data-view="monitor">运营监控</button>
+        <button class="btn-sm" data-act="start.go" data-view="knowledge">知识库</button>
+      </div>
+      <div class="tiny muted mt">按问题取用，不预设绑定。</div>
+    </div>`;
 
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
         <div>
           <h2>开始使用<span class="module-badge">一条流程的试点路径</span></h2>
-          <div class="desc">先把一条流程从立项走到评审固化；每个阶段只问一个问题，做完要留下看得见的东西。其他模块用到时再展开。</div>
+          <div class="desc">先答完 8 个问题，把一条流程从“要什么”走到“下一步”；
+            每个答案都来自系统里已有的证据。</div>
         </div>
         <div class="gap">
           ${data.pilot_confirmed
@@ -244,41 +502,36 @@ function paint(data) {
       </div>
       <div class="start-chain">战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本</div>
       <div class="tiny muted" style="margin-top:6px">统一原则 · 统一基线 · 分级授权 · 受控差异</div>
-      <div class="start-phases">
-        ${phaseGroups.map((group, index) => `
-          <div class="phase-block phase-${index}">
-            <div class="phase-label"><b>${group.name}</b><span>${group.range}</span></div>
-            <div class="start-rail">${railFor(group.steps)}</div>
-          </div>`).join('')}
-      </div>
       <div class="pipe" style="margin-top:12px">
         <i class="fill-ok" style="width:${pct}%"></i>
       </div>
-      <div class="between mt">
-        <span class="tiny muted">
-          前 8 个阶段（到“评审与固化”）齐了，第一条流程就能上线；第 9 阶段“改善与复制”
-          在运营中持续做。这页看“该留下的东西齐不齐”，项目页看“事情做到哪一步”。
-        </span>
-        <button class="btn-sm" data-act="start.guidedPcf">1+3+10 建架构</button>
-        <button class="btn-sm" data-act="start.setupProjects">体系落地项目 →</button>
-      </div>
-      ${data.skipped_count
-        ? `<div class="note mt">${data.skipped_count} 个阶段标了“这次先不做”：不计入完成，也不挡后续；随时可以恢复。</div>`
-        : ''}
-      ${!data.pilot_confirmed && !data.pilot_gate_open
-        ? `<div class="note mt">还差 ${data.pilot_missing_steps.length} 个阶段：${
-          data.pilot_missing_steps.map(esc).join('、')}。</div>`
-        : ''}
     </div>
-    ${pilotGateCard(data)}
-    ${current ? currentCard(current) : completionCard(data)}
-    ${doneList(done)}
-    ${upcomingList(upcoming)}`;
+    <div class="start-shell">
+      <aside class="start-side">${nav}</aside>
+      <main class="start-center">
+        ${blockHeader('地图层', '统一认知', '定方向、定差距')}
+        ${q1}${q2}${q3}
+        ${blockHeader('骨架层', '统一语言', '定口径、定边界、定责任')}
+        ${q4}${q5}
+        ${blockHeader('执行层', '逐层推进', '定方法、留证据、过退出门')}
+        ${railCard}
+        ${q6}${q7}
+        ${current ? currentCard(current) : ''}
+        ${q8}
+        ${doneList(done)}${upcomingList(upcoming)}
+      </main>
+      <aside class="start-aside">${aside}</aside>
+    </div>`;
 }
 
 /* -------------------------------------------------- 交互 */
 
 on('start.go', ({ view }) => go(view));
+
+on('start.jump', ({ target }) => {
+  const el = document.getElementById(target);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 on('start.guidedPcf', () => {
   state.map.openGuidedPcf = true;

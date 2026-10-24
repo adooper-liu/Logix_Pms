@@ -1893,10 +1893,11 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "开始使用" in view and "一条流程的试点路径" in view, "启动向导未渲染"
-            assert page.locator("#view .rail-step").count() == 9, "九步进度轨不完整"
-            assert "A 定方向" in view and "B 建体系" in view and "C 跑闭环" in view, (
-                "阶段没有按 A/B/C 分组展示"
-            )
+            assert page.locator("#view .rail-step").count() == 9, "九阶段进度轨不完整"
+            assert page.locator("#view .start-shell").count() == 1, "开始页没有三栏布局"
+            assert page.locator("#view .start-q").count() == 8, "开始页不是八问"
+            for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
+                assert marker in view, f"开始页缺少「{marker}」"
             gate = page.evaluate(
                 """async () => {
                     const token = localStorage.getItem('psm_token');
@@ -1935,6 +1936,9 @@ def main() -> int:
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
                 assert "这次先不做（未验证）" in page.inner_text("#view"), "跳过步骤未显示为未验证"
+                # “已经具备 / 这次先不做”默认折叠，恢复入口在折叠面板里
+                page.locator("#view details.start-fold summary").first.click()
+                page.wait_for_timeout(300)
                 unskip = page.locator(f'#view button[data-act="start.unskip"][data-key="{key}"]')
                 assert unskip.count(), "跳过后的步骤没有取消跳过入口"
                 unskip.first.click()
