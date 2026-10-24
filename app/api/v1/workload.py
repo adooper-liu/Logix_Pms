@@ -31,6 +31,7 @@ def workload_meta():
     return WorkloadMetaOut(
         source_labels=workload_service.SOURCE_LABELS,
         status_labels=workload_service.STATUS_LABELS,
+        boundary_note=workload_service.BOUNDARY_NOTE,
     )
 
 
@@ -233,6 +234,10 @@ def update_capacity(
     "/summary",
     response_model=WorkloadSummaryOut,
     summary="工作量汇总：标准需求 / 实际工时 / 产能利用率",
+    description=(
+        "标准工时只作为能力基线，用于产能、周期、成本与改善收益；"
+        "不用于个人排名、扣罚或奖金分配。只有已验证工时会进入产能口径。"
+    ),
 )
 def workload_summary(
     db: DbSession,

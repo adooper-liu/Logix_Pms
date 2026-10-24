@@ -183,3 +183,4 @@ class WorkloadSummaryOut(BaseModel):
 class WorkloadMetaOut(BaseModel):
     source_labels: dict
     status_labels: dict
+    boundary_note: str = ""

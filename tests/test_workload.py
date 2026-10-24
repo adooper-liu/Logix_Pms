@@ -208,3 +208,13 @@ def test_actual_worklog_is_attributed_to_activity(client):
 def test_viewer_cannot_write(viewer_client):
     r = viewer_client.post(f"{API}/workload/standards", json=_standard_payload(viewer_client))
     assert r.status_code == 403
+
+
+def test_meta_declares_work_measurement_boundary(client):
+    """标准工时的边界必须由后端下发，页面不能自己写一套口径。"""
+    meta = client.get(f"{API}/workload/meta").json()
+    note = meta["boundary_note"]
+    assert "能力基线" in note
+    assert "不用于个人" in note
+    assert "扣罚" in note
+    assert "已验证" in note

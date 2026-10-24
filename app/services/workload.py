@@ -4,7 +4,8 @@
 - 标准工时 = 观测时间 × 评定系数 × (1 + 宽放率)；
 - 月度需求工时 = 标准工时 × 计划频次；
 - 可用工时 = 人数 × 人均可用小时 × 60 × 出勤率 × 设备可用率；
-- 只有 VERIFIED 的标准进入利用率与成本口径，ESTIMATE 一律不进入。
+- 只有 VERIFIED 的标准进入利用率与成本口径，ESTIMATE 一律不进入；
+- 标准工时只作为能力基线，不用于个人排名、扣罚或奖金分配。
 """
 
 from __future__ import annotations
@@ -30,6 +31,11 @@ from app.schemas.workload import (
     WorkloadSummaryOut,
     WorkloadTotals,
     WorkMeasurementStandardOut,
+)
+
+BOUNDARY_NOTE = (
+    "标准工时只作为能力基线，用于产能、周期、成本与改善收益；"
+    "不用于个人排名、扣罚或奖金分配。只有已验证工时会进入产能口径。"
 )
 
 SOURCE_LABELS = {

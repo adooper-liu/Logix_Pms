@@ -1570,6 +1570,8 @@ def main() -> int:
             assert "标准工时卡" in workload_view, "工作量页缺少标准工时卡"
             assert "产能与负荷" in workload_view, "工作量页缺少产能与负荷"
             assert "理论负荷率" in workload_view, "工作量页缺少负荷率"
+            assert "能力基线" in workload_view, "工作量页缺少能力基线声明"
+            assert "不用于个人" in workload_view, "工作量页缺少不用于个人考核声明"
 
             page.click('#view button:has-text("+ 标准工时")')
             page.wait_for_selector("#mask.show")
@@ -1577,6 +1579,7 @@ def main() -> int:
             std_modal = page.inner_text("#mBody")
             assert "观测时间" in std_modal and "评定系数" in std_modal, "标准工时弹窗缺字段"
             assert "宽放率" in std_modal and "月频次" in std_modal, "标准工时弹窗缺口径字段"
+            assert "不用于个人" in std_modal, "标准工时弹窗缺少使用边界声明"
             close_modal()
             page.wait_for_timeout(300)
 

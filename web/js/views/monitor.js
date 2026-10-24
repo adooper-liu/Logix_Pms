@@ -233,7 +233,9 @@ const renderMonitor = () => {
           <td>${hours(row.effort_minutes)}</td>
         </tr>`).join('') || emptyRow(4, '本期还没有实际工时记录');
 
+      const boundaryNote = (state.workloadMeta && state.workloadMeta.boundary_note) || '';
       const workloadPane = `
+        ${boundaryNote ? `<div class="note mb">${esc(boundaryNote)}</div>` : ''}
         ${workloadCards}
         <div class="card">
           <div class="between mb">
@@ -1080,7 +1082,8 @@ function newWorkloadStandardModal() {
       <div class="field"><label>失效日期</label><input id="wsTo" type="date"></div>
     </div>
     <div class="note">标准工时 = 观测 × 评定系数 × (1 + 宽放率)。
-      新建为草稿；估算来源不能直接验证，验证后才进入产能口径。</div>`,
+      新建为草稿；估算来源不能直接验证，验证后才进入产能口径。
+      标准工时只作为能力基线，不用于个人考核、扣罚或奖金分配。</div>`,
     `<button class="btn btn-g" data-act="monitor.close">取消</button>
      <button class="btn btn-p" data-act="monitor.submitStandard">创建</button>`);
 

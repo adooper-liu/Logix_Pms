@@ -182,6 +182,12 @@ def test_default_view_is_start():
     assert "startup.minimal_ready_count >= startup.minimal_total" in auth_src
 
 
+def test_workload_page_consumes_boundary_note():
+    """标准工时边界由后端下发，前端不能自己维护一份政策文案。"""
+    monitor_src = (JS_ROOT / "views" / "monitor.js").read_text(encoding="utf-8")
+    assert "boundary_note" in monitor_src
+
+
 def test_knowledge_view_wires_pagination():
     """知识库标题写「N 条」，就必须把 page 传下去并提供翻页入口。
 
