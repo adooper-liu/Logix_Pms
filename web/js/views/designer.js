@@ -6,7 +6,7 @@ import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { metricHelp } from '../core/metrics.js';
 import { API_BASE, GET, PATCH, POST, PUT, DEL, getToken } from '../core/api.js';
-import { openToolByCode } from './toolbox.js';
+import { actions as appActions } from '../core/actions.js';
 
 /* ============================================================ 6. 流程设计器 */
 
@@ -44,7 +44,7 @@ on('designer.goDeliverables', () => go('deliverables'));
 on('designer.close', () => closeModal());
 on('designer.submitNodeDoc', ({ node }) => submitNodeDocument(node));
 on('designer.executionConfig', () => openExecutionConfig());
-on('designer.openTool', ({ code }) => openToolByCode(code));
+on('designer.openTool', ({ code }) => appActions['toolbox.openTool'](code));
 on('designer.lintIssue', ({ index }) => selectLintIssue(Number(index)));
 on('designer.diffVersion', ({ id }) => diffVersion(Number(id)));
 on('designer.rollbackVersion', ({ id }) => rollbackVersion(Number(id)));
@@ -2497,4 +2497,8 @@ async function saveBpmnAssignment(nodeKey) {
   }
 }
 
-export { renderDesigner, openDesigner, switchProcess };
+export const actions = {
+  'designer.open': openDesigner,
+  'designer.switch': switchProcess,
+};
+export { renderDesigner };

@@ -1306,7 +1306,7 @@ def main() -> int:
                     }""",
                     pid,
                 )
-                page.evaluate(f"switchProcess({pid})")
+                page.evaluate("(pid) => actions['designer.switch'](pid)", pid)
                 page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
                 page.wait_for_timeout(600)
                 assert "草稿" in page.inner_text("#view"), page.inner_text("#view")[:200]
@@ -1354,7 +1354,7 @@ def main() -> int:
                     }""",
                     pid,
                 )
-                page.evaluate(f"switchProcess({fallback})")
+                page.evaluate("(pid) => actions['designer.switch'](pid)", fallback)
                 page.wait_for_timeout(700)
 
         # 运营监控：KPI 明细 + 异常处理弹窗

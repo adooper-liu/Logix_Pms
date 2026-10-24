@@ -4,10 +4,14 @@
  * 复制成功后刷新当前视图，保证项目交付物列表拿到最新状态。
  */
 import { GET, POST } from './api.js';
-import { toast, openModal, closeModal } from './ui.js';
+import { toast, openModal, closeModal, on } from './ui.js';
 import { state } from './state.js';
 import { esc } from './format.js';
 import { RENDERERS } from './router.js';
+
+on('copy.fill', () => fillCopyInstances());
+on('copy.submit', () => submitTemplateCopy());
+on('copy.close', () => closeModal());
 
 function renderDialog(source) {
   return `
@@ -16,7 +20,7 @@ function renderDialog(source) {
         ? ' · 产出「' + esc(source.target) + '」' : ''}
       <div class="mt">复制会创建交付物新版本，并固定来源版本；来源后续升级不会改动它。</div></div>
     <div class="field"><label>目标项目</label>
-      <select class="sel" id="cpProject" onchange="fillCopyInstances()">
+      <select class="sel" id="cpProject" data-act="copy.fill">
         ${source.projects.map((p) =>
           `<option value="${p.id}">${esc(p.code)} · ${esc(p.name)}</option>`).join('')}
       </select></div>
@@ -26,8 +30,8 @@ function renderDialog(source) {
       <input id="cpTitle" value="${esc(source.title)}"></div>`;
 }
 
-const FOOT = `<button class="btn btn-g" onclick="closeModal()">取消</button>
-  <button class="btn btn-p" onclick="submitTemplateCopy()">复制</button>`;
+const FOOT = `<button class="btn btn-g" data-act="copy.close">取消</button>
+  <button class="btn btn-p" data-act="copy.submit">复制</button>`;
 
 export async function openTemplateCopy(templateId) {
   try {

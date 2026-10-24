@@ -1,26 +1,20 @@
-/* 应用入口：注册视图、接线 DOM、暴露模板需要的全局函数、启动。
+/* 应用入口：注册视图与 actions、接线 DOM、启动。
  *
- * 为什么要往 window 上挂一堆函数？
- * 模板里的 `onclick="openProject(3)"` 是**在全局作用域求值**的，
- * ES 模块的作用域是隔离的，这些函数不挂到 window 上就点不动。
- * 这里集中声明一次，作为唯一的"对外操作面"；后续如果改成事件委托，
- * 只需要删掉这一段，不用动各个视图模块。
+ * 模板不再依赖 window 上的函数：视图统一用 data-act + 委托，
+ * 跨视图动作用 `actions['view.action']`。window 只保留最小操作面，
+ * 方便调试与控制台调用，不再把每个视图的导出摊平。
  */
 
 import { GET } from './core/api.js';
 import {
   AUTH, doLogin, hideLogin, isLoggedIn, loadMeta, logout, renderUserChip, showLogin,
 } from './core/auth.js';
-import { register, go, initialView, onSearch, RENDERERS } from './core/router.js';
+import { register, go, initialView, onSearch } from './core/router.js';
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
-import { closeModal, tab } from './core/ui.js';
-import { actions } from './core/actions.js';
-import * as templateCopy from './core/template-copy.js';
-import {
-  markAllNotificationsRead, openNotification, openNotifications, refreshNotifications,
-  scanNotifications,
-} from './core/notifications.js';
+import { closeModal, on } from './core/ui.js';
+import { actions, registerActions } from './core/actions.js';
+import { openNotifications, refreshNotifications } from './core/notifications.js';
 
 import * as dashboard from './views/dashboard.js';
 import * as mapView from './views/map.js';
@@ -50,6 +44,13 @@ register('deliverables', deliverableView.renderDeliverables);
 register('orgs', orgsView.renderOrgs);
 register('sketches', sketchesView.renderSketches);
 
+// 跨视图动作：视图只导出自己的 action map，由组合根统一注册。
+registerActions({
+  ...projectsView.actions,
+  ...designerView.actions,
+  ...toolboxView.actions,
+}, 'views');
+
 // Canvas 读的是当前主题色，切换主题后要原地重绘，不能等下一次请求
 function applyTheme(code) {
   setTheme(code);
@@ -66,28 +67,14 @@ function applyTheme(code) {
 // 交互式登录成功后刷新顶栏未读数（boot 路径在 boot() 里单独刷新）
 window.addEventListener('pms:login', () => { refreshNotifications(); });
 
-// 模板里 onclick/onchange 需要的操作面
-Object.assign(window, {
-  // 框架级
-  applyTheme, go, closeModal, tab, state, RENDERERS, logout, actions,
-  openNotifications, openNotification, markAllNotificationsRead, scanNotifications,
-  // 业务操作
-  ...dashboard,
-  ...mapView,
-  ...pcfView,
-  ...workflowView,
-  ...projectsView,
-  ...executionView,
-  ...toolboxView,
-  ...designerView,
-  ...monitorView,
-  ...knowledgeView,
-  ...deliverableView,
-  ...orgsView,
-  ...sketchesView,
-  // 跨视图共用：模板库与步骤推荐都从这里发起「复制到项目」
-  ...templateCopy,
-});
+// 框架壳动作（顶栏、模态框、错误重试）
+on('shell.notifications', () => openNotifications());
+on('shell.theme', (_data, el) => applyTheme(el.value));
+on('shell.logout', () => logout());
+on('shell.retry', ({ view }) => go(view));
+
+// 仅保留最小操作面；模板不再依赖这些全局函数。
+Object.assign(window, { go, closeModal, state, actions });
 
 /* -------------------------------------------------- 页面外壳 */
 

@@ -34,7 +34,7 @@ export function openModal(title, body, foot, wide) {
   document.getElementById('mTitle').textContent = title;
   document.getElementById('mBody').innerHTML = body;
   document.getElementById('mFoot').innerHTML = foot ||
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>';
+    '<button class="btn btn-g" data-act="ui.close">关闭</button>';
   const m = document.getElementById('modal');
   m.classList.toggle('wide', !!wide);
   m.scrollTop = 0;
@@ -85,6 +85,8 @@ export function on(dataAct, handler) {
 export function delegateCount() {
   return DELEGATES.size;
 }
+
+on('ui.close', () => closeModal());
 
 if (typeof document !== 'undefined') {
   for (const type of EVENT_TYPES) {

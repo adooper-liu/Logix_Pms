@@ -63,15 +63,15 @@
     <div class="topbar">
       <h1 id="pageTitle">管理驾驶舱</h1>
       <div class="search"><input id="searchInput" placeholder="搜索流程 / 项目 / 工具 / 知识…"></div>
-      <button class="notif-btn" id="notifBtn" onclick="openNotifications()" title="通知">
+      <button class="notif-btn" id="notifBtn" data-act="shell.notifications" title="通知">
         🔔<span class="notif-badge hide" id="notifBadge">0</span>
       </button>
-      <select class="sel theme-sel" id="themeSel" title="切换主题" onchange="applyTheme(this.value)"></select>
+      <select class="sel theme-sel" id="themeSel" title="切换主题" data-act="shell.theme"></select>
       <div class="usr">
         <div class="avatar" id="userAvatar">--</div>
         <span id="userName">未登录</span>
         <span class="tag t-gry" id="userRole"></span>
-        <button class="btn-sm" onclick="logout()">退出</button>
+        <button class="btn-sm" data-act="shell.logout">退出</button>
       </div>
     </div>
     <div class="view" id="view"></div>
@@ -81,7 +81,8 @@
 <!-- 通用模态框 -->
 <div class="mask" id="mask">
   <div class="modal" id="modal">
-    <div class="modal-hd"><span id="mTitle">标题</span><span class="x" onclick="closeModal()">✕</span></div>
+    <div class="modal-hd"><span id="mTitle">标题</span><button class="x" type="button"
+      data-act="ui.close" aria-label="关闭">✕</button></div>
     <div class="modal-bd" id="mBody"></div>
     <div class="modal-ft" id="mFoot"></div>
   </div>

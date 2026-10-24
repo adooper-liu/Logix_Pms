@@ -6,7 +6,7 @@ import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, canManage } from '../core/auth.js';
 import { GET, POST } from '../core/api.js';
 import { metricHelp } from '../core/metrics.js';
-import { openToolByCode } from './toolbox.js';
+import { actions } from '../core/actions.js';
 
 /* ============================================================ 8. 流程知识库 */
 
@@ -24,7 +24,7 @@ on('knowledge.goWorkflow', () => go('workflow'));
 on('knowledge.close', () => closeModal());
 on('knowledge.openTool', ({ code }) => {
   closeModal();
-  openToolByCode(code);
+  actions['toolbox.openTool'](code);
 });
 on('knowledge.submit', () => submitKnowledge());
 

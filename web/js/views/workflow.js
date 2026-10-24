@@ -5,7 +5,8 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
 import { openTemplateCopy } from '../core/template-copy.js';
-import { openToolByCode } from './toolbox.js';
+import { renderRecommendation } from './shared/recommendation.js';
+import { actions } from '../core/actions.js';
 
 /* ============================================================ 3. 五阶段标准工作流 */
 
@@ -29,7 +30,7 @@ on('workflow.copyTemplate', ({ id }) => {
 });
 on('workflow.openTool', ({ code }) => {
   closeModal();
-  openToolByCode(code);
+  actions['toolbox.openTool'](code);
 });
 
 const STAGE_COLORS = [
@@ -282,43 +283,4 @@ async function runRecommend(targetId) {
   }
 }
 
-function renderRecommendation(r) {
-  const conf = Math.round(r.confidence * 100);
-  return `
-    <div class="note mb">
-      <b style="font-size:14px">${esc(r.headline)}</b>
-      <div style="margin-top:6px">
-        <div class="pipe" style="max-width:280px"><i class="fill-${
-          conf >= 70 ? 'ok' : conf >= 50 ? 'warn' : 'bad'}" style="width:${conf}%"></i></div>
-        <span class="tiny">置信度 ${conf}%</span>
-      </div>
-    </div>
-
-    <h3>判断依据</h3>
-    <ol style="padding-left:20px;font-size:13px;line-height:1.9;color:var(--text)">
-      ${r.rationale.map((x) => '<li>' + esc(x) + '</li>').join('')}
-    </ol>
-
-    <h3 class="mt">分层推进建议</h3>
-    <table class="tbl">
-      <thead><tr><th style="width:90px">层次</th><th>动作</th></tr></thead>
-      <tbody>${r.phase_plan.map((p) => '<tr><td><b>' + esc(p.layer) + '</b></td><td>' +
-        esc(p.action) + '</td></tr>').join('')}</tbody>
-    </table>
-
-    <h3 class="mt">推荐工具链（${r.recommended_tools.length} 个）</h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${r.recommended_tools.map((t) => '<button type="button" class="tag ' +
-        ({ DIAGNOSE: 't-blu', DESIGN: 't-red', DEPLOY: 't-yel', MONITOR: 't-grn' }[t.category] || 't-blu') +
-        ' tag-button" data-act="workflow.openTool" data-code="' + esc(t.code) + '">' +
-        (CAT_ICON[t.category] || '') + ' ' + esc(t.name) + '</button>').join('')}
-    </div>
-
-    <h3 class="mt">风险提示</h3>
-    <div class="${r.risks.length && r.risks[0].indexOf('未识别') < 0 ? 'warnbox' : 'note'}">
-      ${r.risks.map((x) => '· ' + esc(x)).join('<br>')}
-    </div>`;
-}
-
-
-export { renderWorkflow, renderRecommendation };
+export { renderWorkflow };

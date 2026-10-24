@@ -213,4 +213,5 @@ function paintTool(t) {
 }
 
 
-export { renderToolbox, openToolByCode };
+export const actions = { 'toolbox.openTool': openToolByCode };
+export { renderToolbox };

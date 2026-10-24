@@ -4,7 +4,12 @@ import { GET, POST } from './api.js';
 import { canManage } from './auth.js';
 import { dtShort, esc, skeleton } from './format.js';
 import { go } from './router.js';
-import { openModal, closeModal, toast } from './ui.js';
+import { openModal, closeModal, toast, on } from './ui.js';
+
+on('notif.open', ({ id }) => openNotification(Number(id)));
+on('notif.scan', () => scanNotifications());
+on('notif.readAll', () => markAllNotificationsRead());
+on('notif.close', () => closeModal());
 
 let items = [];
 
@@ -29,12 +34,13 @@ export async function openNotifications() {
     items = await GET('/notifications?limit=50');
   } catch (e) {
     openModal('通知中心', `<div class="errbar"><div>${esc(e.message)}</div></div>`,
-      '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+      '<button class="btn btn-g" data-act="notif.close">关闭</button>');
     return;
   }
   const unread = items.filter((n) => !n.is_read).length;
   const rows = items.map((n) => `
-    <div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="openNotification(${n.id})">
+    <button class="notif-item ${n.is_read ? '' : 'unread'}" type="button"
+      data-act="notif.open" data-id="${n.id}">
       <span class="notif-dot"></span>
       <div class="notif-main">
         <div class="notif-title">${esc(n.title)}</div>
@@ -42,18 +48,18 @@ export async function openNotifications() {
         <div class="tiny">${esc(n.type_label)} · ${dtShort(n.created_at)}</div>
       </div>
       <span class="alert-go">›</span>
-    </div>`).join('') || '<div class="empty">没有通知</div>';
+    </button>`).join('') || '<div class="empty">没有通知</div>';
 
   openModal('通知中心', `
     <div class="between mb">
       <div class="desc" style="margin:0">${unread ? `${unread} 条未读` : '全部已读'}</div>
       <div class="gap">
-        ${canManage() ? '<button class="btn-sm" onclick="scanNotifications()">扫描逾期</button>' : ''}
-        <button class="btn-sm" onclick="markAllNotificationsRead()">全部已读</button>
+        ${canManage() ? '<button class="btn-sm" data-act="notif.scan">扫描逾期</button>' : ''}
+        <button class="btn-sm" data-act="notif.readAll">全部已读</button>
       </div>
     </div>
     <div class="notif-list">${rows}</div>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+    '<button class="btn btn-g" data-act="notif.close">关闭</button>');
 }
 
 export async function openNotification(id) {

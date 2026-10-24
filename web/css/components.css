@@ -118,6 +118,7 @@ button.tool{text-align:left;font:inherit;color:inherit;width:100%}
 .modal-hd{padding:18px 22px;border-bottom:1px solid var(--line);font-size:16px;font-weight:600;
   display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:0;background:var(--panel);z-index:2}
 .modal-hd .x{cursor:pointer;color:var(--sub);font-size:20px;line-height:1}
+button.x{border:none;background:none;padding:0;font:inherit;color:var(--sub)}
 .modal-bd{padding:20px 22px}
 .modal-ft{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
 .field{margin-bottom:14px}

@@ -6,10 +6,9 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { go } from '../core/router.js';
-import { newProjectWizard } from './projects.js';
 import { GET, POST, PATCH, DEL, download } from '../core/api.js';
-import { openDesigner } from './designer.js';
 import { openDocumentCopy } from '../core/template-copy.js';
+import { actions } from '../core/actions.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
@@ -32,7 +31,7 @@ on('map.editProcess', ({ id }) => editProcessModal(Number(id)));
 on('map.startProject', ({ id, name }) => startProjectFromProcess(Number(id), name));
 on('map.openDesigner', ({ process }) => {
   closeModal();
-  openDesigner(Number(process));
+  actions['designer.open'](Number(process));
 });
 on('map.openDocs', ({ process }) => openDocManager(Number(process)));
 on('map.downloadDoc', ({ doc, version, label }) =>
@@ -484,7 +483,7 @@ async function dlMapDocument(documentId, versionId, label) {
 /** 地图 → 立项：带着流程进入项目向导 */
 function startProjectFromProcess(processId, processName) {
   go('projects');
-  newProjectWizard({ processId, name: processName });
+  actions['projects.newWizard']({ processId, name: processName });
 }
 
 function mapGo(index) {

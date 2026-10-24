@@ -6,7 +6,8 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, role, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
-import { openDesigner } from './designer.js';
+import { actions as appActions } from '../core/actions.js';
+import { renderRecommendation } from './shared/recommendation.js';
 
 /* ============================================================ 4. 流程项目组合 */
 
@@ -25,7 +26,7 @@ on('projects.close', () => closeModal());
 on('projects.edit', ({ id }) => editProjectModal(Number(id)));
 on('projects.closeOpenDesigner', ({ process }) => {
   closeModal();
-  openDesigner(Number(process));
+  appActions['designer.open'](Number(process));
 });
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.wizardRecommend', () => wizardRecommend());
@@ -694,4 +695,8 @@ async function submitProject() {
 }
 
 
-export { renderProjects, newProjectWizard, openProject };
+export const actions = {
+  'projects.open': openProject,
+  'projects.newWizard': newProjectWizard,
+};
+export { renderProjects };

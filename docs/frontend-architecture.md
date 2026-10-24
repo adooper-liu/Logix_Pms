@@ -11,15 +11,15 @@
 另有一条 IA 覆盖问题已在 Phase 0 修复**（保留在 §2.5 作为回归触发条件）。
 本文只描述这些断裂、成因和修复顺序，不改动 IA 已确定的产品决策。
 
-**当前进度**：Phase 0（补 IA 文档）、Phase 1A/1B 已完成；**Phase 2 已完成**
-（13/13 个视图全部迁移到 `data-act`）。**Phase 3–4 尚未开始**，
-§2 是问题记录，§6 是执行顺序。
+**当前进度**：Phase 0 / Phase 1 / Phase 2 已完成；**Phase 3A 已完成**
+（`window` 收窄为 4 个键、跨视图直接 import 清零、内联处理器清零）。
+**Phase 3B（拆 designer）与 Phase 4 尚未开始**，§6 是执行顺序。
 
-**测量基线（2026-10-24 复核，Phase 2 完成后）**：25 个手写 JS 模块、11,598 行
-（其中 views 10,155 行）；13 个视图共 22 个导出符号（挂到 window 后约 34 个全局键）；
-内联事件处理器 15 处（全部在框架壳/core，视图内为 0）；
-视图内原生 `confirm`/`prompt` 0 处；`data-act` 键 248 个。
-复核命令见附录 A。
+**测量基线（2026-10-24 复核，Phase 3A 后）**：25 个手写 JS 模块、11,613 行
+（其中 views 10,126 行）；视图共 19 个导出符号，`window` 只保留
+`{ go, closeModal, state, actions }` 4 个键 + actions 命名空间；
+内联事件处理器 0；视图间直接 import 0；视图内原生 `confirm`/`prompt` 0；
+`data-act` 键 260 个。复核命令见附录 A。
 
 若与代码现状不符，以代码为准，并回来更新本文。
 
@@ -95,12 +95,17 @@ web/js/views/designer/
 `select(key)` / `subscribe(event, fn)`），向下传给各子模块；子模块只依赖这个只读接口，
 `xml.js` 保持纯函数、不接收 `ctx`。没有这层契约，拆完只是把一个大文件变成九个互相 import 的文件。
 
-### 2.2 `window` 全局面 = 22 个视图导出，没有边界
+### 2.2 `window` 全局面 —— **已修复（Phase 3A）**
 
-**证据**：`main.js:69-89` 用 `Object.assign(window, { ...dashboard, ...mapView, ... })`
-把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **22 个导出符号**
-（Phase 2 全部迁移后从 231 降下来），
-加上框架级函数与 `templateCopy`，`window` 上约 **34 个全局键**。
+**现状**：`main.js` 只挂 `{ go, closeModal, state, actions }`；视图不再把全部导出摊到
+`window`，跨视图动作统一走 `actions['view.action']`，模板统一走 `data-act`。
+视图间直接 import 已清零，内联事件处理器为 0。
+
+下面是修复前的实测记录，保留作为回归背景（防止把全局面重新铺开）。
+
+**修复前证据**：`main.js:69-89` 用 `Object.assign(window, { ...dashboard, ...mapView, ... })`
+把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **231 个导出符号**，
+加上框架级函数与 `templateCopy`，`window` 上曾有约 **243 个全局键**。
 
 **这不是「有风险」，而是已经发生过事故**：`map.js` 与 `pcf.js` 都导出了
 `togglePcfNode`，`Object.assign` 后 `pcf.js` 覆盖了 `map.js` 的实现，
@@ -110,19 +115,19 @@ web/js/views/designer/
 （解析各视图的 `export {}`，重名即测试失败）。
 
 **这个全局面存在的唯一原因**：`onclick="openProject(3)"` 在全局作用域求值。
-实测内联事件处理器 **15 处**（13 个视图全部归零；剩余全在框架壳/core）：
+实测内联事件处理器 **0 处**（Phase 3A 后，视图、框架壳与 core 全部清空）：
 
 | 位置 | 内联处理器 |
 |---|---|
-| `web/index.html` / `core`（通知、模板复制、模态默认关闭等） | 15 |
-| 13 个视图 | **0**（已完成） |
+| 13 个视图 / `index.html` / core | **0**（已完成） |
 
 **后果**：
 
 1. **没有 API 边界**。视图模块的「公开面」= 它的全部导出，
    读者无法分辨 `openDesigner`（跨视图要用）和 `restoreLanes`（纯内部），
    只能全文读 2,448 行才能知道。
-2. **无法静态检查**。ES 模块能校验 import 路径，`window` 上挂的 22 个导出不能。
+2. **无法静态检查**。ES 模块能校验 import 路径；Phase 3A 后 `window` 只剩 4 个键，
+其余跨视图调用都有显式 action 名，静态守卫可以检查。
    `tests/test_frontend_structure.py` 原先只能检查「模块文件存在」，检查不了
    「模板里 `onclick="foo()"` 的 foo 是否真实存在」——拼错就是浏览器静默不响应。
    撞名守卫是事后补的；根因仍然是「全部导出即公开面」。
@@ -269,7 +274,16 @@ main.js ──→ views/* ──→ core/components/* ──→ core/{ui,format}
   上移到 `core/`（如果它是公共库），或留在 `views/` 但把共享部分移到 `views/shared/`；
   **不允许继续作为「一个视图被其他视图 import」的隐式公共库**。
 
-#### 现状：视图之间已有 7 处互相 import
+#### 现状：视图之间直接 import 已清零（Phase 3A）
+
+历史上有 7 处直接 import（dashboard→projects、map→projects/designer、
+projects→designer、designer/knowledge/workflow→toolbox）。Phase 3A 已全部改为：
+- 导航/动作类 → `actions['projects.open']` / `actions['designer.open']` 等；
+- 共享渲染 → `views/shared/recommendation.js`；
+- 工具详情 → `actions['toolbox.openTool']`。
+
+当前 `views/*` 之间没有直接 import；只允许 import `views/shared/` 或 `core/*`。
+下面保留历史依赖图，作为回归背景。
 
 实测（`web/js/views/*.js`）：
 
@@ -366,8 +380,8 @@ Object.assign(window, { go, closeModal, state, actions });
 <button class="btn btn-p" data-act="deliverable.open" data-id="3">打开</button>
 ```
 
-在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：现存 15 处
-处理器的分布是 `click 13` / `change 2`，且全部在框架壳/core。
+在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：虽然 Phase 3A 后内联处理器已清零，
+委托根仍覆盖 `click` / `change` / `input` / `submit` / `keydown`，供后续新增交互使用。
 另外 `<select>` / checkbox 会同时触发 `input` 与 `change`，
 委托根必须只处理 `change`，否则一次操作会执行两次（已在实现中拦截）。
 
@@ -399,16 +413,14 @@ for (const type of BUBBLING_EVENTS) {
 - 表单回车提交走 `submit`，不会触发 `click`；分页、搜索、筛选必须有 `submit` 兜底。
 - bpmn-js 画布、draw.io iframe、图表库继续用各自的原生监听，不强行套 `data-act`。
 - **可访问性**：`data-act` 只允许挂在 `<button>` / `<a>` 上；静态守卫拒绝
-  `div/span[data-act]`。这会把剩余 15 处框架壳里的「可点击 div」顺手修成键盘可用控件。
+  `div/span[data-act]`。存量模板已全部迁移，守卫会拦住新代码引入可点击 div。
 - **转义**：`data-act` 的值必须是静态字符串，禁止拼接用户输入；
   其余 `data-*` 与文本一律走 `esc`。事件委托消除了 `onclick="...${name}..."` 的注入面，
   但组件返回 HTML 字符串时仍必须统一转义。
 
-**迁移策略**：13 个视图已全部迁移到 `data-act`，视图内联处理器为 0；
-剩余 15 处都在框架壳/core（通知、模板复制、模态默认关闭、顶栏搜索等），
-随 Phase 3 的 `actions` 收口一起处理。
-删除类确认统一用 `confirmDialog`，输入类用 `promptDialog`；
-可点击行统一改成「名称按钮」或主按钮。
+**迁移状态**：Phase 3A 后，13 个视图、框架壳与 core 的内联处理器全部为 0；
+跨视图调用统一走 `actions['view.action']`。删除类确认统一用 `confirmDialog`，
+输入类用 `promptDialog`；可点击行统一改成「名称按钮」或主按钮。
 
 ### 4.3 共享组件清单
 
@@ -547,6 +559,11 @@ for (const type of BUBBLING_EVENTS) {
 视图之间不存在环；designer 子模块只通过 `ctx` 访问画布，
 各文件按职责内聚设上限（`xml.js` 可放宽到约 700 行，但必须有特征测试）。
 
+> **状态：Phase 3A 已完成（2026-10-24）。**
+> `main.js` 只挂 `{ go, closeModal, state, actions }`；视图间直接 import 清零；
+> 内联处理器清零；`views/shared/recommendation.js` 承接跨视图纯渲染。
+> **Phase 3B（designer 拆包）尚未开始**，是下一步的主要工作。
+
 ### Phase 4 — 状态 schema 与其余分页
 
 - `core/state.js` 补全 `state.designer` 的约 20 个字段并标注类型与用途。
@@ -558,7 +575,7 @@ for (const type of BUBBLING_EVENTS) {
 （a）`state` 访问未声明键会告警（dev Proxy 或路径感知分析器，需处理 `st` 别名）；
 （b）模板里 `actions[...]` 引用的键在注册表中；
 （c）没有残留原生 `confirm(` / `prompt(`；
-（d）视图之间无环、`window` 全局键数量低于当前基线（约 34）。
+（d）视图之间无环、`window` 只有 `{ go, closeModal, state, actions }` 四个键。
 
 ---
 
@@ -575,7 +592,7 @@ for (const type of BUBBLING_EVENTS) {
 | `data-act` 只出现在 `<button>` / `<a>` 上 | 键盘不可用、可点击 div | Phase 1 |
 | 视图文件不得含原生 `confirm(` / `prompt(` | 弹窗风格不一致 | Phase 1 |
 | 每种事件类型的剩余内联处理器数量 | 迁移漏项（`change` / `input` 最易漏） | Phase 2 |
-| `window` 全局键数量预算（当前约 34） | 全局面在迁移中反弹 | Phase 3 |
+| `window` 全局键数量预算（当前 4） | 全局面在迁移中反弹 | Phase 3 |
 | 视图之间**无环**；直接 import 只指向 `views/shared/` 或 `core/` | 循环依赖、隐式公共库 | Phase 3 |
 | `core/*` 不得 import `views/*` | 分层倒置 | Phase 3 |
 | designer 子模块只通过 `ctx` 访问画布、XML 纯函数有特征测试 | 拆包后互相 import | Phase 3 |
@@ -602,11 +619,12 @@ for (const type of BUBBLING_EVENTS) {
 | 指标 | 当前值 |
 |---|---|
 | 手写 JS 模块 | 25 |
-| JS 总行数 / views 行数 | 11,598 / 10,155 |
+| JS 总行数 / views 行数 | 11,613 / 10,126 |
 | `designer.js` | 2,448 行；92 个顶层函数声明（约 106 个命名函数） |
-| 视图导出符号 / `window` 全局键 | 22 / 约 34 |
-| 内联事件处理器 | 15（全部在框架壳/core） |
-| `data-act` 键 | 248（13 个已迁移视图） |
+| 视图导出符号 / `window` 全局键 | 19 / 4 + actions 命名空间 |
+| 内联事件处理器 | 0 |
+| `data-act` 键 | 260 |
+| 视图间直接 import | 0 |
 | 视图内原生 `confirm` / `prompt` | 0 |
 | 组件重复 | 页头 12、表格 49、栅格 18、空状态 27、标签 85 |
 | 视图间直接 import | 7 条边 |

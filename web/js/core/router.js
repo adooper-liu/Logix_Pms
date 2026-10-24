@@ -24,7 +24,8 @@ export async function renderAsync(view, loader, painter) {
     data = await loader();
   } catch (e) {
     el.innerHTML = '<div class="errbar"><div><b>加载失败</b> · ' + esc(e.message) +
-      '</div><button class="btn btn-g" onclick="go(\'' + view + '\')">重试</button></div>';
+      '</div><button class="btn btn-g" data-act="shell.retry" data-view="' + view +
+      '">重试</button></div>';
     return;
   }
   if (state.view !== view) return;   // 用户在加载期间切换了页面

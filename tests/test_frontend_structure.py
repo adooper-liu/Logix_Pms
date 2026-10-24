@@ -143,6 +143,71 @@ def test_native_dialogs_do_not_grow():
     assert len(hits) == 0, f"视图内仍有原生 confirm/prompt/alert：{len(hits)} 处"
 
 
+INLINE_HANDLER_RE = re.compile(
+    r"\bon(click|change|input|submit|keydown|keyup|blur|focus|toggle)\s*=\s*[\"']"
+)
+
+
+def test_no_inline_event_handlers():
+    """行为必须写在 JS 里；模板只允许 data-act。"""
+    bad = []
+    modules = list(JS_ROOT.rglob("*.js")) + [WEB_ROOT / "index.html"]
+    for module in modules:
+        for line_no, line in enumerate(module.read_text(encoding="utf-8").splitlines(), 1):
+            if INLINE_HANDLER_RE.search(line):
+                bad.append(f"{module.relative_to(WEB_ROOT)}:{line_no}")
+    assert not bad, "仍有内联事件处理器：\n" + "\n".join(bad)
+
+
+def test_views_do_not_import_other_views():
+    """视图之间只允许 import views/shared/ 或 core/，不允许直接 import 另一个视图。"""
+    bad = []
+    for module in sorted((JS_ROOT / "views").glob("*.js")):
+        src = module.read_text(encoding="utf-8")
+        for target in re.findall(r"from\s+['\"]\./([^'\"]+)['\"]", src):
+            if target.startswith("shared/"):
+                continue
+            if target.endswith(".js"):
+                bad.append(f"{module.name} -> {target}")
+    assert not bad, "视图之间仍有直接 import：\n" + "\n".join(bad)
+
+
+def test_view_action_keys_are_namespaced_and_unique():
+    action_re = re.compile(r"export\s+const\s+actions\s*=\s*\{(.*?)\};", re.S)
+    key_re = re.compile(r"['\"]([^'\"]+)['\"]\s*:")
+    owners: dict[str, str] = {}
+    name_re = re.compile(r"^[a-z][a-z0-9]*\.[A-Za-z][A-Za-z0-9_]*$")
+    for module in sorted((JS_ROOT / "views").glob("*.js")):
+        match = action_re.search(module.read_text(encoding="utf-8"))
+        if not match:
+            continue
+        for key in key_re.findall(match.group(1)):
+            assert name_re.match(key), f"{module.name} 的 action 未带视图前缀：{key}"
+            assert key not in owners, f"action 重名：{key}（{owners[key]} / {module.name}）"
+            owners[key] = module.name
+
+
+def test_window_surface_is_minimal():
+    src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
+    match = re.search(r"Object\.assign\(window,\s*\{([^}]*)\}", src)
+    assert match, "main.js 缺少 window 操作面声明"
+    surface = match.group(1)
+    names = {part.strip() for part in surface.split(",") if part.strip()}
+    assert names == {"go", "closeModal", "state", "actions"}, (
+        f"window 对外操作面应收窄为 go / closeModal / state / actions，当前：{sorted(names)}"
+    )
+    assert "registerActions(" in src, "main.js 没有注册视图 actions"
+
+
+def test_core_does_not_import_views():
+    bad = []
+    for module in sorted((JS_ROOT / "core").rglob("*.js")):
+        src = module.read_text(encoding="utf-8")
+        if re.search(r"from\s+['\"]\.\./views/", src):
+            bad.append(module.name)
+    assert not bad, f"core 反向 import 视图：{bad}"
+
+
 def test_view_exports_do_not_collide():
     """视图导出的函数会被 Object.assign(window, ...) 合并；重名会静默覆盖。
 
