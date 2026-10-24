@@ -221,7 +221,7 @@ def main() -> int:
         def map_drill() -> None:
             goto("map")
             before = page.inner_text(".crumb")
-            page.click("#view tr.map-row >> nth=2")
+            page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(700)
             after = page.inner_text(".crumb")
             assert len(after) > len(before), f"面包屑未增长：{before!r} → {after!r}"
@@ -232,13 +232,13 @@ def main() -> int:
             goto("map")
             page.click('.crumb a:has-text("全部价值链")')
             page.wait_for_timeout(500)
-            page.click("#view tr.map-row >> nth=2")
+            page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(600)
-            page.click("#view tr.map-row:has-text('L2-003')")
+            page.click("#view .map-row:has-text('L2-003') .map-open")
             page.wait_for_timeout(600)
-            page.click("#view tr.map-row:has-text('L3-032')")
+            page.click("#view .map-row:has-text('L3-032') .map-open")
             page.wait_for_timeout(600)
-            page.click("#view tr.map-row:has-text('L4-201')")
+            page.click("#view .map-row:has-text('L4-201') .map-open")
             page.wait_for_selector("#mask.show")
             page.wait_for_selector("#mapDocs h3", timeout=8000)
             body = page.inner_text("#mBody")
@@ -1560,8 +1560,10 @@ def main() -> int:
                 inst_row = page.locator(f'#view tr.exec-instance-row[data-instance-id="{iid}"]')
                 inst_row.locator('button:has-text("详情")').click()
                 page.wait_for_selector('#mFoot button:has-text("挂起实例")')
-                page.once("dialog", lambda dialog: dialog.accept("E2E 挂起"))
                 page.click('#mFoot button:has-text("挂起实例")')
+                page.wait_for_selector("#uiDialogInput", timeout=5000)
+                page.fill("#uiDialogInput", "E2E 挂起")
+                page.click("#uiDialogOk")
                 page.wait_for_timeout(900)
                 assert "已挂起" in page.inner_text("#toast"), page.inner_text("#toast")
 
@@ -1757,11 +1759,11 @@ def main() -> int:
             goto("map")
             page.click('.crumb a:has-text("全部价值链")')
             page.wait_for_timeout(500)
-            page.click("#view tr.map-row >> nth=2")
+            page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(600)
-            page.click("#view tr.map-row:has-text('L2-003')")
+            page.click("#view .map-row:has-text('L2-003') .map-open")
             page.wait_for_timeout(600)
-            row = page.locator("#view tr.map-row:has-text('L3-032')").first
+            row = page.locator("#view .map-row:has-text('L3-032')").first
             row.locator("a.link:has-text('立项')").click()
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "流程项目组合"

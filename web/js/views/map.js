@@ -1,7 +1,7 @@
 /* 视图：map */
 import { esc, num, bar, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
@@ -9,8 +9,46 @@ import { go } from '../core/router.js';
 import { newProjectWizard } from './projects.js';
 import { GET, POST, PATCH, DEL, download } from '../core/api.js';
 import { openDesigner } from './designer.js';
+import { openDocumentCopy } from '../core/template-copy.js';
 
 /* ============================================================ 2. 企业流程地图 */
+
+on('map.select', ({ code }) => mapSelect(code));
+on('map.go', ({ index }) => mapGo(Number(index)));
+on('map.row', ({ code, kids }) => mapClick(code, kids === '1'));
+on('map.coverage', ({ index }) => openCoverageCategory(Number(index)));
+on('map.categoryMetrics', ({ index }) => openCategoryMetrics(Number(index)));
+on('map.goProjects', () => go('projects'));
+on('map.benchmarkFramework', (_data, el) => setBenchmarkFramework(el.value));
+on('map.pcfWizard', () => openPcfDraftWizard());
+on('map.promoteAll', () => promoteAllDrafts());
+on('map.promoteOne', ({ id }) => promoteDrafts([Number(id)]));
+on('map.newProcess', () => newProcessModal());
+on('map.toggleImprovement', () => toggleImprovement());
+on('map.toggleNav', () => toggleMapNav());
+on('map.close', () => closeModal());
+on('map.deleteProcess', ({ id, code }) => deleteProcess(Number(id), code));
+on('map.editProcess', ({ id }) => editProcessModal(Number(id)));
+on('map.startProject', ({ id, name }) => startProjectFromProcess(Number(id), name));
+on('map.openDesigner', ({ process }) => {
+  closeModal();
+  openDesigner(Number(process));
+});
+on('map.openDocs', ({ process }) => openDocManager(Number(process)));
+on('map.downloadDoc', ({ doc, version, label }) =>
+  dlMapDocument(Number(doc), Number(version), label));
+on('map.copyDoc', ({ doc }) => {
+  closeModal();
+  openDocumentCopy(Number(doc));
+});
+on('map.pcfFramework', (_data, el) => setPcfDraftFramework(el.value));
+on('map.pcfSearch', (_data, el) => filterPcfDraftTree(el.value));
+on('map.pcfCheck', ({ external }, el) => togglePcfNode(external, el.checked));
+on('map.pcfPreview', () => previewPcfDraft());
+on('map.pcfGenerate', () => generatePcfDraft());
+on('map.refreshParents', (_data, el) => refreshParentOptions(el.value));
+on('map.saveProcessNew', () => saveProcess(null));
+on('map.saveProcess', ({ id }) => saveProcess(Number(id)));
 
 const LEVEL_LABELS = {
   1: 'L1 价值链', 2: 'L2 流程类别', 3: 'L3 流程', 4: 'L4 活动', 5: 'L5 子活动',
@@ -51,14 +89,15 @@ function renderOutline(list, path) {
     const kids = inPath && n.level < 3 ? renderOutline(n.children || [], path) : '';
     const stats = subtreeStats(n);
     return `
-      <div class="tree-item lv${n.level}${inPath ? ' in-path' : ''}${on ? ' on' : ''}"
-           onclick="mapSelect('${n.code}')" title="${esc(LEVEL_LABELS[n.level] || ('L' + n.level))}">
+      <button class="tree-item lv${n.level}${inPath ? ' in-path' : ''}${on ? ' on' : ''}"
+           type="button" data-act="map.select" data-code="${esc(n.code)}"
+           title="${esc(LEVEL_LABELS[n.level] || ('L' + n.level))}">
         <span class="tree-level">L${n.level}</span>
         <span class="tree-dot${n.is_improvement_target ? ' target' : ''}"></span>
         <span class="tree-name">${esc(n.name)}</span>
         <span class="cnt has-tip" tabindex="0"
               data-tip="${esc(subtreeTitle(stats))}">${stats.leaves || ''}</span>
-      </div>${kids}`;
+      </button>${kids}`;
   }).join('');
 }
 
@@ -113,16 +152,18 @@ const renderMap = () => {
       : `L1 价值链 · ${tree.length} 条主线，点击任一行逐级下钻` +
         (kw ? ` · 匹配 ${shown.length} 项` : '');
 
-    const crumbs = ['<a onclick="mapGo(-1)">全部价值链</a>']
+    const crumbs = ['<a data-act="map.go" data-index="-1">全部价值链</a>']
       .concat(path.map((code, i) =>
-        '<span>/</span><a onclick="mapGo(' + i + ')">' + esc(state.map.names[code] || code) + '</a>'));
+        '<span>/</span><a data-act="map.go" data-index="' + i + '">' +
+        esc(state.map.names[code] || code) + '</a>'));
     const treeHtml = `
-      <div class="tree-item root${path.length === 0 ? ' on' : ''}" onclick="mapGo(-1)">
+      <button class="tree-item root${path.length === 0 ? ' on' : ''}" type="button"
+        data-act="map.go" data-index="-1">
         <span class="tree-level" aria-hidden="true"></span>
         <span class="tree-dot"></span>
         <span class="tree-name">全部价值链</span>
         <span class="cnt">${tree.length}</span>
-      </div>` + renderOutline(tree, path);
+      </button>` + renderOutline(tree, path);
 
     const rows = shown.map((n) => {
       // 热度由后端统一判定（见 app/api/v1/process_map.py 的阈值），前端不再各算一套
@@ -130,12 +171,14 @@ const renderMap = () => {
       const heatClass = HEAT_CLASS[heat] || HEAT_CLASS.LOW;
       const hasKids = (n.children || []).length > 0;
       return `
-        <tr class="clk map-row" onclick="mapClick('${n.code}', ${hasKids})">
+        <tr class="clk map-row">
           <td>
             <div class="map-name">
               <span class="tag t-gry">L${n.level}</span>
               <span class="map-code">${esc(n.code)}</span>
-              <b>${esc(n.name)}</b>
+              <button class="map-open" type="button" data-act="map.row"
+                data-code="${esc(n.code)}" data-kids="${hasKids ? '1' : '0'}">
+                <b>${esc(n.name)}</b></button>
               ${n.is_improvement_target ? '<span class="tag t-red">待改善</span>' : ''}
               ${n.is_draft ? '<span class="tag t-pur">PCF 草稿</span>' : ''}
             </div>
@@ -152,11 +195,10 @@ const renderMap = () => {
           <td>${hasKids ? (n.children || []).length + ' 项' : '—'}</td>
           <td class="map-go">
             ${n.is_draft && canManage()
-              ? '<a class="link" onclick="event.stopPropagation();promoteDrafts([' + n.id
-                + '])">确认</a> · ' : ''}
+              ? `<a class="link" data-act="map.promoteOne" data-id="${n.id}">确认</a> · ` : ''}
             ${n.level === 3 && canWrite()
-              ? '<a class="link" onclick="event.stopPropagation();startProjectFromProcess('
-                + n.id + ', \'' + esc(n.name) + '\')">立项</a> · ' : ''}
+              ? `<a class="link" data-act="map.startProject" data-id="${n.id}"
+                data-name="${esc(n.name)}">立项</a> · ` : ''}
             ${hasKids ? '进入 ›' : '详情 ›'}
           </td>
         </tr>`;
@@ -184,7 +226,7 @@ const renderMap = () => {
           ${bar(bench.coverage_rate * 100, null, 120)}
         </div>
         <div class="map-bench-pills">${bench.by_top_category.map((c, i) => `
-          <button class="map-bench-pill" onclick="openCoverageCategory(${i})"
+          <button class="map-bench-pill" data-act="map.coverage" data-index="${i}"
             title="${esc(c.name)}${c.name_en ? ' / ' + esc(c.name_en) : ''}${
               c.metric_count ? ' · ' + c.metric_count + ' 项指标' : ''}">
             <b>${esc(c.code)}</b><span>${esc(c.name)}</span><i>${c.mapped_count}</i>
@@ -212,24 +254,24 @@ const renderMap = () => {
               从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
           </div>
           <div class="gap">
-            <a class="link-btn" onclick="go('projects')">去立项 →</a>
-            <select class="sel" onchange="setBenchmarkFramework(this.value)" title="切换对标框架">
+            <a class="link-btn" data-act="map.goProjects">去立项 →</a>
+            <select class="sel" data-act="map.benchmarkFramework" title="切换对标框架">
               <option value="">不对标</option>
               ${frameworkOptions}
             </select>
             ${canManage()
-              ? '<button class="btn-sm" onclick="openPcfDraftWizard()">+ 从 PCF 生成</button>'
+              ? '<button class="btn-sm" data-act="map.pcfWizard">+ 从 PCF 生成</button>'
                 + (draftCount
-                  ? `<button class="btn-sm" onclick="promoteAllDrafts()">确认全部草稿（${
+                  ? `<button class="btn-sm" data-act="map.promoteAll">确认全部草稿（${
                     draftCount}）</button>`
                   : '')
-                + '<button class="btn btn-p" onclick="newProcessModal()">+ 新建流程</button>'
+                + '<button class="btn btn-p" data-act="map.newProcess">+ 新建流程</button>'
               : '<span class="tiny">当前角色只读</span>'}
           </div>
         </div>
         <div class="map-stats">
           <span class="map-stat"><b>${flat.length}</b> ${metricHelp('process_total', '流程资产')}</span>
-          <button class="map-stat${improvementOnly ? ' on' : ''}" onclick="toggleImprovement()">
+          <button class="map-stat${improvementOnly ? ' on' : ''}" data-act="map.toggleImprovement">
             <b>${targetCount}</b> ${metricHelp('improvement_targets', '待改善')}</button>
           <span class="map-stat"><b>${avgHealth}</b> ${metricHelp('map_avg_health', '平均健康度')}</span>
           <span class="map-stat">${metricHelp('level_counts', 'L1')} <b>${levelCounts[1]}</b></span>
@@ -243,7 +285,7 @@ const renderMap = () => {
         <aside class="map-side card">
           <div class="map-side-hd">
             <span class="map-side-title">架构导航</span>
-            <button class="map-side-toggle" onclick="toggleMapNav()"
+            <button class="map-side-toggle" data-act="map.toggleNav"
               title="${state.map.navCollapsed ? '展开架构导航' : '收起架构导航'}">
               <span class="map-side-toggle-icon">${state.map.navCollapsed ? '›' : '‹'}</span>
               <span class="map-side-toggle-label">${state.map.navCollapsed ? '展开' : '收起'}</span>
@@ -261,7 +303,7 @@ const renderMap = () => {
                 <h2 style="margin:0">${esc(title)}</h2>
                 <div class="desc" style="margin:4px 0 0">${esc(desc)}</div>
               </div>
-              <button class="btn-sm${improvementOnly ? ' on' : ''}" onclick="toggleImprovement()">
+              <button class="btn-sm${improvementOnly ? ' on' : ''}" data-act="map.toggleImprovement">
                 ${improvementOnly ? '显示全部' : '只看待改善'}</button>
             </div>
             <div class="legend mb">
@@ -358,13 +400,13 @@ function mapClick(code, hasKids) {
       <div class="note">在「流程设计器」里可以对这条流程做泳道建模与周期效率测算。</div>`,
       `${canManage()
         ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
-          + ' onclick="deleteProcess(' + node.id + ', \'' + esc(node.code) + '\')">删除</button>'
+          + ` data-act="map.deleteProcess" data-id="${node.id}" data-code="${esc(node.code)}">删除</button>`
         : ''}
-       <button class="btn btn-g" onclick="closeModal()">关闭</button>
-       ${canManage() ? '<button class="btn btn-g" onclick="editProcessModal(' + node.id + ')">编辑</button>' : ''}
-       ${canWrite() ? '<button class="btn btn-g" onclick="closeModal();startProjectFromProcess('
-         + node.id + ', \'' + esc(node.name) + '\')">以此流程立项</button>' : ''}
-       <button class="btn btn-p" onclick="closeModal();openDesigner(${node.id})">去设计器分析</button>`);
+       <button class="btn btn-g" data-act="map.close">关闭</button>
+       ${canManage() ? `<button class="btn btn-g" data-act="map.editProcess" data-id="${node.id}">编辑</button>` : ''}
+       ${canWrite() ? `<button class="btn btn-g" data-act="map.startProject" data-id="${node.id}"
+         data-name="${esc(node.name)}">以此流程立项</button>` : ''}
+       <button class="btn btn-p" data-act="map.openDesigner" data-process="${node.id}">去设计器分析</button>`);
     loadProcessDocs(node.id);
   }
 }
@@ -380,7 +422,7 @@ async function loadProcessDocs(processId) {
     if (!box.isConnected) return;
     const header = `<div class="between mt mb">
       <h3 style="margin:0">配套文件（标准）</h3>
-      <button class="btn-sm" onclick="openDocManager(${processId})">管理配套文件 →</button></div>`;
+      <button class="btn-sm" data-act="map.openDocs" data-process="${processId}">管理配套文件 →</button></div>`;
     if (!rows.length) {
       box.innerHTML = header + `<div class="note">该流程及其上级还没有标准文件。
         可以在「交付物与模板库 → 流程标准文件」创建并审批，生效后这里会出现复制入口。</div>`;
@@ -401,9 +443,11 @@ async function loadProcessDocs(processId) {
               ${doc.process_id !== processId ? '<div class="tiny">上级继承</div>' : ''}</td>
             <td>${v && v.has_file
               ? `<span class="gap" style="gap:6px">
-                  <button class="btn-sm" onclick="dlMapDocument(${doc.id}, ${v.id}, '${esc(v.version_display)}')">下载</button>
+                  <button class="btn-sm" data-act="map.downloadDoc" data-doc="${doc.id}"
+                    data-version="${v.id}" data-label="${esc(v.version_display)}">下载</button>
                   ${canWrite()
-                    ? `<button class="btn-sm" onclick="closeModal();openDocumentCopy(${doc.id})">复制到项目</button>`
+                    ? `<button class="btn-sm" data-act="map.copyDoc"
+                      data-doc="${doc.id}">复制到项目</button>`
                     : ''}
                 </span>`
               : '—'}</td>
@@ -500,7 +544,7 @@ function openPcfDraftWizard() {
   pcfDraft.gen = openModal('从 PCF 生成流程架构草稿', `
     <div class="row2">
       <div class="field"><label>分类框架</label>
-        <select class="sel" id="pcfFramework" onchange="setPcfDraftFramework(this.value)">
+        <select class="sel" id="pcfFramework" data-act="map.pcfFramework">
           ${pcfFrameworkOptions()}
         </select></div>
       <div class="field"><label>生成范围</label>
@@ -509,12 +553,12 @@ function openPcfDraftWizard() {
     </div>
     <div class="field"><label>搜索分类</label>
       <input id="pcfSearch" placeholder="按编码、中文名或英文名过滤"
-        oninput="filterPcfDraftTree(this.value)"></div>
+        data-act="map.pcfSearch"></div>
     <div id="pcfTree" class="pcf-tree"><div class="empty">加载中…</div></div>
     <div id="pcfPreview" class="pcf-preview">勾选 L1/L2 会选中其下全部 L3；生成时自动补齐上级 L1/L2。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-g" onclick="previewPcfDraft()">预览</button>
-   <button class="btn btn-p" onclick="generatePcfDraft()">生成草稿</button>`, true);
+  `<button class="btn btn-g" data-act="map.close">取消</button>
+   <button class="btn btn-g" data-act="map.pcfPreview">预览</button>
+   <button class="btn btn-p" data-act="map.pcfGenerate">生成草稿</button>`, true);
   loadPcfDraftTree(pcfDraft.gen);
 }
 
@@ -568,8 +612,9 @@ function pcfGroupSelected(node) {
 
 function pcfLeafHtml(node) {
   const checked = pcfDraft.selected.has(node.external_id) ? ' checked' : '';
-  return `<div class="pcf-leaf"><label class="pcf-label" onclick="event.stopPropagation()">
-    <input type="checkbox"${checked} onchange="togglePcfNode('${esc(node.external_id)}', this.checked)">
+  return `<div class="pcf-leaf"><label class="pcf-label" data-pcf-stop>
+    <input type="checkbox"${checked} data-act="map.pcfCheck"
+      data-external="${esc(node.external_id)}">
     <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
     ${node.name_en ? `<span class="tiny">${esc(node.name_en)}</span>` : ''}
   </label></div>`;
@@ -587,10 +632,10 @@ function pcfGroupHtml(node, keyword) {
     : pcfGroupHtml(child, selfMatch ? '' : keyword))).join('');
   if (!body) return '';
   const openAttr = keyword || pcfDraft.open.has(node.external_id) ? ' open' : '';
-  return `<details class="pcf-node"${openAttr} data-pcf="${esc(node.external_id)}"
-    ontoggle="rememberPcfOpen(this)">
-    <summary><label class="pcf-label" onclick="event.stopPropagation()">
-      <input type="checkbox"${checked} onchange="togglePcfNode('${esc(node.external_id)}', this.checked)">
+  return `<details class="pcf-node"${openAttr} data-pcf="${esc(node.external_id)}">
+    <summary><label class="pcf-label" data-pcf-stop>
+      <input type="checkbox"${checked} data-act="map.pcfCheck"
+        data-external="${esc(node.external_id)}">
       <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
       ${node.name_en ? `<span class="tiny">${esc(node.name_en)}</span>` : ''}
     </label></summary>${body}</details>`;
@@ -613,6 +658,23 @@ function renderPcfDraftTree() {
         || (child.children || []).some((leaf) => pcfNodeMatches(leaf, keyword))))
     .map((node) => pcfGroupHtml(node, keyword)).join('');
   box.innerHTML = html || '<div class="empty">没有匹配的分类</div>';
+  bindPcfTreeEvents(box);
+}
+
+/** toggle 不冒泡，且 label 点击会误触 details；在树容器上挂一次捕获监听。 */
+function bindPcfTreeEvents(box) {
+  if (!box || box.dataset.pcfBound) return;
+  box.dataset.pcfBound = '1';
+  box.addEventListener('click', (event) => {
+    if (event.target.closest && event.target.closest('[data-pcf-stop]')) {
+      event.stopPropagation();
+    }
+  }, true);
+  box.addEventListener('toggle', (event) => {
+    if (event.target.matches && event.target.matches('details[data-pcf]')) {
+      rememberPcfOpen(event.target);
+    }
+  }, true);
 }
 
 function filterPcfDraftTree(value) {
@@ -677,7 +739,10 @@ async function previewPcfDraft() {
 
 async function generatePcfDraft() {
   if (!pcfDraft.selected.size) return toast('请至少勾选一个 L3 分类', true);
-  if (!confirm(`按当前选择生成 ${pcfDraft.selected.size} 个 L3 分类的流程草稿？`)) return;
+  const ok = await confirmDialog(
+    `按当前选择生成 ${pcfDraft.selected.size} 个 L3 分类的流程草稿？`,
+    { title: '生成流程草稿', okText: '生成' });
+  if (!ok) return;
   try {
     const data = await POST('/process-map/pcf/generate', pcfRequestPayload());
     closeModal();
@@ -693,7 +758,9 @@ async function generatePcfDraft() {
 
 async function promoteDrafts(ids) {
   if (!ids || !ids.length) return;
-  if (!confirm(`确认 ${ids.length} 个流程草稿？确认后按正式流程参与统计。`)) return;
+  const ok = await confirmDialog(`确认 ${ids.length} 个流程草稿？确认后按正式流程参与统计。`,
+    { title: '确认流程草稿', okText: '确认' });
+  if (!ok) return;
   try {
     const data = await POST('/process-map/drafts/promote', { process_ids: ids });
     toast(`已确认 ${data.updated} 个草稿`);
@@ -742,11 +809,11 @@ function openCoverageCategory(index) {
       <tbody>${rows}</tbody>
     </table>` : '<div class="empty">该分类下没有已映射流程</div>';
   const metricButton = c.external_id && c.metric_count
-    ? `<button class="btn btn-g" onclick="openCategoryMetrics(${index})">查看 PCF 指标（${
+    ? `<button class="btn btn-g" data-act="map.categoryMetrics" data-index="${index}">查看 PCF 指标（${
       c.metric_count}）</button>` : '';
   openModal(`${c.code} ${c.name}${c.name_en ? ' · ' + c.name_en : ''} · 覆盖流程`,
     description + processTable,
-    metricButton + '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+    metricButton + '<button class="btn btn-g" data-act="map.close">关闭</button>');
 }
 
 async function openCategoryMetrics(index) {
@@ -769,7 +836,7 @@ async function openCategoryMetrics(index) {
         <thead><tr><th>指标 ID</th><th>指标</th><th>类别</th><th>公式</th><th>单位</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>', true);
+    '<button class="btn btn-g" data-act="map.close">关闭</button>', true);
   } catch (e) {
     if (modalAlive(gen)) toast(e.message, true);
   }
@@ -823,7 +890,7 @@ function newProcessModal() {
     </div>
     <div class="row2">
       <div class="field"><label>层级 *</label>
-        <select id="pfLevel" onchange="refreshParentOptions(this.value)">
+        <select id="pfLevel" data-act="map.refreshParents">
           <option value="1">L1 价值链</option>
           <option value="2">L2 流程类别</option>
           <option value="3" selected>L3 流程</option>
@@ -851,8 +918,8 @@ function newProcessModal() {
     <div class="field"><label>是否为待改善项</label>
       <select id="pfTarget"><option value="false">否</option><option value="true">是</option></select>
       <div class="hint">勾选后会出现在驾驶舱的「待改善流程」统计里</div></div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveProcess(null)">创建</button>`);
+    `<button class="btn btn-g" data-act="map.close">取消</button>
+     <button class="btn btn-p" data-act="map.saveProcessNew">创建</button>`);
 }
 
 function editProcessModal(processId) {
@@ -893,8 +960,8 @@ function editProcessModal(processId) {
           <option value="true"${node.is_improvement_target ? ' selected' : ''}>是</option>
         </select></div>
     </div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveProcess(${processId})">保存</button>`);
+    `<button class="btn btn-g" data-act="map.close">取消</button>
+     <button class="btn btn-p" data-act="map.saveProcess" data-id="${processId}">保存</button>`);
 }
 
 async function saveProcess(processId) {
@@ -955,7 +1022,10 @@ async function saveProcess(processId) {
 }
 
 async function deleteProcess(processId, code) {
-  if (!confirm('确定删除流程 ' + code + '？其下级流程与流程模型会一并删除，且不可恢复。')) return;
+  const ok = await confirmDialog(
+    `确定删除流程 ${code}？其下级流程与流程模型会一并删除，且不可恢复。`,
+    { danger: true, okText: '删除' });
+  if (!ok) return;
   try {
     await DEL('/process-map/' + processId);
     closeModal();
@@ -968,4 +1038,4 @@ async function deleteProcess(processId, code) {
 }
 
 
-export { renderMap, deleteProcess, dlMapDocument, editProcessModal, filterPcfDraftTree, flattenTree, generatePcfDraft, invalidateProcessCaches, mapClick, mapGo, mapSelect, newProcessModal, openCategoryMetrics, openCoverageCategory, openDocManager, openPcfDraftWizard, pcfRequestPayload, previewPcfDraft, processParentOptions, promoteAllDrafts, promoteDrafts, refreshParentOptions, rememberPcfOpen, saveProcess, setBenchmarkFramework, setPcfDraftFramework, startProjectFromProcess, toggleImprovement, toggleMapNav, togglePcfNode };
+export { renderMap };
