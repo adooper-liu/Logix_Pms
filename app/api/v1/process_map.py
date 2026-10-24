@@ -71,6 +71,7 @@ def _to_out(p: ProcessArch) -> ProcessArchOut:
         improvement_space=p.improvement_space,
         health_score=p.health_score,
         is_improvement_target=p.is_improvement_target,
+        requires_change_request=p.requires_change_request,
         is_draft=p.is_draft,
         source_framework_code=p.source_framework_code,
         source_external_id=p.source_external_id,

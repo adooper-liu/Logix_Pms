@@ -86,11 +86,17 @@ class BenchmarkCategory(Base):
     external_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     # 中文原名；没有中文译名时为空，展示层回落 name_en。
     name_zh: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    # 中文名的来源：APQC_CN = 来自 APQC 中文整理版（L1–L3）；
+    # REFERENCE = 本系统自建参考译文（L4/L5），**非官方**，界面必须标注。
+    name_zh_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     level: Mapped[int] = mapped_column(Integer, index=True)  # 1..5
     parent_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("benchmark_category.id", ondelete="CASCADE"), nullable=True, index=True
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 官方定义的中文参考译文（非 APQC 官方）。官方英文原文保留在 description，
+    # 两者并存，界面必须标注译文来源，不得把译文当官方口径对外引用。
+    description_zh: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metrics_available: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     difference_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     change_details: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -156,6 +162,14 @@ class BenchmarkMetric(Base):
     formula: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # 中文参考译文（非 APQC 官方）。name/formula/unit 保留官方英文原文，
+    # 译文单独存放，界面并排展示并标注来源。
+    name_zh: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    formula_zh: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    unit_zh: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    category_label_zh: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 译文来源；当前指标译文均为本系统自建参考译文（REFERENCE），非 APQC 官方。
+    translation_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (

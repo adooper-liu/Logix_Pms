@@ -46,6 +46,7 @@ from app.schemas.process import (
 )
 from app.services import audit as audit_service
 from app.services import bpmn as bpmn_service
+from app.services import change as change_service
 from app.services import designer
 from app.services import process_model as model_service
 
@@ -60,6 +61,7 @@ def _version_out(row: ProcessModelVersion) -> ProcessModelVersionOut:
         status=row.status,
         status_label=model_service.STATUS_LABELS.get(row.status, row.status),
         change_note=row.change_note,
+        change_request_id=row.change_request_id,
         created_by_name=row.created_by_name,
         created_at=row.created_at,
         reviewed_by_name=row.reviewed_by_name,
@@ -117,6 +119,7 @@ def _load_model(db: DbSession, process_id: int) -> ProcessModelOut:
         if process
         else 0,
         updated_at=process.model_updated_at if process else None,
+        requires_change_request=bool(process and process.requires_change_request),
         nodes=[ProcessNodeOut.model_validate(n) for n in nodes],
         edges=[ProcessEdgeOut.model_validate(e) for e in edges],
     )
@@ -494,14 +497,29 @@ def publish_model(
                 f"你提交的是 v{payload.expected_version}）。请刷新后再发布。"
             ),
         )
+    change_row = None
+    if payload.change_request_id is not None:
+        try:
+            change_row = change_service.require_approved(db, process_id, payload.change_request_id)
+        except change_service.ChangeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif process.requires_change_request:
+        raise HTTPException(
+            status_code=409,
+            detail=("该流程启用了变更门禁：请先在「变更」页创建并批准变更申请，再带着变更单发布"),
+        )
     row = model_service.publish(db, process, user, note=payload.change_note)
+    if change_row is not None:
+        row.change_request_id = change_row.id
+        change_service.mark_applied(db, change_row)
     audit_service.record(
         db,
         user,
         "UPDATE",
         "process_design",
         process_id,
-        f"发布流程模型 {process.code}（v{row.version}）到运行时",
+        f"发布流程模型 {process.code}（v{row.version}）到运行时"
+        + (f"，变更单 {change_row.code}" if change_row else ""),
     )
     db.commit()
     return _load_model(db, process_id)

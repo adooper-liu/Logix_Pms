@@ -11,15 +11,16 @@
 另有一条 IA 覆盖问题已在 Phase 0 修复**（保留在 §2.5 作为回归触发条件）。
 本文只描述这些断裂、成因和修复顺序，不改动 IA 已确定的产品决策。
 
-**当前进度**：Phase 0 / Phase 1 / Phase 2 已完成；**Phase 3A 已完成**
-（`window` 收窄为 4 个键、跨视图直接 import 清零、内联处理器清零）。
-**Phase 3B（拆 designer）与 Phase 4 尚未开始**，§6 是执行顺序。
+**当前进度**：Phase 0 / Phase 1 / Phase 2 / Phase 3 已完成
+（`window` 收窄为 4 个键、跨视图直接 import 清零、内联处理器清零、
+`designer.js` 拆包）。**Phase 4 尚未开始**，§6 是执行顺序。
 
-**测量基线（2026-10-24 复核，Phase 3A 后）**：25 个手写 JS 模块、11,613 行
-（其中 views 10,126 行）；视图共 19 个导出符号，`window` 只保留
+**测量基线（2026-10-24 复核，P0/P1 治理能力补齐后）**：37 个手写 JS 模块、13,023 行
+（其中 views 11,573 行）；14 个视图、20 个导出符号，`window` 只保留
 `{ go, closeModal, state, actions }` 4 个键 + actions 命名空间；
 内联事件处理器 0；视图间直接 import 0；视图内原生 `confirm`/`prompt` 0；
-`data-act` 键 260 个。复核命令见附录 A。
+`data-act` 键 260 个；`designer.js` 7 行薄壳 + 9 个职责模块（单文件最大 551 行）。
+复核命令见附录 A。
 
 若与代码现状不符，以代码为准，并回来更新本文。
 
@@ -43,9 +44,19 @@
 
 ## 二、五条断裂（2.5 已修复，保留为回归触发条件）
 
-### 2.1 `designer.js` 不是视图，是一个应用
+### 2.1 `designer.js` 不是视图，是一个应用 —— **已修复（Phase 3B）**
 
-**证据**：`web/js/views/designer.js` — 2,448 行、92 个顶层函数声明（约 106 个命名函数）。
+> **拆分结果（2026-10-24）**：`designer.js` 从 2,448 行降为 7 行薄壳，
+> 只 `export { actions, openDesigner, renderDesigner } from './designer/index.js'`。
+> 实现拆成 10 个模块：`index`(431) / `canvas`(324) / `providers`(105) /
+> `xml`(373) / `panels`(551) / `assignment`(372) / `lint`(260) /
+> `versions`(215) / `changes`(272) / `transfer`(85)。子模块之间不互相 import，
+> 统一通过 `index.js` 注入的 `ctx`（`getModeler` / `getElement` /
+> `select` / `subscribe` + 协作动作）访问画布与彼此的服务；
+> `xml.js` 保持纯函数。守卫见 §7 与 `tests/test_frontend_structure.py`。
+> 下面的证据保留为**拆分前**的体检记录，是这次拆分的依据。
+
+**拆分前证据**：`web/js/views/designer.js` — 2,448 行、92 个顶层函数声明（约 106 个命名函数）。
 它同时承担 8 类互不相干的责任：
 
 | 责任 | 代表函数 | 行段 |
@@ -62,7 +73,7 @@
 **后果**：
 
 1. **实现层与 IA 的「分屏」约定脱节**。IA 第 8 节要求「模型页和指标页分开」——
-   产品层用页签已经做到了；但代码层仍是一个 2,448 行的文件，
+   产品层用页签已经做到了；但拆分前代码层仍是一个 2,448 行的文件，
    读代码的人得不到 IA 承诺的模块边界。**注意：这是代码组织问题，不是 IA 违规**；
    页签已经兑现了产品承诺，拆分是为了可测试性与变更隔离。
 2. **XML 手术部分是纯函数，被埋在视图里**。`restoreLanes` / `ensureFlowRefs` /
@@ -83,6 +94,7 @@ web/js/views/designer/
   assignment.js       # 分派与 SLA
   lint.js             # bpmnlint 规则 → 中文化映射
   versions.js         # 版本历史 / 差异 / 回滚
+  changes.js          # 变更申请 / 影响分析 / 发布门禁
   transfer.js         # 导入导出
 ```
 
@@ -125,7 +137,7 @@ web/js/views/designer/
 
 1. **没有 API 边界**。视图模块的「公开面」= 它的全部导出，
    读者无法分辨 `openDesigner`（跨视图要用）和 `restoreLanes`（纯内部），
-   只能全文读 2,448 行才能知道。
+   拆分前只能全文读 2,448 行才能知道。
 2. **无法静态检查**。ES 模块能校验 import 路径；Phase 3A 后 `window` 只剩 4 个键，
 其余跨视图调用都有显式 action 名，静态守卫可以检查。
    `tests/test_frontend_structure.py` 原先只能检查「模块文件存在」，检查不了
@@ -559,10 +571,12 @@ for (const type of BUBBLING_EVENTS) {
 视图之间不存在环；designer 子模块只通过 `ctx` 访问画布，
 各文件按职责内聚设上限（`xml.js` 可放宽到约 700 行，但必须有特征测试）。
 
-> **状态：Phase 3A 已完成（2026-10-24）。**
+> **状态：Phase 3A / 3B 已完成（2026-10-24）。**
 > `main.js` 只挂 `{ go, closeModal, state, actions }`；视图间直接 import 清零；
 > 内联处理器清零；`views/shared/recommendation.js` 承接跨视图纯渲染。
-> **Phase 3B（designer 拆包）尚未开始**，是下一步的主要工作。
+> **Phase 3B** 把 `designer.js` 拆成 `views/designer/` 下 9 个模块 + 7 行薄壳，
+> 子模块通过 `ctx` 协作、互不 import；守卫（具名 import 必须真实导出、
+> 子模块不得互相 import、shell 必须保持薄壳）已进 `tests/test_frontend_structure.py`。
 
 ### Phase 4 — 状态 schema 与其余分页
 
@@ -593,11 +607,14 @@ for (const type of BUBBLING_EVENTS) {
 | 视图文件不得含原生 `confirm(` / `prompt(` | 弹窗风格不一致 | Phase 1 |
 | 每种事件类型的剩余内联处理器数量 | 迁移漏项（`change` / `input` 最易漏） | Phase 2 |
 | `window` 全局键数量预算（当前 4） | 全局面在迁移中反弹 | Phase 3 |
-| 视图之间**无环**；直接 import 只指向 `views/shared/` 或 `core/` | 循环依赖、隐式公共库 | Phase 3 |
-| `core/*` 不得 import `views/*` | 分层倒置 | Phase 3 |
-| designer 子模块只通过 `ctx` 访问画布、XML 纯函数有特征测试 | 拆包后互相 import | Phase 3 |
+| 视图之间**无环**；直接 import 只指向 `views/shared/` 或 `core/` | 循环依赖、隐式公共库 | **已实现** |
+| `core/*` 不得 import `views/*` | 分层倒置 | **已实现** |
+| designer 子模块只通过 `ctx` 访问画布、XML 纯函数有特征测试 | 拆包后互相 import | **已实现（Phase 3B）** |
+| 具名 import 必须在目标模块真实 `export` | 拆包时漏导出，浏览器加载即报错 | **已实现（Phase 3B）** |
+| JS 块注释必须闭合、不得有游离 `*` 行 | 搬迁注释导致 SyntaxError | **已实现（Phase 3B）** |
+| designer 子模块不得互相 import；shell 保持薄壳 | 拆完又长回一张网 | **已实现（Phase 3B）** |
+| designer 单文件 ≤ 700 行、shell ≤ 30 行 | `designer.js` 再次膨胀 | **已实现（Phase 3B）** |
 | `state` 访问未声明键会告警（dev Proxy 或路径感知分析） | 拼错状态键 → 静默 undefined | Phase 4 |
-| 单文件职责/行数上限（按内聚设置，不搞一刀切） | `designer.js` 再次膨胀 | Phase 3 |
 
 ---
 
@@ -616,18 +633,17 @@ for (const type of BUBBLING_EVENTS) {
 
 ## 附录 A：测量基线与复核命令（2026-10-24）
 
-| 指标 | 当前值 |
+| 指标 | 当前值（P0 治理能力补齐后） |
 |---|---|
-| 手写 JS 模块 | 25 |
-| JS 总行数 / views 行数 | 11,613 / 10,126 |
-| `designer.js` | 2,448 行；92 个顶层函数声明（约 106 个命名函数） |
-| 视图导出符号 / `window` 全局键 | 19 / 4 + actions 命名空间 |
+| 手写 JS 模块 | 37 |
+| JS 总行数 / views 行数 | 13,023 / 11,573 |
+| `designer.js` | 7 行薄壳；10 个模块，最大 `panels.js` 551 行 |
+| 视图导出符号 / `window` 全局键 | 20 / 4 + actions 命名空间 |
 | 内联事件处理器 | 0 |
 | `data-act` 键 | 260 |
 | 视图间直接 import | 0 |
 | 视图内原生 `confirm` / `prompt` | 0 |
 | 组件重复 | 页头 12、表格 49、栅格 18、空状态 27、标签 85 |
-| 视图间直接 import | 7 条边 |
 
 复核命令（在仓库根目录执行）：
 
@@ -636,8 +652,8 @@ for (const type of BUBBLING_EVENTS) {
 find web/js -name '*.js' | wc -l
 find web/js -name '*.js' -print0 | xargs -0 cat | wc -l
 wc -l web/js/views/*.js
-wc -l web/js/views/designer.js
-grep -cE '^(async )?function ' web/js/views/designer.js
+wc -l web/js/views/designer.js web/js/views/designer/*.js
+grep -cE '^(async )?function ' web/js/views/designer/*.js
 
 # 内联处理器（总数与按事件类型）
 grep -roE 'on(click|change|input|submit|keydown|keyup|blur|focus|toggle)="' web/js web/index.html | wc -l

@@ -17,6 +17,7 @@ import { actions, registerActions } from './core/actions.js';
 import { openNotifications, refreshNotifications } from './core/notifications.js';
 
 import * as dashboard from './views/dashboard.js';
+import * as strategyView from './views/strategy.js';
 import * as mapView from './views/map.js';
 import * as pcfView from './views/pcf.js';
 import * as workflowView from './views/workflow.js';
@@ -31,6 +32,7 @@ import * as orgsView from './views/orgs.js';
 import * as sketchesView from './views/sketches.js';
 
 register('dashboard', dashboard.renderDashboard);
+register('strategy', strategyView.renderStrategy);
 register('map', mapView.renderMap);
 register('pcf', pcfView.renderPcf);
 register('workflow', workflowView.renderWorkflow);

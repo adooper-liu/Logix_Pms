@@ -186,6 +186,7 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
                 "lane": n.lane,
                 "owner": n.owner_role,
                 "standard_minutes": n.duration_minutes,
+                "activity_id": n.process_arch_id,
             }
             for n in nodes
         ],
@@ -346,6 +347,7 @@ def _create_task(
         name=node["name"],
         task_type=node.get("type") or NodeType.TASK.value,
         lane=node.get("lane"),
+        activity_id=node.get("activity_id"),
         candidate_role=candidate_text,
         candidate_role_code=assignment.get("role"),
         candidate_org_unit_id=assignment.get("org_unit_id"),

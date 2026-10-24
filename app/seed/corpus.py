@@ -337,6 +337,8 @@ PROCESS_ARCH = [
         space=6.0,
         health=68.0,
         target=False,
+        # 启用变更门禁：发布模型前必须有已批准的变更申请
+        requires_change_request=True,
     ),
     dict(
         code="L3-034",

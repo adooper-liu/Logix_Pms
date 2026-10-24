@@ -130,7 +130,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
 种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、24 份步骤契约、32 个交付物定义（每个项目自动生成 32 个交付物实例）、5 个演示组织单元与 4 个演示账号（已挂到演示组织）、
-15 个 KPI × 6 个月时序、8 条异常事件、9 篇知识条目、4 个演示用户、
+16 个 KPI × 6 个月时序、5 条标准工时卡、3 条产能记录、3 个战略目标、1 份变更申请、8 条异常事件、9 篇知识条目、4 个演示用户、
 4 套对标框架（SCOR + APQC PCF v8.0 跨行业/消费品/消费电子，共 6,135 个标准分类、
 62 条显式流程映射（L4 继承后 249 条）、3,453 条 PCF 指标）。
 
@@ -156,7 +156,7 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：12 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器跑两段：14 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
@@ -358,13 +358,20 @@ web/            前端（原生 ES 模块，无构建步骤）
     views/
       dashboard.js  map.js  workflow.js  projects.js
       toolbox.js    designer.js  monitor.js  knowledge.js  execution.js
+      designer/     designer 子模块：index 编排，canvas/providers/xml/panels/
+                    assignment/lint/versions/transfer 各管一块（子模块间不互相 import）
     main.js       注册视图、接线 DOM、暴露模板所需函数、启动
 scripts/
   seed.py             命令行灌库
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
-  verify_frontend.py  无头浏览器联调自检（12 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器联调自检（14 个视图 + 交互路径 + 主题切换 + 截图）
+  pcf_zh.py           APQC PCF 中文参考译文覆盖层工具（覆盖率/校验/切片/合并/标点归一化）
+  pcf_zh_align.py     把译文里的活动名引用对齐到分类树正式译名（官方译名优先）
+  pcf_zh_audit.py     中文覆盖层一致性审计（同英文多译文、交叉引用、标点口径、孤儿键）
 tests/          接口测试、迁移一致性测试、前端模块结构守卫
 docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件、执行与设计器差距分析
+                「APQC＋十要素」治理体系的能力差距与优先级见 docs/apqc-ten-elements-gap-analysis.md
+                APQC 中文参考译文的约定见 docs/pcf-chinese-translation.md
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
@@ -383,7 +390,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 
 ```text
 main.js
-  └─ views/*        十二个视图，各自 import 需要的 core
+  └─ views/*        十四个视图，各自 import 需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
             └─ core/{api, auth, state, theme, ui, format}.js
 ```
@@ -442,24 +449,25 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 前端不维护映射表，避免「后端加了新枚举、前端忘了同步」。
 
 **测试守卫**：[tests/test_frontend_structure.py](tests/test_frontend_structure.py) 会在
-pytest 里检查 import 路径是否存在、九个视图是否都注册且有 renderer、样式表是否被引用，
+pytest 里检查 import 路径是否存在、十四个视图是否都注册且有 renderer、样式表是否被引用，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**十三个模块与对应接口**：
+**十四个模块与对应接口**：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
 | 管理驾驶舱 | `/dashboard/overview`、`/process-map/heatmap` | 指标卡、五阶段健康度、方法论分布、改善优先级（该改什么）与重点项目（正在做什么）、健康度预警、异常概览；优先级行可定位到地图 |
+| 战略目标 | `/strategy/objectives`、`/strategy/processes/{id}/objectives` | 年度目标（目标值/责任人/来源/周期）、目标 → L1/L2/L3 → KPI 的承接关系；按流程或 KPI 反查，流程卡按祖先继承目标 |
 | 企业流程地图 | `/process-map/tree`、`/benchmark/frameworks/{code}/coverage` | L1→L4 逐级下钻、SCOR / APQC PCF v8.0 变体切换与覆盖率；分类弹窗可查看 PCF 指标与框架署名；可从 PCF 勾选生成架构草稿并确认；流程详情含标准配套文件（含上级继承）与管理入口 |
 | PCF 分类框架 | `/benchmark/frameworks/{code}/tree`、`/benchmark/categories/{id}/metrics` | L1–L5 可展开树、中英文对照、搜索、官方定义、指标与公司流程覆盖；用于学习、识别与对标 |
 | 五阶段标准工作流 | `/workflow/stages` | 24 个步骤卡片 + 点击查看方法/工具/交付物/关键要点 + 方法论匹配实时试算 |
-| 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变 |
+| 流程项目组合 | `/projects`、`/projects/{id}` | 多维筛选、详情五页签（概览/KPI/工作流/甘特图/下一步）、步骤状态可变；改善项目卡（来源、问题/根因/对策/验证/收益、观察期与一次投入、复制状态） |
 | 流程执行 | `/execution/*`、`/integrations/*` | 启动实例（可按节点指派）、任务队列、认领/完成/改派、按规则自动分支、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限、超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成、实例时间线；集成页含出站 Outbox 与入站 HMAC Webhook |
 | 方法论工具箱 | `/tools/grouped`、`/tools/match` | 33 个工具卡片 + 「按问题找工具」自然语言匹配；从步骤页进入时只显示该步骤推荐工具并按必用/推荐/可选标注 |
 | 交付物与模板库 | `/projects/{id}/deliverables`、`/process-documents`、`/tool-templates`、`/baselines` | 四个页签：项目交付物、流程标准文件（组织/变体/有效版本/升级变基/复制晋升）、工具模板库、基线与审计（含治理概览） |
-| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn` | bpmn-js 专业 BPMN 2.0 画布（调色板/折点/撤销重做/复制粘贴，布局与折点持久化，自动布局保留泳道，隐藏执行引擎不支持的构造）；右侧属性栏按元素类型编辑节点类型/泳道/负责人/指标/分派与 SLA、连线标签/条件/概率、泳道新增与改名；另可新增泳道（带默认活动）、跨泳道移动节点；草稿 → 评审 → 发布、版本历史/差异/回滚；BPMN 导入/导出 |
+| 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn`、`/changes` | bpmn-js 专业 BPMN 2.0 画布（调色板/折点/撤销重做/复制粘贴，布局与折点持久化，自动布局保留泳道，隐藏执行引擎不支持的构造）；右侧属性栏按元素类型编辑节点类型/泳道/负责人/指标/分派与 SLA、连线标签/条件/概率、泳道新增与改名；另可新增泳道（带默认活动）、跨泳道移动节点；草稿 → 评审 → 发布、版本历史/差异/回滚；变更申请与影响分析，启用门禁的流程必须带已批准变更单发布；BPMN 导入/导出 |
 | 架构草图 | `/sketches` | 独立 draw.io 白板：自由画布、mxfile 版本保存、关联流程/项目；**不参与 BPMN 建模与流程执行** |
-| 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions` | 四维度雷达、KPI 明细 + 6 个月走势、异常闭环处理 |
+| 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions`、`/workload/summary` | 四维度雷达、KPI 明细 + 6 个月走势；KPI 定义卡（结果/过程/健康度、公式与分子分母、粒度/频率/来源、红黄绿阈值、责任人与版本）；改善候选自动扫描（红/黄且无进行中项目）与一键生成改善项目；工作量页（标准工时、产能、实际工时与理论负荷率）；异常闭环处理 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
 | 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
 
@@ -479,14 +487,14 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 
 | 表 | 说明 |
 |---|---|
-| `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分；`is_draft` 标记从 PCF 生成、尚未确认的草稿 |
+| `process_arch` | 流程架构 L1–L4，含价值-痛点三维打分；`is_draft` 标记从 PCF 生成、尚未确认的草稿；`requires_change_request` 启用发布变更门禁 |
 | `process_node` / `process_edge` | 流程设计器的泳道节点与连线，节点带作业时间、等待时间、返工率、审批层级 |
 | `process_instance` / `process_task` | 运行时实例与任务队列；实例启动时快照流程模型 |
 | `form_definition` / `process_rule` | 节点表单定义与分支规则；随实例快照冻结 |
 | `notification` | 站内通知：任务指派、流程完成、异常超期、里程碑逾期 |
 | `integration_endpoint` / `integration_delivery` | ERP/OA 出站 Webhook 端点与 Outbox 投递记录 |
 | `inbound_webhook` / `inbound_event` | ERP/OA 入站入口（HMAC 签名、服务账号、流程范围）与幂等事件 |
-| `project` / `project_step` | 流程项目与它的 24 个步骤实例 |
+| `project` / `project_step` | 流程项目与它的 24 个步骤实例；项目带改善项目卡（来源/问题/根因/对策/验证/收益/观察期/复制状态） |
 | `workflow_template` | 五阶段标准工作流（全公司共用的操作手册） |
 | `step_contract` | 步骤契约：输入、工具引用与使用要求、验收口径、决策门 |
 | `deliverable_definition` / `deliverable_instance` / `deliverable_version` | 标准交付物定义 → 项目实例 → 不可变版本；版本记录模板/标准文件来源 |
@@ -496,7 +504,11 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | `org_unit` | 组织树：集团/公司/工厂/部门；标准文件与模板按它标范围 |
 | `app_user` | 用户、角色、归属组织与启停状态；管理员在「组织与人员」维护 |
 | `asset_baseline` | 资产基线：某时点的标准文件/模板版本快照（JSON），用于审计与升级前对照 |
-| `kpi_definition` / `kpi_record` | KPI 定义与月度时序 |
+| `kpi_definition` / `kpi_record` | KPI 定义卡（类型/公式/分子分母/粒度/频率/来源/阈值/责任人/版本）与月度时序 |
+| `strategy_objective` / `objective_process_link` | 年度战略目标与「目标 → 流程 → 可选 KPI」的承接关系 |
+| `process_change_request` | 变更申请：原因/范围、影响分析（人员/系统/数据/权限/控制/培训/KPI）、测试证据、回退方案、审批状态 |
+| `work_measurement_standard` | 标准工时卡：L4 活动 × 岗位 × 方法 × 观测/评定/宽放 × 样本 × 频次 × 验证状态 |
+| `capacity_calendar` | 产能日历：组织 × 岗位 × 期间 × 人数 × 可用工时 × 出勤率 × 设备可用率 |
 | `exception_event` | 异常事件闭环台账 |
 | `knowledge_item` | 案例 / 模板 / 最佳实践 / 标准 |
 | `benchmark_framework` / `benchmark_category` | 对标框架（SCOR / APQC PCF v8.0 跨行业/消费品/消费电子）的 L1–L5 分类树；`external_id` 存 PCF ID，`name_zh`/`name_en` 中英文对照 |
@@ -603,6 +615,8 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 | GET | `/baselines/{id}` | 基线明细：创建时的标准文件/模板版本 |
 | GET | `/baselines/{id}/diff` | 基线 vs 当前有效版本：已变更 / 新增 / 已移除 / 未变 |
 | GET | `/baselines/governance` | 治理概览：资产有效性、落后变体、固定旧版交付物、基线覆盖率、模板使用 |
+| GET | `/baselines/findings` | 治理待办清单，支持 status / type 过滤 |
+| POST | `/baselines/audit-scan` | 一致性扫描（MANAGER+）：资产有效性、KPI 数量超限（流程/责任人 > 5） |
 | GET | `/baselines/meta` | 范围与差异状态中文标签 |
 
 ### 流程项目组合
@@ -610,7 +624,8 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 |---|---|---|
 | GET | `/projects` | 多维筛选：methodology / status / stage / priority / owner / keyword，分页 |
 | POST | `/projects` | 新建项目，自动生成绩效编码并按模板生成 24 个步骤 |
-| GET | `/projects/{id}` | 项目详情：五阶段进度、当前待办、下一步建议、KPI 趋势 |
+| GET | `/projects/meta` | 改善来源与复制状态中文标签 |
+| GET | `/projects/{id}` | 项目详情：五阶段进度、当前待办、下一步建议、KPI 趋势、改善项目卡 |
 | PATCH | `/projects/{id}` | 更新项目 |
 | GET | `/projects/{id}/steps` | 步骤清单 |
 | PATCH | `/projects/steps/{id}` | 更新步骤状态；阶段完成自动推进，进度自动回算 |
@@ -721,11 +736,51 @@ pytest 里检查 import 路径是否存在、九个视图是否都注册且有 r
 ### 运营监控
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/monitor/kpi-radar` | 四维度雷达 + 各指标时序 |
-| GET/POST | `/monitor/kpis` | KPI 定义 |
+| GET | `/monitor/kpi-radar` | 四维度雷达 + 各指标时序 + 按结果/过程/健康度的红黄绿汇总 |
+| GET | `/monitor/meta` | KPI 类型、频率、状态、维度的中文标签（前端不维护映射表） |
+| GET/POST | `/monitor/kpis` | KPI 定义卡清单 / 新增；支持按 dimension、kind、frequency、process_id、activity_id、owner_user_id 过滤 |
+| GET/PATCH | `/monitor/kpis/{id}` | 定义卡详情 / 局部更新；口径变更自动让 version +1 并写审计 |
 | GET/POST | `/monitor/kpis/{id}/records` | 时序数据（同期同项目重复提交自动覆盖） |
 | GET | `/monitor/exceptions/summary` | 异常概览（含超期数、按严重度分布） |
 | GET/POST/PATCH/DELETE | `/monitor/exceptions[/{id}]` | 异常事件闭环 |
+| GET | `/monitor/improvement-candidates` | 红/黄 KPI 改善候选（自动排除已有进行中项目的指标） |
+| POST | `/monitor/kpis/{id}/improvement-draft` | 把红/黄 KPI 转成改善项目草稿；同一 KPI 不允许并行多张 |
+
+### 战略目标
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/strategy/meta` | 周期与状态中文标签 |
+| GET | `/strategy/summary` | 年度目标数、已承接、未承接、关联 KPI 数 |
+| GET/POST | `/strategy/objectives` | 目标清单 / 新增（年度、周期、基线/目标值、责任人、来源） |
+| GET/PATCH/DELETE | `/strategy/objectives/{id}` | 详情（含承接关系）/ 修改 / 删除 |
+| POST | `/strategy/objectives/{id}/links` | 新增承接：流程（L1–L4）+ 可选 KPI |
+| DELETE | `/strategy/objectives/{id}/links/{link_id}` | 移除承接 |
+| GET | `/strategy/processes/{id}/objectives` | 按流程反查（含上级继承） |
+| GET | `/strategy/kpis/{id}/objectives` | 按 KPI 反查 |
+
+### 变更治理
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/changes/meta` | 变更类型、影响级别、状态与影响分析字段的中文标签 |
+| GET/POST | `/changes` | 变更申请清单 / 新建草稿；支持 process_id、status、year 过滤 |
+| GET/PATCH | `/changes/{id}` | 详情 / 修改（仅草稿） |
+| POST | `/changes/{id}/submit` | 提交审批；重大变更校验 7 项影响分析、测试证据与回退方案 |
+| POST | `/changes/{id}/approve` | 批准 |
+| POST | `/changes/{id}/reject` | 驳回（可带原因） |
+| POST | `/changes/{id}/cancel` | 取消 |
+| POST | `/processes/{id}/design/publish` | 启用 `requires_change_request` 的流程必须带 `change_request_id`，发布成功后变更单进入已应用 |
+
+### 工作量与产能
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/workload/meta` | 标准工时来源与状态中文标签 |
+| GET/POST | `/workload/standards` | 标准工时卡清单 / 新增（活动 × 岗位 × 方法 × 样本 × 宽放） |
+| GET/PATCH | `/workload/standards/{id}` | 详情 / 修改；口径变更自动升版并回到草稿，需重新验证 |
+| POST | `/workload/standards/{id}/verify` | 验证标准工时；只有已验证标准进入产能口径 |
+| POST | `/workload/standards/{id}/retire` | 停用标准工时 |
+| GET/POST | `/workload/capacity` | 产能日历（组织 × 岗位 × 期间） |
+| PATCH | `/workload/capacity/{id}` | 修改人数、可用工时、出勤率、设备可用率 |
+| GET | `/workload/summary` | 标准需求 / 实际工时 / 可用产能 / 理论负荷率；实际工时按任务冻结的 L4 活动归集 |
 
 ### 流程知识库
 | 方法 | 路径 | 说明 |
@@ -950,8 +1005,8 @@ OWNER 的归属按 **`owner_user_id` 外键**判断（项目、异常事件与�
 | 流程地图 | 新建 / 编辑 / 删除流程架构 | MANAGER+ |
 | 项目组合 | 新建（含立项向导）、编辑属性、删除项目 | OWNER 仅自己名下；删除需 MANAGER+ |
 | 项目详情 | 改步骤状态、甘特图与里程碑 | OWNER 仅自己名下 |
-| 流程设计器 | 节点增删改、泳道建模 | OWNER 仅自己负责的流程 |
-| 运营监控 | 登记异常、处理异常、新建 KPI、录入数据点 | 异常 OWNER+；KPI 需 MANAGER+ |
+| 流程设计器 | 节点增删改、泳道建模；变更申请提交/审批（流程管理科） | OWNER 仅自己负责的流程；变更审批需 MANAGER+ |
+| 运营监控 | 登记异常、处理异常、新建 KPI、录入数据点、红/黄 KPI 转改善项目 | 异常 OWNER+；KPI 与转改善需 MANAGER+ |
 | 知识库 | 新建知识条目 | MANAGER+ |
 | 交付物与模板库 | 上传交付物版本、审批/恢复、新建/上传流程标准文件、审批、复制到项目、项目成果晋升、模板管理 | 交付物与复制跟随项目 Owner；标准文件与模板管理需 MANAGER+ |
 | 组织单元 | 新建/修改/停用组织；新建/编辑人员、分配组织与角色、重置口令 | 仅系统管理员（ADMIN） |

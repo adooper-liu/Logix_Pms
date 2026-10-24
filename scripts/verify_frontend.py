@@ -23,6 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 VIEWS = [
     ("dashboard", "管理驾驶舱"),
+    ("strategy", "战略目标"),
     ("map", "企业流程地图"),
     ("workflow", "五阶段标准工作流"),
     ("projects", "流程项目组合"),
@@ -296,9 +297,14 @@ def main() -> int:
             assert "Procure materials and services" in detail, detail[:160]
             assert "PCF ID 10216" in detail, detail[:160]
             assert "官方定义" in detail
+            # 中文名优先展示，且必须标出中文来源（官方中文整理版 / 参考译文 / 未译）
+            assert "采购物料与服务" in detail, detail[:160]
+            assert "官方中文版" in detail, detail[:160]
 
             page.wait_for_selector("#pcfMetricBox table", timeout=10000)
             assert "指标 ID" in page.inner_text("#pcfMetricBox")
+            # 指标表下方必须标注「参考译文」，不能让自建译名被当成官方口径
+            assert "参考译文" in page.inner_text("#pcfMetricBox")
 
         # 交互原语：confirm / prompt 走自建模态框，关闭等于取消
         def ui_dialogs() -> None:
@@ -463,6 +469,7 @@ def main() -> int:
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(900)
             assert "概览" in page.inner_text("#mBody"), "详情弹窗未渲染"
+            assert "改善项目卡" in page.inner_text("#mBody"), "项目概览缺少改善项目卡"
             for label, marker in [
                 ("KPI 追踪", "指标"),
                 ("工作流推进", "阶段1"),
@@ -772,6 +779,78 @@ def main() -> int:
 
         # 设计器：打开节点编辑，改等待时间，指标应变化
         # 评审中的流程为只读：调色板必须保留可见、可折叠，但创建工具不可用
+        def designer_xml_pure_functions() -> None:
+            """xml.js 是纯函数：在真实浏览器里 import 并跑特征样例。
+
+            项目没有 Node 测试环境，这里用浏览器原生的 DOMParser/XMLSerializer
+            验证泳道恢复、连线引用补齐、类型写入与折点正交化，
+            避免只靠静态守卫（源码里有函数名 ≠ 函数能跑）。
+            """
+            errors = page.evaluate(
+                """async () => {
+                  const m = await import('/static/js/views/designer/xml.js');
+                  const errors = [];
+                  const expect = (ok, msg) => { if (!ok) errors.push(msg); };
+
+                  // 1) 折点正交化：斜线补直角点
+                  const pts = m.orthogonalizePath([
+                    {x: 0, y: 0}, {x: 100, y: 50}, {x: 100, y: 200},
+                  ]);
+                  expect(pts.length === 3 && pts[1].x === 100 && pts[1].y === 0,
+                    'orthogonalizePath 未补出正交折点: ' + JSON.stringify(pts));
+
+                  const defs = (body) => `<?xml version="1.0" encoding="UTF-8"?>
+                    <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                      xmlns:pms="http://logix-pms.local/bpmn">
+                      <bpmn:process id="P">${body}</bpmn:process>
+                    </bpmn:definitions>`;
+
+                  // 2) ensureFlowRefs：从 sequenceFlow 反推 incoming/outgoing
+                  const refs = m.ensureFlowRefs(defs(
+                    '<bpmn:startEvent id="A"/><bpmn:task id="B"/>' +
+                    '<bpmn:sequenceFlow id="F" sourceRef="A" targetRef="B"/>'));
+                  expect(/outgoing[^>]*>F</.test(refs), '缺少 outgoing 引用');
+                  expect(/incoming[^>]*>F</.test(refs), '缺少 incoming 引用');
+
+                  // 3) setPmsNodeType：写入 pms:nodeType 扩展
+                  const typed = m.setPmsNodeType(defs('<bpmn:task id="B"/>'), 'B', 'APPROVAL');
+                  expect(/nodeType[^>]*>APPROVAL</.test(typed),
+                    'setPmsNodeType 没有写入扩展类型');
+
+                  // 4) appendBpmnLane：新增泳道 + 默认活动，ID 不与现有节点冲突
+                  const added = m.appendBpmnLane(defs('<bpmn:task id="n1"/>'), '财务', ['n1']);
+                  expect(added && added.laneId === 'Lane_1' && added.taskId === 'n2',
+                    'appendBpmnLane 返回的 ID 不符合预期: ' + JSON.stringify(added));
+                  expect(added.xml.includes('name="财务"') && added.xml.includes('bpmn:lane'),
+                    'appendBpmnLane 没有生成泳道');
+
+                  // 5) restoreLanes：补回泳道 DI，并为标题栏留出横向偏移（200 + 80）
+                  const withLane = `<?xml version="1.0" encoding="UTF-8"?>
+                    <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+                      <bpmn:process id="P">
+                        <bpmn:laneSet id="LS"><bpmn:lane id="L1">
+                          <bpmn:flowNodeRef>A</bpmn:flowNodeRef></bpmn:lane></bpmn:laneSet>
+                        <bpmn:task id="A"/>
+                      </bpmn:process>
+                      <bpmndi:BPMNDiagram id="D"><bpmndi:BPMNPlane id="PL" bpmnElement="P">
+                        <bpmndi:BPMNShape id="A_di" bpmnElement="A">
+                          <dc:Bounds x="200" y="120" width="100" height="80"/></bpmndi:BPMNShape>
+                      </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+                    </bpmn:definitions>`;
+                  const restored = m.restoreLanes(withLane);
+                  expect(restored.includes('bpmnElement="L1"'),
+                    'restoreLanes 没有补回泳道 DI');
+                  expect(/x="280"/.test(restored),
+                    'restoreLanes 没有为泳道标题栏留出横向偏移');
+                  return errors;
+                }"""
+            )
+            assert not errors, "designer/xml.js 特征测试失败：\n" + "\n".join(errors)
+
         def designer_readonly_palette() -> None:
             goto("designer")
             picked = pick_review_design()
@@ -1357,6 +1436,25 @@ def main() -> int:
                 page.evaluate("(pid) => actions['designer.switch'](pid)", fallback)
                 page.wait_for_timeout(700)
 
+        # 设计器「变更」页签：变更单 + 影响分析
+        def designer_change_tab() -> None:
+            goto("designer")
+            pick_editable_design()
+            page.click('#view .seg button:has-text("变更")')
+            page.wait_for_timeout(700)
+            view = page.inner_text("#view")
+            assert "变更申请" in view, "设计器变更页未渲染"
+            assert "重大变更需填写完整影响分析" in view, "变更页缺少门禁说明"
+            page.click('#view button:has-text("+ 变更申请")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            modal = page.inner_text("#mBody")
+            assert "变更类型" in modal and "影响级别" in modal, "变更弹窗缺类型/级别"
+            assert "人员影响" in modal and "系统影响" in modal, "变更弹窗缺影响分析"
+            assert "测试证据" in modal and "回退方案" in modal, "变更弹窗缺测试/回退"
+            close_modal()
+            page.wait_for_timeout(300)
+
         # 运营监控：KPI 明细 + 异常处理弹窗
         def monitor() -> None:
             goto("monitor")
@@ -1367,7 +1465,63 @@ def main() -> int:
             assert "整体达成率趋势" in view, "整体趋势图未渲染"
             page.click('#view .seg button:has-text("KPI 明细")')
             page.wait_for_timeout(600)
-            assert "KPI 明细" in page.inner_text("#view"), "KPI 明细未渲染"
+            kpi_view = page.inner_text("#view")
+            assert "KPI 明细" in kpi_view, "KPI 明细未渲染"
+            assert "改善候选" in kpi_view, "KPI 明细缺少改善候选卡"
+            assert "红/黄/绿" in kpi_view, "KPI 明细缺少红黄绿状态列"
+            assert "全部类型" in kpi_view, "KPI 明细缺少类型筛选"
+
+            # 定义卡：新建弹窗必须能填写口径、阈值与类型；编辑弹窗回填公式
+            page.click('#view button:has-text("+ 新建 KPI")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            modal = page.inner_text("#mBody")
+            assert "计算公式" in modal and "指标类型" in modal, (
+                f"KPI 定义卡字段缺失：{modal[:160]!r}"
+            )
+            assert "红线" in modal and "绿线" in modal, "KPI 定义卡缺少红/黄/绿阈值"
+            assert "生效版本" in modal and "数据来源系统" in modal, "KPI 定义卡缺少版本或来源"
+            kinds = page.eval_on_selector_all(
+                "#nkKind option", "els => els.map(e => e.textContent)"
+            )
+            assert {"结果", "过程", "健康度"} <= set(kinds), f"指标类型标签不完整：{kinds}"
+            close_modal()
+            page.wait_for_timeout(300)
+
+            page.click('#view button:has-text("编辑") >> nth=0')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(500)
+            edit_modal = page.inner_text("#mBody")
+            assert "KPI 编码" in edit_modal and "计算公式" in edit_modal, "编辑弹窗未回填定义卡"
+            assert page.locator("#nkCode").input_value(), "编辑弹窗缺少 KPI 编码"
+            close_modal()
+            page.wait_for_timeout(300)
+
+            # 工作量：标准工时与产能必须能从标准需求算到负荷率
+            page.click('#view .seg button:has-text("工作量")')
+            page.wait_for_timeout(800)
+            workload_view = page.inner_text("#view")
+            assert "标准工时卡" in workload_view, "工作量页缺少标准工时卡"
+            assert "产能与负荷" in workload_view, "工作量页缺少产能与负荷"
+            assert "理论负荷率" in workload_view, "工作量页缺少负荷率"
+
+            page.click('#view button:has-text("+ 标准工时")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            std_modal = page.inner_text("#mBody")
+            assert "观测时间" in std_modal and "评定系数" in std_modal, "标准工时弹窗缺字段"
+            assert "宽放率" in std_modal and "月频次" in std_modal, "标准工时弹窗缺口径字段"
+            close_modal()
+            page.wait_for_timeout(300)
+
+            page.click('#view button:has-text("+ 产能")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            cap_modal = page.inner_text("#mBody")
+            assert "出勤率" in cap_modal and "设备可用率" in cap_modal, "产能弹窗缺字段"
+            close_modal()
+            page.wait_for_timeout(300)
+
             page.click('#view .seg button:has-text("异常台账")')
             page.wait_for_timeout(600)
             # 异常台账在最后一张表，行内才有「处理」按钮
@@ -1526,6 +1680,22 @@ def main() -> int:
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "运营监控与KPI"
             assert "异常台账" in page.inner_text("#view")
+
+        # 战略目标：年度目标与「目标 → 流程 → KPI」承接
+        def strategy_view() -> None:
+            goto("strategy")
+            page.wait_for_timeout(800)
+            view = page.inner_text("#view")
+            assert "战略目标" in view and "年度目标" in view, "战略目标页未渲染"
+            assert "已承接流程" in view, "战略目标页缺少承接汇总"
+            page.click('#view button:has-text("+ 新建目标")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            modal = page.inner_text("#mBody")
+            assert "目标名称" in modal and "目标值" in modal, "战略目标弹窗缺字段"
+            assert "来源文件" in modal and "基线值" in modal, "战略目标弹窗缺口径字段"
+            close_modal()
+            page.wait_for_timeout(300)
 
         # 指标口径：页面上必须有可悬停的说明
         def metric_help() -> None:
@@ -1791,6 +1961,7 @@ def main() -> int:
         check("主题切换", theme_switch)
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)
+        check("战略目标承接", strategy_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
         check("工作流步骤详情", workflow_step_modal)
@@ -1805,10 +1976,12 @@ def main() -> int:
         check("组织与人员管理界面", admin_orgs)
         check("草图 draw.io 消息协议", sketch_drawio_protocol)
         check("设计器只读调色板可见可折叠", designer_readonly_palette)
+        check("设计器 XML 纯函数特征测试", designer_xml_pure_functions)
         check("设计器改节点并重算", designer_edit_node)
         check("设计器专业 BPMN 画布（bpmn-js）", designer_bpmn_spike)
         check("设计器 bpmn-js 属性补全", designer_bpmn_properties)
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
+        check("设计器变更申请与影响分析", designer_change_tab)
         check("监控异常处理弹窗", monitor)
         check("知识库详情 + 快速找工具", knowledge)
         check("项目甘特图与里程碑", project_gantt)

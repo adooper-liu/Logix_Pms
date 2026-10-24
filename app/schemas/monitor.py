@@ -8,7 +8,14 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime, UtcDateTimeIn
-from app.models.enums import ExceptionSeverity, ExceptionStatus, KpiDimension, KpiDirection
+from app.models.enums import (
+    ExceptionSeverity,
+    ExceptionStatus,
+    KpiDimension,
+    KpiDirection,
+    KpiFrequency,
+    KpiKind,
+)
 from app.schemas.common import ORMModel
 
 # ---------------------------------------------------------------- KPI
@@ -18,13 +25,67 @@ class KpiDefinitionCreate(BaseModel):
     code: str = Field(max_length=32)
     name: str = Field(max_length=64)
     dimension: KpiDimension
+    kind: KpiKind = KpiKind.PROCESS
     direction: KpiDirection = KpiDirection.LOWER_BETTER
     unit: Optional[str] = None
     target_value: Optional[float] = None
     baseline_value: Optional[float] = None
     description: Optional[str] = None
+
+    # 定义卡：口径、粒度、来源与质量规则
+    formula: Optional[str] = None
+    numerator: Optional[str] = None
+    denominator: Optional[str] = None
+    granularity: Optional[str] = None
+    frequency: KpiFrequency = KpiFrequency.MONTHLY
+    source_system: Optional[str] = None
+    quality_rule: Optional[str] = None
+
+    # 红/黄/绿三条线
+    red_threshold: Optional[float] = None
+    yellow_threshold: Optional[float] = None
+    green_threshold: Optional[float] = None
+
     process_id: Optional[int] = None
+    activity_id: Optional[int] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+
+
+class KpiDefinitionUpdate(BaseModel):
+    """局部更新；只改传了的字段。定义口径变更会让 version +1。"""
+
+    code: Optional[str] = Field(default=None, max_length=32)
+    name: Optional[str] = Field(default=None, max_length=64)
+    dimension: Optional[KpiDimension] = None
+    kind: Optional[KpiKind] = None
+    direction: Optional[KpiDirection] = None
+    unit: Optional[str] = None
+    target_value: Optional[float] = None
+    baseline_value: Optional[float] = None
+    description: Optional[str] = None
+
+    formula: Optional[str] = None
+    numerator: Optional[str] = None
+    denominator: Optional[str] = None
+    granularity: Optional[str] = None
+    frequency: Optional[KpiFrequency] = None
+    source_system: Optional[str] = None
+    quality_rule: Optional[str] = None
+
+    red_threshold: Optional[float] = None
+    yellow_threshold: Optional[float] = None
+    green_threshold: Optional[float] = None
+
+    process_id: Optional[int] = None
+    activity_id: Optional[int] = None
+    owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+    is_active: Optional[bool] = None
 
 
 class KpiRecordCreate(BaseModel):
@@ -47,17 +108,58 @@ class KpiDefinitionOut(ORMModel):
     code: str
     name: str
     dimension: str
+    kind: str
+    kind_label: str
     direction: str
     unit: Optional[str] = None
     target_value: Optional[float] = None
     baseline_value: Optional[float] = None
     description: Optional[str] = None
+
+    formula: Optional[str] = None
+    numerator: Optional[str] = None
+    denominator: Optional[str] = None
+    granularity: Optional[str] = None
+    frequency: str
+    frequency_label: str
+    source_system: Optional[str] = None
+    quality_rule: Optional[str] = None
+
+    red_threshold: Optional[float] = None
+    yellow_threshold: Optional[float] = None
+    green_threshold: Optional[float] = None
+
     process_id: Optional[int] = None
+    activity_id: Optional[int] = None
     owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    version: int
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
     is_active: bool
+
     latest_value: Optional[float] = None
     achievement_rate: Optional[float] = Field(default=None, description="当前值对目标值的达成率 %")
     trend: Optional[str] = Field(default=None, description="UP / DOWN / FLAT")
+    status: Optional[str] = Field(default=None, description="RED / YELLOW / GREEN")
+    status_label: Optional[str] = None
+
+
+class KpiMetaOut(BaseModel):
+    kind_labels: dict
+    frequency_labels: dict
+    status_labels: dict
+    dimension_labels: dict
+
+
+class KpiKindSummary(BaseModel):
+    kind: str
+    label: str
+    kpi_count: int
+    red: int = 0
+    yellow: int = 0
+    green: int = 0
+    gray: int = 0
 
 
 class RadarDimension(BaseModel):
@@ -78,16 +180,44 @@ class KpiTrendSeries(BaseModel):
     code: str
     name: str
     dimension: str
+    kind: str
+    kind_label: str
     unit: Optional[str] = None
     target_value: Optional[float] = None
     direction: str
+    frequency: str
+    granularity: Optional[str] = None
+    status: Optional[str] = None
+    status_label: Optional[str] = None
     points: List[KpiTrendPoint] = []
 
 
 class KpiRadarResponse(BaseModel):
     overall_achievement: float
     dimensions: List[RadarDimension]
+    by_kind: List[KpiKindSummary] = []
     series: List[KpiTrendSeries] = []
+
+
+class ImprovementCandidateOut(BaseModel):
+    """红/黄 KPI 中尚未有进行中改善项目的候选。"""
+
+    kpi_id: int
+    code: str
+    name: str
+    status: str
+    status_label: str
+    latest_value: Optional[float] = None
+    target_value: Optional[float] = None
+    unit: Optional[str] = None
+    red_threshold: Optional[float] = None
+    yellow_threshold: Optional[float] = None
+    green_threshold: Optional[float] = None
+    process_id: Optional[int] = None
+    process_code: Optional[str] = None
+    process_name: Optional[str] = None
+    owner: Optional[str] = None
+    owner_user_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------- 异常事件

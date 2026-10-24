@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 API = "/api/v1"
 BYTES = b"PK\x03\x04" + b"governance asset"
 
@@ -153,3 +155,50 @@ def test_governance_summary(client, manager_client):
     assert summary["template_usage_30d"] >= 1
 
     assert client.delete(f"{API}/projects/{project['id']}").status_code == 200
+
+
+def test_kpi_over_cap_creates_governance_finding(client):
+    """每条流程的 KPI 超过 5 个时，治理扫描应生成待办。"""
+    created = client.post(
+        f"{API}/process-map",
+        json={"code": "L3-KCAP", "name": "KPI 上限测试", "level": 3},
+    )
+    assert created.status_code == 201, created.text
+    pid = created.json()["id"]
+    try:
+        for index in range(6):
+            kpi = client.post(
+                f"{API}/monitor/kpis",
+                json={
+                    "code": f"CAP-{uuid.uuid4().hex[:6].upper()}-{index}",
+                    "name": f"上限测试指标 {index}",
+                    "dimension": "EFFICIENCY",
+                    "kind": "PROCESS",
+                    "direction": "LOWER_BETTER",
+                    "process_id": pid,
+                    "formula": "A ÷ B",
+                    "target_value": 5,
+                    "red_threshold": 10,
+                    "yellow_threshold": 8,
+                    "green_threshold": 5,
+                },
+            )
+            assert kpi.status_code == 201, kpi.text
+
+        scan = client.post(f"{API}/baselines/audit-scan")
+        assert scan.status_code == 200, scan.text
+
+        findings = client.get(
+            f"{API}/baselines/findings",
+            params={"type": "KPI_OVER_CAP", "status": "OPEN"},
+        ).json()
+        row = next(
+            item
+            for item in findings
+            if item["entity_type"] == "process" and item["entity_id"] == pid
+        )
+        assert row["severity"] == "MEDIUM"
+        assert row["type_label"] == "KPI 数量超限"
+        assert "6" in row["detail"]
+    finally:
+        client.delete(f"{API}/process-map/{pid}")

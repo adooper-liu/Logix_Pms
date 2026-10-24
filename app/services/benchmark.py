@@ -203,10 +203,12 @@ def category_tree(
             name=category.name,
             name_en=category.name_en,
             name_zh=category.name_zh,
+            name_zh_source=category.name_zh_source,
             external_id=category.external_id,
             level=category.level,
             parent_id=category.parent_id,
             description=category.description,
+            description_zh=category.description_zh,
             metrics_available=category.metrics_available,
             metric_count=metric_counts.get(category.external_id, 0),
             difference_index=category.difference_index,
@@ -294,9 +296,11 @@ def coverage(
             name=category.name,
             name_en=category.name_en,
             name_zh=category.name_zh,
+            name_zh_source=category.name_zh_source,
             external_id=category.external_id,
             level=category.level,
             description=category.description,
+            description_zh=category.description_zh,
             metric_count=metric_counts.get(category.external_id, 0),
             mapped_count=len(by_top[category.id]),
             processes=[
@@ -366,6 +370,7 @@ def category_metrics(db: Session, category: BenchmarkCategory) -> CategoryMetric
         code=category.code,
         name=category.name,
         name_en=category.name_en,
+        name_zh=category.name_zh,
         external_id=category.external_id,
         metrics=[
             BenchmarkMetricOut(
@@ -377,6 +382,11 @@ def category_metrics(db: Session, category: BenchmarkCategory) -> CategoryMetric
                 formula=row.formula,
                 unit=row.unit,
                 source=row.source,
+                name_zh=row.name_zh,
+                formula_zh=row.formula_zh,
+                unit_zh=row.unit_zh,
+                category_label_zh=row.category_label_zh,
+                translation_source=row.translation_source,
             )
             for row in rows
         ],

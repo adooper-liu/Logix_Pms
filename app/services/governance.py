@@ -19,7 +19,9 @@ from app.core.timeutil import utcnow
 from app.models.deliverable import DeliverableDefinition, DeliverableInstance, DeliverableVersion
 from app.models.enums import DeliverableStatus
 from app.models.governance import GovernanceFinding
+from app.models.monitor import KpiDefinition
 from app.models.org import OrgUnit
+from app.models.process import ProcessArch
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project
 from app.models.tool_template import ToolTemplate
@@ -34,7 +36,11 @@ TYPE_LABELS: Dict[str, str] = {
     "FROZEN_REFERENCE": "交付物固定旧版",
     "NO_EFFECTIVE": "资产未生效",
     "REVIEW_OVERDUE": "模板复审逾期",
+    "KPI_OVER_CAP": "KPI 数量超限",
 }
+
+# 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
+KPI_CAP = 5
 
 STATUS_LABELS: Dict[str, str] = {
     "OPEN": "待处理",
@@ -239,6 +245,45 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
             f"来源 v{source.version_label}，标准现行 v{latest.version_label}",
             org_unit_id=document.org_unit_id if document else None,
             owner_user_id=project.owner_user_id,
+        )
+
+    # KPI 数量治理：每条流程、每个责任人分别不超过 5 个承重指标
+    kpis = db.scalars(select(KpiDefinition).where(KpiDefinition.is_active.is_(True))).all()
+    by_process: Dict[int, List[KpiDefinition]] = {}
+    by_owner: Dict[int, List[KpiDefinition]] = {}
+    for kpi in kpis:
+        if kpi.process_id is not None:
+            by_process.setdefault(kpi.process_id, []).append(kpi)
+        if kpi.owner_user_id is not None:
+            by_owner.setdefault(kpi.owner_user_id, []).append(kpi)
+
+    for process_id, rows in by_process.items():
+        if len(rows) <= KPI_CAP:
+            continue
+        process = db.get(ProcessArch, process_id)
+        add(
+            "KPI_OVER_CAP",
+            "MEDIUM",
+            "process",
+            process_id,
+            f"流程 KPI 超过 {KPI_CAP} 个：{process.code if process else process_id}",
+            f"当前 {len(rows)} 个承重指标；建议保留 2–5 个，其余改为过程信号或归档",
+            org_unit_id=process.org_unit_id if process else None,
+            owner_user_id=process.owner_user_id if process else None,
+        )
+
+    for owner_id, rows in by_owner.items():
+        if len(rows) <= KPI_CAP:
+            continue
+        owner = db.get(User, owner_id)
+        add(
+            "KPI_OVER_CAP",
+            "MEDIUM",
+            "user",
+            owner_id,
+            f"责任人 KPI 超过 {KPI_CAP} 个：{owner.display_name if owner else owner_id}",
+            f"当前 {len(rows)} 个承重指标；建议聚焦 3–5 个结果指标",
+            owner_user_id=owner_id,
         )
 
     return findings

@@ -11,6 +11,7 @@ from app.api.v1 import (
     auth,
     baselines,
     benchmark,
+    changes,
     dashboard,
     deliverables,
     designer,
@@ -25,9 +26,11 @@ from app.api.v1 import (
     process_map,
     projects,
     sketches,
+    strategy,
     tool_templates,
     tools,
     workflow,
+    workload,
 )
 
 api_router = APIRouter()
@@ -55,10 +58,13 @@ protected.include_router(integrations.router)
 protected.include_router(tools.router)
 protected.include_router(tool_templates.router)
 protected.include_router(designer.router)
+protected.include_router(changes.router)
 protected.include_router(monitor.router)
 protected.include_router(notifications.router)
 protected.include_router(orgs.router)
 protected.include_router(positions.router)
+protected.include_router(workload.router)
+protected.include_router(strategy.router)
 protected.include_router(knowledge.router)
 api_router.include_router(protected)
 

@@ -241,10 +241,14 @@ def test_committed_tree_parents_resolve(dataset):
 
 
 def test_committed_bilingual_pairs(dataset):
-    """中英文都保留：L1–L3 有 name_zh，L4/L5 明确为空而不是覆盖英文。"""
+    """中英文都保留：官方中文整理版覆盖 L1–L3，覆盖层补的 L4/L5 单独标注来源。"""
     for framework in dataset["frameworks"]:
-        chinese = [row for row in framework["categories"] if row["name_zh"]]
-        assert len(chinese) == 449
+        official = [
+            row
+            for row in framework["categories"]
+            if row.get("name_zh_source") == pcf_data.SOURCE_APQC_CN
+        ]
+        assert len(official) == 449, framework["code"]
         for row in framework["categories"]:
             assert row["name_en"]
             if row["name_zh"]:

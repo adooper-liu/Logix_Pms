@@ -54,6 +54,28 @@ class Project(Base):
     metric_unit: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     improvement_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 目标改善幅度 %
 
+    # 改善项目卡：来源、问题、根因、对策、验证、收益与复制
+    source: Mapped[str] = mapped_column(
+        String(24), default="MANUAL", server_default="MANUAL", index=True
+    )
+    source_kpi_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("kpi_definition.id", ondelete="SET NULL", name="fk_project_source_kpi"),
+        nullable=True,
+        index=True,
+    )
+    problem_statement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    root_cause: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    countermeasure: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    benefit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    observation_until: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    one_time_cost: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    transfer_cost: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    replication_status: Mapped[str] = mapped_column(
+        String(20), default="NOT_EVALUATED", server_default="NOT_EVALUATED", index=True
+    )
+    replication_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
     budget: Mapped[float] = mapped_column(Float, default=0.0)
     actual_cost: Mapped[float] = mapped_column(Float, default=0.0)
     roi_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -71,6 +93,7 @@ class Project(Base):
         cascade="all, delete-orphan",
         order_by="ProjectStep.stage_no, ProjectStep.step_no",
     )
+    source_kpi: Mapped[Optional["KpiDefinition"]] = relationship("KpiDefinition")  # noqa: F821
 
     __table_args__ = (Index("ix_project_status_stage", "status", "current_stage"),)
 

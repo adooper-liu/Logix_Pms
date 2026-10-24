@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import (
+    CurrentUser,
     DbSession,
     ManagerUser,
     WriteUser,
@@ -22,6 +23,8 @@ from app.models.enums import (
     ExceptionStatus,
     KpiDimension,
     KpiDirection,
+    KpiFrequency,
+    KpiKind,
     Role,
 )
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
@@ -31,8 +34,12 @@ from app.schemas.monitor import (
     ExceptionOut,
     ExceptionSummary,
     ExceptionUpdate,
+    ImprovementCandidateOut,
     KpiDefinitionCreate,
     KpiDefinitionOut,
+    KpiDefinitionUpdate,
+    KpiKindSummary,
+    KpiMetaOut,
     KpiRadarResponse,
     KpiRecordCreate,
     KpiRecordOut,
@@ -40,8 +47,11 @@ from app.schemas.monitor import (
     KpiTrendSeries,
     RadarDimension,
 )
+from app.schemas.project import ProjectDraftOut
 from app.services import audit as audit_service
+from app.services import improvement as improvement_service
 from app.services import integrations as integration_service
+from app.services import kpi as kpi_service
 from app.services import notifications as notification_service
 
 router = APIRouter(prefix="/monitor", tags=["运营监控"])
@@ -51,6 +61,27 @@ DIMENSION_LABELS = {
     KpiDimension.QUALITY.value: "质量",
     KpiDimension.COST.value: "成本",
     KpiDimension.FLEXIBILITY.value: "灵活性",
+}
+
+KIND_LABELS = {
+    KpiKind.RESULT.value: "结果",
+    KpiKind.PROCESS.value: "过程",
+    KpiKind.HEALTH.value: "健康度",
+}
+
+FREQUENCY_LABELS = {
+    KpiFrequency.DAILY.value: "每日",
+    KpiFrequency.WEEKLY.value: "每周",
+    KpiFrequency.MONTHLY.value: "每月",
+    KpiFrequency.QUARTERLY.value: "每季",
+    KpiFrequency.AD_HOC.value: "按需",
+}
+
+STATUS_LABELS = {
+    "RED": "红",
+    "YELLOW": "黄",
+    "GREEN": "绿",
+    "GRAY": "灰（未取数）",
 }
 
 GOOD_THRESHOLD = 100.0
@@ -95,22 +126,77 @@ def _dimension_status(rate: float) -> str:
 def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
     records = sorted(kpi.records, key=lambda r: r.period)
     latest = records[-1].value if records else None
+    status = kpi_service.status_for(
+        latest,
+        kpi.direction,
+        kpi.red_threshold,
+        kpi.yellow_threshold,
+        kpi.green_threshold,
+    )
     return KpiDefinitionOut(
         id=kpi.id,
         code=kpi.code,
         name=kpi.name,
         dimension=kpi.dimension,
+        kind=kpi.kind,
+        kind_label=KIND_LABELS.get(kpi.kind, kpi.kind),
         direction=kpi.direction,
         unit=kpi.unit,
         target_value=kpi.target_value,
         baseline_value=kpi.baseline_value,
         description=kpi.description,
+        formula=kpi.formula,
+        numerator=kpi.numerator,
+        denominator=kpi.denominator,
+        granularity=kpi.granularity,
+        frequency=kpi.frequency,
+        frequency_label=FREQUENCY_LABELS.get(kpi.frequency, kpi.frequency),
+        source_system=kpi.source_system,
+        quality_rule=kpi.quality_rule,
+        red_threshold=kpi.red_threshold,
+        yellow_threshold=kpi.yellow_threshold,
+        green_threshold=kpi.green_threshold,
         process_id=kpi.process_id,
+        activity_id=kpi.activity_id,
         owner=kpi.owner,
+        owner_user_id=kpi.owner_user_id,
+        version=kpi.version,
+        valid_from=kpi.valid_from,
+        valid_to=kpi.valid_to,
         is_active=kpi.is_active,
         latest_value=latest,
         achievement_rate=_achievement(kpi.direction, latest, kpi.target_value),
         trend=_trend(records),
+        status=status,
+        status_label=STATUS_LABELS.get(status) if status else None,
+    )
+
+
+def _to_series(kpi: KpiDefinition) -> KpiTrendSeries:
+    records = sorted(kpi.records, key=lambda r: r.period)
+    latest = records[-1].value if records else None
+    status = kpi_service.status_for(
+        latest,
+        kpi.direction,
+        kpi.red_threshold,
+        kpi.yellow_threshold,
+        kpi.green_threshold,
+    )
+    return KpiTrendSeries(
+        kpi_id=kpi.id,
+        code=kpi.code,
+        name=kpi.name,
+        dimension=kpi.dimension,
+        kind=kpi.kind,
+        kind_label=KIND_LABELS.get(kpi.kind, kpi.kind),
+        unit=kpi.unit,
+        target_value=kpi.target_value,
+        direction=kpi.direction,
+        frequency=kpi.frequency,
+        granularity=kpi.granularity,
+        status=status,
+        status_label=STATUS_LABELS.get(status) if status else None,
+        points=[KpiTrendPoint(period=r.period, value=r.value) for r in records],
     )
 
 
@@ -148,25 +234,21 @@ def kpi_radar(db: DbSession, include_series: bool = True):
 
     buckets: Dict[str, List[float]] = {d.value: [] for d in KpiDimension}
     series: List[KpiTrendSeries] = []
+    kind_stats: Dict[str, Dict[str, int]] = {
+        kind.value: {"total": 0, "RED": 0, "YELLOW": 0, "GREEN": 0, "GRAY": 0} for kind in KpiKind
+    }
 
     for kpi in kpis:
         out = _to_kpi_out(kpi)
         if out.achievement_rate is not None:
             buckets.setdefault(kpi.dimension, []).append(out.achievement_rate)
+        stats = kind_stats.setdefault(
+            kpi.kind, {"total": 0, "RED": 0, "YELLOW": 0, "GREEN": 0, "GRAY": 0}
+        )
+        stats["total"] += 1
+        stats[out.status or "GRAY"] += 1
         if include_series:
-            records = sorted(kpi.records, key=lambda r: r.period)
-            series.append(
-                KpiTrendSeries(
-                    kpi_id=kpi.id,
-                    code=kpi.code,
-                    name=kpi.name,
-                    dimension=kpi.dimension,
-                    unit=kpi.unit,
-                    target_value=kpi.target_value,
-                    direction=kpi.direction,
-                    points=[KpiTrendPoint(period=r.period, value=r.value) for r in records],
-                )
-            )
+            series.append(_to_series(kpi))
 
     dimensions: List[RadarDimension] = []
     for dim in KpiDimension:
@@ -182,11 +264,36 @@ def kpi_radar(db: DbSession, include_series: bool = True):
             )
         )
 
+    by_kind = [
+        KpiKindSummary(
+            kind=kind,
+            label=KIND_LABELS.get(kind, kind),
+            kpi_count=stats["total"],
+            red=stats["RED"],
+            yellow=stats["YELLOW"],
+            green=stats["GREEN"],
+            gray=stats["GRAY"],
+        )
+        for kind, stats in kind_stats.items()
+    ]
+
     scored = [d.achievement_rate for d in dimensions if d.kpi_count > 0]
     return KpiRadarResponse(
         overall_achievement=round(sum(scored) / len(scored), 1) if scored else 0.0,
         dimensions=dimensions,
+        by_kind=by_kind,
         series=series,
+    )
+
+
+@router.get("/meta", response_model=KpiMetaOut, summary="KPI 枚举中文标签")
+def kpi_meta():
+    """中文标签由后端下发，前端不维护映射表。"""
+    return KpiMetaOut(
+        kind_labels=KIND_LABELS,
+        frequency_labels=FREQUENCY_LABELS,
+        status_labels=STATUS_LABELS,
+        dimension_labels=DIMENSION_LABELS,
     )
 
 
@@ -194,33 +301,180 @@ def kpi_radar(db: DbSession, include_series: bool = True):
 def list_kpis(
     db: DbSession,
     dimension: Optional[KpiDimension] = None,
+    kind: Optional[KpiKind] = None,
+    frequency: Optional[KpiFrequency] = None,
     process_id: Optional[int] = None,
+    activity_id: Optional[int] = None,
+    owner_user_id: Optional[int] = None,
+    active_only: bool = False,
 ):
     stmt = select(KpiDefinition)
     if dimension is not None:
         stmt = stmt.where(KpiDefinition.dimension == dimension.value)
+    if kind is not None:
+        stmt = stmt.where(KpiDefinition.kind == kind.value)
+    if frequency is not None:
+        stmt = stmt.where(KpiDefinition.frequency == frequency.value)
     if process_id is not None:
         stmt = stmt.where(KpiDefinition.process_id == process_id)
+    if activity_id is not None:
+        stmt = stmt.where(KpiDefinition.activity_id == activity_id)
+    if owner_user_id is not None:
+        stmt = stmt.where(KpiDefinition.owner_user_id == owner_user_id)
+    if active_only:
+        stmt = stmt.where(KpiDefinition.is_active.is_(True))
     rows = db.scalars(stmt.order_by(KpiDefinition.dimension, KpiDefinition.code)).all()
     return [_to_kpi_out(k) for k in rows]
+
+
+@router.get("/kpis/{kpi_id}", response_model=KpiDefinitionOut, summary="KPI 定义详情")
+def get_kpi(kpi_id: int, db: DbSession):
+    obj = db.get(KpiDefinition, kpi_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="KPI 不存在")
+    return _to_kpi_out(obj)
 
 
 @router.post(
     "/kpis",
     response_model=KpiDefinitionOut,
     status_code=status.HTTP_201_CREATED,
-    summary="新增 KPI 定义",
+    summary="新增 KPI 定义卡",
 )
 def create_kpi(payload: KpiDefinitionCreate, db: DbSession, user: ManagerUser):
     if db.scalar(select(KpiDefinition).where(KpiDefinition.code == payload.code)):
         raise HTTPException(status_code=409, detail=f"KPI 编码 {payload.code} 已存在")
-    obj = KpiDefinition(**as_columns(payload.model_dump()))
+    try:
+        kpi_service.validate_definition(payload.formula, payload.numerator, payload.denominator)
+        kpi_service.validate_dates(payload.valid_from, payload.valid_to)
+        kpi_service.validate_thresholds(
+            payload.direction.value,
+            payload.red_threshold,
+            payload.yellow_threshold,
+            payload.green_threshold,
+        )
+        kpi_service.validate_activity(db, payload.process_id, payload.activity_id)
+        kpi_service.ensure_formula_consistency(
+            db,
+            name=payload.name,
+            process_id=payload.process_id,
+            formula=payload.formula,
+        )
+    except kpi_service.KpiDefinitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    data = as_columns(payload.model_dump())
+    data["owner_user_id"], data["owner"] = resolve_owner(db, payload.owner_user_id, payload.owner)
+    data["version"] = 1
+    obj = KpiDefinition(**data)
     db.add(obj)
     db.flush()
-    audit_service.record(db, user, "CREATE", "kpi", obj.id, f"新增 KPI {obj.code} {obj.name}")
+    audit_service.record(
+        db, user, "CREATE", "kpi", obj.id, f"新增 KPI 定义卡 {obj.code} {obj.name} v1"
+    )
     db.commit()
     db.refresh(obj)
     return _to_kpi_out(obj)
+
+
+@router.patch("/kpis/{kpi_id}", response_model=KpiDefinitionOut, summary="修改 KPI 定义卡")
+def update_kpi(kpi_id: int, payload: KpiDefinitionUpdate, db: DbSession, user: ManagerUser):
+    obj = db.get(KpiDefinition, kpi_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="KPI 不存在")
+
+    data = as_columns(payload.model_dump(exclude_unset=True))
+    if "code" in data and data["code"] != obj.code:
+        if db.scalar(select(KpiDefinition).where(KpiDefinition.code == data["code"])):
+            raise HTTPException(status_code=409, detail=f"KPI 编码 {data['code']} 已存在")
+
+    # 阈值/日期/活动要按「合并后」的值校验，否则局部更新会绕过规则
+    direction = data.get("direction", obj.direction)
+    red = data.get("red_threshold", obj.red_threshold)
+    yellow = data.get("yellow_threshold", obj.yellow_threshold)
+    green = data.get("green_threshold", obj.green_threshold)
+    process_id = data["process_id"] if "process_id" in data else obj.process_id
+    activity_id = data["activity_id"] if "activity_id" in data else obj.activity_id
+    name = data.get("name", obj.name)
+    formula = data.get("formula", obj.formula)
+    valid_from = data["valid_from"] if "valid_from" in data else obj.valid_from
+    valid_to = data["valid_to"] if "valid_to" in data else obj.valid_to
+    try:
+        kpi_service.validate_thresholds(direction, red, yellow, green)
+        kpi_service.validate_dates(valid_from, valid_to)
+        kpi_service.validate_activity(db, process_id, activity_id)
+        kpi_service.ensure_formula_consistency(
+            db,
+            name=name,
+            process_id=process_id,
+            formula=formula,
+            exclude_id=obj.id,
+        )
+    except kpi_service.KpiDefinitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    apply_owner_update(db, data, obj.owner)
+    fields = sorted(data)
+    for field, value in data.items():
+        setattr(obj, field, value)
+    # 定义版本只在口径字段变更时递增；追加数据点走 /records，不影响版本
+    obj.version = (obj.version or 1) + 1
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "kpi",
+        obj.id,
+        f"更新 KPI 定义卡 {obj.code} 到 v{obj.version}（{', '.join(fields)}）",
+    )
+    db.commit()
+    db.refresh(obj)
+    return _to_kpi_out(obj)
+
+
+@router.get(
+    "/improvement-candidates",
+    response_model=List[ImprovementCandidateOut],
+    summary="红/黄 KPI 改善候选（自动排除已有进行中项目）",
+)
+def improvement_candidates(db: DbSession, user: CurrentUser):
+    return improvement_service.candidates(db)
+
+
+@router.post(
+    "/kpis/{kpi_id}/improvement-draft",
+    response_model=ProjectDraftOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="把红/黄 KPI 转成改善项目草稿",
+)
+def create_improvement_draft(kpi_id: int, db: DbSession, user: ManagerUser):
+    kpi = db.get(KpiDefinition, kpi_id)
+    if kpi is None:
+        raise HTTPException(status_code=404, detail="KPI 不存在")
+    try:
+        project = improvement_service.draft_from_kpi(db, kpi, user)
+    except improvement_service.ImprovementError as exc:
+        code = 409 if "已有进行中" in str(exc) else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "project",
+        project.id,
+        f"从 KPI {kpi.code} 生成改善项目 {project.code}",
+    )
+    db.commit()
+    db.refresh(project)
+    return ProjectDraftOut(
+        id=project.id,
+        code=project.code,
+        name=project.name,
+        process_id=project.process_id,
+        source_kpi_id=project.source_kpi_id,
+        status=project.status,
+        status_label=improvement_service.PROJECT_STATUS_LABELS.get(project.status, project.status),
+    )
 
 
 @router.get("/kpis/{kpi_id}/records", response_model=List[KpiRecordOut], summary="KPI 时序数据")

@@ -62,7 +62,7 @@ def test_pcf_tree_keeps_bilingual_names(client):
     assert root["name"] == root["name_zh"]
     assert root["external_id"] == "10002"
 
-    # L4/L5 没有中文来源：name_zh 为空，name 回落英文，英文不丢失。
+    # L4/L5 的中文来自本系统覆盖层（参考译文）：name 回落中文，英文原文仍保留在 name_en。
     full = client.get(f"{API}/benchmark/frameworks/APQC_PCF/tree", params={"max_level": 5}).json()
     stack = list(full)
     leaf = None
@@ -73,8 +73,10 @@ def test_pcf_tree_keeps_bilingual_names(client):
             break
         stack.extend(node["children"])
     assert leaf is not None
-    assert leaf["name_zh"] is None
-    assert leaf["name"] == leaf["name_en"]
+    assert leaf["name_zh"]
+    assert leaf["name"] == leaf["name_zh"]
+    assert leaf["name_en"] and leaf["name_en"] != leaf["name_zh"]
+    assert leaf["name_zh_source"] == "REFERENCE"
 
 
 def test_pcf_tree_supports_five_levels(client):

@@ -42,8 +42,11 @@ const renderProjects = () => {
   qs.push('page_size=100');
 
   renderAsync('projects',
-    () => GET('/projects?' + qs.join('&')),
-    (page) => {
+    () => Promise.all([GET('/projects?' + qs.join('&')), GET('/projects/meta')])
+      .then(([page, meta]) => ({ page, meta })),
+    (d) => {
+      const page = d.page;
+      state.projectMeta = d.meta;
       const rows = page.items.map((p) => `
         <tr class="clk">
           <td><button class="project-open" type="button" data-act="projects.open"
@@ -180,6 +183,7 @@ async function openProject(id) {
       </div>
       <div class="field"><label>改善目标</label><textarea readonly>${esc(p.objective || '—')}</textarea></div>
       <div class="field"><label>范围边界</label><textarea readonly>${esc(p.scope || '—')}</textarea></div>
+      ${improvementCardHtml(p)}
       <div class="row2">
         <div class="field"><label>预算 / 已投入（万元）</label>
           <input value="${num(p.budget, 1)} / ${num(p.actual_cost, 1)}" readonly></div>
@@ -295,6 +299,37 @@ async function openProject(id) {
 
 /* -------------------------------------------------- 项目属性的写入口 */
 
+function improvementCardHtml(p) {
+  const rows = [
+    ['来源', p.source_label
+      ? p.source_label + (p.source_kpi_code ? ` · KPI ${p.source_kpi_code} ${p.source_kpi_name || ''}` : '')
+      : null],
+    ['问题', p.problem_statement],
+    ['根因', p.root_cause],
+    ['对策', p.countermeasure],
+    ['验证', p.verification],
+    ['收益', p.benefit],
+    ['观察期至', p.observation_until],
+    ['一次性投入', p.one_time_cost ? num(p.one_time_cost, 1) + ' 万元' : null],
+    ['转移成本', p.transfer_cost ? num(p.transfer_cost, 1) + ' 万元' : null],
+    ['复制状态', p.replication_status_label
+      ? p.replication_status_label + (p.replication_note ? ' · ' + p.replication_note : '')
+      : null],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!rows.length) {
+    return '<div class="note">改善项目卡尚未填写，点「编辑」补充问题、根因、对策与验证。</div>';
+  }
+  return `
+    <div class="card" style="margin-top:10px">
+      <h3 style="margin-top:0">改善项目卡</h3>
+      <table class="tbl">
+        <tbody>${rows.map(([label, value]) =>
+          `<tr><td class="tiny muted" style="width:110px">${esc(label)}</td>
+            <td>${esc(String(value))}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
 async function editProjectModal(projectId) {
   openModal('加载中…', skeleton(4), '', true);
   let p;
@@ -306,6 +341,12 @@ async function editProjectModal(projectId) {
   }
   const opt = (v, label, cur) =>
     '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
+  const repLabels = (state.projectMeta && state.projectMeta.replication_status_labels) || {};
+  const repEntries = Object.entries(repLabels);
+  const repOptions = repEntries.length
+    ? repEntries.map(([v, label]) => opt(v, label, p.replication_status)).join('')
+    : `<option value="${esc(p.replication_status)}" selected>${
+      esc(p.replication_status_label || p.replication_status)}</option>`;
 
   openModal('编辑项目 · ' + p.code, `
     <div class="row2">
@@ -352,6 +393,34 @@ async function editProjectModal(projectId) {
       <div class="field"><label>预计 ROI（倍）</label>
         <input id="epRoi" type="number" step="0.1" value="${p.roi_estimate === null ? '' : p.roi_estimate}"></div>
     </div>
+    <div class="field"><label>问题描述</label>
+      <textarea id="epProblem" rows="2" placeholder="发生了什么、发生多少次、影响多大">${esc(p.problem_statement || '')}</textarea></div>
+    <div class="row2">
+      <div class="field"><label>根因</label>
+        <textarea id="epRoot" rows="2" placeholder="为什么反复发生">${esc(p.root_cause || '')}</textarea></div>
+      <div class="field"><label>对策</label>
+        <textarea id="epCounter" rows="2" placeholder="谁做什么、何时完成">${esc(p.countermeasure || '')}</textarea></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>验证</label>
+        <textarea id="epVerify" rows="2" placeholder="如何验证改善有效">${esc(p.verification || '')}</textarea></div>
+      <div class="field"><label>收益</label>
+        <textarea id="epBenefit" rows="2" placeholder="可验证、可持续的收益">${esc(p.benefit || '')}</textarea></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>观察期至</label>
+        <input id="epObservation" type="date" value="${p.observation_until || ''}"></div>
+      <div class="field"><label>一次性投入（万元）</label>
+        <input id="epOneTime" type="number" step="0.1" value="${p.one_time_cost || 0}"></div>
+      <div class="field"><label>转移成本（万元）</label>
+        <input id="epTransfer" type="number" step="0.1" value="${p.transfer_cost || 0}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>复制状态</label>
+        <select id="epReplication">${repOptions}</select></div>
+      <div class="field"><label>复制说明</label>
+        <input id="epReplicationNote" value="${esc(p.replication_note || '')}" placeholder="适用条件 / 拒绝复制理由"></div>
+    </div>
     <div class="row3">
       <div class="field"><label>预算（万元）</label><input id="epBudget" type="number" step="0.1" value="${p.budget}"></div>
       <div class="field"><label>已投入（万元）</label><input id="epActual" type="number" step="0.1" value="${p.actual_cost}"></div>
@@ -389,6 +458,16 @@ async function saveProjectEdit(projectId) {
     budget: Number(val('epBudget') || 0),
     actual_cost: Number(val('epActual') || 0),
     end_date: val('epEnd') || null,
+    problem_statement: val('epProblem').trim() || null,
+    root_cause: val('epRoot').trim() || null,
+    countermeasure: val('epCounter').trim() || null,
+    verification: val('epVerify').trim() || null,
+    benefit: val('epBenefit').trim() || null,
+    observation_until: val('epObservation') || null,
+    one_time_cost: Number(val('epOneTime') || 0),
+    transfer_cost: Number(val('epTransfer') || 0),
+    replication_status: val('epReplication'),
+    replication_note: val('epReplicationNote').trim() || null,
   };
   // OWNER 不能改归属，后端也会拦；这里干脆不发这个字段
   if (canManage()) payload.owner = val('epOwner').trim();

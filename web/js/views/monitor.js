@@ -1,12 +1,13 @@
 /* 视图：monitor */
 import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
+import { toast, openModal, closeModal, confirmDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PATCH } from '../core/api.js';
+import { actions as appActions } from '../core/actions.js';
 
 /* ============================================================ 7. 运营监控与KPI */
 
@@ -15,10 +16,19 @@ on('monitor.status', (_data, el) => setMonitorStatus(el.value));
 on('monitor.openException', ({ id }) => openException(Number(id)));
 on('monitor.newException', () => newExceptionModal());
 on('monitor.newKpi', () => newKpiModal());
+on('monitor.editKpi', ({ id }) => editKpiModal(Number(id)));
+on('monitor.kind', (_data, el) => setMonitorKind(el.value));
+on('monitor.period', (_data, el) => setMonitorPeriod(el.value));
+on('monitor.newStandard', () => newWorkloadStandardModal());
+on('monitor.submitStandard', () => submitWorkloadStandard());
+on('monitor.verifyStandard', ({ id }) => verifyWorkloadStandard(Number(id)));
+on('monitor.newCapacity', () => newCapacityModal());
+on('monitor.submitCapacity', () => submitCapacity());
 on('monitor.close', () => closeModal());
 on('monitor.saveException', ({ id }) => saveException(Number(id)));
 on('monitor.submitException', () => submitException());
-on('monitor.submitKpi', () => submitKpi());
+on('monitor.submitKpi', ({ kpi }) => submitKpi(kpi ? Number(kpi) : null));
+on('monitor.improveKpi', ({ id }) => createImprovement(Number(id)));
 on('monitor.addRecord', ({ kpi, name }) => addKpiRecordModal(Number(kpi), name));
 on('monitor.submitRecord', ({ kpi }) => submitKpiRecord(Number(kpi)));
 on('monitor.goExecution', () => go('execution'));
@@ -30,9 +40,17 @@ const renderMonitor = () => {
       GET('/monitor/kpi-radar'),
       GET('/monitor/exceptions' + qs),
       GET('/monitor/exceptions/summary'),
-    ]).then(([radar, exceptions, summary]) => ({ radar, exceptions, summary })),
+      GET('/monitor/meta'),
+      GET('/workload/summary' + (state.monitor.period ? '?period=' + state.monitor.period + '-01' : '')),
+      GET('/workload/meta'),
+      GET('/monitor/improvement-candidates'),
+    ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates]) => ({
+      radar, exceptions, summary, meta, workload, workloadMeta, candidates,
+    })),
     (d) => {
       state.monitorRadar = d.radar;
+      state.monitorMeta = d.meta;
+      state.workloadMeta = d.workloadMeta;
       const tab = state.monitor.tab || 'overview';
       const s = d.summary;
       const dimColor = {
@@ -62,15 +80,27 @@ const renderMonitor = () => {
         return { latest, delta, reach };
       };
 
-      const kpiRows = d.radar.series.map((series) => {
+      const kindLabels = (d.meta && d.meta.kind_labels) || {};
+      const kindFilter = state.monitor.kind || '';
+      const visibleSeries = kindFilter
+        ? d.radar.series.filter((series) => series.kind === kindFilter)
+        : d.radar.series;
+      const statusTone = { RED: 't-red', YELLOW: 't-yel', GREEN: 't-grn' };
+
+      const kpiRows = visibleSeries.map((series) => {
         const { latest, delta, reach } = kpiInfo(series);
         return `
           <tr>
-            <td><b>${esc(series.name)}</b><div class="tiny">${esc(series.code)} · ${esc(series.unit || '')}</div></td>
+            <td><b>${esc(series.name)}</b><div class="tiny">${esc(series.code)} · ${esc(series.unit || '')}
+              <span class="tag t-blu">${esc(series.kind_label)}</span></div></td>
             <td>${KPI_DIM_ICON[series.dimension] || ''}</td>
             <td><b>${num(latest, 2)}</b></td>
             <td class="muted">${num(series.target_value, 2)}</td>
             <td>${reach === null ? '—' : bar(Math.min(reach, 130), null, 70)}</td>
+            <td>${series.status
+              ? `<span class="tag ${statusTone[series.status] || 't-gry'}">${
+                esc(series.status_label || series.status)}</span>`
+              : '<span class="muted">—</span>'}</td>
             <td>${delta === null ? '<span class="muted">—</span>'
               : '<span class="' + (series.direction === 'LOWER_BETTER'
                   ? (delta < 0 ? 'up' : delta > 0 ? 'down' : '')
@@ -78,11 +108,18 @@ const renderMonitor = () => {
                 + (delta > 0 ? '↑ ' : delta < 0 ? '↓ ' : '→ ') + num(Math.abs(delta), 2) + '</span>'}</td>
             <td><canvas class="spark" width="110" height="26" data-spark="${series.kpi_id}"></canvas></td>
             <td>${canManage()
-              ? `<button class="btn-sm" data-act="monitor.addRecord" data-kpi="${series.kpi_id}"
-                data-name="${esc(series.name)}">录入</button>`
+              ? `<div class="gap">
+                  ${series.status === 'RED' || series.status === 'YELLOW'
+                    ? `<button class="btn-sm btn-p" data-act="monitor.improveKpi"
+                        data-id="${series.kpi_id}">转改善</button>` : ''}
+                  <button class="btn-sm" data-act="monitor.addRecord" data-kpi="${series.kpi_id}"
+                    data-name="${esc(series.name)}">录入</button>
+                  <button class="btn-sm" data-act="monitor.editKpi"
+                    data-id="${series.kpi_id}">编辑</button>
+                </div>`
               : ''}</td>
           </tr>`;
-      }).join('') || emptyRow(7, '暂无 KPI');
+      }).join('') || emptyRow(9, kindFilter ? '该类型下暂无 KPI' : '暂无 KPI');
 
       const quick = d.radar.series.map((series) => ({ series, ...kpiInfo(series) }))
         .filter((row) => row.reach !== null)
@@ -147,11 +184,104 @@ const renderMonitor = () => {
 
       state.monitorTrend = { trend, periods };
 
+      const wl = d.workload;
+      const hours = (minutes) => num((minutes || 0) / 60, 1);
+      const periodValue = state.monitor.period
+        || (wl.period ? wl.period.slice(0, 7) : '');
+      const utilization = wl.totals.utilization;
+      const workloadCards = `
+        <div class="grid g4 stat-row">
+          <div class="kpi stat"><div class="num">${hours(wl.totals.demand_minutes)}<small>h</small></div>
+            <div class="lab">标准需求</div><div class="trend">仅已验证标准</div></div>
+          <div class="kpi stat"><div class="num">${hours(wl.totals.available_minutes)}<small>h</small></div>
+            <div class="lab">可用产能</div><div class="trend">人数 × 工时 × 出勤 × 设备</div></div>
+          <div class="kpi stat"><div class="num">${hours(wl.totals.actual_minutes)}<small>h</small></div>
+            <div class="lab">实际工时</div><div class="trend">来自任务工时记录</div></div>
+          <div class="kpi stat"><div class="num">${utilization === null ? '—' : num(utilization * 100, 1)}<small>%</small></div>
+            <div class="lab">理论负荷率</div><div class="trend">标准需求 ÷ 可用产能</div></div>
+        </div>`;
+      const standardRows = wl.standards.map((row) => `
+        <tr>
+          <td><b>${esc(row.name)}</b><div class="tiny">${esc(row.activity_code || '')} ${
+            esc(row.activity_name || '')}</div></td>
+          <td>${esc(row.position_name || '—')}</td>
+          <td>${num(row.standard_minutes, 2)}</td>
+          <td>${num(row.monthly_frequency, 1)}</td>
+          <td>${hours(row.demand_minutes)}</td>
+          <td><span class="tag ${row.status === 'VERIFIED' ? 't-grn'
+            : row.status === 'RETIRED' ? 't-gry' : 't-yel'}">${esc(row.status_label)}</span>
+            <div class="tiny">${esc(row.source_label)}</div></td>
+          <td>${canManage() && row.status === 'DRAFT'
+            ? `<button class="btn-sm" data-act="monitor.verifyStandard"
+                data-id="${row.standard_id}">验证</button>` : ''}</td>
+        </tr>`).join('') || emptyRow(7, '还没有标准工时卡');
+      const capacityRows = wl.capacity.map((row) => `
+        <tr>
+          <td>${esc(row.org_unit_name || '—')}</td>
+          <td>${esc(row.position_name || '—')}</td>
+          <td>${num(row.headcount, 1)}</td>
+          <td>${hours(row.available_minutes)}</td>
+          <td>${hours(row.demand_minutes)}</td>
+          <td>${hours(row.gap_minutes)}</td>
+          <td>${row.utilization === null ? '—' : num(row.utilization * 100, 1) + '%'}</td>
+        </tr>`).join('') || emptyRow(7, '还没有产能记录');
+      const actualRows = wl.actual.map((row) => `
+        <tr>
+          <td>${esc(row.activity_code || '—')} ${esc(row.activity_name || '')}</td>
+          <td>${esc(row.position_name || '—')}</td>
+          <td>${row.task_count}</td>
+          <td>${hours(row.effort_minutes)}</td>
+        </tr>`).join('') || emptyRow(4, '本期还没有实际工时记录');
+
+      const workloadPane = `
+        ${workloadCards}
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">标准工时卡（${wl.standards.length} 条）</h3>
+              <div class="desc" style="margin:2px 0 0">标准工时 = 观测 × 评定系数 × (1 + 宽放率)；
+                只有「已验证」进入产能口径</div></div>
+            <div class="gap">
+              <input class="sel sel-sm" type="month" data-act="monitor.period" value="${periodValue}">
+              ${canManage()
+                ? '<button class="btn btn-g" data-act="monitor.newStandard">+ 标准工时</button>' : ''}
+            </div>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>活动 / 标准</th><th>岗位</th><th>标准工时（分）</th>
+              <th>月频次</th><th>需求（h/月）</th><th>状态 / 来源</th><th></th></tr></thead>
+            <tbody>${standardRows}</tbody>
+          </table>
+        </div>
+        <div class="grid g2">
+          <div class="card">
+            <div class="between mb">
+              <div><h3 style="margin:0">产能与负荷</h3>
+                <div class="desc" style="margin:2px 0 0">可用工时扣除出勤与设备可用率</div></div>
+              ${canManage()
+                ? '<button class="btn-sm" data-act="monitor.newCapacity">+ 产能</button>' : ''}
+            </div>
+            <table class="tbl">
+              <thead><tr><th>组织</th><th>岗位</th><th>人数</th><th>可用（h）</th>
+                <th>需求（h）</th><th>缺口（h）</th><th>负荷率</th></tr></thead>
+              <tbody>${capacityRows}</tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>实际工时（按活动）</h3>
+            <div class="desc">来自任务工时记录；未关联活动的工时单独列示</div>
+            <table class="tbl">
+              <thead><tr><th>活动</th><th>岗位</th><th>任务数</th><th>实际（h）</th></tr></thead>
+              <tbody>${actualRows}</tbody>
+            </table>
+          </div>
+        </div>`;
+
       const tabs = `
         <div class="seg">
           <button class="${tab === 'overview' ? 'on' : ''}" data-act="monitor.tab" data-tab="overview">概览</button>
           <button class="${tab === 'kpi' ? 'on' : ''}" data-act="monitor.tab" data-tab="kpi">KPI 明细</button>
           <button class="${tab === 'exceptions' ? 'on' : ''}" data-act="monitor.tab" data-tab="exceptions">异常台账</button>
+          <button class="${tab === 'workload' ? 'on' : ''}" data-act="monitor.tab" data-tab="workload">工作量</button>
         </div>`;
 
       const overview = `
@@ -199,15 +329,53 @@ const renderMonitor = () => {
           </div>
         </div>`;
 
-      const kpiPane = `
+      const kindOptions = Object.entries(kindLabels).map(([value, label]) =>
+        `<option value="${value}"${state.monitor.kind === value ? ' selected' : ''}>${
+          esc(label)}</option>`).join('');
+      const kindStats = (d.radar.by_kind || []).map((k) =>
+        `<span class="tag ${k.red ? 't-red' : k.yellow ? 't-yel' : 't-gry'}">${
+          esc(k.label)} ${k.kpi_count} · 红 ${k.red} / 黄 ${k.yellow} / 绿 ${k.green} / 灰 ${k.gray}</span>`).join('');
+      const candidateRows = (d.candidates || []).map((row) => `
+        <tr>
+          <td><b>${esc(row.name)}</b><div class="tiny">${esc(row.code)}</div></td>
+          <td><span class="tag ${row.status === 'RED' ? 't-red' : 't-yel'}">${
+            esc(row.status_label)}</span></td>
+          <td>${num(row.latest_value, 2)} → ${num(row.target_value, 2)} ${esc(row.unit || '')}</td>
+          <td class="tiny">${esc(row.process_code || '—')} ${esc(row.process_name || '')}</td>
+          <td>${esc(row.owner || '—')}</td>
+          <td>${canManage()
+            ? `<button class="btn-sm btn-p" data-act="monitor.improveKpi"
+                data-id="${row.kpi_id}">转改善</button>` : ''}</td>
+        </tr>`).join('');
+      const candidateCard = `
         <div class="card">
           <div class="between mb">
-            <div><h3 style="margin:0">KPI 明细（${d.radar.series.length} 项）</h3>
-              <div class="desc" style="margin:2px 0 0">越小越好的指标，达成率取目标与实际的比值</div></div>
+            <div><h3 style="margin:0">改善候选（${(d.candidates || []).length}）</h3>
+              <div class="desc" style="margin:2px 0 0">自动扫描红/黄 KPI，
+                已排除有进行中改善项目的指标</div></div>
           </div>
+          ${candidateRows ? `
+            <table class="tbl">
+              <thead><tr><th>指标</th><th>状态</th><th>当前 → 目标</th>
+                <th>流程</th><th>责任人</th><th></th></tr></thead>
+              <tbody>${candidateRows}</tbody>
+            </table>` : '<div class="tiny muted">当前没有需要立项的红/黄 KPI。</div>'}
+        </div>`;
+
+      const kpiPane = `
+        ${candidateCard}
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">KPI 明细（${visibleSeries.length} 项）</h3>
+              <div class="desc" style="margin:2px 0 0">按定义卡判定红/黄/绿；越小越好的指标，达成率取目标与实际的比值</div></div>
+            <select class="sel sel-sm" data-act="monitor.kind">
+              <option value="">全部类型</option>${kindOptions}
+            </select>
+          </div>
+          <div class="gap mb">${kindStats}</div>
           <table class="tbl">
             <thead><tr><th>指标</th><th>维度</th><th>${metricHelp('latest_value', '当前值')}</th><th>${metricHelp('target_value', '目标')}</th>
-              <th>${metricHelp('achievement_rate', '达成率')}</th><th>${metricHelp('kpi_trend', '环比')}</th><th>${metricHelp('kpi_series', '6 个月走势')}</th>${canManage() ? '<th></th>' : ''}</tr></thead>
+              <th>${metricHelp('achievement_rate', '达成率')}</th><th>红/黄/绿</th><th>${metricHelp('kpi_trend', '环比')}</th><th>${metricHelp('kpi_series', '6 个月走势')}</th>${canManage() ? '<th></th>' : ''}</tr></thead>
             <tbody>${kpiRows}</tbody>
           </table>
         </div>`;
@@ -244,7 +412,9 @@ const renderMonitor = () => {
           </div>
           <div class="mt">${tabs}</div>
         </div>
-        ${tab === 'kpi' ? kpiPane : tab === 'exceptions' ? excPane : overview}`;
+        ${tab === 'kpi' ? kpiPane
+          : tab === 'exceptions' ? excPane
+            : tab === 'workload' ? workloadPane : overview}`;
 
       if (tab === 'overview') {
         drawRadar(d.radar);
@@ -262,6 +432,17 @@ function setMonitorTab(tab) {
 
 function setMonitorStatus(status) {
   state.monitor.status = status;
+  RENDERERS.monitor();
+}
+
+function setMonitorKind(kind) {
+  state.monitor.kind = kind;
+  RENDERERS.monitor();
+}
+
+function setMonitorPeriod(period) {
+  state.monitor.period = period;
+  state.monitor.tab = 'workload';
   RENDERERS.monitor();
 }
 
@@ -596,78 +777,214 @@ async function submitException() {
   }
 }
 
-function newKpiModal() {
-  openModal('新建 KPI 定义', `
+let editingKpi = null;
+
+async function editKpiModal(kpiId) {
+  try {
+    const kpi = await GET('/monitor/kpis/' + kpiId);
+    newKpiModal(kpi);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function newKpiModal(kpi = null) {
+  editingKpi = kpi;
+  const meta = state.monitorMeta
+    || { kind_labels: {}, frequency_labels: {}, dimension_labels: {} };
+  const value = (key) => (kpi && kpi[key] !== null && kpi[key] !== undefined ? kpi[key] : '');
+  const options = (labels, selected) => Object.entries(labels || {}).map(([code, label]) =>
+    `<option value="${esc(code)}"${code === selected ? ' selected' : ''}>${esc(label)}</option>`)
+    .join('');
+  const numValue = (key) => (kpi && kpi[key] !== null && kpi[key] !== undefined
+    ? kpi[key] : '');
+
+  openModal(kpi ? '编辑 KPI 定义卡 · ' + kpi.code : '新建 KPI 定义卡', `
     <div class="row2">
       <div class="field"><label>KPI 编码 *</label>
-        <input id="nkCode" placeholder="如 EFF-06"><div class="hint">全局唯一</div></div>
+        <input id="nkCode" value="${esc(value('code'))}" placeholder="如 EFF-06">
+        <div class="hint">全局唯一</div></div>
       <div class="field"><label>指标名称 *</label>
-        <input id="nkName" placeholder="如 订单评审平均时长"></div>
+        <input id="nkName" value="${esc(value('name'))}" placeholder="如 订单评审平均时长"></div>
     </div>
     <div class="row3">
       <div class="field"><label>维度</label>
-        <select id="nkDim">
-          <option value="EFFICIENCY">效率</option><option value="QUALITY">质量</option>
-          <option value="COST">成本</option><option value="FLEXIBILITY">灵活性</option>
-        </select></div>
-      <div class="field"><label>方向</label>
-        <select id="nkDir">
-          <option value="LOWER_BETTER">越小越好</option>
-          <option value="HIGHER_BETTER">越大越好</option>
-        </select></div>
-      <div class="field"><label>单位</label><input id="nkUnit" placeholder="天 / % / 元"></div>
+        <select id="nkDim">${options(meta.dimension_labels, value('dimension') || 'EFFICIENCY')}</select></div>
+      <div class="field"><label>指标类型</label>
+        <select id="nkKind">${options(meta.kind_labels, value('kind') || 'PROCESS')}</select></div>
+      <div class="field"><label>统计频率</label>
+        <select id="nkFreq">${options(meta.frequency_labels, value('frequency') || 'MONTHLY')}</select></div>
     </div>
     <div class="row3">
-      <div class="field"><label>基线值</label><input id="nkBase" type="number" step="0.01"></div>
-      <div class="field"><label>目标值</label><input id="nkTarget" type="number" step="0.01"></div>
-      <div class="field"><label>归属流程</label>
-        <select id="nkProcess"><option value="">不关联</option></select></div>
+      <div class="field"><label>方向</label>
+        <select id="nkDir">
+          <option value="LOWER_BETTER"${value('direction') === 'LOWER_BETTER' ? ' selected' : ''}>越小越好</option>
+          <option value="HIGHER_BETTER"${value('direction') === 'HIGHER_BETTER' ? ' selected' : ''}>越大越好</option>
+        </select></div>
+      <div class="field"><label>单位</label>
+        <input id="nkUnit" value="${esc(value('unit'))}" placeholder="天 / % / 元"></div>
+      <div class="field"><label>粒度</label>
+        <input id="nkGran" value="${esc(value('granularity'))}" placeholder="如 每张订单 / 月"></div>
+    </div>
+    <div class="field"><label>计算公式 *</label>
+      <textarea id="nkFormula" rows="2" placeholder="Σ(结束时间 − 开始时间) ÷ 单数">${esc(value('formula'))}</textarea>
+      <div class="hint">公式与分子分母至少填一组；同一流程下同名 KPI 不允许出现两种公式</div></div>
+    <div class="row2">
+      <div class="field"><label>分子</label>
+        <input id="nkNumerator" value="${esc(value('numerator'))}" placeholder="如 按时交付订单数"></div>
+      <div class="field"><label>分母</label>
+        <input id="nkDenominator" value="${esc(value('denominator'))}" placeholder="如 总订单数"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>数据来源系统</label>
+        <input id="nkSource" value="${esc(value('source_system'))}" placeholder="ERP / MES / OA"></div>
+      <div class="field"><label>口径说明</label>
+        <input id="nkDesc" value="${esc(value('description'))}" placeholder="数据怎么算、排除什么"></div>
+      <div class="field"><label>质量规则</label>
+        <input id="nkQuality" value="${esc(value('quality_rule'))}" placeholder="如 剔除撤销单"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>基线值</label>
+        <input id="nkBase" type="number" step="0.01" value="${numValue('baseline_value')}"></div>
+      <div class="field"><label>目标值</label>
+        <input id="nkTarget" type="number" step="0.01" value="${numValue('target_value')}"></div>
+      <div class="field"><label>生效版本</label>
+        <input value="${kpi ? 'v' + kpi.version + '（保存后自动 +1）' : 'v1'}" readonly></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>红线</label>
+        <input id="nkRed" type="number" step="0.01" value="${numValue('red_threshold')}"></div>
+      <div class="field"><label>黄线</label>
+        <input id="nkYellow" type="number" step="0.01" value="${numValue('yellow_threshold')}"></div>
+      <div class="field"><label>绿线</label>
+        <input id="nkGreen" type="number" step="0.01" value="${numValue('green_threshold')}"></div>
     </div>
     <div class="row2">
-      <div class="field"><label>责任人</label><input id="nkOwner" placeholder="指标 Owner"></div>
-      <div class="field"><label>统计口径说明</label><input id="nkDesc" placeholder="数据怎么来的"></div>
-    </div>`,
+      <div class="field"><label>生效日期</label>
+        <input id="nkValidFrom" type="date" value="${esc(value('valid_from'))}"></div>
+      <div class="field"><label>失效日期</label>
+        <input id="nkValidTo" type="date" value="${esc(value('valid_to'))}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>归属流程（L2–L4）</label>
+        <select id="nkProcess"><option value="">不关联</option></select></div>
+      <div class="field"><label>绑定 L4 活动</label>
+        <select id="nkActivity"><option value="">不绑定</option></select></div>
+    </div>
+    <div class="field"><label>责任人</label>
+      <select id="nkOwner"><option value="">未指派</option></select>
+      ${kpi && kpi.owner && !kpi.owner_user_id
+        ? `<div class="hint">当前展示名「${esc(kpi.owner)}」未绑定账号；选择人员后会同步绑定</div>`
+        : ''}</div>
+    <div class="note">红/黄/绿必须同时填写：越大越好时 红 ≤ 黄 ≤ 绿，越小越好时 红 ≥ 黄 ≥ 绿。
+      保存定义会让版本 +1，追加数据点不会。</div>`,
     `<button class="btn btn-g" data-act="monitor.close">取消</button>
-     <button class="btn btn-p" data-act="monitor.submitKpi">创建</button>`);
+     <button class="btn btn-p" data-act="monitor.submitKpi"
+       data-kpi="${kpi ? kpi.id : ''}">${kpi ? '保存' : '创建'}</button>`);
 
-  GET('/process-map/flat').then((rows) => {
-    const sel = document.getElementById('nkProcess');
-    if (!sel) return;
-    rows.filter((r) => r.level >= 2).forEach((r) => {
-      const o = document.createElement('option');
-      o.value = String(r.id);
-      o.textContent = 'L' + r.level + ' ' + r.code + ' ' + r.name;
-      sel.appendChild(o);
-    });
-  }).catch(() => {});
+  Promise.all([GET('/process-map/flat'), GET('/execution/assignees')])
+    .then(([rows, users]) => {
+      const procSel = document.getElementById('nkProcess');
+      if (procSel) {
+        rows.filter((r) => r.level >= 2).forEach((r) => {
+          const o = document.createElement('option');
+          o.value = String(r.id);
+          o.textContent = 'L' + r.level + ' ' + r.code + ' ' + r.name;
+          o.selected = kpi && kpi.process_id === r.id;
+          procSel.appendChild(o);
+        });
+      }
+      const actSel = document.getElementById('nkActivity');
+      if (actSel) {
+        rows.filter((r) => r.level === 4).forEach((r) => {
+          const o = document.createElement('option');
+          o.value = String(r.id);
+          o.textContent = r.code + ' ' + r.name;
+          o.selected = kpi && kpi.activity_id === r.id;
+          actSel.appendChild(o);
+        });
+      }
+      const ownerSel = document.getElementById('nkOwner');
+      if (ownerSel) {
+        users.forEach((user) => {
+          const o = document.createElement('option');
+          o.value = String(user.id);
+          o.textContent = user.display_name + ' · ' + (user.role_label || user.role);
+          o.selected = kpi && kpi.owner_user_id === user.id;
+          ownerSel.appendChild(o);
+        });
+      }
+    })
+    .catch(() => {});
 }
 
-async function submitKpi() {
+async function submitKpi(kpiId) {
   const val = (id) => {
     const el = document.getElementById(id);
     return el ? el.value : '';
   };
-  const numOrNull = (id) => (val(id) === '' ? null : Number(val(id)));
+  const numOrNull = (id) => (val(id).trim() === '' ? null : Number(val(id)));
+  const textOrNull = (id) => val(id).trim() || null;
   const code = val('nkCode').trim();
   const name = val('nkName').trim();
   if (!code) return toast('请填写 KPI 编码', true);
   if (!name) return toast('请填写指标名称', true);
+  if (!val('nkFormula').trim()
+    && !(val('nkNumerator').trim() && val('nkDenominator').trim())) {
+    return toast('请填写计算公式，或同时填写分子与分母', true);
+  }
+
+  const thresholds = ['nkRed', 'nkYellow', 'nkGreen'].map((id) => numOrNull(id));
+  if (thresholds.some((v) => v !== null) && thresholds.some((v) => v === null)) {
+    return toast('红/黄/绿阈值必须同时填写或同时留空', true);
+  }
+  const validFrom = val('nkValidFrom') || null;
+  const validTo = val('nkValidTo') || null;
+  if (validFrom && validTo && validFrom > validTo) {
+    return toast('生效日期不能晚于失效日期', true);
+  }
+
+  const ownerId = val('nkOwner');
+  const payload = {
+    code,
+    name,
+    dimension: val('nkDim'),
+    kind: val('nkKind'),
+    direction: val('nkDir'),
+    frequency: val('nkFreq'),
+    unit: textOrNull('nkUnit'),
+    granularity: textOrNull('nkGran'),
+    formula: textOrNull('nkFormula'),
+    numerator: textOrNull('nkNumerator'),
+    denominator: textOrNull('nkDenominator'),
+    source_system: textOrNull('nkSource'),
+    description: textOrNull('nkDesc'),
+    quality_rule: textOrNull('nkQuality'),
+    baseline_value: numOrNull('nkBase'),
+    target_value: numOrNull('nkTarget'),
+    red_threshold: thresholds[0],
+    yellow_threshold: thresholds[1],
+    green_threshold: thresholds[2],
+    valid_from: validFrom,
+    valid_to: validTo,
+    process_id: val('nkProcess') ? Number(val('nkProcess')) : null,
+    activity_id: val('nkActivity') ? Number(val('nkActivity')) : null,
+    owner_user_id: ownerId ? Number(ownerId) : null,
+  };
+  // 旧数据只有展示名、没有账号绑定：未选人时保留原文，避免保存后被清空
+  if (!ownerId && editingKpi && editingKpi.owner) payload.owner = editingKpi.owner;
 
   try {
-    await POST('/monitor/kpis', {
-      code,
-      name,
-      dimension: val('nkDim'),
-      direction: val('nkDir'),
-      unit: val('nkUnit').trim() || null,
-      baseline_value: numOrNull('nkBase'),
-      target_value: numOrNull('nkTarget'),
-      process_id: val('nkProcess') ? Number(val('nkProcess')) : null,
-      owner: val('nkOwner').trim() || null,
-      description: val('nkDesc').trim() || null,
-    });
+    if (kpiId) {
+      await PATCH('/monitor/kpis/' + kpiId, payload);
+      toast('KPI 定义已更新');
+    } else {
+      await POST('/monitor/kpis', payload);
+      toast('KPI 已创建');
+    }
+    editingKpi = null;
     closeModal();
-    toast('KPI 已创建');
+    state.monitor.tab = 'kpi';
     RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);
@@ -705,6 +1022,226 @@ async function submitKpiRecord(kpiId) {
     closeModal();
     toast('数据点已保存');
     state.monitor.tab = 'kpi';
+    RENDERERS.monitor();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+
+async function createImprovement(kpiId) {
+  try {
+    const draft = await POST('/monitor/kpis/' + kpiId + '/improvement-draft');
+    toast('已生成改善项目 ' + draft.code);
+    appActions['projects.open'](draft.id);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* -------------------------------------------------- 工作量：标准工时与产能 */
+function newWorkloadStandardModal() {
+  const meta = state.workloadMeta || { source_labels: {} };
+  const sourceOptions = Object.entries(meta.source_labels).map(([value, label]) =>
+    `<option value="${esc(value)}">${esc(label)}</option>`).join('');
+  openModal('新建标准工时卡', `
+    <div class="row2">
+      <div class="field"><label>名称 *</label>
+        <input id="wsName" placeholder="如 采购需求汇总与归并"></div>
+      <div class="field"><label>来源方法</label>
+        <select id="wsSource">${sourceOptions}</select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>L4 活动 *</label>
+        <select id="wsActivity"><option value="">请选择</option></select></div>
+      <div class="field"><label>岗位 *</label>
+        <select id="wsPosition"><option value="">请选择</option></select></div>
+    </div>
+    <div class="field"><label>方法说明 *</label>
+      <input id="wsMethod" placeholder="动作序列、设备、物料、检验"></div>
+    <div class="row3">
+      <div class="field"><label>观测时间（分钟）*</label>
+        <input id="wsObserved" type="number" step="0.01" min="0" placeholder="原始观测均值"></div>
+      <div class="field"><label>评定系数</label>
+        <input id="wsRating" type="number" step="0.01" min="0.5" max="2" value="1"></div>
+      <div class="field"><label>宽放率（0–1）</label>
+        <input id="wsAllowance" type="number" step="0.01" min="0" max="1" value="0.1"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>有效样本</label>
+        <input id="wsSample" type="number" min="0" value="0"></div>
+      <div class="field"><label>月频次</label>
+        <input id="wsFrequency" type="number" step="0.1" min="0" value="0"></div>
+      <div class="field"><label>适用组织</label>
+        <select id="wsOrg"><option value="">集团通用</option></select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>生效日期</label><input id="wsFrom" type="date"></div>
+      <div class="field"><label>失效日期</label><input id="wsTo" type="date"></div>
+    </div>
+    <div class="note">标准工时 = 观测 × 评定系数 × (1 + 宽放率)。
+      新建为草稿；估算来源不能直接验证，验证后才进入产能口径。</div>`,
+    `<button class="btn btn-g" data-act="monitor.close">取消</button>
+     <button class="btn btn-p" data-act="monitor.submitStandard">创建</button>`);
+
+  Promise.all([GET('/process-map/flat?level=4'), GET('/positions'), GET('/org-units')])
+    .then(([activities, positions, orgs]) => {
+      const actSel = document.getElementById('wsActivity');
+      if (actSel) {
+        activities.forEach((row) => {
+          const o = document.createElement('option');
+          o.value = String(row.id);
+          o.textContent = row.code + ' ' + row.name;
+          actSel.appendChild(o);
+        });
+      }
+      const posSel = document.getElementById('wsPosition');
+      if (posSel) {
+        positions.forEach((row) => {
+          const o = document.createElement('option');
+          o.value = String(row.id);
+          o.textContent = row.name + (row.org_unit_name ? ' · ' + row.org_unit_name : '');
+          posSel.appendChild(o);
+        });
+      }
+      const orgSel = document.getElementById('wsOrg');
+      if (orgSel) {
+        orgs.forEach((row) => {
+          const o = document.createElement('option');
+          o.value = String(row.id);
+          o.textContent = row.name;
+          orgSel.appendChild(o);
+        });
+      }
+    })
+    .catch(() => {});
+}
+
+async function submitWorkloadStandard() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  const numVal = (id) => Number(val(id) || 0);
+  const textOrNull = (id) => val(id).trim() || null;
+  const name = val('wsName').trim();
+  if (!name) return toast('请填写标准名称', true);
+  if (!val('wsActivity')) return toast('请选择 L4 活动', true);
+  if (!val('wsPosition')) return toast('请选择岗位', true);
+  if (numVal('wsObserved') <= 0) return toast('观测时间必须大于 0', true);
+  try {
+    await POST('/workload/standards', {
+      name,
+      activity_id: Number(val('wsActivity')),
+      position_id: Number(val('wsPosition')),
+      org_unit_id: val('wsOrg') ? Number(val('wsOrg')) : null,
+      method_description: textOrNull('wsMethod'),
+      source: val('wsSource'),
+      observed_minutes: numVal('wsObserved'),
+      rating_factor: numVal('wsRating'),
+      allowance_rate: numVal('wsAllowance'),
+      sample_size: Number(val('wsSample') || 0),
+      monthly_frequency: numVal('wsFrequency'),
+      valid_from: val('wsFrom') || null,
+      valid_to: val('wsTo') || null,
+    });
+    closeModal();
+    toast('标准工时卡已创建（草稿）');
+    state.monitor.tab = 'workload';
+    RENDERERS.monitor();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function verifyWorkloadStandard(standardId) {
+  const ok = await confirmDialog('验证后该标准工时会进入产能与负荷口径，确定继续？',
+    { title: '验证标准工时', okText: '验证' });
+  if (!ok) return;
+  try {
+    await POST('/workload/standards/' + standardId + '/verify');
+    toast('标准工时已验证');
+    state.monitor.tab = 'workload';
+    RENDERERS.monitor();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function newCapacityModal() {
+  const now = new Date();
+  const month = state.monitor.period || now.getFullYear() + '-' + _p2(now.getMonth() + 1);
+  openModal('登记产能', `
+    <div class="row2">
+      <div class="field"><label>组织 *</label>
+        <select id="capOrg"><option value="">请选择</option></select></div>
+      <div class="field"><label>岗位 *</label>
+        <select id="capPosition"><option value="">请选择</option></select></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>期间 *</label><input id="capPeriod" type="month" value="${month}"></div>
+      <div class="field"><label>人数</label>
+        <input id="capHeadcount" type="number" step="0.1" min="0" value="1"></div>
+      <div class="field"><label>人均可用工时</label>
+        <input id="capHours" type="number" step="1" min="0" value="168"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>出勤率（0–1）</label>
+        <input id="capAttendance" type="number" step="0.01" min="0" max="1" value="1"></div>
+      <div class="field"><label>设备可用率（0–1）</label>
+        <input id="capEquipment" type="number" step="0.01" min="0" max="1" value="1"></div>
+    </div>
+    <div class="field"><label>备注</label><input id="capNote" placeholder="如 班次调整 / 计划停机"></div>
+    <div class="note">可用工时 = 人数 × 人均可用工时 × 60 × 出勤率 × 设备可用率。</div>`,
+    `<button class="btn btn-g" data-act="monitor.close">取消</button>
+     <button class="btn btn-p" data-act="monitor.submitCapacity">保存</button>`);
+
+  Promise.all([GET('/org-units'), GET('/positions')])
+    .then(([orgs, positions]) => {
+      const orgSel = document.getElementById('capOrg');
+      if (orgSel) {
+        orgs.forEach((row) => {
+          const o = document.createElement('option');
+          o.value = String(row.id);
+          o.textContent = row.name;
+          orgSel.appendChild(o);
+        });
+      }
+      const posSel = document.getElementById('capPosition');
+      if (posSel) {
+        positions.forEach((row) => {
+          const o = document.createElement('option');
+          o.value = String(row.id);
+          o.textContent = row.name + (row.org_unit_name ? ' · ' + row.org_unit_name : '');
+          posSel.appendChild(o);
+        });
+      }
+    })
+    .catch(() => {});
+}
+
+async function submitCapacity() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  if (!val('capOrg')) return toast('请选择组织', true);
+  if (!val('capPosition')) return toast('请选择岗位', true);
+  if (!val('capPeriod')) return toast('请选择期间', true);
+  try {
+    await POST('/workload/capacity', {
+      org_unit_id: Number(val('capOrg')),
+      position_id: Number(val('capPosition')),
+      period: val('capPeriod') + '-01',
+      headcount: Number(val('capHeadcount') || 0),
+      available_hours_per_person: Number(val('capHours') || 0),
+      attendance_rate: Number(val('capAttendance') || 1),
+      equipment_availability: Number(val('capEquipment') || 1),
+      note: val('capNote').trim() || null,
+    });
+    closeModal();
+    toast('产能已登记');
+    state.monitor.tab = 'workload';
     RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);

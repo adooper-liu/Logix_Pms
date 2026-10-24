@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
     DbSession,
@@ -19,7 +20,7 @@ from app.api.deps import (
 from app.core.timeutil import utcnow
 from app.models.deliverable import DeliverableInstance, DeliverableVersion
 from app.models.enums import Methodology, ProjectStatus, Role, StepStatus
-from app.models.monitor import ExceptionEvent, KpiRecord
+from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.schemas.common import DeleteResult, Page, as_columns
@@ -31,6 +32,7 @@ from app.schemas.project import (
     ProjectCreate,
     ProjectDetail,
     ProjectKpiPoint,
+    ProjectMetaOut,
     ProjectOut,
     ProjectSchedule,
     ProjectStepOut,
@@ -42,6 +44,7 @@ from app.schemas.project import (
 )
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
+from app.services import improvement as improvement_service
 from app.services import methodology as methodology_service
 from app.services import storage as storage_service
 from app.services.workflow import STAGE_NAMES, recompute_progress, seed_project_steps
@@ -77,20 +80,19 @@ def _to_out(p: Project, process_name: Optional[str] = None) -> ProjectOut:
     data["methodology_label"] = METHODOLOGY_LABELS.get(p.methodology, p.methodology)
     data["status_label"] = STATUS_LABELS.get(p.status, p.status)
     data["stage_name"] = STAGE_NAMES.get(p.current_stage)
+    data["source_label"] = improvement_service.SOURCE_LABELS.get(p.source, p.source)
+    data["replication_status_label"] = improvement_service.REPLICATION_LABELS.get(
+        p.replication_status, p.replication_status
+    )
+    data["source_kpi_code"] = p.source_kpi.code if p.source_kpi else None
+    data["source_kpi_name"] = p.source_kpi.name if p.source_kpi else None
     return ProjectOut.model_validate(data)
 
 
-def _next_code(db: DbSession) -> str:
-    year = date.today().year
-    prefix = f"PRJ-{year}-"
-    existing = db.scalars(select(Project.code).where(Project.code.like(f"{prefix}%"))).all()
-    seq = 0
-    for code in existing:
-        try:
-            seq = max(seq, int(code.rsplit("-", 1)[1]))
-        except (IndexError, ValueError):
-            continue
-    return f"{prefix}{seq + 1:03d}"
+def _validate_source_kpi(db: DbSession, data: dict) -> None:
+    kpi_id = data.get("source_kpi_id")
+    if kpi_id is not None and db.get(KpiDefinition, kpi_id) is None:
+        raise HTTPException(status_code=400, detail="source_kpi_id 指向的 KPI 不存在")
 
 
 # ------------------------------------------------------------------ 立项向导
@@ -106,6 +108,14 @@ def recommend_methodology(payload: MethodologyRecommendRequest, db: DbSession):
 
 
 # ------------------------------------------------------------------ 汇总
+
+
+@router.get("/meta", response_model=ProjectMetaOut, summary="项目来源与复制状态标签")
+def project_meta():
+    return ProjectMetaOut(
+        source_labels=improvement_service.SOURCE_LABELS,
+        replication_status_labels=improvement_service.REPLICATION_LABELS,
+    )
 
 
 @router.get("/meta/summary", summary="项目组合汇总（按方法论 / 状态 / 优先级）")
@@ -151,7 +161,7 @@ def list_projects(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
 ):
-    stmt = select(Project)
+    stmt = select(Project).options(joinedload(Project.source_kpi))
     if methodology is not None:
         stmt = stmt.where(Project.methodology == methodology.value)
     if status_ is not None:
@@ -198,11 +208,12 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
         data["owner"] = user.display_name
     if not data.get("owner"):
         raise HTTPException(status_code=400, detail="必须指定 Owner（owner 或 owner_user_id）")
-    code = payload.code or _next_code(db)
+    code = payload.code or improvement_service.next_project_code(db)
     if db.scalar(select(Project).where(Project.code == code)):
         raise HTTPException(status_code=409, detail=f"项目编码 {code} 已存在")
     if data.get("process_id") is not None and db.get(ProcessArch, data["process_id"]) is None:
         raise HTTPException(status_code=400, detail="process_id 指向的流程不存在")
+    _validate_source_kpi(db, data)
 
     # 自动推算目标改善幅度
     baseline, target = data.get("baseline_value"), data.get("target_value")
@@ -304,6 +315,7 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
         raise HTTPException(status_code=404, detail="项目不存在")
     ensure_can_edit_owned(user, project.owner_user_id, project.owner)
     data = as_columns(payload.model_dump(exclude_unset=True))
+    _validate_source_kpi(db, data)
     if user.role == Role.OWNER.value:
         # 归属不由 OWNER 自己变更，避免把项目转给他人或冒名
         data.pop("owner", None)

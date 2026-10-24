@@ -31,6 +31,7 @@ class ProcessArchBase(BaseModel):
     improvement_space: float = Field(default=3.0, ge=0, le=5)
     health_score: Optional[float] = Field(default=None, ge=0, le=100)
     is_improvement_target: bool = False
+    requires_change_request: bool = False
 
 
 class ProcessArchCreate(ProcessArchBase):
@@ -49,6 +50,7 @@ class ProcessArchUpdate(BaseModel):
     improvement_space: Optional[float] = Field(default=None, ge=0, le=5)
     health_score: Optional[float] = Field(default=None, ge=0, le=100)
     is_improvement_target: Optional[bool] = None
+    requires_change_request: Optional[bool] = None
 
 
 class ProcessArchOut(ORMModel):
@@ -68,6 +70,7 @@ class ProcessArchOut(ORMModel):
     improvement_space: float
     health_score: Optional[float] = None
     is_improvement_target: bool
+    requires_change_request: bool = False
     is_draft: bool = False
     source_framework_code: Optional[str] = None
     source_external_id: Optional[str] = None
@@ -227,6 +230,7 @@ class ProcessModelOut(BaseModel):
     version_id: Optional[int] = None
     published_version: int = 0
     updated_at: Optional[UtcDateTime] = None
+    requires_change_request: bool = False
     nodes: List[ProcessNodeOut] = []
     edges: List[ProcessEdgeOut] = []
 
@@ -237,6 +241,7 @@ class ProcessModelVersionOut(BaseModel):
     status: str
     status_label: str
     change_note: Optional[str] = None
+    change_request_id: Optional[int] = None
     created_by_name: Optional[str] = None
     created_at: UtcDateTime
     reviewed_by_name: Optional[str] = None
@@ -257,6 +262,9 @@ class PublishModelRequest(BaseModel):
         default=None, description="客户端看到的版本；不一致时拒绝发布"
     )
     change_note: Optional[str] = Field(default=None, max_length=200)
+    change_request_id: Optional[int] = Field(
+        default=None, description="启用变更门禁的流程必须引用一张已批准的变更申请"
+    )
 
 
 class ReviewModelRequest(BaseModel):

@@ -87,6 +87,12 @@ class ProcessTask(Base):
     name: Mapped[str] = mapped_column(String(128))
     task_type: Mapped[str] = mapped_column(String(16), default="TASK")
     lane: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 任务创建时从实例快照冻结的 L4 活动；用于把实际工时归集到活动
+    activity_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="SET NULL", name="fk_process_task_activity"),
+        nullable=True,
+        index=True,
+    )
     candidate_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # 结构化分派：角色编码与组织范围；candidate_role 保留展示文本
     candidate_role_code: Mapped[Optional[str]] = mapped_column(

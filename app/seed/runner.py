@@ -19,6 +19,7 @@ from app.models.benchmark import (
     BenchmarkMetric,
     ProcessBenchmarkMap,
 )
+from app.models.change import ProcessChangeRequest
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -58,14 +59,26 @@ from app.models.process import (
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.sketch import Sketch
+from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
+from app.models.workload import CapacityCalendar, WorkMeasurementStandard
 from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
-from app.seed import benchmark_data, corpus, corpus_data, deliverable_data, pcf_data
+from app.seed import (
+    benchmark_data,
+    change_data,
+    corpus,
+    corpus_data,
+    deliverable_data,
+    pcf_data,
+    strategy_data,
+    workload_data,
+)
 from app.services import deliverable as deliverable_service
 from app.services import execution as execution_service
 from app.services import notifications as notification_service
+from app.services import workload as workload_service
 from app.services.workflow import recompute_progress, seed_project_steps
 
 # 设计器画布上的排布参数
@@ -139,6 +152,7 @@ def _seed_process_arch(
             improvement_space=row.get("space", 3.0),
             health_score=row.get("health"),
             is_improvement_target=row.get("target", False),
+            requires_change_request=row.get("requires_change_request", False),
         )
         db.add(obj)
         db.flush()
@@ -384,9 +398,11 @@ def _seed_benchmarks(
                 name=row["name"],
                 name_en=row.get("name_en"),
                 name_zh=row.get("name_zh"),
+                name_zh_source=row.get("name_zh_source"),
                 external_id=row["external_id"],
                 level=row["level"],
                 description=row.get("description"),
+                description_zh=row.get("description_zh"),
                 metrics_available=row.get("metrics_available", False),
                 difference_index=row.get("difference_index", 0),
                 change_details=row.get("change_details"),
@@ -421,6 +437,11 @@ def _seed_benchmarks(
                     formula=row.get("formula"),
                     unit=row.get("unit"),
                     source=row.get("source"),
+                    name_zh=row.get("name_zh"),
+                    formula_zh=row.get("formula_zh"),
+                    unit_zh=row.get("unit_zh"),
+                    category_label_zh=row.get("category_label_zh"),
+                    translation_source=row.get("translation_source"),
                 )
                 for row in pcf_data.metric_rows()
             ]
@@ -473,26 +494,180 @@ def _seed_benchmarks(
             )
 
 
-def _seed_kpis(db: Session, code_to_id: Dict[str, int]) -> None:
+def _seed_kpis(db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]) -> Dict[str, int]:
     periods = [date.fromisoformat(p) for p in corpus_data.KPI_PERIODS]
+    ids: Dict[str, int] = {}
     for row in corpus_data.KPIS:
+        card = corpus_data.KPI_DEFINITION_CARDS[row["code"]]
+        owner_name = row.get("owner")
         kpi = KpiDefinition(
             code=row["code"],
             name=row["name"],
             dimension=row["dimension"],
+            kind=card["kind"],
             direction=row["direction"],
             unit=row.get("unit"),
             target_value=row.get("target_value"),
             baseline_value=row.get("baseline_value"),
             description=row.get("description"),
+            formula=card.get("formula"),
+            numerator=card.get("numerator"),
+            denominator=card.get("denominator"),
+            granularity=card.get("granularity"),
+            frequency=card["frequency"],
+            source_system=card.get("source_system"),
+            quality_rule=card.get("quality_rule"),
+            red_threshold=card.get("red_threshold"),
+            yellow_threshold=card.get("yellow_threshold"),
+            green_threshold=card.get("green_threshold"),
             process_id=code_to_id.get(row["process"]) if row.get("process") else None,
-            owner=row.get("owner"),
+            owner=owner_name,
+            owner_user_id=_owner_user_id(owner_name, user_ids),
+            version=1,
+            valid_from=(date.fromisoformat(card["valid_from"]) if card.get("valid_from") else None),
+            valid_to=date.fromisoformat(card["valid_to"]) if card.get("valid_to") else None,
             is_active=True,
         )
         db.add(kpi)
         db.flush()
+        ids[row["code"]] = kpi.id
         for period, value in zip(periods, row["values"], strict=False):
             db.add(KpiRecord(kpi_id=kpi.id, period=period, value=float(value)))
+    return ids
+
+
+def _seed_strategy(
+    db: Session,
+    code_to_id: Dict[str, int],
+    user_ids: Dict[str, int],
+    kpi_ids: Dict[str, int],
+) -> None:
+    for row in strategy_data.STRATEGY_OBJECTIVES:
+        owner_name = row.get("owner")
+        objective = StrategyObjective(
+            code=row["code"],
+            name=row["name"],
+            description=row.get("description"),
+            year=row["year"],
+            period=row["period"],
+            baseline_value=row.get("baseline_value"),
+            target_value=row.get("target_value"),
+            unit=row.get("unit"),
+            source_document=row.get("source_document"),
+            owner=owner_name,
+            owner_user_id=_owner_user_id(owner_name, user_ids),
+            status=row.get("status", "ACTIVE"),
+        )
+        db.add(objective)
+        db.flush()
+        for link in row.get("links", []):
+            process_id = code_to_id.get(link["process"])
+            if not process_id:
+                continue
+            kpi_id = kpi_ids.get(link["kpi"]) if link.get("kpi") else None
+            db.add(
+                ObjectiveProcessLink(
+                    objective_id=objective.id,
+                    process_id=process_id,
+                    kpi_id=kpi_id,
+                    note=link.get("note"),
+                )
+            )
+    db.flush()
+
+
+def _seed_workload(
+    db: Session,
+    code_to_id: Dict[str, int],
+    position_ids: Dict[str, int],
+    org_ids: Dict[str, int],
+    user_ids: Dict[str, int],
+) -> None:
+    verifier_id = user_ids.get("流程管理科")
+    for row in workload_data.WORK_MEASUREMENT_STANDARDS:
+        activity_id = code_to_id.get(row["activity"])
+        position_id = position_ids.get(row["position"])
+        if not activity_id or not position_id:
+            continue
+        verified = row["status"] == "VERIFIED"
+        db.add(
+            WorkMeasurementStandard(
+                code=row["code"],
+                name=row["name"],
+                activity_id=activity_id,
+                position_id=position_id,
+                org_unit_id=org_ids.get(row["org"]) if row.get("org") else None,
+                method_description=row.get("method"),
+                source=row["source"],
+                observed_minutes=row["observed_minutes"],
+                rating_factor=row["rating_factor"],
+                allowance_rate=row["allowance_rate"],
+                standard_minutes=workload_service.compute_standard_minutes(
+                    row["observed_minutes"], row["rating_factor"], row["allowance_rate"]
+                ),
+                sample_size=row["sample_size"],
+                monthly_frequency=row["monthly_frequency"],
+                status=row["status"],
+                version=1,
+                valid_from=(
+                    date.fromisoformat(row["valid_from"]) if row.get("valid_from") else None
+                ),
+                valid_to=date.fromisoformat(row["valid_to"]) if row.get("valid_to") else None,
+                note=row.get("note"),
+                verified_by_id=verifier_id if verified else None,
+                verified_at=utcnow() if verified else None,
+                created_by_id=verifier_id,
+            )
+        )
+    for row in workload_data.CAPACITY_CALENDAR:
+        org_id = org_ids.get(row["org"])
+        position_id = position_ids.get(row["position"])
+        if not org_id or not position_id:
+            continue
+        db.add(
+            CapacityCalendar(
+                org_unit_id=org_id,
+                position_id=position_id,
+                period=date.fromisoformat(row["period"]),
+                headcount=row["headcount"],
+                available_hours_per_person=row["available_hours_per_person"],
+                attendance_rate=row["attendance_rate"],
+                equipment_availability=row["equipment_availability"],
+                note=row.get("note"),
+            )
+        )
+    db.flush()
+
+
+def _seed_changes(db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]) -> None:
+    for row in change_data.CHANGE_REQUESTS:
+        process_id = code_to_id.get(row["process"])
+        if not process_id:
+            continue
+        requester = row.get("requested_by")
+        db.add(
+            ProcessChangeRequest(
+                code=row["code"],
+                process_id=process_id,
+                title=row["title"],
+                reason=row.get("reason"),
+                scope=row.get("scope"),
+                change_type=row.get("change_type", "STRUCTURE"),
+                impact_level=row.get("impact_level", "MINOR"),
+                version_label=row.get("version_label"),
+                impact=row.get("impact") or {},
+                test_evidence=row.get("test_evidence"),
+                rollback_plan=row.get("rollback_plan"),
+                effective_date=(
+                    date.fromisoformat(row["effective_date"]) if row.get("effective_date") else None
+                ),
+                emergency=row.get("emergency", False),
+                status=row.get("status", "DRAFT"),
+                requested_by_id=_owner_user_id(requester, user_ids),
+                requested_by_name=requester,
+            )
+        )
+    db.flush()
 
 
 def _seed_exceptions(
@@ -914,6 +1089,10 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        ObjectiveProcessLink,
+        StrategyObjective,
+        WorkMeasurementStandard,
+        CapacityCalendar,
         GovernanceFinding,
         TemplateUsage,
         ToolTemplateVersion,
@@ -936,6 +1115,7 @@ def _wipe(db: Session) -> None:
         ProcessBenchmarkMap,
         BenchmarkMetric,
         ProcessModelVersion,
+        ProcessChangeRequest,
         NodeTool,
         ProcessEdge,
         ProcessNode,
@@ -984,10 +1164,13 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_deliverable_definitions(db)
     _seed_benchmarks(db, code_to_id)
     project_ids = _seed_projects(db, code_to_id, user_ids)
-    _seed_kpis(db, code_to_id)
+    kpi_ids = _seed_kpis(db, code_to_id, user_ids)
+    _seed_workload(db, code_to_id, position_ids, org_ids, user_ids)
+    _seed_strategy(db, code_to_id, user_ids, kpi_ids)
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids)
     _seed_design_models(db, code_to_id, position_ids)
+    _seed_changes(db, code_to_id, user_ids)
     _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)
     _seed_notifications(db, user_ids)

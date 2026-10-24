@@ -74,6 +74,10 @@ class ProcessArch(Base):
     # 最近一次发布到运行时的版本；新实例按这个版本快照
     published_model_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     model_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 为 True 时，发布模型必须引用一张已批准的变更申请
+    requires_change_request: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
 
     children: Mapped[List["ProcessArch"]] = relationship(
         "ProcessArch",
@@ -249,6 +253,16 @@ class ProcessModelVersion(Base):
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 发布时引用的变更申请；重大变更/门禁流程由它提供影响分析证据
+    change_request_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "process_change_request.id",
+            ondelete="SET NULL",
+            name="fk_model_version_change_request",
+        ),
+        nullable=True,
+        index=True,
+    )
     # bpmn-js 的完整 XML（含 DI 坐标/连线折点/泳道）；用于还原用户的版面调整
     bpmn_xml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     change_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

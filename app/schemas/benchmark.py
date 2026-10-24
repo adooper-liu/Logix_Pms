@@ -38,10 +38,18 @@ class BenchmarkCategoryOut(BaseModel):
     name: str
     name_en: Optional[str] = None
     name_zh: Optional[str] = None
+    name_zh_source: Optional[str] = Field(
+        default=None,
+        description="中文名来源：APQC_CN = 官方中文整理版；REFERENCE = 自建参考译文（非官方）",
+    )
     external_id: Optional[str] = None
     level: int
     parent_id: Optional[int] = None
     description: Optional[str] = None
+    description_zh: Optional[str] = Field(
+        default=None,
+        description="官方定义的中文参考译文（非 APQC 官方）；与官方英文原文并存",
+    )
     metrics_available: bool = False
     metric_count: int = 0
     difference_index: int = 0
@@ -89,15 +97,23 @@ class CoverageCategoryOut(BaseModel):
     name: str
     name_en: Optional[str] = None
     name_zh: Optional[str] = None
+    name_zh_source: Optional[str] = None
     external_id: Optional[str] = None
     level: int
     description: Optional[str] = None
+    description_zh: Optional[str] = None
     metric_count: int = 0
     mapped_count: int = 0
     processes: List[ProcessRef] = []
 
 
 class BenchmarkMetricOut(BaseModel):
+    """PCF 指标。
+
+    `name` / `formula` / `unit` / `metric_category` 是 APQC 官方英文原文；
+    带 `_zh` 的是自建中文参考译文，**非官方**，界面必须标注来源。
+    """
+
     id: int
     external_id: str
     metric_id: str
@@ -106,6 +122,14 @@ class BenchmarkMetricOut(BaseModel):
     formula: Optional[str] = None
     unit: Optional[str] = None
     source: Optional[str] = None
+    name_zh: Optional[str] = None
+    formula_zh: Optional[str] = None
+    unit_zh: Optional[str] = None
+    category_label_zh: Optional[str] = None
+    translation_source: Optional[str] = Field(
+        default=None,
+        description="译文来源；当前指标译文均为 REFERENCE（本系统自建参考译文，非 APQC 官方）",
+    )
 
 
 class CategoryMetricsOut(BaseModel):
@@ -115,6 +139,7 @@ class CategoryMetricsOut(BaseModel):
     code: str
     name: str
     name_en: Optional[str] = None
+    name_zh: Optional[str] = None
     external_id: Optional[str] = None
     metrics: List[BenchmarkMetricOut] = []
 

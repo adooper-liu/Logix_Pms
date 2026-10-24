@@ -8,7 +8,15 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime
-from app.models.enums import Methodology, ProcessState, ProjectStatus, ScopeType, StepStatus
+from app.models.enums import (
+    ImprovementSource,
+    Methodology,
+    ProcessState,
+    ProjectStatus,
+    ReplicationStatus,
+    ScopeType,
+    StepStatus,
+)
 from app.schemas.common import ORMModel
 
 # ---------------------------------------------------------------- 标准工作流
@@ -87,6 +95,20 @@ class ProjectBase(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
 
+    # 改善项目卡
+    source: ImprovementSource = ImprovementSource.MANUAL
+    source_kpi_id: Optional[int] = None
+    problem_statement: Optional[str] = None
+    root_cause: Optional[str] = None
+    countermeasure: Optional[str] = None
+    verification: Optional[str] = None
+    benefit: Optional[str] = None
+    observation_until: Optional[date] = None
+    one_time_cost: float = 0
+    transfer_cost: float = 0
+    replication_status: ReplicationStatus = ReplicationStatus.NOT_EVALUATED
+    replication_note: Optional[str] = None
+
 
 class ProjectCreate(ProjectBase):
     code: Optional[str] = Field(default=None, description="不传则自动生成 PRJ-YYYY-NNN")
@@ -119,6 +141,18 @@ class ProjectUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     progress: Optional[float] = Field(default=None, ge=0, le=100)
+    source: Optional[ImprovementSource] = None
+    source_kpi_id: Optional[int] = None
+    problem_statement: Optional[str] = None
+    root_cause: Optional[str] = None
+    countermeasure: Optional[str] = None
+    verification: Optional[str] = None
+    benefit: Optional[str] = None
+    observation_until: Optional[date] = None
+    one_time_cost: Optional[float] = None
+    transfer_cost: Optional[float] = None
+    replication_status: Optional[ReplicationStatus] = None
+    replication_note: Optional[str] = None
 
 
 class ProjectOut(ORMModel):
@@ -154,8 +188,39 @@ class ProjectOut(ORMModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     progress: float
+    source: str = "MANUAL"
+    source_label: Optional[str] = None
+    source_kpi_id: Optional[int] = None
+    source_kpi_code: Optional[str] = None
+    source_kpi_name: Optional[str] = None
+    problem_statement: Optional[str] = None
+    root_cause: Optional[str] = None
+    countermeasure: Optional[str] = None
+    verification: Optional[str] = None
+    benefit: Optional[str] = None
+    observation_until: Optional[date] = None
+    one_time_cost: float = 0
+    transfer_cost: float = 0
+    replication_status: str = "NOT_EVALUATED"
+    replication_status_label: Optional[str] = None
+    replication_note: Optional[str] = None
     created_at: Optional[UtcDateTime] = None
     updated_at: Optional[UtcDateTime] = None
+
+
+class ProjectMetaOut(BaseModel):
+    source_labels: dict
+    replication_status_labels: dict
+
+
+class ProjectDraftOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    process_id: Optional[int] = None
+    source_kpi_id: Optional[int] = None
+    status: str
+    status_label: Optional[str] = None
 
 
 class StageProgress(BaseModel):

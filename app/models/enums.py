@@ -83,6 +83,25 @@ class KpiDimension(str, Enum):
     FLEXIBILITY = "FLEXIBILITY"  # 灵活性
 
 
+class KpiKind(str, Enum):
+    """KPI 定义卡的结果分类（与四维度正交）。
+
+    结果 = 客户/经营结果，过程 = 流程执行信号，健康度 = 治理与数据质量门槛。
+    """
+
+    RESULT = "RESULT"
+    PROCESS = "PROCESS"
+    HEALTH = "HEALTH"
+
+
+class KpiFrequency(str, Enum):
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    AD_HOC = "AD_HOC"
+
+
 class KpiDirection(str, Enum):
     HIGHER_BETTER = "HIGHER_BETTER"  # 越大越好（如准时交付率）
     LOWER_BETTER = "LOWER_BETTER"  # 越小越好（如周期、差错率）
@@ -180,6 +199,78 @@ class ToolLevel(str, Enum):
     REQUIRED = "REQUIRED"
     RECOMMENDED = "RECOMMENDED"
     OPTIONAL = "OPTIONAL"
+
+
+class WorkMeasurementSource(str, Enum):
+    """标准工时的取得方法；不同方法证据强度不同。"""
+
+    TIME_STUDY = "TIME_STUDY"  # 时间研究（秒表/录像）
+    WORK_SAMPLING = "WORK_SAMPLING"  # 工作抽样
+    PREDETERMINED = "PREDETERMINED"  # 预定时间系统
+    ESTIMATE = "ESTIMATE"  # 估算，未经验证
+
+
+class WorkMeasurementStatus(str, Enum):
+    """标准工时状态；只有 VERIFIED 能进入产能与成本口径。"""
+
+    DRAFT = "DRAFT"
+    VERIFIED = "VERIFIED"
+    RETIRED = "RETIRED"
+
+
+class StrategyPeriod(str, Enum):
+    ANNUAL = "ANNUAL"
+    H1 = "H1"
+    H2 = "H2"
+    Q1 = "Q1"
+    Q2 = "Q2"
+    Q3 = "Q3"
+    Q4 = "Q4"
+
+
+class StrategyStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+
+
+class ChangeType(str, Enum):
+    STRUCTURE = "STRUCTURE"
+    KPI = "KPI"
+    FORM_RULE = "FORM_RULE"
+    POLICY = "POLICY"
+    OTHER = "OTHER"
+
+
+class ChangeImpactLevel(str, Enum):
+    MAJOR = "MAJOR"
+    MINOR = "MINOR"
+    PATCH = "PATCH"
+
+
+class ChangeStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    APPLIED = "APPLIED"
+    CANCELLED = "CANCELLED"
+
+
+class ImprovementSource(str, Enum):
+    MANUAL = "MANUAL"
+    KPI_THRESHOLD = "KPI_THRESHOLD"
+    AUDIT_FINDING = "AUDIT_FINDING"
+    CUSTOMER_COMPLAINT = "CUSTOMER_COMPLAINT"
+    EMPLOYEE_SUGGESTION = "EMPLOYEE_SUGGESTION"
+    BENCHMARK_GAP = "BENCHMARK_GAP"
+    OTHER = "OTHER"
+
+
+class ReplicationStatus(str, Enum):
+    NOT_EVALUATED = "NOT_EVALUATED"
+    PILOT = "PILOT"
+    REPLICATED = "REPLICATED"
+    REJECTED = "REJECTED"
 
 
 class ProcessDocumentCategory(str, Enum):

@@ -36,6 +36,7 @@ def test_frontend_has_modules():
     # 各业务视图
     assert {
         "dashboard.js",
+        "strategy.js",
         "map.js",
         "pcf.js",
         "workflow.js",
@@ -51,6 +52,21 @@ def test_frontend_has_modules():
     } <= names
     assert "main.js" in names
 
+    # designer 拆包的目标结构（少一个就说明拆分没落地或被误删）
+    designer_modules = {p.name for p in (JS_ROOT / "views" / "designer").glob("*.js")}
+    assert {
+        "index.js",
+        "canvas.js",
+        "providers.js",
+        "xml.js",
+        "panels.js",
+        "assignment.js",
+        "lint.js",
+        "versions.js",
+        "transfer.js",
+        "changes.js",
+    } <= designer_modules
+
 
 def test_all_relative_imports_resolve():
     """每个 `from './x.js'` 都必须指向真实存在的文件。"""
@@ -65,11 +81,59 @@ def test_all_relative_imports_resolve():
     assert not broken, "存在无效的 import 路径：\n" + "\n".join(broken)
 
 
+NAMED_IMPORT_RE = re.compile(r"import\s*\{([^}]*)\}\s*from\s*['\"]([^'\"]+)['\"]", re.S)
+EXPORT_DECL_RE = re.compile(
+    r"export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)"
+)
+EXPORT_LIST_RE = re.compile(r"export\s*\{([^}]*)\}", re.S)
+
+
+def _exported_names(src: str) -> set[str]:
+    names = set(EXPORT_DECL_RE.findall(src))
+    for group in EXPORT_LIST_RE.findall(src):
+        for item in group.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            # `a as b` 对外暴露的是别名 b
+            names.add(item.split(" as ")[-1].strip())
+    return names
+
+
+def test_named_imports_exist_in_target_module():
+    """import 的具名符号必须在目标模块里真的 export。
+
+    回归背景：拆 `designer/xml.js` 时函数被吞进未闭合的块注释、模块没有任何
+    export，但旧守卫只检查源码里出现 `function xxx(`，测试全绿而浏览器加载即报
+    「does not provide an export named」。
+    """
+    missing = []
+    for module in _modules():
+        src = module.read_text(encoding="utf-8")
+        for names, target in NAMED_IMPORT_RE.findall(src):
+            if not target.startswith("."):
+                continue
+            resolved = (module.parent / target).resolve()
+            if not resolved.exists():
+                continue  # 路径问题由上一个用例负责
+            exported = _exported_names(resolved.read_text(encoding="utf-8"))
+            for spec in names.split(","):
+                spec = spec.strip()
+                if not spec:
+                    continue
+                name = spec.split(" as ")[0].strip()
+                if name not in exported:
+                    rel = module.relative_to(JS_ROOT).as_posix()
+                    missing.append(f"{rel}: {name} 不在 {target} 的导出中")
+    assert not missing, "存在无法解析的具名 import：\n" + "\n".join(missing)
+
+
 def test_view_modules_are_registered():
     """main.js 必须注册全部业务视图，否则对应页面会是空白。"""
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     for view in (
         "dashboard",
+        "strategy",
         "map",
         "pcf",
         "workflow",
@@ -126,7 +190,7 @@ def test_data_act_is_only_on_interactive_elements():
 
 def test_data_act_keys_are_namespaced():
     keys = set()
-    for module in (JS_ROOT / "views").glob("*.js"):
+    for module in (JS_ROOT / "views").rglob("*.js"):
         src = module.read_text(encoding="utf-8")
         keys |= set(re.findall(r'data-act="([^"]+)"', src))
     pattern = re.compile(r"^[a-z][a-z0-9]*\.[A-Za-z][A-Za-z0-9_]*$")
@@ -137,7 +201,7 @@ def test_data_act_keys_are_namespaced():
 def test_native_dialogs_do_not_grow():
     """Phase 1A 不改存量视图；用基线数量防止新代码继续引入原生弹窗。"""
     hits = []
-    for module in (JS_ROOT / "views").glob("*.js"):
+    for module in (JS_ROOT / "views").rglob("*.js"):
         src = module.read_text(encoding="utf-8")
         hits.extend(re.findall(r"\b(confirm|prompt|alert)\(", src))
     assert len(hits) == 0, f"视图内仍有原生 confirm/prompt/alert：{len(hits)} 处"
@@ -165,7 +229,7 @@ def test_views_do_not_import_other_views():
     for module in sorted((JS_ROOT / "views").glob("*.js")):
         src = module.read_text(encoding="utf-8")
         for target in re.findall(r"from\s+['\"]\./([^'\"]+)['\"]", src):
-            if target.startswith("shared/"):
+            if target.startswith("shared/") or "/" in target:
                 continue
             if target.endswith(".js"):
                 bad.append(f"{module.name} -> {target}")
@@ -208,6 +272,117 @@ def test_core_does_not_import_views():
     assert not bad, f"core 反向 import 视图：{bad}"
 
 
+def test_js_block_comments_are_balanced():
+    """块注释必须闭合，且不允许出现游离的 `* ... */` 行。
+
+    回归背景：拆 `designer.js` 时把注释开头搬进了 `designer/xml.js`、结尾留在原地，
+    浏览器报 `Unexpected token '*'`；这种错误 Python 测试若不扫源码就完全看不见。
+    """
+    bad = []
+    for module in _modules():
+        in_block = False
+        for line_no, line in enumerate(module.read_text(encoding="utf-8").splitlines(), 1):
+            if not in_block and re.match(r"^\s*\*", line):
+                bad.append(f"{module.relative_to(JS_ROOT)}:{line_no} 游离的注释行")
+            cursor = 0
+            while cursor < len(line):
+                if in_block:
+                    end = line.find("*/", cursor)
+                    if end < 0:
+                        break
+                    in_block = False
+                    cursor = end + 2
+                else:
+                    start = line.find("/*", cursor)
+                    if start < 0:
+                        break
+                    in_block = True
+                    cursor = start + 2
+        if in_block:
+            bad.append(f"{module.relative_to(JS_ROOT)} 文件结束时仍有未闭合的块注释")
+    assert not bad, "JS 注释结构异常：\n" + "\n".join(bad)
+
+
+def test_designer_xml_module_is_pure():
+    """BPMN XML 手术必须保持纯函数，方便单测与复用。"""
+    xml_src = (JS_ROOT / "views" / "designer" / "xml.js").read_text(encoding="utf-8")
+    for forbidden in ("fetch(", "state.", "toast(", "document.", "openModal(", "closeModal("):
+        assert forbidden not in xml_src, f"designer/xml.js 不应依赖 {forbidden}"
+    for symbol in ("appendBpmnLane", "restoreLanes", "ensureFlowRefs", "orthogonalizePath"):
+        assert f"function {symbol}(" in xml_src, f"designer/xml.js 缺少 {symbol}"
+
+
+def test_designer_shell_is_thin_and_wires_submodules():
+    """designer.js 只做薄壳；实现全部在 ./designer/ 里，且由 index 统一组装。"""
+    shell = (JS_ROOT / "views" / "designer.js").read_text(encoding="utf-8")
+    assert "from './designer/index.js'" in shell, "designer.js 没有委托给 designer/index.js"
+    assert "function paintDesigner(" not in shell, "designer.js 仍有页面渲染逻辑"
+
+    index_src = (JS_ROOT / "views" / "designer" / "index.js").read_text(encoding="utf-8")
+    assert "export function renderDesigner(" in index_src
+    assert "export const actions" in index_src
+    for factory in (
+        "createCanvas",
+        "createPanels",
+        "createAssignment",
+        "createLint",
+        "createVersions",
+        "createTransfer",
+        "createChanges",
+    ):
+        assert f"{factory}(ctx)" in index_src, f"index.js 没有组装 {factory}"
+    for hook in (
+        "renderSelection",
+        "runLint",
+        "renderBpmnAssignment",
+        "hydrateBpmnNodeExtras",
+        "saveNow",
+        "closeSidebar",
+    ):
+        assert hook in index_src, f"ctx 没有注入 {hook}"
+
+
+def test_designer_module_sizes_are_bounded():
+    """拆分不是把一个大文件摊成九个，单个模块必须有内聚上限。"""
+    subdir = JS_ROOT / "views" / "designer"
+    oversized = []
+    for module in sorted(subdir.glob("*.js")):
+        lines = len(module.read_text(encoding="utf-8").splitlines())
+        if lines > 700:
+            oversized.append(f"{module.name}: {lines} 行")
+    assert not oversized, "designer 子模块超过 700 行，应继续按职责拆分：\n" + "\n".join(oversized)
+
+    shell_lines = len((JS_ROOT / "views" / "designer.js").read_text(encoding="utf-8").splitlines())
+    assert shell_lines <= 30, f"designer.js 应保持薄壳，当前 {shell_lines} 行"
+
+
+def test_designer_submodules_do_not_import_each_other():
+    """子模块只通过 ctx 协作；互相 import 会重新长成一张网。
+
+    xml.js（纯函数）和 providers.js（bpmn-js 扩展点）不持有状态，可以共享；
+    其余模块一律不得互相 import。
+    """
+    subdir = JS_ROOT / "views" / "designer"
+    forbidden = {
+        "canvas.js",
+        "panels.js",
+        "assignment.js",
+        "lint.js",
+        "versions.js",
+        "transfer.js",
+        "changes.js",
+        "index.js",
+    }
+    bad = []
+    for module in sorted(subdir.glob("*.js")):
+        if module.name == "index.js":
+            continue
+        for target in IMPORT_RE.findall(module.read_text(encoding="utf-8")):
+            if target.startswith(".") and Path(target).name in forbidden:
+                bad.append(f"{module.name} -> {target}")
+    assert not bad, "designer 子模块不得互相 import：\n" + "\n".join(bad)
+
+
 def test_view_exports_do_not_collide():
     """视图导出的函数会被 Object.assign(window, ...) 合并；重名会静默覆盖。
 
@@ -232,6 +407,7 @@ def test_view_exports_do_not_collide():
 def test_every_view_module_exports_a_renderer():
     renderers = {
         "dashboard.js": "renderDashboard",
+        "strategy.js": "renderStrategy",
         "map.js": "renderMap",
         "pcf.js": "renderPcf",
         "workflow.js": "renderWorkflow",
@@ -247,6 +423,14 @@ def test_every_view_module_exports_a_renderer():
     }
     for filename, symbol in renderers.items():
         src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")
+        if filename == "designer.js":
+            # designer 是薄壳，实现与导出都在 ./designer/index.js
+            assert "from './designer/index.js'" in src, "designer.js 没有委托给子模块"
+            index_src = (JS_ROOT / "views" / "designer" / "index.js").read_text(encoding="utf-8")
+            assert re.search(r"\bexport function renderDesigner\b", index_src), (
+                "designer/index.js 没有导出 renderDesigner"
+            )
+            continue
         assert re.search(rf"\bconst {symbol}\b", src), f"{filename} 缺少 {symbol}"
         assert re.search(rf"export \{{[^}}]*\b{symbol}\b", src), f"{filename} 没有导出 {symbol}"
 
@@ -267,7 +451,7 @@ def test_metric_help_keys_are_registered():
     metrics_src = (JS_ROOT / "core" / "metrics.js").read_text(encoding="utf-8")
     registered = set(re.findall(r"^  ([a-z_]+):\s*\{", metrics_src, re.MULTILINE))
     used: set[str] = set()
-    for module in (JS_ROOT / "views").glob("*.js"):
+    for module in (JS_ROOT / "views").rglob("*.js"):
         used |= set(re.findall(r"metricHelp\('([a-z_]+)'", module.read_text(encoding="utf-8")))
     missing = sorted(used - registered)
     assert not missing, f"以下指标未在 metrics.js 注册：{missing}"

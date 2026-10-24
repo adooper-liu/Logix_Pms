@@ -1002,8 +1002,10 @@ def test_kpi_radar(client):
     }
     assert data["overall_achievement"] > 0
     assert all(d["status"] in {"GOOD", "WATCH", "RISK"} for d in data["dimensions"])
-    assert len(data["series"]) == 15
+    assert len(data["series"]) == 16
     assert all(len(s["points"]) == 6 for s in data["series"])
+    assert {k["kind"] for k in data["by_kind"]} == {"RESULT", "PROCESS", "HEALTH"}
+    assert all({"kind", "kind_label", "status", "status_label"} <= set(s) for s in data["series"])
 
 
 def test_kpi_achievement_direction(client):

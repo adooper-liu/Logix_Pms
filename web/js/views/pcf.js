@@ -191,6 +191,19 @@ function visibleEntries() {
   return flat.filter((entry) => visible.has(entry.node.id));
 }
 
+/* -------------------------------------------------- 中文来源标注
+ *
+ * 中文名有两种来源，界面上必须区分：
+ * - APQC_CN：来自 APQC 中文整理版（L1–L3），可以当官方中文用；
+ * - REFERENCE：本系统自建参考译文（L4/L5），非官方，只供快速理解。
+ * 没有中文的条目标「未译」，不要让人误以为那就是官方中文。
+ */
+function zhSourceTag(source, hasZh) {
+  if (!hasZh) return '<span class="tag t-gry">未译</span>';
+  if (source === 'APQC_CN') return '<span class="tag t-blu">官方中文版</span>';
+  return '<span class="tag t-yel">参考译文</span>';
+}
+
 function paintPcfRows() {
   const box = document.getElementById('pcfRows');
   if (!box) return;
@@ -209,6 +222,7 @@ function paintPcfRows() {
         <span class="map-code">${esc(node.code)}</span>
         <span class="pcf-row-name">${esc(nameZh)}</span>
         ${showEn ? `<span class="pcf-row-en">${esc(node.name_en)}</span>` : ''}
+        ${node.name_zh ? '' : '<span class="tag t-gry">未译</span>'}
         ${node.metric_count ? `<span class="tag t-gry">${node.metric_count} 指标</span>` : ''}
       </button>
     </div>`;
@@ -256,10 +270,20 @@ async function paintPcfDetail(node) {
       <span class="tag t-blu">${esc(meta.label)}</span>
       <span class="tag t-gry">PCF ID ${esc(node.external_id || '—')}</span>
       <span class="tag t-gry">${esc(node.code)}</span>
+      ${zhSourceTag(node.name_zh_source, !!node.name_zh)}
       ${node.metrics_available ? '<span class="tag t-grn">有指标</span>' : ''}
     </div>
     <div class="pcf-section"><h4>官方定义</h4>
-      <div class="tiny" style="line-height:1.7">${esc(node.description || '（该元素没有官方定义）')}</div>
+      ${node.description_zh ? `
+        <div class="tiny" style="line-height:1.7">${esc(node.description_zh)}</div>
+        <div class="tiny" style="margin-top:6px;color:var(--sub)">
+          <span class="tag t-yel">参考译文</span> 本系统自建译名，非 APQC 官方，仅供快速理解
+        </div>
+        <div class="tiny" style="line-height:1.7;margin-top:8px;color:var(--sub)">
+          <b>官方英文原文</b><br>${esc(node.description)}
+        </div>` : `
+        <div class="tiny" style="line-height:1.7">${esc(node.description || '（该元素没有官方定义）')}</div>
+        ${node.description ? '<div class="tiny" style="margin-top:6px;color:var(--sub)"><span class="tag t-gry">未译</span></div>' : ''}`}
     </div>
     <div class="pcf-section"><h4>公司流程覆盖</h4>
       <div class="tiny">直接映射 ${node.mapped_process_count || 0} 条 · 含下级合计 ${
@@ -284,11 +308,18 @@ async function paintPcfDetail(node) {
         <thead><tr><th>指标 ID</th><th>指标</th><th>类别</th><th>公式</th><th>单位</th></tr></thead>
         <tbody>${data.metrics.map((m) => `
           <tr><td class="tiny">${esc(m.metric_id)}</td>
-            <td>${esc(m.name)}</td>
-            <td class="tiny">${esc(m.metric_category || '—')}</td>
-            <td class="tiny">${esc(m.formula || '—')}</td>
-            <td class="tiny">${esc(m.unit || '—')}</td></tr>`).join('')}</tbody>
-      </table>`;
+            <td>${esc(m.name_zh || m.name)}${m.name_zh
+              ? `<div class="tiny" style="color:var(--sub)">${esc(m.name)}</div>` : ''}</td>
+            <td class="tiny">${esc(m.category_label_zh || m.metric_category || '—')}${m.category_label_zh
+              ? `<div class="tiny" style="color:var(--sub)">${esc(m.metric_category)}</div>` : ''}</td>
+            <td class="tiny">${esc(m.formula_zh || m.formula || '—')}${m.formula_zh
+              ? `<div class="tiny" style="color:var(--sub)">${esc(m.formula)}</div>` : ''}</td>
+            <td class="tiny">${esc(m.unit_zh || m.unit || '—')}${m.unit_zh
+              ? `<div class="tiny" style="color:var(--sub)">${esc(m.unit)}</div>` : ''}</td></tr>`).join('')}</tbody>
+      </table>
+      <div class="tiny" style="margin-top:8px;color:var(--sub)">
+        <span class="tag t-yel">参考译文</span> 指标中文为本系统自建参考译文，非 APQC 官方口径；英文为官方原文
+      </div>`;
   } catch (e) {
     if (token === detailToken) {
       const target = document.getElementById('pcfMetricBox');

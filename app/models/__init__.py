@@ -10,6 +10,7 @@ from app.models.benchmark import (
     BenchmarkMetric,
     ProcessBenchmarkMap,
 )
+from app.models.change import ProcessChangeRequest
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -20,10 +21,14 @@ from app.models.enums import (
     AssetVariationPolicy,
     AuditAction,
     BaselineScope,
+    ChangeImpactLevel,
+    ChangeStatus,
+    ChangeType,
     DeliverableStatus,
     DeliverableType,
     ExceptionSeverity,
     ExceptionStatus,
+    ImprovementSource,
     InstanceStatus,
     KnowledgeType,
     KpiDimension,
@@ -34,14 +39,19 @@ from app.models.enums import (
     ProcessDocumentCategory,
     ProcessState,
     ProjectStatus,
+    ReplicationStatus,
     Role,
     ScopeType,
     StepStatus,
+    StrategyPeriod,
+    StrategyStatus,
     TaskStatus,
     TemplateFormat,
     TemplateMode,
     ToolCategory,
     ToolLevel,
+    WorkMeasurementSource,
+    WorkMeasurementStatus,
 )
 from app.models.execution import (
     FormDefinition,
@@ -69,9 +79,11 @@ from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelV
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.sketch import Sketch
+from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
+from app.models.workload import CapacityCalendar, WorkMeasurementStandard
 
 __all__ = [
     # 模型
@@ -123,6 +135,11 @@ __all__ = [
     "IntegrationDelivery",
     "InboundWebhook",
     "InboundEvent",
+    "WorkMeasurementStandard",
+    "CapacityCalendar",
+    "StrategyObjective",
+    "ObjectiveProcessLink",
+    "ProcessChangeRequest",
     # 枚举
     "Methodology",
     "ProjectStatus",
@@ -149,4 +166,13 @@ __all__ = [
     "TemplateFormat",
     "TemplateMode",
     "ToolLevel",
+    "WorkMeasurementSource",
+    "WorkMeasurementStatus",
+    "StrategyPeriod",
+    "StrategyStatus",
+    "ChangeType",
+    "ChangeImpactLevel",
+    "ChangeStatus",
+    "ImprovementSource",
+    "ReplicationStatus",
 ]
