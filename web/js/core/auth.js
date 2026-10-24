@@ -3,7 +3,7 @@
 import { API_BASE, GET, setToken, getToken, setUnauthorizedHandler } from './api.js';
 import { state } from './state.js';
 import { toast } from './ui.js';
-import { go, initialView } from './router.js';
+import { explicitView, go } from './router.js';
 
 export const AUTH = { user: null };
 
@@ -84,7 +84,7 @@ export async function doLogin() {
     renderUserChip();
     await loadMeta();
     window.dispatchEvent(new Event('pms:login'));
-    go(initialView());
+    await enterDefaultView();
     toast('欢迎回来，' + body.user.display_name);
   } catch (e) {
     err.textContent = e.message;
@@ -141,6 +141,26 @@ export async function loadMeta() {
       '<span style="color:var(--bad)">后端未连接</span>';
     throw e;
   }
+}
+
+/**
+ * 登录/启动后的落地页：显式 hash/路径优先；
+ * 否则最小启动未完成进「开始使用」，7/7 完成后进角色化驾驶舱。
+ */
+export async function enterDefaultView() {
+  const explicit = explicitView();
+  if (explicit) {
+    go(explicit);
+    return;
+  }
+  let view = 'start';
+  try {
+    const startup = await GET('/start/status');
+    if (startup.minimal_ready_count >= startup.minimal_total) view = 'dashboard';
+  } catch (e) {
+    // 启动页会自己展示错误与重试，不要把用户挡在空白页
+  }
+  go(view);
 }
 
 // 令牌失效由 api 层回调到这里：清身份 + 弹登录页

@@ -80,6 +80,7 @@ class HomeAction(BaseModel):
     label: str
     view: str
     hint: Optional[str] = None
+    action: str = "dashboard.go"
 
 
 class HomeItem(BaseModel):

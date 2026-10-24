@@ -286,12 +286,13 @@ async function openProject(id) {
       ${sched ? paintGantt(sched) : '<div class="empty">甘特图数据加载失败</div>'}
     </div>`;
 
+  const stageWord = d.project.project_type === 'GOVERNANCE_SETUP' ? '九个' : '五个';
   const nextPane = `
     <div data-pane id="pd-nx" class="hide">
       ${d.next_action ? `
         <div class="field"><label>下一步动作（阶段${d.next_action.stage_no} · 步骤 ${esc(d.next_action.step_no || '—')}）</label>
           <textarea readonly style="min-height:120px">${esc(d.next_action.name + '\n\n' + d.next_action.suggestion)}</textarea></div>` :
-        '<div class="note mb">五个阶段全部完成，项目已进入运营阶段。</div>'}
+        `<div class="note mb">${stageWord}阶段全部完成，项目已进入运营阶段。</div>`}
       <h3>当前阶段待办步骤</h3>
       ${d.current_steps.length ? `
         <div class="steplist">${d.current_steps.map((st) => `

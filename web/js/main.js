@@ -7,9 +7,10 @@
 
 import { GET } from './core/api.js';
 import {
-  AUTH, doLogin, hideLogin, isLoggedIn, loadMeta, logout, renderUserChip, showLogin,
+  AUTH, doLogin, enterDefaultView, hideLogin, isLoggedIn, loadMeta, logout, renderUserChip,
+  showLogin,
 } from './core/auth.js';
-import { register, go, initialView, onSearch } from './core/router.js';
+import { initExpertMode, register, go, toggleExpertMode, onSearch } from './core/router.js';
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, on } from './core/ui.js';
@@ -119,11 +120,14 @@ function wireChrome() {
   });
   const navCollapse = document.getElementById('navCollapse');
   if (navCollapse) navCollapse.onclick = toggleNav;
+  const expertToggle = document.getElementById('expertToggle');
+  if (expertToggle) expertToggle.onclick = toggleExpertMode;
   try {
     applyNavCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
   } catch (e) {
     applyNavCollapsed(false);
   }
+  initExpertMode();
   document.getElementById('mask').onclick = (e) => {
     if (e.target.id === 'mask') closeModal();
   };
@@ -155,7 +159,7 @@ async function boot() {
     renderUserChip();
     await loadMeta();
     await refreshNotifications();
-    go(initialView());
+    await enterDefaultView();
   } catch (e) {
     // 令牌失效时 api() 已经弹过登录框了
     if (!isLoggedIn()) return;

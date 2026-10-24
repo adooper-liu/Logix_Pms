@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from app.api.deps import CurrentUser, DbSession
-from app.schemas.startup import StartupStatusOut
+from app.api.deps import CurrentUser, DbSession, ManagerUser
+from app.schemas.startup import StartupSkipIn, StartupStatusOut
 from app.services import startup as startup_service
 
 router = APIRouter(prefix="/start", tags=["启动向导"])
@@ -16,3 +16,27 @@ router = APIRouter(prefix="/start", tags=["启动向导"])
 )
 def startup_status(db: DbSession, user: CurrentUser):
     return startup_service.status(db)
+
+
+@router.post(
+    "/steps/{step_key}/skip",
+    response_model=StartupStatusOut,
+    summary="跳过启动步骤（标记未验证，MANAGER+）",
+)
+def skip_step(step_key: str, payload: StartupSkipIn, db: DbSession, user: ManagerUser):
+    try:
+        return startup_service.skip_step(db, step_key, payload.reason, user)
+    except startup_service.StartupStepNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/steps/{step_key}/skip",
+    response_model=StartupStatusOut,
+    summary="取消跳过启动步骤（MANAGER+）",
+)
+def unskip_step(step_key: str, db: DbSession, user: ManagerUser):
+    try:
+        return startup_service.unskip_step(db, step_key, user)
+    except startup_service.StartupStepNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

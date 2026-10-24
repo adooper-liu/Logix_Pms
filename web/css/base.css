@@ -10,6 +10,7 @@
   /* ---- 表面与文字 ---- */
   --bg:#f4f6fb;
   --panel:#ffffff;
+  --on-accent:#ffffff;
   --panel-2:#fafbfe;
   --panel-3:#f5f7fc;
   --panel-hover:#f7f9fe;
@@ -185,6 +186,18 @@ html.nav-collapsed .nav a.active::before{left:-8px}
   border-radius:0 3px 3px 0;background:var(--nav-active-bar)}
 .side .foot{padding:16px 20px;font-size:11px;color:var(--nav-sub);border-top:1px solid var(--nav-line)}
 .side .foot b{color:var(--ok);font-weight:600}
+
+/* 专家模式：默认只露主线，其余入口收起；状态由 html.expert-mode 控制 */
+html:not(.expert-mode) .nav .expert-only{display:none}
+.nav-expert{display:flex;align-items:center;gap:10px;width:calc(100% - 8px);
+  margin:14px 4px 4px;padding:9px 14px;border:1px dashed var(--nav-line);
+  border-radius:10px;background:transparent;color:var(--nav-sub);font:inherit;
+  font-size:13px;text-align:left;cursor:pointer;transition:var(--transition,.15s)}
+.nav-expert:hover{background:var(--nav-hover);color:#fff}
+.nav-expert.on{background:var(--nav-active-bg);border-style:solid;color:#fff;font-weight:600}
+.nav-expert .ic{width:18px;text-align:center;font-size:15px}
+html.nav-collapsed .nav .nav-expert{justify-content:center;padding:10px 0}
+html.nav-collapsed .nav .nav-expert .lbl{display:none}
 
 /* ===== 主区 ===== */
 .main{flex:1;display:flex;flex-direction:column;min-width:0}

@@ -20,6 +20,13 @@ on('dashboard.methodology', ({ methodology }) => openMethodology(methodology));
 on('dashboard.openProject', ({ id }) => actions['projects.open'](Number(id)));
 on('dashboard.openProcess', ({ code }) => openProcessOnMap(code));
 on('dashboard.go', ({ view }) => go(view));
+on('dashboard.setupProjects', () => {
+  state.projects.filter = {
+    methodology: '', status: '', stage: '', projectType: 'GOVERNANCE_SETUP',
+  };
+  state.projects.keyword = '';
+  go('projects');
+});
 on('dashboard.goImprovementMap', () => openImprovementMap());
 on('dashboard.goExceptions', () => openExceptions());
 on('dashboard.goProjects', () => go('projects'));
@@ -27,6 +34,12 @@ on('dashboard.goProjects', () => go('projects'));
 const METHOD_COLOR = {
   BPR: 'var(--bad)', BPI: 'var(--warn-strong)', LEAN: 'var(--ok-strong)', HYBRID: 'var(--purple-strong)',
 };
+
+function actionAttrs(action) {
+  return action.action === 'dashboard.setupProjects'
+    ? 'data-act="dashboard.setupProjects"'
+    : 'data-act="dashboard.go"';
+}
 
 const renderDashboard = () => renderAsync('dashboard',
   () => Promise.all([
@@ -56,7 +69,7 @@ const renderDashboard = () => renderAsync('dashboard',
                 ${item.hint ? `<div class="tiny muted">${esc(item.hint)}</div>` : ''}`).join('')}
               <div class="gap mt">
                 ${block.actions.map((action) => `<button class="btn-sm"
-                  data-act="dashboard.go" data-view="${esc(action.view)}"
+                  ${actionAttrs(action)} data-view="${esc(action.view)}"
                   title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}
               </div>
             </div>`).join('')}

@@ -11,6 +11,7 @@ from pathlib import Path
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 JS_ROOT = WEB_ROOT / "js"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 IMPORT_RE = re.compile(r"""from\s+['"]([^'"]+)['"]""")
 
@@ -155,6 +156,30 @@ def test_view_modules_are_registered():
         "sketches",
     ):
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
+
+
+def test_spa_views_cover_all_registered_views():
+    """/start 这类深链要求服务端 SPA_VIEWS 与前端注册表一致，否则直接 404。"""
+    main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
+    registered = set(re.findall(r"register\('([a-z_]+)'", main_src))
+    assert {"start", "process_card"} <= registered
+
+    backend_src = (PROJECT_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    block = re.search(r"SPA_VIEWS = \{(.*?)\}", backend_src, re.S)
+    assert block, "app/main.py 未找到 SPA_VIEWS"
+    declared = set(re.findall(r'"([a-z_]+)"', block.group(1)))
+    assert registered <= declared, f"SPA_VIEWS 缺少视图：{sorted(registered - declared)}"
+
+
+def test_default_view_is_start():
+    """未指定 hash/路径时默认进「开始使用」；最小启动 7/7 后改落驾驶舱。"""
+    router_src = (JS_ROOT / "core" / "router.js").read_text(encoding="utf-8")
+    assert "export function explicitView()" in router_src
+
+    auth_src = (JS_ROOT / "core" / "auth.js").read_text(encoding="utf-8")
+    assert "const explicit = explicitView()" in auth_src
+    assert "let view = 'start'" in auth_src
+    assert "startup.minimal_ready_count >= startup.minimal_total" in auth_src
 
 
 def test_knowledge_view_wires_pagination():

@@ -93,6 +93,38 @@ def main() -> int:
         assert page.inner_text("#backendState").strip() == "后端已连接"
         print(f"登录成功：{page.inner_text('#userName')}（{page.inner_text('#userRole')}）\n")
 
+        skipped_keys: list[str] = []
+
+        # 默认入口与专家模式：登录后应落在「开始使用」（除非最小启动已 7/7），
+        # 专家工具默认收起；开启后再跑后面的 16 个视图巡检。
+        def default_entry_and_expert_mode() -> None:
+            token = page.evaluate("() => localStorage.getItem('psm_token')")
+            status = page.evaluate(
+                """async (token) => {
+                    const res = await fetch('/api/v1/start/status', {
+                        headers: { Authorization: 'Bearer ' + token },
+                    });
+                    return res.ok ? await res.json() : null;
+                }""",
+                token,
+            )
+            expected = "管理驾驶舱"
+            if not status or status["minimal_ready_count"] < status["minimal_total"]:
+                expected = "开始使用"
+            assert page.inner_text("#pageTitle") == expected, (
+                f"默认落地页应为「{expected}」，实际「{page.inner_text('#pageTitle')}」"
+            )
+            assert page.locator('.nav a[data-view="designer"]').is_hidden(), "专家工具默认应收起"
+            page.click("#expertToggle")
+            page.wait_for_timeout(250)
+            assert page.locator('.nav a[data-view="designer"]').is_visible(), "专家模式未展开"
+            assert page.evaluate("localStorage.getItem('pms_expert_mode')") == "1"
+            page.reload(wait_until="networkidle")
+            page.wait_for_timeout(800)
+            assert page.locator('.nav a[data-view="designer"]').is_visible(), "刷新后专家模式未保持"
+
+        check("默认入口与专家模式", default_entry_and_expert_mode)
+
         # ---------------------------------------------------- 第一段：视图渲染
         print("── 视图渲染 ──")
         for view, _title in VIEWS:
@@ -102,6 +134,12 @@ def main() -> int:
             except Exception:
                 pass
             page.wait_for_timeout(600)
+            if view == "process_card":
+                # 流程卡要先拉流程清单、再拉详情，两次串行请求，给足时间
+                try:
+                    page.wait_for_selector("#view select.sel", timeout=8000)
+                except Exception:
+                    pass
 
             text = page.inner_text("#view").strip()
             nodes = page.eval_on_selector_all("#view *", "els => els.length")
@@ -1648,6 +1686,11 @@ def main() -> int:
 
         # 直接打开视图路径：服务端返回前端入口，启动后按路径进入对应视图
         def direct_view_url() -> None:
+            page.goto(base + "/start", wait_until="networkidle")
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "开始使用", (
+                f"直接打开 /start 未进入启动页：{page.inner_text('#pageTitle')}"
+            )
             page.goto(base + "/orgs", wait_until="networkidle")
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "组织与人员", (
@@ -1755,8 +1798,43 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "开始使用" in view and "九步启动路径" in view, "启动向导未渲染"
-            assert "下一步" in view or "全部就绪" in view, "启动向导缺少下一步"
-            assert page.locator("#view .card").count() >= 9, "启动向导步骤卡片不足"
+            assert page.locator("#view .rail-step").count() == 9, "九步进度轨不完整"
+
+            # 最小启动可能已经 7/7；切到完整路径，确保至少有一个未完成步骤可检查证据面板
+            page.click('#view .seg button[data-mode="full"]')
+            page.wait_for_timeout(500)
+            assert page.locator('#view .seg button[data-mode="full"].on').count() == 1
+            view = page.inner_text("#view")
+            has_current = page.locator("#view .start-current").count() == 1
+            assert has_current or "全部就绪" in view or "已推进完" in view, "完整路径没有当前步"
+            assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
+
+            if has_current:
+                assert "出门证据" in view, "启动向导缺少证据面板"
+                assert "已具备" in view and ("仍缺" in view or "建议补充" in view), (
+                    "证据面板缺少缺项"
+                )
+                # 跳过 = 未验证，且可以取消
+                skip_button = page.locator('#view .start-current button[data-act="start.skip"]')
+                key = skip_button.first.get_attribute("data-key")
+                skipped_keys.append(key)
+                skip_button.first.click()
+                page.wait_for_selector("#mask.show")
+                page.click("#uiDialogOk")
+                page.wait_for_timeout(1400)
+                assert "未验证（已跳过）" in page.inner_text("#view"), "跳过步骤未显示为未验证"
+                unskip = page.locator(f'#view button[data-act="start.unskip"][data-key="{key}"]')
+                assert unskip.count(), "跳过后的步骤没有取消跳过入口"
+                unskip.first.click()
+                page.wait_for_selector("#mask.show")
+                page.click("#uiDialogOk")
+                page.wait_for_timeout(1400)
+                skipped_keys.remove(key)
+                assert "未验证（已跳过）" not in page.inner_text("#view"), "取消跳过后仍是未验证"
+
+            page.click('#view .seg button[data-mode="minimal"]')
+            page.wait_for_timeout(400)
+            assert page.locator('#view .seg button[data-mode="minimal"].on').count() == 1
 
         def process_card_view() -> None:
             goto("process_card")
@@ -2085,10 +2163,14 @@ def main() -> int:
         def cleanup() -> None:
             """自检会真的调 POST 建数据，跑完要删掉，保证脚本可反复执行。"""
             script = """
-              async () => {
+              async (keys) => {
                 const t = localStorage.getItem('psm_token');
                 const h = { Authorization: 'Bearer ' + t };
                 const out = [];
+                for (const k of (keys || [])) {
+                  await fetch('/api/v1/start/steps/' + k + '/skip', { method: 'DELETE', headers: h });
+                  out.push('startup-skip:' + k);
+                }
                 const proj = await fetch('/api/v1/projects?page_size=200', { headers: h }).then(r => r.json());
                 for (const p of proj.items) {
                   if (p.name.includes('自检用')) {
@@ -2113,7 +2195,7 @@ def main() -> int:
                 return out;
               }
             """
-            removed = page.evaluate(script)
+            removed = page.evaluate(script, skipped_keys)
             if removed:
                 print(f"NOTICE 已清理自检产生的 {len(removed)} 条数据：{', '.join(removed)}")
 

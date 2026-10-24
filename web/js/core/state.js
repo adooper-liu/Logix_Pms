@@ -30,6 +30,7 @@ export const state = {
   strategy: { year: new Date().getFullYear() },
   dataGov: null,
   processCard: { processId: null },
+  start: { mode: 'minimal', data: null },
   execution: { tab: 'tasks', filter: 'open' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',

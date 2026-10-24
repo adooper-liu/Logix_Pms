@@ -15,6 +15,11 @@ def test_admin_home_has_setup_and_governance(client):
     setup = next(block for block in data["blocks"] if block["key"] == "setup")
     assert any(action["view"] == "start" for action in setup["actions"])
 
+    execution = next(block for block in data["blocks"] if block["key"] == "execution")
+    labels = {item["label"] for item in execution["items"]}
+    assert {"执行中项目", "体系落地项目"} <= labels
+    assert any(action.get("action") == "dashboard.setupProjects" for action in execution["actions"])
+
 
 def test_owner_home_is_personal(owner_client):
     data = owner_client.get(f"{API}/dashboard/home").json()

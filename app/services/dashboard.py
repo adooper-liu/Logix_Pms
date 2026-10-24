@@ -352,6 +352,17 @@ def build_home(db: Session, user: User) -> DashboardHome:
         )
         or 0
     )
+    setup_projects = (
+        db.scalar(
+            select(func.count())
+            .select_from(Project)
+            .where(
+                Project.status.in_([ProjectStatus.PLANNING.value, ProjectStatus.ACTIVE.value]),
+                Project.project_type == "GOVERNANCE_SETUP",
+            )
+        )
+        or 0
+    )
     next_step = next((s for s in startup.steps if s.key == startup.next_step), None)
     next_title = next_step.title if next_step else "九步已全部就绪"
     invalid_raci = next(
@@ -405,8 +416,19 @@ def build_home(db: Session, user: User) -> DashboardHome:
                 key="execution",
                 title="正在推进",
                 description="当前执行中的流程项目",
-                items=[HomeItem(label="执行中项目", value=f"{active_projects} 个")],
-                actions=[HomeAction(label="项目组合", view="projects")],
+                items=[
+                    HomeItem(label="执行中项目", value=f"{active_projects} 个"),
+                    HomeItem(label="体系落地项目", value=f"{setup_projects} 个"),
+                ],
+                actions=[
+                    HomeAction(label="项目组合", view="projects"),
+                    HomeAction(
+                        label="体系落地项目",
+                        view="projects",
+                        hint="9 阶段 / 27 步",
+                        action="dashboard.setupProjects",
+                    ),
+                ],
             )
         )
         headline = (

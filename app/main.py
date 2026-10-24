@@ -28,14 +28,19 @@ WEB_DIR = PROJECT_ROOT / "web"
 SAMPLE_HTML = PROJECT_ROOT / "index-sample.html"
 # 允许直接用 /orgs、/projects 这类路径打开前端；视图名与 web/js/main.js 的注册保持一致
 SPA_VIEWS = {
+    "start",
     "dashboard",
+    "strategy",
     "map",
+    "process_card",
+    "pcf",
     "workflow",
     "projects",
     "execution",
     "toolbox",
     "designer",
     "monitor",
+    "data",
     "knowledge",
     "deliverables",
     "orgs",
