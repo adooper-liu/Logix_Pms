@@ -183,6 +183,9 @@
 .modal:has(.drawio-frame) .drawio-frame{flex:1;height:auto;min-height:0}
 
 /* ===== 流程项目组合：步骤清单 ===== */
+.project-open{border:none;background:none;padding:0;font:inherit;color:inherit;
+  text-align:left;cursor:pointer}
+.project-open:hover{color:var(--brand)}
 .steplist{border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .stepitem{display:flex;gap:10px;align-items:flex-start;padding:10px 13px;border-bottom:1px solid var(--panel-3);font-size:12.5px}
 .stepitem:last-child{border-bottom:none}

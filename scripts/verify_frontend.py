@@ -459,7 +459,7 @@ def main() -> int:
         # 项目详情：四个页签 + 步骤状态可改
         def project_detail_tabs() -> None:
             goto("projects")
-            page.click("#view tbody tr >> nth=0")
+            page.click("#view .project-open >> nth=0")
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(900)
             assert "概览" in page.inner_text("#mBody"), "详情弹窗未渲染"
@@ -665,8 +665,10 @@ def main() -> int:
             page.wait_for_timeout(1000)
             assert position_name in page.inner_text("#view")
             row = page.locator("#view tr").filter(has_text=position_name).first
-            page.once("dialog", lambda dialog: dialog.accept())
             row.locator('button:has-text("删除")').click()
+            page.wait_for_selector("#uiDialogOk", timeout=5000)
+            assert "删除岗位" in page.inner_text("#mBody")
+            page.click("#uiDialogOk")
             page.wait_for_timeout(1000)
             assert position_name not in page.inner_text("#view")
 
@@ -1390,7 +1392,7 @@ def main() -> int:
         # 甘特图与里程碑
         def project_gantt() -> None:
             goto("projects")
-            page.click("#view tbody tr >> nth=0")
+            page.click("#view .project-open >> nth=0")
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(1000)
             page.click('#mBody .tabs button:has-text("甘特图")')

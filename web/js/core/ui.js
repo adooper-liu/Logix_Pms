@@ -94,6 +94,12 @@ if (typeof document !== 'undefined') {
       if (!el) return;
       const handler = DELEGATES.get(el.dataset.act);
       if (!handler) return;
+      // <select> / checkbox / radio 会同时触发 input 与 change；只处理 change，
+      // 否则同一个动作会执行两次（真实事故：步骤状态被 PATCH 两次）。
+      if (type === 'input') {
+        const tag = el.tagName;
+        if (tag === 'SELECT' || el.type === 'checkbox' || el.type === 'radio') return;
+      }
       if (type === 'keydown') {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         // 原生 button/a 由浏览器合成 click，避免重复触发

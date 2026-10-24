@@ -3,11 +3,32 @@
  * 组织树与人员都从接口读取，不在前端写死；写操作只对系统管理员开放。
  */
 import { esc, dtShort, emptyRow, skeleton } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { role } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
+
+on('orgs.tab', ({ tab }) => setAdminTab(tab));
+on('orgs.createOrg', () => openOrgCreate());
+on('orgs.editOrg', ({ id }) => openOrgEdit(Number(id)));
+on('orgs.toggleOrg', ({ id, active }) => toggleOrgActive(Number(id), active === '1'));
+on('orgs.deleteOrg', ({ id, name }) => deleteOrgAction(Number(id), name));
+on('orgs.close', () => closeModal());
+on('orgs.submitOrgCreate', () => submitOrgCreate());
+on('orgs.submitOrgEdit', ({ id }) => submitOrgEdit(Number(id)));
+on('orgs.createPosition', () => openPositionCreate());
+on('orgs.editPosition', ({ id }) => openPositionEdit(Number(id)));
+on('orgs.deletePosition', ({ id }) => deletePositionAction(Number(id)));
+on('orgs.submitPositionNew', () => submitPosition(null));
+on('orgs.submitPosition', ({ id }) => submitPosition(Number(id)));
+on('orgs.createUser', () => openUserCreate());
+on('orgs.editUser', ({ id }) => openUserEdit(Number(id)));
+on('orgs.submitUserCreate', () => submitUserCreate());
+on('orgs.submitUserEdit', ({ id }) => submitUserEdit(Number(id)));
+on('orgs.userFilter', ({ filter }, el) => {
+  setUserFilter(filter, el.type === 'checkbox' ? el.checked : el.value);
+});
 
 function adminState() {
   state.admin = state.admin || {
@@ -62,11 +83,11 @@ function paintShell() {
           <div class="desc">组织编码与人员账号由系统管理员维护；人员归属组织用于标准文件/模板的继承范围</div></div>
       </div>
       <div class="tabs" style="margin-bottom:0">
-        <button class="${a.tab === 'org' ? 'on' : ''}" onclick="setAdminTab('org')">
+        <button class="${a.tab === 'org' ? 'on' : ''}" data-act="orgs.tab" data-tab="org">
           组织架构（${(state.adminOrgs || []).length}）</button>
-        <button class="${a.tab === 'user' ? 'on' : ''}" onclick="setAdminTab('user')">
+        <button class="${a.tab === 'user' ? 'on' : ''}" data-act="orgs.tab" data-tab="user">
           人员与角色（${(state.adminUsers || []).length}）</button>
-        <button class="${a.tab === 'position' ? 'on' : ''}" onclick="setAdminTab('position')">
+        <button class="${a.tab === 'position' ? 'on' : ''}" data-act="orgs.tab" data-tab="position">
           岗位（${(state.adminPositions || []).length}）</button>
       </div>
     </div>
@@ -96,10 +117,12 @@ function paintOrgTab() {
         ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
       <td>${esc(org.description || '—')}</td>
       <td>
-        <button class="btn-sm" onclick="openOrgEdit(${org.id})">编辑</button>
-        <button class="btn-sm" onclick="toggleOrgActive(${org.id}, ${!org.is_active})">
+        <button class="btn-sm" data-act="orgs.editOrg" data-id="${org.id}">编辑</button>
+        <button class="btn-sm" data-act="orgs.toggleOrg" data-id="${org.id}"
+          data-active="${org.is_active ? '0' : '1'}">
           ${org.is_active ? '停用' : '启用'}</button>
-        <button class="btn-sm" onclick="deleteOrgAction(${org.id}, '${esc(org.name)}')">删除</button>
+        <button class="btn-sm" data-act="orgs.deleteOrg" data-id="${org.id}"
+          data-name="${esc(org.name)}">删除</button>
       </td>
     </tr>`).join('') || emptyRow(6, '还没有组织，先新建集团/公司/部门');
 
@@ -107,7 +130,7 @@ function paintOrgTab() {
     <div class="card">
       <div class="between mb">
         <h3 style="margin:0">组织树</h3>
-        <button class="btn btn-p" onclick="openOrgCreate()">+ 新建组织</button>
+        <button class="btn btn-p" data-act="orgs.createOrg">+ 新建组织</button>
       </div>
       <table class="tbl">
         <thead><tr><th>组织</th><th>路径</th><th>下级</th><th>状态</th><th>说明</th><th>操作</th></tr></thead>
@@ -141,8 +164,8 @@ function openOrgCreate() {
     </div>
     <div class="field"><label>说明</label><textarea id="aoDesc"></textarea></div>
     <div class="note">编码由系统内维护，全局唯一；后续可接 ERP/HR 同步。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitOrgCreate()">创建</button>`);
+  `<button class="btn btn-g" data-act="orgs.close">取消</button>
+   <button class="btn btn-p" data-act="orgs.submitOrgCreate">创建</button>`);
 }
 
 async function submitOrgCreate() {
@@ -183,8 +206,8 @@ function openOrgEdit(orgId) {
       <option value="false" ${org.is_active ? '' : 'selected'}>停用</option>
     </select></div>
     <div class="note">上级组织与编码不支持在这里修改，避免破坏继承路径。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitOrgEdit(${org.id})">保存</button>`);
+  `<button class="btn btn-g" data-act="orgs.close">取消</button>
+   <button class="btn btn-p" data-act="orgs.submitOrgEdit" data-id="${org.id}">保存</button>`);
 }
 
 async function submitOrgEdit(orgId) {
@@ -216,7 +239,10 @@ async function toggleOrgActive(orgId, active) {
 }
 
 async function deleteOrgAction(orgId, name) {
-  if (!window.confirm('确认删除组织「' + name + '」？有下级或资产引用时会被拒绝。')) return;
+  const ok = await confirmDialog(
+    `确认删除组织「${name}」？有下级或资产引用时会被拒绝。`,
+    { danger: true, okText: '删除' });
+  if (!ok) return;
   try {
     await DEL('/org-units/' + orgId);
     toast('组织已删除');
@@ -246,8 +272,8 @@ function paintPositionTab() {
       <td>${esc(row.org_unit_name || '集团通用')}</td>
       <td>${row.is_active
         ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
-      <td><button class="btn-sm" onclick="openPositionEdit(${row.id})">编辑</button>
-        <button class="btn-sm" onclick="deletePositionAction(${row.id})">删除</button></td>
+      <td><button class="btn-sm" data-act="orgs.editPosition" data-id="${row.id}">编辑</button>
+        <button class="btn-sm" data-act="orgs.deletePosition" data-id="${row.id}">删除</button></td>
     </tr>`).join('') || emptyRow(5, '还没有岗位，先建一个岗位再绑定人员和流程节点');
 
   body.innerHTML = `
@@ -255,7 +281,7 @@ function paintPositionTab() {
       <div class="between mb">
         <div><h3 style="margin:0">岗位主数据</h3>
           <div class="tiny">岗位连接人员与流程活动；被引用时只能停用，不能删除</div></div>
-        <button class="btn btn-p" onclick="openPositionCreate()">+ 新建岗位</button>
+        <button class="btn btn-p" data-act="orgs.createPosition">+ 新建岗位</button>
       </div>
       <table class="tbl">
         <thead><tr><th>编码</th><th>岗位</th><th>所属组织</th><th>状态</th><th>操作</th></tr></thead>
@@ -290,16 +316,16 @@ function positionModal(row) {
 
 function openPositionCreate() {
   openModal('新建岗位', positionModal(null),
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitPosition(null)">创建</button>`);
+    `<button class="btn btn-g" data-act="orgs.close">取消</button>
+     <button class="btn btn-p" data-act="orgs.submitPositionNew">创建</button>`);
 }
 
 function openPositionEdit(positionId) {
   const row = (state.adminPositions || []).find((item) => item.id === positionId);
   if (!row) return;
   openModal('编辑岗位 · ' + row.code, positionModal(row),
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitPosition(${row.id})">保存</button>`);
+    `<button class="btn btn-g" data-act="orgs.close">取消</button>
+     <button class="btn btn-p" data-act="orgs.submitPosition" data-id="${row.id}">保存</button>`);
 }
 
 async function submitPosition(positionId) {
@@ -331,7 +357,9 @@ async function submitPosition(positionId) {
 
 async function deletePositionAction(positionId) {
   const row = (state.adminPositions || []).find((item) => item.id === positionId);
-  if (!row || !confirm(`删除岗位「${row.name}」？`)) return;
+  if (!row) return;
+  const ok = await confirmDialog(`删除岗位「${row.name}」？`, { danger: true, okText: '删除' });
+  if (!ok) return;
   try {
     await DEL('/positions/' + positionId);
     toast('岗位已删除');
@@ -374,24 +402,25 @@ function paintUserTab() {
       <td>${user.is_active
         ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
       <td>${user.last_login_at ? dtShort(user.last_login_at) : '从未登录'}</td>
-      <td><button class="btn-sm" onclick="openUserEdit(${user.id})">编辑</button></td>
+      <td><button class="btn-sm" data-act="orgs.editUser" data-id="${user.id}">编辑</button></td>
     </tr>`).join('') || emptyRow(8, '没有符合条件的人员');
 
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
         <h3 style="margin:0">人员与角色</h3>
-        <button class="btn btn-p" onclick="openUserCreate()">+ 新建人员</button>
+        <button class="btn btn-p" data-act="orgs.createUser">+ 新建人员</button>
       </div>
       <div class="gap mb" style="flex-wrap:wrap">
         <input class="sel" style="min-width:200px" placeholder="搜索用户名 / 姓名 / 部门"
-          value="${esc(a.userKeyword || '')}" oninput="setUserFilter('userKeyword', this.value)">
-        <select class="sel" onchange="setUserFilter('userRole', this.value)">
+          value="${esc(a.userKeyword || '')}" data-act="orgs.userFilter"
+          data-filter="userKeyword">
+        <select class="sel" data-act="orgs.userFilter" data-filter="userRole">
           <option value="">全部角色</option>
           ${roles.map((r) => `<option value="${r.value}"
             ${a.userRole === r.value ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}
         </select>
-        <select class="sel" onchange="setUserFilter('userOrgId', this.value)">
+        <select class="sel" data-act="orgs.userFilter" data-filter="userOrgId">
           <option value="">全部组织</option>
           ${(state.adminOrgs || []).map((org) => `<option value="${org.id}"
             ${String(a.userOrgId) === String(org.id) ? 'selected' : ''}>
@@ -399,7 +428,7 @@ function paintUserTab() {
         </select>
         <label class="tiny gap" style="gap:6px">
           <input type="checkbox" ${a.activeOnly ? 'checked' : ''}
-            onchange="setUserFilter('activeOnly', this.checked)">只看启用
+            data-act="orgs.userFilter" data-filter="activeOnly">只看启用
         </label>
         <span class="tiny">${users.length} / ${(state.adminUsers || []).length} 人</span>
       </div>
@@ -445,8 +474,8 @@ function openUserCreate() {
     </div>
     <div class="field"><label>部门（可选）</label><input id="auDept" placeholder="部门标签"></div>
     <div class="note">人员归属组织决定其可见的集团/分公司标准，不影响项目归属权限。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitUserCreate()">创建</button>`);
+  `<button class="btn btn-g" data-act="orgs.close">取消</button>
+   <button class="btn btn-p" data-act="orgs.submitUserCreate">创建</button>`);
 }
 
 async function submitUserCreate() {
@@ -508,8 +537,8 @@ function openUserEdit(userId) {
         placeholder="留空表示不修改"></div>
     </div>
     <div class="note">用户名不可修改；停用后无法登录，但历史审计与项目归属保留。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitUserEdit(${user.id})">保存</button>`);
+  `<button class="btn btn-g" data-act="orgs.close">取消</button>
+   <button class="btn btn-p" data-act="orgs.submitUserEdit" data-id="${user.id}">保存</button>`);
 }
 
 async function submitUserEdit(userId) {
@@ -536,9 +565,4 @@ async function submitUserEdit(userId) {
   }
 }
 
-export {
-  renderOrgs, setAdminTab, openOrgCreate, submitOrgCreate, openOrgEdit, submitOrgEdit,
-  toggleOrgActive, deleteOrgAction, setUserFilter, openUserCreate, submitUserCreate,
-  openUserEdit, submitUserEdit, openPositionCreate, openPositionEdit, submitPosition,
-  deletePositionAction,
-};
+export { renderOrgs };

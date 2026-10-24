@@ -1,14 +1,35 @@
 /* 视图：projects */
 import { esc, num, pct, methodTag, statusTag, bar, emptyRow, skeleton } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
-import { toast, openModal, closeModal, modalAlive, tab, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, confirmDialog, tab, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS } from '../core/router.js';
+import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, role, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { openDesigner } from './designer.js';
 
 /* ============================================================ 4. 流程项目组合 */
+
+on('projects.open', ({ id }) => openProject(Number(id)));
+on('projects.new', () => newProjectWizard());
+on('projects.goWorkflow', () => go('workflow'));
+on('projects.goExecution', () => go('execution'));
+on('projects.filter', ({ key }, el) => setPFilter(key, el.value));
+on('projects.clearFilter', () => clearPFilter());
+on('projects.tab', ({ pane }, el) => tab(el, pane));
+on('projects.patchStep', ({ id, project }, el) => {
+  patchStep(Number(id), el.value, Number(project));
+});
+on('projects.delete', ({ id, code }) => deleteProject(Number(id), code));
+on('projects.close', () => closeModal());
+on('projects.edit', ({ id }) => editProjectModal(Number(id)));
+on('projects.closeOpenDesigner', ({ process }) => {
+  closeModal();
+  openDesigner(Number(process));
+});
+on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
+on('projects.wizardRecommend', () => wizardRecommend());
+on('projects.submit', () => submitProject());
 
 const renderProjects = () => {
   const f = state.projects.filter;
@@ -23,8 +44,9 @@ const renderProjects = () => {
     () => GET('/projects?' + qs.join('&')),
     (page) => {
       const rows = page.items.map((p) => `
-        <tr class="clk" onclick="openProject(${p.id})">
-          <td><b>${esc(p.name)}</b>
+        <tr class="clk">
+          <td><button class="project-open" type="button" data-act="projects.open"
+              data-id="${p.id}"><b>${esc(p.name)}</b></button>
             <div class="tiny">${esc(p.code)}${p.process_name ? ' · ' + esc(p.process_name) : ''}</div></td>
           <td>${methodTag(p.methodology, state.meta.methodology[p.methodology])}</td>
           <td>阶段${p.current_stage}<div class="tiny">${esc(p.stage_name || '')}</div></td>
@@ -54,9 +76,9 @@ const renderProjects = () => {
             <div><h2>流程项目组合<span class="module-badge">改善项目 · 推进循环</span></h2>
               <div class="desc">共 ${page.total} 个项目 · 每个项目按 24 步标准工作流推进；点击行查看详情与下一步动作</div></div>
             <div class="gap">
-              <a class="link-btn" onclick="go('workflow')">查看方法手册</a>
-              <a class="link-btn" onclick="go('execution')">流程执行 →</a>
-              <button class="btn btn-p" onclick="newProjectWizard()">+ 新建流程项目</button>
+              <a class="link-btn" data-act="projects.goWorkflow">查看方法手册</a>
+              <a class="link-btn" data-act="projects.goExecution">流程执行 →</a>
+              <button class="btn btn-p" data-act="projects.new">+ 新建流程项目</button>
             </div>
           </div>
           <div class="grid g4 stat-row">
@@ -68,23 +90,23 @@ const renderProjects = () => {
               <div class="lab">${metricHelp('avg_progress', '平均进度')}${overdueCount ? ' · ' + overdueCount + ' 项超期' : ''}</div></div>
           </div>
           <div class="gap mt" style="flex-wrap:wrap">
-            <select class="sel" onchange="setPFilter('methodology', this.value)">
+            <select class="sel" data-act="projects.filter" data-key="methodology">
               ${opt('', '全部方法', f.methodology)}
               ${['BPR', 'BPI', 'LEAN', 'HYBRID'].map((m) =>
                 opt(m, state.meta.methodology[m] || m, f.methodology)).join('')}
             </select>
-            <select class="sel" onchange="setPFilter('stage', this.value)">
+            <select class="sel" data-act="projects.filter" data-key="stage">
               ${opt('', '全部阶段', f.stage)}
               ${[1, 2, 3, 4, 5].map((i) => opt(String(i), '阶段' + i + ' ' +
                 (state.meta.stage[i] || ''), f.stage)).join('')}
             </select>
-            <select class="sel" onchange="setPFilter('status', this.value)">
+            <select class="sel" data-act="projects.filter" data-key="status">
               ${opt('', '全部状态', f.status)}
               ${['PLANNING', 'ACTIVE', 'ON_HOLD', 'CLOSED', 'CANCELLED'].map((s) =>
                 opt(s, state.meta.status[s] || s, f.status)).join('')}
             </select>
             ${(f.methodology || f.stage || f.status || state.projects.keyword)
-              ? '<button class="btn-sm" style="align-self:center" onclick="clearPFilter()">清空筛选</button>' : ''}
+              ? '<button class="btn-sm" style="align-self:center" data-act="projects.clearFilter">清空筛选</button>' : ''}
           </div>
         </div>
 
@@ -131,11 +153,11 @@ async function openProject(id) {
 
   const tabs = `
     <div class="tabs">
-      <button class="on" onclick="tab(this,'pd-ov')">概览</button>
-      <button onclick="tab(this,'pd-kp')">KPI 追踪</button>
-      <button onclick="tab(this,'pd-wk')">工作流推进</button>
-      <button onclick="tab(this,'pd-gt')">甘特图</button>
-      <button onclick="tab(this,'pd-nx')">下一步</button>
+      <button class="on" data-act="projects.tab" data-pane="pd-ov">概览</button>
+      <button data-act="projects.tab" data-pane="pd-kp">KPI 追踪</button>
+      <button data-act="projects.tab" data-pane="pd-wk">工作流推进</button>
+      <button data-act="projects.tab" data-pane="pd-gt">甘特图</button>
+      <button data-act="projects.tab" data-pane="pd-nx">下一步</button>
     </div>`;
 
   const overview = `
@@ -227,7 +249,8 @@ async function openProject(id) {
                 <span class="no">${esc(st.step_no)}</span>
                 <span class="nm"><b>${esc(st.name)}</b>
                   <i>${esc(st.deliverable || '')}${st.owner ? ' · ' + esc(st.owner) : ''}</i></span>
-                <select onchange="patchStep(${st.id}, this.value, ${p.id})">${stepStatusOpts(st.status)}</select>
+                <select data-act="projects.patchStep" data-id="${st.id}"
+                  data-project="${p.id}">${stepStatusOpts(st.status)}</select>
               </div>`).join('')}
           </div>
         </div>`;
@@ -260,11 +283,12 @@ async function openProject(id) {
   openModal(p.name, tabs + overview + kpiPane + wfPane + ganttPane + nextPane, `
     ${canManage()
       ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
-        + ' onclick="deleteProject(' + p.id + ', \'' + esc(p.code) + '\')">删除项目</button>'
+        + ` data-act="projects.delete" data-id="${p.id}" data-code="${esc(p.code)}">删除项目</button>`
       : ''}
-    <button class="btn btn-g" onclick="closeModal()">关闭</button>
-    ${canEditThis ? '<button class="btn btn-g" onclick="editProjectModal(' + p.id + ')">编辑</button>' : ''}
-    ${p.process_id ? '<button class="btn btn-p" onclick="closeModal();openDesigner(' + p.process_id + ')">查看流程模型</button>' : ''}`,
+    <button class="btn btn-g" data-act="projects.close">关闭</button>
+    ${canEditThis ? `<button class="btn btn-g" data-act="projects.edit" data-id="${p.id}">编辑</button>` : ''}
+    ${p.process_id ? `<button class="btn btn-p" data-act="projects.closeOpenDesigner"
+      data-process="${p.process_id}">查看流程模型</button>` : ''}`,
     true);
 }
 
@@ -333,8 +357,8 @@ async function editProjectModal(projectId) {
       <div class="field"><label>计划结束</label>
         <input id="epEnd" type="date" value="${p.end_date || ''}"></div>
     </div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="saveProjectEdit(${p.id})">保存</button>`, true);
+    `<button class="btn btn-g" data-act="projects.close">取消</button>
+     <button class="btn btn-p" data-act="projects.saveEdit" data-id="${p.id}">保存</button>`, true);
 }
 
 async function saveProjectEdit(projectId) {
@@ -381,7 +405,10 @@ async function saveProjectEdit(projectId) {
 }
 
 async function deleteProject(projectId, code) {
-  if (!confirm('确定删除项目 ' + code + '？其全部步骤记录会一并删除，且不可恢复。')) return;
+  const ok = await confirmDialog(
+    `确定删除项目 ${code}？其全部步骤记录会一并删除，且不可恢复。`,
+    { danger: true, okText: '删除' });
+  if (!ok) return;
   try {
     await DEL('/projects/' + projectId);
     closeModal();
@@ -484,7 +511,8 @@ async function patchStep(stepId, status, projectId) {
   try {
     await PATCH('/projects/steps/' + stepId, { status });
     toast('步骤状态已更新');
-    const onWk = !document.getElementById('pd-wk').classList.contains('hide');
+    const wk = document.getElementById('pd-wk');
+    const onWk = !!wk && !wk.classList.contains('hide');
     await openProject(projectId);
     // 后端可能已推进阶段，重开后停留在「工作流推进」页签上。
     // 若用户在刷新期间关掉了弹窗，这里不能再操作它的 DOM。
@@ -537,7 +565,7 @@ function newProjectWizard(prefill) {
       <div class="field"><label>计划周期（月）</label>
         <input id="npDur" type="number" value="6" min="1" max="36"></div>
     </div>
-    <button class="btn btn-g" id="npRecBtn" onclick="wizardRecommend()">匹配方法论</button>
+    <button class="btn btn-g" id="npRecBtn" data-act="projects.wizardRecommend">匹配方法论</button>
     <div id="npResult" class="mt"></div>
 
     <h3 class="mt">② 基本信息</h3>
@@ -582,8 +610,8 @@ function newProjectWizard(prefill) {
       <div class="field"><label>计划开始</label><input id="npStart" type="date"></div>
       <div class="field"><label>计划结束</label><input id="npEnd" type="date"></div>
     </div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitProject()">立项</button>`, true);
+    `<button class="btn btn-g" data-act="projects.close">取消</button>
+     <button class="btn btn-p" data-act="projects.submit">立项</button>`, true);
 
   // 关联流程下拉：取 L3 / L4 流程（项目通常落在这一层）
   GET('/process-map/flat').then((rows) => {
@@ -666,4 +694,4 @@ async function submitProject() {
 }
 
 
-export { renderProjects, clearPFilter, deleteProject, editProjectModal, newProjectWizard, openProject, paintGantt, patchStep, saveProjectEdit, setPFilter, submitProject, wizardRecommend };
+export { renderProjects, newProjectWizard, openProject };

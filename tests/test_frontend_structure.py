@@ -140,7 +140,7 @@ def test_native_dialogs_do_not_grow():
     for module in (JS_ROOT / "views").glob("*.js"):
         src = module.read_text(encoding="utf-8")
         hits.extend(re.findall(r"\b(confirm|prompt|alert)\(", src))
-    assert len(hits) <= 19, f"原生 confirm/prompt/alert 数量增加：{len(hits)} > 19"
+    assert len(hits) <= 16, f"原生 confirm/prompt/alert 数量增加：{len(hits)} > 16"
 
 
 def test_view_exports_do_not_collide():
