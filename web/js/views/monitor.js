@@ -1,12 +1,12 @@
 /* 视图：monitor */
 import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
-import { toast, openModal, closeModal, confirmDialog, modalAlive, viewEl, on } from '../core/ui.js';
+import { toast, openModal, closeModal, confirmDialog, promptDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
-import { GET, POST, PATCH } from '../core/api.js';
+import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { actions as appActions } from '../core/actions.js';
 
 /* ============================================================ 7. 运营监控与KPI */
@@ -22,6 +22,13 @@ on('monitor.period', (_data, el) => setMonitorPeriod(el.value));
 on('monitor.newStandard', () => newWorkloadStandardModal());
 on('monitor.submitStandard', () => submitWorkloadStandard());
 on('monitor.verifyStandard', ({ id }) => verifyWorkloadStandard(Number(id)));
+on('monitor.observations', ({ id }) => openObservationsModal(Number(id)));
+on('monitor.addObservation', ({ standard }) => addObservation(Number(standard)));
+on('monitor.deleteObservation', ({ id, standard }) =>
+  deleteObservation(Number(standard), Number(id)));
+on('monitor.submitReview', ({ id }) => submitStandardReview(Number(id)));
+on('monitor.approveStandard', ({ id }) => reviewWorkloadStandard(Number(id), true));
+on('monitor.rejectStandard', ({ id }) => reviewWorkloadStandard(Number(id), false));
 on('monitor.newCapacity', () => newCapacityModal());
 on('monitor.submitCapacity', () => submitCapacity());
 on('monitor.close', () => closeModal());
@@ -185,6 +192,7 @@ const renderMonitor = () => {
       state.monitorTrend = { trend, periods };
 
       const wl = d.workload;
+      state.monitorWorkload = wl;
       const hours = (minutes) => num((minutes || 0) / 60, 1);
       const periodValue = state.monitor.period
         || (wl.period ? wl.period.slice(0, 7) : '');
@@ -209,11 +217,22 @@ const renderMonitor = () => {
           <td>${num(row.monthly_frequency, 1)}</td>
           <td>${hours(row.demand_minutes)}</td>
           <td><span class="tag ${row.status === 'VERIFIED' ? 't-grn'
+            : row.status === 'IN_REVIEW' ? 't-blu'
             : row.status === 'RETIRED' ? 't-gry' : 't-yel'}">${esc(row.status_label)}</span>
-            <div class="tiny">${esc(row.source_label)}</div></td>
-          <td>${canManage() && row.status === 'DRAFT'
-            ? `<button class="btn-sm" data-act="monitor.verifyStandard"
-                data-id="${row.standard_id}">验证</button>` : ''}</td>
+            <div class="tiny">样本 ${row.observation_count} 条 · ${esc(row.source_label)}</div></td>
+          <td class="gap">
+            <button class="btn-sm" data-act="monitor.observations"
+              data-id="${row.standard_id}">样本</button>
+            ${canManage() && row.status === 'DRAFT' && row.sample_size >= 5
+              ? `<button class="btn-sm" data-act="monitor.submitReview"
+                  data-id="${row.standard_id}">提交评审</button>` : ''}
+            ${canManage() && row.status === 'DRAFT'
+              ? `<button class="btn-sm" data-act="monitor.verifyStandard"
+                  data-id="${row.standard_id}">直接验证</button>` : ''}
+            ${canManage() && row.status === 'IN_REVIEW'
+              ? `<button class="btn-sm" data-act="monitor.observations"
+                  data-id="${row.standard_id}">审核</button>` : ''}
+          </td>
         </tr>`).join('') || emptyRow(7, '还没有标准工时卡');
       const capacityRows = wl.capacity.map((row) => `
         <tr>
@@ -1165,6 +1184,141 @@ async function verifyWorkloadStandard(standardId) {
     await POST('/workload/standards/' + standardId + '/verify');
     toast('标准工时已验证');
     state.monitor.tab = 'workload';
+    RENDERERS.monitor();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function workloadStandard(standardId) {
+  return ((state.monitorWorkload || {}).standards || [])
+    .find((row) => row.standard_id === standardId) || null;
+}
+
+async function openObservationsModal(standardId) {
+  const standard = workloadStandard(standardId);
+  let observations;
+  try {
+    observations = await GET(`/workload/standards/${standardId}/observations`);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const rows = observations.map((row) => `
+    <tr>
+      <td>${row.sequence}</td>
+      <td>${dtShort(row.observed_at)}</td>
+      <td>${num(row.observed_minutes, 2)}</td>
+      <td>${esc(row.observer_name || '—')}</td>
+      <td>${esc(row.note || '')}</td>
+      <td>${canManage() ? `<button class="btn-sm" data-act="monitor.deleteObservation"
+        data-id="${row.id}" data-standard="${standardId}">删除</button>` : ''}</td>
+    </tr>`).join('') || emptyRow(6, '还没有观测记录');
+  const info = standard
+    ? `样本 ${standard.sample_size} 条 · 均值 ${num(standard.observed_minutes, 2)} 分钟`
+      + ` · ${standard.status_label}`
+    : '';
+  const addForm = canManage() && standard && standard.status !== 'RETIRED' ? `
+    <div class="row3">
+      <div class="field"><label>观测时间（分钟）*</label>
+        <input id="obsMinutes" type="number" step="0.01" min="0"></div>
+      <div class="field"><label>观测时刻</label>
+        <input id="obsAt" type="datetime-local"></div>
+      <div class="field"><label>备注</label>
+        <input id="obsNote" placeholder="可选"></div>
+    </div>
+    <div class="gap mb"><button class="btn-sm" data-act="monitor.addObservation"
+      data-standard="${standardId}">+ 添加观测</button></div>` : '';
+  const footer = [
+    canManage() && standard && standard.status === 'DRAFT' && standard.sample_size >= 5
+      ? `<button class="btn btn-p" data-act="monitor.submitReview"
+          data-id="${standardId}">提交评审</button>` : '',
+    canManage() && standard && standard.status === 'IN_REVIEW'
+      ? `<button class="btn btn-g" data-act="monitor.rejectStandard"
+          data-id="${standardId}">退回</button>
+         <button class="btn btn-p" data-act="monitor.approveStandard"
+          data-id="${standardId}">通过</button>` : '',
+    '<button class="btn btn-g" data-act="monitor.close">关闭</button>',
+  ].join('');
+  openModal(`标准工时样本 · ${esc(standard ? standard.name : standardId)}`, `
+    <div class="note mb">${info}<br>
+      先定方法，再观测；至少 5 条有效样本才能提交评审。均值与样本量由记录自动计算。
+      ${standard && standard.review_note
+        ? `<br>上次评审意见：${esc(standard.review_note)}` : ''}</div>
+    ${addForm}
+    <table class="tbl">
+      <thead><tr><th>#</th><th>观测时刻</th><th>分钟</th><th>观测人</th>
+        <th>备注</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`, footer, true);
+}
+
+async function addObservation(standardId) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  const minutes = Number(val('obsMinutes'));
+  if (!minutes || minutes <= 0) return toast('请填写大于 0 的观测时间', true);
+  try {
+    await POST(`/workload/standards/${standardId}/observations`, {
+      observed_minutes: minutes,
+      observed_at: val('obsAt') ? val('obsAt') + ':00' : null,
+      note: val('obsNote').trim() || null,
+    });
+    toast('观测已记录');
+    await RENDERERS.monitor();
+    openObservationsModal(standardId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteObservation(standardId, observationId) {
+  const ok = await confirmDialog('删除后均值和样本量会自动重算，确定继续？',
+    { title: '删除观测', okText: '删除', danger: true });
+  if (!ok) return;
+  try {
+    await DEL(`/workload/standards/${standardId}/observations/${observationId}`);
+    toast('观测已删除');
+    await RENDERERS.monitor();
+    openObservationsModal(standardId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function submitStandardReview(standardId) {
+  const ok = await confirmDialog('提交后进入待审核；评审通过才进入产能口径。',
+    { title: '提交评审', okText: '提交' });
+  if (!ok) return;
+  try {
+    await POST(`/workload/standards/${standardId}/submit-review`);
+    toast('已提交评审');
+    closeModal();
+    RENDERERS.monitor();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function reviewWorkloadStandard(standardId, approved) {
+  const note = await promptDialog(
+    approved ? '审核意见（可留空）' : '退回原因（必填）',
+    {
+      title: approved ? '通过标准工时' : '退回标准工时',
+      okText: approved ? '通过' : '退回',
+      value: '',
+    },
+  );
+  if (note === undefined) return;
+  if (!approved && !note.trim()) return toast('退回必须填写原因', true);
+  try {
+    await POST(`/workload/standards/${standardId}/review`, {
+      approved,
+      note: note.trim() || null,
+    });
+    toast(approved ? '已通过评审' : '已退回');
+    closeModal();
     RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);

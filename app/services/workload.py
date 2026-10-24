@@ -14,7 +14,7 @@ from datetime import date, datetime, time
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.timeutil import utcnow
 from app.models.enums import WorkMeasurementSource, WorkMeasurementStatus
@@ -22,7 +22,11 @@ from app.models.execution import ProcessTask, TaskWorklog
 from app.models.org import OrgUnit, Position
 from app.models.process import ProcessArch
 from app.models.user import User
-from app.models.workload import CapacityCalendar, WorkMeasurementStandard
+from app.models.workload import (
+    CapacityCalendar,
+    WorkMeasurementObservation,
+    WorkMeasurementStandard,
+)
 from app.schemas.workload import (
     CapacityCalendarOut,
     WorkloadActualRow,
@@ -30,6 +34,7 @@ from app.schemas.workload import (
     WorkloadStandardRow,
     WorkloadSummaryOut,
     WorkloadTotals,
+    WorkMeasurementObservationOut,
     WorkMeasurementStandardOut,
 )
 
@@ -47,9 +52,13 @@ SOURCE_LABELS = {
 
 STATUS_LABELS = {
     WorkMeasurementStatus.DRAFT.value: "草稿",
+    WorkMeasurementStatus.IN_REVIEW.value: "待审核",
     WorkMeasurementStatus.VERIFIED.value: "已验证",
     WorkMeasurementStatus.RETIRED.value: "已停用",
 }
+
+# 时间研究工作流的最低有效样本数；旧的手工标准仍可按 sample_size 验证
+MIN_OBSERVATIONS = 5
 
 MEASUREMENT_FIELDS = {
     "activity_id",
@@ -185,6 +194,15 @@ def update_standard(
             )
         ):
             raise WorkloadError(f"标准工时编码 {data['code']} 已存在")
+    has_observations = bool(
+        db.scalar(
+            select(func.count())
+            .select_from(WorkMeasurementObservation)
+            .where(WorkMeasurementObservation.standard_id == row.id)
+        )
+    )
+    if has_observations and {"observed_minutes", "sample_size"} & set(data):
+        raise WorkloadError("已有观测记录，均值和样本量由观测记录自动计算")
     merged = {field: data.get(field, getattr(row, field)) for field in MEASUREMENT_FIELDS}
     validate_standard(db, merged)
     changed = any(field in data for field in MEASUREMENT_FIELDS)
@@ -195,13 +213,160 @@ def update_standard(
             row.observed_minutes, row.rating_factor, row.allowance_rate
         )
         row.version = (row.version or 1) + 1
-        # 已验证的标准一旦改口径就必须重新验证，避免旧结论悄悄失效
-        if row.status == WorkMeasurementStatus.VERIFIED.value:
+        # 已验证/待审核的标准一旦改口径就必须重新验证，避免旧结论悄悄失效
+        if row.status in (
+            WorkMeasurementStatus.VERIFIED.value,
+            WorkMeasurementStatus.IN_REVIEW.value,
+        ):
             row.status = WorkMeasurementStatus.DRAFT.value
             row.verified_by_id = None
             row.verified_at = None
+            row.reviewed_by_id = None
+            row.reviewed_at = None
+            row.review_note = None
     db.flush()
     return row
+
+
+def observation_out(db: Session, row: WorkMeasurementObservation) -> WorkMeasurementObservationOut:
+    observer = db.get(User, row.observer_user_id) if row.observer_user_id else None
+    return WorkMeasurementObservationOut(
+        id=row.id,
+        standard_id=row.standard_id,
+        sequence=row.sequence,
+        observed_minutes=row.observed_minutes,
+        observed_at=row.observed_at,
+        observer_user_id=row.observer_user_id,
+        observer_name=observer.display_name if observer else None,
+        note=row.note,
+        created_at=row.created_at,
+    )
+
+
+def list_observations(db: Session, standard_id: int) -> List[WorkMeasurementObservation]:
+    return list(
+        db.scalars(
+            select(WorkMeasurementObservation)
+            .where(WorkMeasurementObservation.standard_id == standard_id)
+            .order_by(WorkMeasurementObservation.sequence)
+        ).all()
+    )
+
+
+def _recompute_from_observations(db: Session, row: WorkMeasurementStandard) -> None:
+    observations = list_observations(db, row.id)
+    row.sample_size = len(observations)
+    if not observations:
+        return
+    row.observed_minutes = round(
+        sum(item.observed_minutes for item in observations) / len(observations), 4
+    )
+    row.standard_minutes = compute_standard_minutes(
+        row.observed_minutes, row.rating_factor, row.allowance_rate
+    )
+
+
+def _reset_for_new_evidence(row: WorkMeasurementStandard) -> None:
+    """样本或口径变化后，旧的验证/评审结论必须失效。"""
+    if row.status in (
+        WorkMeasurementStatus.VERIFIED.value,
+        WorkMeasurementStatus.IN_REVIEW.value,
+    ):
+        row.status = WorkMeasurementStatus.DRAFT.value
+        row.version = (row.version or 1) + 1
+        row.verified_by_id = None
+        row.verified_at = None
+        row.reviewed_by_id = None
+        row.reviewed_at = None
+        row.review_note = None
+
+
+def add_observation(
+    db: Session,
+    row: WorkMeasurementStandard,
+    payload,
+    user: User,
+) -> WorkMeasurementObservation:
+    if row.status == WorkMeasurementStatus.RETIRED.value:
+        raise WorkloadError("已停用的标准工时不能新增观测记录")
+    sequence = (
+        db.scalar(
+            select(func.max(WorkMeasurementObservation.sequence)).where(
+                WorkMeasurementObservation.standard_id == row.id
+            )
+        )
+        or 0
+    ) + 1
+    observation = WorkMeasurementObservation(
+        standard_id=row.id,
+        sequence=sequence,
+        observed_minutes=payload.observed_minutes,
+        observed_at=payload.observed_at or utcnow(),
+        observer_user_id=user.id,
+        note=payload.note,
+    )
+    db.add(observation)
+    _reset_for_new_evidence(row)
+    db.flush()
+    _recompute_from_observations(db, row)
+    db.flush()
+    return observation
+
+
+def delete_observation(db: Session, row: WorkMeasurementStandard, observation_id: int) -> None:
+    observation = db.get(WorkMeasurementObservation, observation_id)
+    if observation is None or observation.standard_id != row.id:
+        raise WorkloadError("观测记录不存在")
+    db.delete(observation)
+    _reset_for_new_evidence(row)
+    db.flush()
+    _recompute_from_observations(db, row)
+    db.flush()
+
+
+def submit_review(db: Session, row: WorkMeasurementStandard) -> None:
+    if row.status == WorkMeasurementStatus.IN_REVIEW.value:
+        return
+    if row.status != WorkMeasurementStatus.DRAFT.value:
+        raise WorkloadError("只有草稿状态的标准工时可以提交评审")
+    if row.source == WorkMeasurementSource.ESTIMATE.value:
+        raise WorkloadError("估算工时不走评审，也不能标记为已验证")
+    if not (row.method_description or "").strip():
+        raise WorkloadError("请先填写方法说明，再提交评审")
+    if row.sample_size < MIN_OBSERVATIONS:
+        raise WorkloadError(f"有效样本不足：至少需要 {MIN_OBSERVATIONS} 条观测或样本")
+    row.status = WorkMeasurementStatus.IN_REVIEW.value
+    row.verified_by_id = None
+    row.verified_at = None
+    row.reviewed_by_id = None
+    row.reviewed_at = None
+    row.review_note = None
+    db.flush()
+
+
+def review_standard(
+    db: Session,
+    row: WorkMeasurementStandard,
+    user: User,
+    approved: bool,
+    note: Optional[str],
+) -> None:
+    if row.status != WorkMeasurementStatus.IN_REVIEW.value:
+        raise WorkloadError("只有待审核的标准工时可以评审")
+    if not approved and not (note or "").strip():
+        raise WorkloadError("退回时必须填写原因")
+    row.reviewed_by_id = user.id
+    row.reviewed_at = utcnow()
+    row.review_note = (note or "").strip() or None
+    if approved:
+        row.status = WorkMeasurementStatus.VERIFIED.value
+        row.verified_by_id = user.id
+        row.verified_at = utcnow()
+    else:
+        row.status = WorkMeasurementStatus.DRAFT.value
+        row.verified_by_id = None
+        row.verified_at = None
+    db.flush()
 
 
 def verify_standard(db: Session, row: WorkMeasurementStandard, user: User) -> None:
@@ -226,6 +391,15 @@ def standard_out(db: Session, row: WorkMeasurementStandard) -> WorkMeasurementSt
     position = db.get(Position, row.position_id)
     org_unit = db.get(OrgUnit, row.org_unit_id) if row.org_unit_id else None
     verified_by = db.get(User, row.verified_by_id) if row.verified_by_id else None
+    reviewed_by = db.get(User, row.reviewed_by_id) if row.reviewed_by_id else None
+    observation_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(WorkMeasurementObservation)
+            .where(WorkMeasurementObservation.standard_id == row.id)
+        )
+        or 0
+    )
     return WorkMeasurementStandardOut(
         id=row.id,
         code=row.code,
@@ -256,6 +430,11 @@ def standard_out(db: Session, row: WorkMeasurementStandard) -> WorkMeasurementSt
         verified_by_id=row.verified_by_id,
         verified_by_name=verified_by.display_name if verified_by else None,
         verified_at=row.verified_at,
+        observation_count=observation_count,
+        reviewed_by_id=row.reviewed_by_id,
+        reviewed_by_name=reviewed_by.display_name if reviewed_by else None,
+        reviewed_at=row.reviewed_at,
+        review_note=row.review_note,
         created_at=row.created_at,
     )
 
@@ -359,7 +538,10 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
 
     standards = db.scalars(
         select(WorkMeasurementStandard)
-        .options(joinedload(WorkMeasurementStandard.activity))
+        .options(
+            joinedload(WorkMeasurementStandard.activity),
+            selectinload(WorkMeasurementStandard.reviewed_by),
+        )
         .where(
             WorkMeasurementStandard.status != WorkMeasurementStatus.RETIRED.value,
             (WorkMeasurementStandard.valid_from.is_(None))
@@ -368,6 +550,16 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
             | (WorkMeasurementStandard.valid_to >= start),
         )
     ).all()
+    observation_counts = dict(
+        db.execute(
+            select(
+                WorkMeasurementObservation.standard_id,
+                func.count(),
+            )
+            .where(WorkMeasurementObservation.standard_id.in_([row.id for row in standards]))
+            .group_by(WorkMeasurementObservation.standard_id)
+        ).all()
+    )
     standard_rows = [
         WorkloadStandardRow(
             standard_id=row.id,
@@ -381,6 +573,11 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
             standard_minutes=row.standard_minutes,
             monthly_frequency=row.monthly_frequency,
             demand_minutes=round(row.standard_minutes * row.monthly_frequency, 2),
+            sample_size=row.sample_size,
+            observation_count=observation_counts.get(row.id, 0),
+            observed_minutes=row.observed_minutes,
+            review_note=row.review_note,
+            reviewed_by_name=(row.reviewed_by.display_name if row.reviewed_by else None),
             status=row.status,
             status_label=STATUS_LABELS.get(row.status, row.status),
             source=row.source,

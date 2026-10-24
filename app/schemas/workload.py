@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -82,7 +82,35 @@ class WorkMeasurementStandardOut(ORMModel):
     verified_by_id: Optional[int] = None
     verified_by_name: Optional[str] = None
     verified_at: Optional[UtcDateTime] = None
+    observation_count: int = 0
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    reviewed_at: Optional[UtcDateTime] = None
+    review_note: Optional[str] = None
     created_at: UtcDateTime
+
+
+class WorkMeasurementObservationCreate(BaseModel):
+    observed_minutes: float = Field(gt=0, description="本次观测到的作业时间（分钟）")
+    observed_at: Optional[datetime] = None
+    note: Optional[str] = None
+
+
+class WorkMeasurementObservationOut(ORMModel):
+    id: int
+    standard_id: int
+    sequence: int
+    observed_minutes: float
+    observed_at: UtcDateTime
+    observer_user_id: Optional[int] = None
+    observer_name: Optional[str] = None
+    note: Optional[str] = None
+    created_at: UtcDateTime
+
+
+class WorkMeasurementReviewIn(BaseModel):
+    approved: bool
+    note: Optional[str] = Field(default=None, max_length=400)
 
 
 class CapacityCalendarCreate(BaseModel):
@@ -132,6 +160,11 @@ class WorkloadStandardRow(BaseModel):
     standard_minutes: float
     monthly_frequency: float
     demand_minutes: float
+    sample_size: int = 0
+    observation_count: int = 0
+    observed_minutes: float = 0
+    review_note: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
     status: str
     status_label: str
     source: str

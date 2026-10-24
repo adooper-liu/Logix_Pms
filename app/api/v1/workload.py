@@ -9,13 +9,16 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser
 from app.models.enums import WorkMeasurementStatus
-from app.schemas.common import as_columns
+from app.schemas.common import DeleteResult, as_columns
 from app.schemas.workload import (
     CapacityCalendarCreate,
     CapacityCalendarOut,
     CapacityCalendarUpdate,
     WorkloadMetaOut,
     WorkloadSummaryOut,
+    WorkMeasurementObservationCreate,
+    WorkMeasurementObservationOut,
+    WorkMeasurementReviewIn,
     WorkMeasurementStandardCreate,
     WorkMeasurementStandardOut,
     WorkMeasurementStandardUpdate,
@@ -139,6 +142,128 @@ def verify_standard(standard_id: int, db: DbSession, user: ManagerUser):
         "work_measurement_standard",
         row.id,
         f"验证标准工时 {row.code} v{row.version}",
+    )
+    db.commit()
+    db.refresh(row)
+    return workload_service.standard_out(db, row)
+
+
+@router.get(
+    "/standards/{standard_id}/observations",
+    response_model=List[WorkMeasurementObservationOut],
+    summary="标准工时的现场观测记录",
+)
+def list_observations(standard_id: int, db: DbSession, user: CurrentUser):
+    workload_service.require_standard(db, standard_id)
+    return [
+        workload_service.observation_out(db, row)
+        for row in workload_service.list_observations(db, standard_id)
+    ]
+
+
+@router.post(
+    "/standards/{standard_id}/observations",
+    response_model=WorkMeasurementObservationOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新增观测记录（均值和样本量自动回算，MANAGER+）",
+)
+def add_observation(
+    standard_id: int,
+    payload: WorkMeasurementObservationCreate,
+    db: DbSession,
+    user: ManagerUser,
+):
+    row = workload_service.require_standard(db, standard_id)
+    try:
+        observation = workload_service.add_observation(db, row, payload, user)
+    except workload_service.WorkloadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "work_measurement_observation",
+        observation.id,
+        f"新增观测记录：{row.code} 第 {observation.sequence} 条"
+        f"（均值 {row.observed_minutes} 分，样本 {row.sample_size}）",
+    )
+    db.commit()
+    db.refresh(observation)
+    return workload_service.observation_out(db, observation)
+
+
+@router.delete(
+    "/standards/{standard_id}/observations/{observation_id}",
+    response_model=DeleteResult,
+    summary="删除观测记录（均值和样本量自动回算，MANAGER+）",
+)
+def delete_observation(standard_id: int, observation_id: int, db: DbSession, user: ManagerUser):
+    row = workload_service.require_standard(db, standard_id)
+    try:
+        workload_service.delete_observation(db, row, observation_id)
+    except workload_service.WorkloadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "DELETE",
+        "work_measurement_observation",
+        observation_id,
+        f"删除观测记录：{row.code}（均值 {row.observed_minutes} 分，样本 {row.sample_size}）",
+    )
+    db.commit()
+    return DeleteResult(deleted=1)
+
+
+@router.post(
+    "/standards/{standard_id}/submit-review",
+    response_model=WorkMeasurementStandardOut,
+    summary="提交标准工时评审（至少 5 条有效样本，MANAGER+）",
+)
+def submit_review(standard_id: int, db: DbSession, user: ManagerUser):
+    row = workload_service.require_standard(db, standard_id)
+    try:
+        workload_service.submit_review(db, row)
+    except workload_service.WorkloadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "work_measurement_standard",
+        row.id,
+        f"提交标准工时评审 {row.code} v{row.version}（样本 {row.sample_size}）",
+    )
+    db.commit()
+    db.refresh(row)
+    return workload_service.standard_out(db, row)
+
+
+@router.post(
+    "/standards/{standard_id}/review",
+    response_model=WorkMeasurementStandardOut,
+    summary="审核标准工时（通过 / 退回，MANAGER+）",
+)
+def review_standard(
+    standard_id: int,
+    payload: WorkMeasurementReviewIn,
+    db: DbSession,
+    user: ManagerUser,
+):
+    row = workload_service.require_standard(db, standard_id)
+    try:
+        workload_service.review_standard(db, row, user, payload.approved, payload.note)
+    except workload_service.WorkloadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    decision = "通过" if payload.approved else "退回"
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "work_measurement_standard",
+        row.id,
+        f"审核标准工时 {row.code} v{row.version}：{decision}"
+        + (f"（{payload.note}）" if payload.note else ""),
     )
     db.commit()
     db.refresh(row)

@@ -95,7 +95,11 @@ from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
-from app.models.workload import CapacityCalendar, WorkMeasurementStandard
+from app.models.workload import (
+    CapacityCalendar,
+    WorkMeasurementObservation,
+    WorkMeasurementStandard,
+)
 
 __all__ = [
     # 模型
@@ -151,6 +155,7 @@ __all__ = [
     "InboundWebhook",
     "InboundEvent",
     "WorkMeasurementStandard",
+    "WorkMeasurementObservation",
     "CapacityCalendar",
     "StrategyObjective",
     "ObjectiveProcessLink",

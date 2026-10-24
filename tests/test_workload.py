@@ -218,3 +218,135 @@ def test_meta_declares_work_measurement_boundary(client):
     assert "不用于个人" in note
     assert "扣罚" in note
     assert "已验证" in note
+
+
+def _observation(standard_id: int, minutes: float, **overrides) -> dict:
+    payload = {
+        "observed_minutes": minutes,
+        "observed_at": "2026-11-01T09:00:00",
+        "note": "现场观测",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_time_study_observation_and_review_flow(client):
+    created = client.post(
+        f"{API}/workload/standards",
+        json=_standard_payload(client, sample_size=0),
+    )
+    assert created.status_code == 201, created.text
+    sid = created.json()["id"]
+    assert created.json()["observation_count"] == 0
+
+    for minutes in (10.0, 12.0, 11.0, 13.0, 9.0):
+        added = client.post(
+            f"{API}/workload/standards/{sid}/observations", json=_observation(sid, minutes)
+        )
+        assert added.status_code == 201, added.text
+    standards = client.get(f"{API}/workload/standards").json()
+    row = next(item for item in standards if item["id"] == sid)
+    assert row["observation_count"] == 5
+    assert row["sample_size"] == 5
+    assert row["observed_minutes"] == 11.0
+    assert row["standard_minutes"] == 13.31
+
+    observations = client.get(f"{API}/workload/standards/{sid}/observations").json()
+    assert [item["sequence"] for item in observations] == [1, 2, 3, 4, 5]
+    assert observations[0]["observer_name"] == "系统管理员"
+
+    submitted = client.post(f"{API}/workload/standards/{sid}/submit-review")
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "IN_REVIEW"
+    assert submitted.json()["status_label"] == "待审核"
+
+    approved = client.post(
+        f"{API}/workload/standards/{sid}/review",
+        json={"approved": True, "note": "方法与样本符合要求"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "VERIFIED"
+    assert approved.json()["reviewed_by_name"] == "系统管理员"
+    assert approved.json()["review_note"] == "方法与样本符合要求"
+
+    # 已验证后新增样本：重新回到草稿并升版
+    sixth = client.post(f"{API}/workload/standards/{sid}/observations", json=_observation(sid, 8.0))
+    assert sixth.status_code == 201
+    after_add = next(
+        item for item in client.get(f"{API}/workload/standards").json() if item["id"] == sid
+    )
+    assert after_add["status"] == "DRAFT"
+    assert after_add["version"] == 2
+    assert after_add["sample_size"] == 6
+    assert after_add["observed_minutes"] == 10.5
+    assert after_add["reviewed_by_id"] is None
+
+    # 退回必须写原因
+    assert client.post(f"{API}/workload/standards/{sid}/submit-review").status_code == 200
+    rejected = client.post(
+        f"{API}/workload/standards/{sid}/review", json={"approved": False, "note": ""}
+    )
+    assert rejected.status_code == 400
+    returned = client.post(
+        f"{API}/workload/standards/{sid}/review",
+        json={"approved": False, "note": "样本波动偏大，请补充观测"},
+    )
+    assert returned.status_code == 200
+    assert returned.json()["status"] == "DRAFT"
+    assert returned.json()["review_note"] == "样本波动偏大，请补充观测"
+
+    # 删除一条观测后自动回算
+    obs_id = observations[0]["id"]
+    assert client.delete(f"{API}/workload/standards/{sid}/observations/{obs_id}").status_code == 200
+    after_delete = next(
+        item for item in client.get(f"{API}/workload/standards").json() if item["id"] == sid
+    )
+    assert after_delete["observation_count"] == 5
+    assert after_delete["sample_size"] == 5
+
+
+def test_submit_review_requires_samples(client):
+    created = client.post(
+        f"{API}/workload/standards",
+        json=_standard_payload(client, sample_size=0),
+    )
+    sid = created.json()["id"]
+    response = client.post(f"{API}/workload/standards/{sid}/submit-review")
+    assert response.status_code == 400
+    assert "样本不足" in response.json()["detail"]
+
+
+def test_observations_lock_manual_mean(client):
+    created = client.post(
+        f"{API}/workload/standards",
+        json=_standard_payload(client, sample_size=0),
+    )
+    sid = created.json()["id"]
+    assert (
+        client.post(
+            f"{API}/workload/standards/{sid}/observations", json=_observation(sid, 10.0)
+        ).status_code
+        == 201
+    )
+    rejected = client.patch(f"{API}/workload/standards/{sid}", json={"observed_minutes": 12.0})
+    assert rejected.status_code == 400
+    assert "已有观测记录" in rejected.json()["detail"]
+
+
+def test_observation_permissions(owner_client, viewer_client):
+    standards = owner_client.get(f"{API}/workload/standards").json()
+    sid = standards[0]["id"]
+    assert (
+        owner_client.post(
+            f"{API}/workload/standards/{sid}/observations", json=_observation(sid, 10.0)
+        ).status_code
+        == 403
+    )
+    assert (
+        viewer_client.post(
+            f"{API}/workload/standards/{sid}/observations", json=_observation(sid, 10.0)
+        ).status_code
+        == 403
+    )
+    # 读取观测记录对只读角色开放
+    assert viewer_client.get(f"{API}/workload/standards/{sid}/observations").status_code == 200

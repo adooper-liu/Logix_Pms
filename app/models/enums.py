@@ -219,6 +219,7 @@ class WorkMeasurementStatus(str, Enum):
     """标准工时状态；只有 VERIFIED 能进入产能与成本口径。"""
 
     DRAFT = "DRAFT"
+    IN_REVIEW = "IN_REVIEW"
     VERIFIED = "VERIFIED"
     RETIRED = "RETIRED"
 

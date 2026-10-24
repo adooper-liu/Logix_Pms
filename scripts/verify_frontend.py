@@ -1622,6 +1622,74 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
+        # 标准工时：观测记录 → 提交评审 → 审核通过
+        def time_study_workflow() -> None:
+            created = page.evaluate("""async () => {
+                const t = localStorage.getItem('psm_token');
+                const h = { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' };
+                const acts = await fetch('/api/v1/process-map/flat?level=4',
+                    { headers: h }).then(r => r.json());
+                const pos = await fetch('/api/v1/positions',
+                    { headers: h }).then(r => r.json());
+                const res = await fetch('/api/v1/workload/standards', {
+                    method: 'POST', headers: h,
+                    body: JSON.stringify({
+                        name: '自检用标准工时',
+                        activity_id: acts[0].id,
+                        position_id: pos[0].id,
+                        method_description: '自检方法：取料→处理→放行',
+                        source: 'TIME_STUDY',
+                        observed_minutes: 10,
+                        rating_factor: 1,
+                        allowance_rate: 0.1,
+                        sample_size: 0,
+                        monthly_frequency: 1,
+                    }),
+                });
+                return res.ok ? await res.json() : { error: await res.text() };
+            }""")
+            assert created.get("id"), created
+            goto("monitor")
+            page.click('#view .seg button:has-text("工作量")')
+            page.wait_for_timeout(800)
+
+            row = page.locator('#view tr:has-text("自检用标准工时")').first
+            row.locator('button:has-text("样本")').click()
+            page.wait_for_selector("#obsMinutes")
+            modal = page.inner_text("#mBody")
+            assert "至少 5 条有效样本" in modal, "样本弹窗缺少评审门槛说明"
+
+            for index, minutes in enumerate((10, 10.5, 9.5, 10, 10), start=1):
+                page.fill("#obsMinutes", str(minutes))
+                page.click('#mBody button:has-text("+ 添加观测")')
+                page.wait_for_function(
+                    """(expected) => {
+                        const body = document.getElementById('mBody');
+                        return body && body.innerText.includes('样本 ' + expected + ' 条');
+                    }""",
+                    arg=index,
+                    timeout=8000,
+                )
+                page.wait_for_selector("#obsMinutes")
+            assert "样本 5 条" in page.inner_text("#mBody"), "样本量没有自动回算"
+
+            page.click('#mFoot button:has-text("提交评审")')
+            page.wait_for_selector("#mask.show")
+            page.click("#uiDialogOk")
+            page.wait_for_timeout(1200)
+
+            row = page.locator('#view tr:has-text("自检用标准工时")').first
+            assert "待审核" in row.inner_text(), "提交评审后状态不是待审核"
+            row.locator('button:has-text("样本")').click()
+            page.wait_for_selector("#obsMinutes")
+            page.click('#mFoot button:has-text("通过")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#uiDialogInput", "自检通过")
+            page.click("#uiDialogOk")
+            page.wait_for_timeout(1200)
+            row = page.locator('#view tr:has-text("自检用标准工时")').first
+            assert "已验证" in row.inner_text(), "审核通过后状态不是已验证"
+
         # 数据治理：数据域/数据流登记与缺口概览
         def data_governance_view() -> None:
             goto("data")
@@ -2222,6 +2290,7 @@ def main() -> int:
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
         check("设计器变更申请与影响分析", designer_change_tab)
         check("监控异常处理弹窗", monitor)
+        check("标准工时观测与评审", time_study_workflow)
         check("数据治理数据域与数据流", data_governance_view)
         check("知识库详情 + 快速找工具", knowledge)
         check("项目甘特图与里程碑", project_gantt)
@@ -2277,6 +2346,17 @@ def main() -> int:
                       method: 'DELETE', headers: h,
                     });
                     out.push('authorization-rule:' + r.code);
+                  }
+                }
+                const standards = await fetch(
+                  '/api/v1/workload/standards?include_retired=true', { headers: h }
+                ).then(r => r.json());
+                for (const s of standards) {
+                  if (s.name.includes('自检用') && s.status !== 'RETIRED') {
+                    await fetch('/api/v1/workload/standards/' + s.id + '/retire', {
+                      method: 'POST', headers: h,
+                    });
+                    out.push('standard:' + s.code);
                   }
                 }
                 return out;

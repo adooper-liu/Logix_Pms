@@ -84,6 +84,13 @@ class WorkMeasurementStandard(Base):
         ForeignKey("app_user.id", ondelete="SET NULL", name="fk_wms_created_by"),
         nullable=True,
     )
+    # 评审人：与“验证人”分开，保留“谁观测、谁审核”的责任链
+    reviewed_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL", name="fk_wms_reviewed_by"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -95,10 +102,53 @@ class WorkMeasurementStandard(Base):
     verified_by: Mapped[Optional["User"]] = relationship(  # noqa: F821
         "User", foreign_keys=[verified_by_id]
     )
+    reviewed_by: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[reviewed_by_id]
+    )
+    observations: Mapped[list["WorkMeasurementObservation"]] = relationship(
+        "WorkMeasurementObservation",
+        back_populates="standard",
+        cascade="all, delete-orphan",
+        order_by="WorkMeasurementObservation.sequence",
+    )
 
     __table_args__ = (
         Index("ix_wms_activity_position", "activity_id", "position_id"),
         Index("ix_wms_position_status", "position_id", "status"),
+    )
+
+
+class WorkMeasurementObservation(Base):
+    """一次现场观测记录：均值、样本量由这些记录自动回算。"""
+
+    __tablename__ = "work_measurement_observation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    standard_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "work_measurement_standard.id",
+            ondelete="CASCADE",
+            name="fk_wms_observation_standard",
+        ),
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, default=1)
+    observed_minutes: Mapped[float] = mapped_column(Float)
+    observed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    observer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL", name="fk_wms_observation_observer"),
+        nullable=True,
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    standard: Mapped["WorkMeasurementStandard"] = relationship(
+        "WorkMeasurementStandard", back_populates="observations"
+    )
+    observer: Mapped[Optional["User"]] = relationship("User")  # noqa: F821
+
+    __table_args__ = (
+        UniqueConstraint("standard_id", "sequence", name="uq_wms_observation_sequence"),
     )
 
 
