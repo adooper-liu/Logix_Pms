@@ -7,13 +7,13 @@
 export const state = {
   view: 'dashboard',
   /** 五个业务枚举的中文标签，首次启动时从后端 meta 接口拉取 */
-  meta: { methodology: {}, status: {}, stage: {} },
+  meta: { methodology: {}, status: {}, stage: {}, setupStage: {} },
   map: {
     code: null, name: null, path: [], improvementOnly: false,
     pendingJump: null, navCollapsed: false,
     frameworks: null, benchmarkFramework: '', benchmark: null,
   },
-  projects: { filter: { methodology: '', status: '', stage: '' }, keyword: '' },
+  projects: { filter: { methodology: '', status: '', stage: '', projectType: '' }, keyword: '' },
   workflow: { tab: 'steps', stage: 1 },
   /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
   toolboxFilter: null,
@@ -29,6 +29,7 @@ export const state = {
   monitor: { status: '', tab: 'overview', kind: '', period: '' },
   strategy: { year: new Date().getFullYear() },
   dataGov: null,
+  processCard: { processId: null },
   execution: { tab: 'tasks', filter: 'open' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
@@ -48,6 +49,8 @@ export const TITLES = {
   monitor: '运营监控与KPI',
   strategy: '战略目标',
   data: '数据治理',
+  start: '开始使用',
+  process_card: '流程卡',
   knowledge: '流程知识库',
   pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',

@@ -19,7 +19,7 @@ from app.api.deps import (
 )
 from app.core.timeutil import utcnow
 from app.models.deliverable import DeliverableInstance, DeliverableVersion
-from app.models.enums import Methodology, ProjectStatus, Role, StepStatus
+from app.models.enums import Methodology, ProjectStatus, ProjectType, Role, StepStatus
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
 from app.models.project import Project, ProjectStep, WorkflowTemplate
@@ -40,12 +40,14 @@ from app.schemas.project import (
     ProjectUpdate,
     ScheduleStage,
     ScheduleStep,
+    SetupProgramCreate,
     StageProgress,
 )
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import improvement as improvement_service
 from app.services import methodology as methodology_service
+from app.services import setup_program as setup_service
 from app.services import storage as storage_service
 from app.services.workflow import STAGE_NAMES, recompute_progress, seed_project_steps
 
@@ -66,6 +68,17 @@ STATUS_LABELS: Dict[str, str] = {
     ProjectStatus.CANCELLED.value: "已取消",
 }
 
+PROJECT_TYPE_LABELS: Dict[str, str] = {
+    ProjectType.IMPROVEMENT.value: "流程改善",
+    ProjectType.GOVERNANCE_SETUP.value: "治理体系落地",
+}
+
+
+def _stage_names(project: Project) -> Dict[int, str]:
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        return setup_service.SETUP_STAGE_NAMES
+    return STAGE_NAMES
+
 
 # ------------------------------------------------------------------ 工具函数
 
@@ -79,7 +92,8 @@ def _to_out(p: Project, process_name: Optional[str] = None) -> ProjectOut:
     data["process_name"] = process_name
     data["methodology_label"] = METHODOLOGY_LABELS.get(p.methodology, p.methodology)
     data["status_label"] = STATUS_LABELS.get(p.status, p.status)
-    data["stage_name"] = STAGE_NAMES.get(p.current_stage)
+    data["stage_name"] = _stage_names(p).get(p.current_stage)
+    data["project_type_label"] = PROJECT_TYPE_LABELS.get(p.project_type, p.project_type)
     data["source_label"] = improvement_service.SOURCE_LABELS.get(p.source, p.source)
     data["replication_status_label"] = improvement_service.REPLICATION_LABELS.get(
         p.replication_status, p.replication_status
@@ -142,6 +156,8 @@ def summary(db: DbSession):
         "methodology_labels": METHODOLOGY_LABELS,
         "status_labels": STATUS_LABELS,
         "stage_names": STAGE_NAMES,
+        "setup_stage_names": setup_service.SETUP_STAGE_NAMES,
+        "project_type_labels": PROJECT_TYPE_LABELS,
     }
 
 
@@ -153,9 +169,10 @@ def list_projects(
     db: DbSession,
     methodology: Optional[Methodology] = None,
     status_: Optional[ProjectStatus] = Query(default=None, alias="status"),
-    stage: Optional[int] = Query(default=None, ge=1, le=5),
+    stage: Optional[int] = Query(default=None, ge=1, le=9),
     priority: Optional[int] = Query(default=None, ge=1, le=5),
     process_id: Optional[int] = None,
+    project_type: Optional[ProjectType] = None,
     owner: Optional[str] = None,
     keyword: Optional[str] = None,
     page: int = Query(default=1, ge=1),
@@ -172,6 +189,8 @@ def list_projects(
         stmt = stmt.where(Project.priority == priority)
     if process_id is not None:
         stmt = stmt.where(Project.process_id == process_id)
+    if project_type is not None:
+        stmt = stmt.where(Project.project_type == project_type.value)
     if owner:
         stmt = stmt.where(Project.owner.like(f"%{owner}%"))
     if keyword:
@@ -197,6 +216,11 @@ def list_projects(
     "", response_model=ProjectOut, status_code=status.HTTP_201_CREATED, summary="新建流程项目"
 )
 def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
+    if payload.project_type == ProjectType.GOVERNANCE_SETUP:
+        raise HTTPException(
+            status_code=400,
+            detail="治理体系落地项目请使用 /projects/setup-program 创建（9 阶段模板）",
+        )
     data = as_columns(payload.model_dump(exclude={"code", "seed_workflow"}))
     # 归属以账号 id 为准；只给了姓名的历史数据按唯一 display_name 尝试绑定
     data["owner_user_id"], data["owner"] = resolve_owner(
@@ -241,6 +265,52 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     return _to_out(project, _process_names(db).get(project.process_id))
 
 
+@router.post(
+    "/setup-program",
+    response_model=ProjectOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新建治理体系落地项目（9 阶段，MANAGER+）",
+)
+def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: ManagerUser):
+    data = as_columns(payload.model_dump())
+    data["owner_user_id"], data["owner"] = resolve_owner(
+        db, data.get("owner_user_id"), data.get("owner")
+    )
+    if not data.get("owner") or not data.get("owner_user_id"):
+        raise HTTPException(status_code=400, detail="必须指定项目 Owner 账号")
+    code = setup_service.next_setup_code(db)
+    project = Project(
+        code=code,
+        name=payload.name,
+        project_type=ProjectType.GOVERNANCE_SETUP.value,
+        methodology=Methodology.HYBRID.value,
+        status=ProjectStatus.PLANNING.value,
+        current_stage=1,
+        priority=payload.priority,
+        owner=data["owner"],
+        owner_user_id=data["owner_user_id"],
+        sponsor=payload.sponsor,
+        objective=payload.objective,
+        scope=payload.scope,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    db.add(project)
+    db.flush()
+    setup_service.seed_setup_steps(db, project)
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "project",
+        project.id,
+        f"创建治理体系落地项目 {project.code} {project.name}（9 阶段）",
+    )
+    db.commit()
+    db.refresh(project)
+    return _to_out(project)
+
+
 # ------------------------------------------------------------------ 详情 / 更新 / 删除
 
 
@@ -258,15 +328,17 @@ def get_project(project_id: int, db: DbSession):
         .order_by(ProjectStep.stage_no, ProjectStep.step_no)
     ).all()
 
+    names = _stage_names(project)
+    stage_numbers = sorted({s.stage_no for s in steps}) or sorted(names)
     stages: List[StageProgress] = []
-    for stage_no in sorted(STAGE_NAMES):
+    for stage_no in stage_numbers:
         stage_steps = [s for s in steps if s.stage_no == stage_no]
         done = sum(1 for s in stage_steps if s.status == StepStatus.DONE.value)
         total = len(stage_steps)
         stages.append(
             StageProgress(
                 stage_no=stage_no,
-                stage_name=STAGE_NAMES[stage_no],
+                stage_name=names.get(stage_no, f"阶段 {stage_no}"),
                 total=total,
                 done=done,
                 progress=round(done / total * 100, 1) if total else 0.0,
@@ -282,13 +354,22 @@ def get_project(project_id: int, db: DbSession):
     next_action = None
     if current_steps:
         head = current_steps[0]
-        tpl = db.scalar(select(WorkflowTemplate).where(WorkflowTemplate.step_no == head.step_no))
+        if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+            suggestion = (
+                f"按九阶段体系落地路径推进：{head.deliverable or head.name}；完成后标记为已完成。"
+            )
+        else:
+            tpl = db.scalar(
+                select(WorkflowTemplate).where(WorkflowTemplate.step_no == head.step_no)
+            )
+            suggestion = (tpl.action if tpl else "按标准工作流推进该步骤。") + (
+                f" 关键要点：{tpl.key_points}" if tpl else ""
+            )
         next_action = NextAction(
             step_no=head.step_no,
             name=head.name,
             stage_no=head.stage_no,
-            suggestion=(tpl.action if tpl else "按标准工作流推进该步骤。")
-            + (f" 关键要点：{tpl.key_points}" if tpl else ""),
+            suggestion=suggestion,
         )
 
     kpi_trend = [
@@ -388,7 +469,7 @@ def delete_project(project_id: int, db: DbSession, user: ManagerUser):
 
 @router.get("/{project_id}/steps", response_model=List[ProjectStepOut], summary="项目步骤清单")
 def list_steps(
-    project_id: int, db: DbSession, stage_no: Optional[int] = Query(default=None, ge=1, le=5)
+    project_id: int, db: DbSession, stage_no: Optional[int] = Query(default=None, ge=1, le=9)
 ):
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -412,8 +493,9 @@ def get_schedule(project_id: int, db: DbSession):
     ).all()
 
     today = date.today()
+    names = _stage_names(project)
     stages: List[ScheduleStage] = []
-    for stage_no in sorted(STAGE_NAMES):
+    for stage_no in sorted({s.stage_no for s in steps}):
         stage_steps = [s for s in steps if s.stage_no == stage_no]
         if not stage_steps:
             continue
@@ -422,7 +504,7 @@ def get_schedule(project_id: int, db: DbSession):
         stages.append(
             ScheduleStage(
                 stage_no=stage_no,
-                stage_name=STAGE_NAMES[stage_no],
+                stage_name=names.get(stage_no, f"阶段 {stage_no}"),
                 start=min(dates) if dates else None,
                 end=max(dates) if dates else None,
                 progress=round(done / len(stage_steps) * 100, 1),

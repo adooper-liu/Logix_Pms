@@ -23,11 +23,13 @@ from app.api.v1 import (
     notifications,
     orgs,
     positions,
+    process_card,
     process_documents,
     process_map,
     projects,
     raci,
     sketches,
+    startup,
     strategy,
     tool_templates,
     tools,
@@ -46,6 +48,7 @@ api_router.include_router(integrations.inbound_router)
 protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(dashboard.router)
 protected.include_router(process_map.router)
+protected.include_router(process_card.router)
 protected.include_router(process_documents.router)
 protected.include_router(benchmark.router)
 protected.include_router(baselines.router)
@@ -69,6 +72,7 @@ protected.include_router(workload.router)
 protected.include_router(strategy.router)
 protected.include_router(raci.router)
 protected.include_router(data_governance.router)
+protected.include_router(startup.router)
 protected.include_router(knowledge.router)
 api_router.include_router(protected)
 

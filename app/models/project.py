@@ -20,6 +20,9 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(160))
+    project_type: Mapped[str] = mapped_column(
+        String(24), default="IMPROVEMENT", server_default="IMPROVEMENT", index=True
+    )
     methodology: Mapped[str] = mapped_column(String(16), index=True)
     status: Mapped[str] = mapped_column(String(16), index=True, default="PLANNING")
     current_stage: Mapped[int] = mapped_column(Integer, default=1)  # 1..5

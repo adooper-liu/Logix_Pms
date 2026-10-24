@@ -16,6 +16,8 @@ on('projects.new', () => newProjectWizard());
 on('projects.goWorkflow', () => go('workflow'));
 on('projects.goExecution', () => go('execution'));
 on('projects.filter', ({ key }, el) => setPFilter(key, el.value));
+on('projects.newSetup', () => newSetupProgramModal());
+on('projects.submitSetup', () => submitSetupProgram());
 on('projects.clearFilter', () => clearPFilter());
 on('projects.tab', ({ pane }, el) => tab(el, pane));
 on('projects.patchStep', ({ id, project }, el) => {
@@ -38,6 +40,7 @@ const renderProjects = () => {
   if (f.methodology) qs.push('methodology=' + f.methodology);
   if (f.status) qs.push('status=' + f.status);
   if (f.stage) qs.push('stage=' + f.stage);
+  if (f.projectType) qs.push('project_type=' + f.projectType);
   if (state.projects.keyword) qs.push('keyword=' + encodeURIComponent(state.projects.keyword));
   qs.push('page_size=100');
 
@@ -51,7 +54,9 @@ const renderProjects = () => {
         <tr class="clk">
           <td><button class="project-open" type="button" data-act="projects.open"
               data-id="${p.id}"><b>${esc(p.name)}</b></button>
-            <div class="tiny">${esc(p.code)}${p.process_name ? ' · ' + esc(p.process_name) : ''}</div></td>
+            <div class="tiny">${esc(p.code)}${p.process_name ? ' · ' + esc(p.process_name) : ''}
+              ${p.project_type === 'GOVERNANCE_SETUP'
+                ? '<span class="tag t-blu">体系落地</span>' : ''}</div></td>
           <td>${methodTag(p.methodology, state.meta.methodology[p.methodology])}</td>
           <td>阶段${p.current_stage}<div class="tiny">${esc(p.stage_name || '')}</div></td>
           <td>${esc(p.owner)}<div class="tiny">${esc(p.department || '')}</div></td>
@@ -65,6 +70,15 @@ const renderProjects = () => {
 
       const opt = (v, label, cur) =>
         '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
+      // 改善项目 5 阶段、体系落地项目 9 阶段；未筛选类型时按纯阶段号列出
+      const stageCount = f.projectType === 'IMPROVEMENT' ? 5 : 9;
+      const stageNames = f.projectType === 'GOVERNANCE_SETUP'
+        ? state.meta.setupStage : state.meta.stage;
+      const stageOptions = Array.from({ length: stageCount }, (_, index) => {
+        const no = index + 1;
+        const name = f.projectType ? (stageNames[no] || '') : '';
+        return opt(String(no), '阶段' + no + (name ? ' ' + name : ''), f.stage);
+      }).join('');
 
       const today = new Date().toISOString().slice(0, 10);
       const activeCount = page.items.filter((p) => p.status === 'ACTIVE').length;
@@ -78,10 +92,11 @@ const renderProjects = () => {
         <div class="card page-head">
           <div class="between">
             <div><h2>流程项目组合<span class="module-badge">改善项目 · 推进循环</span></h2>
-              <div class="desc">共 ${page.total} 个项目 · 每个项目按 24 步标准工作流推进；点击行查看详情与下一步动作</div></div>
+              <div class="desc">共 ${page.total} 个项目 · 改善项目走 24 步、体系落地项目走 9 阶段；点击行查看详情与下一步动作</div></div>
             <div class="gap">
               <a class="link-btn" data-act="projects.goWorkflow">查看方法手册</a>
               <a class="link-btn" data-act="projects.goExecution">流程执行 →</a>
+              <button class="btn btn-g" data-act="projects.newSetup">+ 体系落地项目</button>
               <button class="btn btn-p" data-act="projects.new">+ 新建流程项目</button>
             </div>
           </div>
@@ -101,15 +116,19 @@ const renderProjects = () => {
             </select>
             <select class="sel" data-act="projects.filter" data-key="stage">
               ${opt('', '全部阶段', f.stage)}
-              ${[1, 2, 3, 4, 5].map((i) => opt(String(i), '阶段' + i + ' ' +
-                (state.meta.stage[i] || ''), f.stage)).join('')}
+              ${stageOptions}
+            </select>
+            <select class="sel" data-act="projects.filter" data-key="projectType">
+              ${opt('', '全部类型', f.projectType)}
+              ${opt('IMPROVEMENT', '流程改善', f.projectType)}
+              ${opt('GOVERNANCE_SETUP', '治理体系落地', f.projectType)}
             </select>
             <select class="sel" data-act="projects.filter" data-key="status">
               ${opt('', '全部状态', f.status)}
               ${['PLANNING', 'ACTIVE', 'ON_HOLD', 'CLOSED', 'CANCELLED'].map((s) =>
                 opt(s, state.meta.status[s] || s, f.status)).join('')}
             </select>
-            ${(f.methodology || f.stage || f.status || state.projects.keyword)
+            ${(f.methodology || f.stage || f.projectType || f.status || state.projects.keyword)
               ? '<button class="btn-sm" style="align-self:center" data-act="projects.clearFilter">清空筛选</button>' : ''}
           </div>
         </div>
@@ -129,7 +148,7 @@ function setPFilter(key, value) {
   RENDERERS.projects();
 }
 function clearPFilter() {
-  state.projects.filter = { methodology: '', status: '', stage: '' };
+  state.projects.filter = { methodology: '', status: '', stage: '', projectType: '' };
   state.projects.keyword = '';
   document.getElementById('searchInput').value = '';
   RENDERERS.projects();
@@ -297,6 +316,77 @@ async function openProject(id) {
     true);
 }
 
+/* -------------------------------------------------- 治理体系落地项目 */
+
+function newSetupProgramModal() {
+  openModal('新建治理体系落地项目', `
+    <div class="field"><label>项目名称 *</label>
+      <input id="spName" placeholder="如 采购域流程治理体系落地"></div>
+    <div class="row2">
+      <div class="field"><label>项目 Owner *</label>
+        <select id="spOwner"><option value="">请选择</option></select></div>
+      <div class="field"><label>发起人 / 赞助人</label>
+        <input id="spSponsor" placeholder="如 集团总经理"></div>
+    </div>
+    <div class="field"><label>目标</label>
+      <textarea id="spObjective" rows="2" placeholder="建立可运行的流程治理体系"></textarea></div>
+    <div class="field"><label>范围</label>
+      <textarea id="spScope" rows="2" placeholder="试点流程、法人/工厂、系统范围"></textarea></div>
+    <div class="row3">
+      <div class="field"><label>开始日期</label><input id="spStart" type="date"></div>
+      <div class="field"><label>结束日期</label><input id="spEnd" type="date"></div>
+      <div class="field"><label>优先级</label>
+        <select id="spPriority">
+          ${[1, 2, 3, 4, 5].map((i) => `<option value="${i}"${i === 2 ? ' selected' : ''}>${i}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="note">会按九阶段模板生成 27 个步骤：立项定界 → 战略基线 → 架构 → 制度授权 →
+      流程/表单/工具 → 工时 → 试运行 → 固化 → 改善与复制。</div>`,
+    `<button class="btn btn-g" data-act="projects.close">取消</button>
+     <button class="btn btn-p" data-act="projects.submitSetup">创建</button>`);
+
+  GET('/execution/assignees').then((users) => {
+    const sel = document.getElementById('spOwner');
+    if (!sel) return;
+    users.forEach((user) => {
+      const option = document.createElement('option');
+      option.value = String(user.id);
+      option.textContent = user.display_name + ' · ' + (user.role_label || user.role);
+      sel.appendChild(option);
+    });
+  }).catch(() => {});
+}
+
+async function submitSetupProgram() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  const name = val('spName').trim();
+  if (!name) return toast('请填写项目名称', true);
+  if (!val('spOwner')) return toast('请选择项目 Owner', true);
+  const start = val('spStart') || null;
+  const end = val('spEnd') || null;
+  if (start && end && start > end) return toast('开始日期不能晚于结束日期', true);
+  try {
+    const created = await POST('/projects/setup-program', {
+      name,
+      owner_user_id: Number(val('spOwner')),
+      sponsor: val('spSponsor').trim() || null,
+      objective: val('spObjective').trim() || null,
+      scope: val('spScope').trim() || null,
+      priority: Number(val('spPriority') || 2),
+      start_date: start,
+      end_date: end,
+    });
+    closeModal();
+    toast('体系落地项目已创建（9 阶段）');
+    openProject(created.id);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 /* -------------------------------------------------- 项目属性的写入口 */
 
 function improvementCardHtml(p) {
@@ -333,14 +423,19 @@ function improvementCardHtml(p) {
 async function editProjectModal(projectId) {
   openModal('加载中…', skeleton(4), '', true);
   let p;
+  let detail;
   try {
-    p = (await GET('/projects/' + projectId)).project;
+    detail = await GET('/projects/' + projectId);
+    p = detail.project;
   } catch (e) {
     openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>');
     return;
   }
   const opt = (v, label, cur) =>
     '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
+  const stageOptions = (detail.stages || []).map((stage) =>
+    opt(String(stage.stage_no), '阶段' + stage.stage_no + ' ' + stage.stage_name,
+      String(p.current_stage))).join('');
   const repLabels = (state.projectMeta && state.projectMeta.replication_status_labels) || {};
   const repEntries = Object.entries(repLabels);
   const repOptions = repEntries.length
@@ -360,8 +455,7 @@ async function editProjectModal(projectId) {
         <select id="epStatus">${['PLANNING', 'ACTIVE', 'ON_HOLD', 'CLOSED', 'CANCELLED'].map((s) =>
           opt(s, state.meta.status[s] || s, p.status)).join('')}</select></div>
       <div class="field"><label>当前阶段</label>
-        <select id="epStage">${[1, 2, 3, 4, 5].map((i) =>
-          opt(String(i), '阶段' + i + ' ' + (state.meta.stage[i] || ''), String(p.current_stage))).join('')}</select></div>
+        <select id="epStage">${stageOptions}</select></div>
       <div class="field"><label>优先级</label>
         <select id="epPriority">${[1, 2, 3, 4, 5].map((i) =>
           opt(String(i), i + (i === 1 ? ' 最高' : i === 5 ? ' 最低' : ''), String(p.priority))).join('')}</select></div>

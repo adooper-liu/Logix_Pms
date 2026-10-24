@@ -32,10 +32,36 @@ const renderDashboard = () => renderAsync('dashboard',
   () => Promise.all([
     GET('/dashboard/overview?board_limit=5'),
     GET('/process-map/heatmap?level=3&limit=5'),
-  ]).then(([overview, priority]) => ({ overview, priority })),
+    GET('/dashboard/home'),
+  ]).then(([overview, priority, home]) => ({ overview, priority, home })),
   (payload) => {
     const d = payload.overview;
     const priority = payload.priority;
+    const home = payload.home;
+    const homeHtml = `
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">${esc(home.headline)}</h3>
+            <div class="desc" style="margin:2px 0 0">当前角色：${esc(home.role_label)}</div></div>
+          <button class="btn btn-g" data-act="dashboard.go" data-view="start">启动向导</button>
+        </div>
+        <div class="grid g3">
+          ${home.blocks.map((block) => `
+            <div class="card" style="margin:0">
+              <div class="between mb"><b>${esc(block.title)}</b>
+                <span class="tiny muted">${esc(block.description || '')}</span></div>
+              ${block.items.map((item) => `
+                <div class="between tiny"><span>${esc(item.label)}</span>
+                  <b>${esc(item.value)}</b></div>
+                ${item.hint ? `<div class="tiny muted">${esc(item.hint)}</div>` : ''}`).join('')}
+              <div class="gap mt">
+                ${block.actions.map((action) => `<button class="btn-sm"
+                  data-act="dashboard.go" data-view="${esc(action.view)}"
+                  title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`;
     const byKey = Object.fromEntries(d.cards.map((c) => [c.key, c]));
     const primary = ['active_projects', 'improvement_targets', 'open_exceptions', 'avg_improvement']
       .map((key) => byKey[key]).filter(Boolean);
@@ -177,6 +203,8 @@ const renderDashboard = () => renderAsync('dashboard',
         </div>
       </div>
 
+      ${homeHtml}
+
       <div class="grid g2">
         <div class="card">
           <h3>五阶段推进健康度</h3>
@@ -245,7 +273,7 @@ const renderDashboard = () => renderAsync('dashboard',
 
 function openProjects(filter) {
   state.projects.filter = Object.assign(
-    { methodology: '', status: '', stage: '' }, filter || {},
+    { methodology: '', status: '', stage: '', projectType: '' }, filter || {},
   );
   state.projects.keyword = '';
   go('projects');

@@ -43,6 +43,7 @@ from app.models.enums import (
     ProcessDocumentCategory,
     ProcessState,
     ProjectStatus,
+    ProjectType,
     RaciType,
     ReplicationStatus,
     Role,
@@ -154,6 +155,7 @@ __all__ = [
     # 枚举
     "Methodology",
     "ProjectStatus",
+    "ProjectType",
     "ProcessState",
     "ProcessDocumentCategory",
     "ScopeType",

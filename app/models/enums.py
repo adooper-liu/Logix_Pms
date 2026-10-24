@@ -23,6 +23,11 @@ class ProjectStatus(str, Enum):
     CANCELLED = "CANCELLED"  # 已取消
 
 
+class ProjectType(str, Enum):
+    IMPROVEMENT = "IMPROVEMENT"  # 流程改善项目（24 步）
+    GOVERNANCE_SETUP = "GOVERNANCE_SETUP"  # 治理体系落地项目（9 阶段）
+
+
 class ProcessState(str, Enum):
     """立项向导里对流程现状的判断，用于自动匹配方法论。"""
 

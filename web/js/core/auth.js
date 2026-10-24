@@ -134,6 +134,7 @@ export async function loadMeta() {
     state.meta.methodology = meta.methodology_labels || {};
     state.meta.status = meta.status_labels || {};
     state.meta.stage = meta.stage_names || {};
+    state.meta.setupStage = meta.setup_stage_names || {};
     document.getElementById('backendState').textContent = '后端已连接';
   } catch (e) {
     document.getElementById('backendState').innerHTML =

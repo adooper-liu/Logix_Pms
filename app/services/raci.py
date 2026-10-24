@@ -290,7 +290,12 @@ def invalid_processes(db: Session) -> List[RaciProcessOut]:
     process_ids = db.scalars(select(RaciAssignment.process_id).distinct()).all()
     invalid: List[RaciProcessOut] = []
     for process_id in process_ids:
-        result = process_raci(db, process_id)
+        try:
+            result = process_raci(db, process_id)
+        except RaciError:
+            # 流程已删除但 SQLite 测试库未强制外键时可能留下孤儿 RACI；
+            # 启动状态只统计仍然存在的流程。
+            continue
         if not result.valid:
             invalid.append(result)
     return invalid

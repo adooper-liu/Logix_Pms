@@ -86,8 +86,10 @@ def recompute_progress(db: Session, project: Project) -> float:
     done = sum(1 for s in steps if s.status == StepStatus.DONE.value)
     project.progress = round(done / len(steps) * 100, 1)
 
-    # 连续推进：当前阶段全部完成就进入下一阶段
-    while project.current_stage < 5:
+    # 连续推进：当前阶段全部完成就进入下一阶段。
+    # 阶段上限由实际步骤决定（改善项目 5 阶段，体系落地项目 9 阶段）。
+    max_stage = max((s.stage_no for s in steps), default=5)
+    while project.current_stage < max_stage:
         stage_steps = [s for s in steps if s.stage_no == project.current_stage]
         if stage_steps and all(s.status == StepStatus.DONE.value for s in stage_steps):
             project.current_stage += 1

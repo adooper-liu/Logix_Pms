@@ -23,8 +23,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 VIEWS = [
     ("dashboard", "管理驾驶舱"),
+    ("start", "开始使用"),
     ("strategy", "战略目标"),
     ("map", "企业流程地图"),
+    ("process_card", "流程卡"),
     ("workflow", "五阶段标准工作流"),
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
@@ -1710,13 +1712,13 @@ def main() -> int:
             page.click("#view a.kpi.stat >> nth=0")
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "流程项目组合"
-            assert page.locator("#view select").nth(2).input_value() == "ACTIVE"
+            assert page.locator('#view select[data-key="status"]').input_value() == "ACTIVE"
 
             goto("dashboard")
             page.click("#view a.stage-row >> nth=0")
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "流程项目组合"
-            assert page.locator("#view select").nth(1).input_value() == "1"
+            assert page.locator('#view select[data-key="stage"]').input_value() == "1"
 
             goto("dashboard")
             page.click("#view .card:has(h3:has-text('改善优先级')) .project-open >> nth=0")
@@ -1747,6 +1749,39 @@ def main() -> int:
             assert "来源文件" in modal and "基线值" in modal, "战略目标弹窗缺口径字段"
             close_modal()
             page.wait_for_timeout(300)
+
+        def start_view() -> None:
+            goto("start")
+            page.wait_for_timeout(900)
+            view = page.inner_text("#view")
+            assert "开始使用" in view and "九步启动路径" in view, "启动向导未渲染"
+            assert "下一步" in view or "全部就绪" in view, "启动向导缺少下一步"
+            assert page.locator("#view .card").count() >= 9, "启动向导步骤卡片不足"
+
+        def process_card_view() -> None:
+            goto("process_card")
+            page.wait_for_timeout(1400)
+            view = page.inner_text("#view")
+            assert "流程卡" in view, "流程卡未渲染"
+            for marker in (
+                "战略承接",
+                "权责矩阵",
+                "制度与标准",
+                "流程模型",
+                "工作量与产能",
+                "KPI",
+                "变更",
+                "改善",
+                "治理待办",
+            ):
+                assert marker in view, f"流程卡缺少「{marker}」区块"
+            options = page.eval_on_selector_all(
+                "#view select.sel option", "els => els.map(e => e.value).filter(Boolean)"
+            )
+            if len(options) > 1:
+                page.select_option("#view select.sel", value=options[1])
+                page.wait_for_timeout(1200)
+                assert "流程卡" in page.inner_text("#view")
 
         # 指标口径：页面上必须有可悬停的说明
         def metric_help() -> None:
@@ -2013,6 +2048,8 @@ def main() -> int:
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)
         check("战略目标承接", strategy_view)
+        check("开始使用九步向导", start_view)
+        check("流程卡聚合视图", process_card_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
         check("工作流步骤详情", workflow_step_modal)

@@ -36,8 +36,10 @@ def test_frontend_has_modules():
     # 各业务视图
     assert {
         "dashboard.js",
+        "start.js",
         "strategy.js",
         "map.js",
+        "process_card.js",
         "pcf.js",
         "workflow.js",
         "projects.js",
@@ -135,8 +137,10 @@ def test_view_modules_are_registered():
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     for view in (
         "dashboard",
+        "start",
         "strategy",
         "map",
+        "process_card",
         "pcf",
         "workflow",
         "projects",
@@ -196,7 +200,7 @@ def test_data_act_keys_are_namespaced():
     for module in (JS_ROOT / "views").rglob("*.js"):
         src = module.read_text(encoding="utf-8")
         keys |= set(re.findall(r'data-act="([^"]+)"', src))
-    pattern = re.compile(r"^[a-z][a-z0-9]*\.[A-Za-z][A-Za-z0-9_]*$")
+    pattern = re.compile(r"^[a-z][a-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*$")
     invalid = sorted(key for key in keys if not pattern.match(key))
     assert not invalid, f"data-act 键必须带视图前缀：{invalid}"
 
@@ -412,8 +416,10 @@ def test_view_exports_do_not_collide():
 def test_every_view_module_exports_a_renderer():
     renderers = {
         "dashboard.js": "renderDashboard",
+        "start.js": "renderStart",
         "strategy.js": "renderStrategy",
         "map.js": "renderMap",
+        "process_card.js": "renderProcessCard",
         "pcf.js": "renderPcf",
         "workflow.js": "renderWorkflow",
         "projects.js": "renderProjects",

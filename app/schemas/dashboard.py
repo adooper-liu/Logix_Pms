@@ -74,3 +74,31 @@ class DashboardOverview(BaseModel):
     health_alerts: List[HealthAlert]
     exception_summary: dict
     knowledge_count: int
+
+
+class HomeAction(BaseModel):
+    label: str
+    view: str
+    hint: Optional[str] = None
+
+
+class HomeItem(BaseModel):
+    label: str
+    value: str
+    hint: Optional[str] = None
+
+
+class DashboardHomeBlock(BaseModel):
+    key: str
+    title: str
+    description: Optional[str] = None
+    items: List[HomeItem] = []
+    actions: List[HomeAction] = []
+
+
+class DashboardHome(BaseModel):
+    role: str
+    role_label: str
+    display_name: str
+    headline: str
+    blocks: List[DashboardHomeBlock] = []

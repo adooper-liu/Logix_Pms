@@ -6,22 +6,37 @@ from datetime import date
 from typing import Dict, List
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.timeutil import utcnow
-from app.models.enums import ExceptionStatus, Methodology, ProjectStatus
+from app.models.change import ProcessChangeRequest
+from app.models.enums import (
+    ChangeStatus,
+    ExceptionStatus,
+    Methodology,
+    ProjectStatus,
+    Role,
+)
+from app.models.governance import GovernanceFinding
 from app.models.knowledge import KnowledgeItem
-from app.models.monitor import ExceptionEvent
+from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch
 from app.models.project import Project, ProjectStep
+from app.models.user import User
 from app.schemas.dashboard import (
+    DashboardHome,
+    DashboardHomeBlock,
     DashboardOverview,
     HealthAlert,
+    HomeAction,
+    HomeItem,
     KpiCard,
     MethodologySlice,
     ProjectBoardItem,
     StageHealth,
 )
+from app.services import kpi as kpi_service
+from app.services import startup as startup_service
 
 STAGE_NAMES: Dict[int, str] = {
     1: "识别与优先级排序",
@@ -50,8 +65,10 @@ HEALTH_ALERT_THRESHOLD = 70.0
 
 
 def build_overview(db: Session, board_limit: int = 8) -> DashboardOverview:
-    projects = db.scalars(select(Project)).all()
-    steps = db.scalars(select(ProjectStep)).all()
+    projects = db.scalars(select(Project).where(Project.project_type == "IMPROVEMENT")).all()
+    steps = db.scalars(
+        select(ProjectStep).join(Project).where(Project.project_type == "IMPROVEMENT")
+    ).all()
 
     active = [p for p in projects if p.status == ProjectStatus.ACTIVE.value]
     this_year = date.today().year
@@ -276,3 +293,233 @@ def _health_alerts(db: Session, limit: int = 8) -> List[HealthAlert]:
     rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     alerts.sort(key=lambda a: (rank.get(a.level, 3), -a.priority_score))
     return alerts[:limit]
+
+
+def _kpi_red_yellow(db: Session, owner_user_id: int | None = None) -> tuple[int, int]:
+    stmt = (
+        select(KpiDefinition)
+        .options(selectinload(KpiDefinition.records))
+        .where(KpiDefinition.is_active.is_(True))
+    )
+    if owner_user_id is not None:
+        stmt = stmt.where(KpiDefinition.owner_user_id == owner_user_id)
+    total = 0
+    red_yellow = 0
+    for kpi in db.scalars(stmt).all():
+        total += 1
+        records = sorted(kpi.records, key=lambda row: row.period)
+        if not records:
+            continue
+        state = kpi_service.status_for(
+            records[-1].value,
+            kpi.direction,
+            kpi.red_threshold,
+            kpi.yellow_threshold,
+            kpi.green_threshold,
+        )
+        if state in ("RED", "YELLOW"):
+            red_yellow += 1
+    return total, red_yellow
+
+
+def build_home(db: Session, user: User) -> DashboardHome:
+    """角色化工作台：不同角色只看到自己需要先处理的事。"""
+    startup = startup_service.status(db)
+    open_findings = (
+        db.scalar(
+            select(func.count())
+            .select_from(GovernanceFinding)
+            .where(GovernanceFinding.status == "OPEN")
+        )
+        or 0
+    )
+    pending_changes = (
+        db.scalar(
+            select(func.count())
+            .select_from(ProcessChangeRequest)
+            .where(ProcessChangeRequest.status == ChangeStatus.SUBMITTED.value)
+        )
+        or 0
+    )
+    active_projects = (
+        db.scalar(
+            select(func.count())
+            .select_from(Project)
+            .where(
+                Project.status == ProjectStatus.ACTIVE.value,
+                Project.project_type == "IMPROVEMENT",
+            )
+        )
+        or 0
+    )
+    next_step = next((s for s in startup.steps if s.key == startup.next_step), None)
+    next_title = next_step.title if next_step else "九步已全部就绪"
+    invalid_raci = next(
+        (s.evidence.get("invalid_processes", 0) for s in startup.steps if s.key == "org_raci"),
+        0,
+    )
+    total_kpi, red_yellow = _kpi_red_yellow(db)
+
+    blocks: list[DashboardHomeBlock] = []
+    if user.role in (Role.ADMIN.value, Role.MANAGER.value):
+        blocks.append(
+            DashboardHomeBlock(
+                key="setup",
+                title="启动进度",
+                description="从范围与授权到运营复制，按九步路径推进",
+                items=[
+                    HomeItem(
+                        label="已完成",
+                        value=f"{startup.ready_count}/{startup.total} 步",
+                        hint=f"就绪率 {startup.readiness_pct}%",
+                    ),
+                    HomeItem(label="下一步", value=next_title),
+                ],
+                actions=[
+                    HomeAction(label="打开启动向导", view="start"),
+                    HomeAction(label="战略目标", view="strategy"),
+                    HomeAction(label="流程地图", view="map"),
+                ],
+            )
+        )
+        blocks.append(
+            DashboardHomeBlock(
+                key="governance",
+                title="治理待办",
+                description="先处理会阻塞发布或口径统一的事项",
+                items=[
+                    HomeItem(label="治理待办", value=f"{open_findings} 项"),
+                    HomeItem(label="待审变更", value=f"{pending_changes} 张"),
+                    HomeItem(label="RACI 不完整", value=f"{invalid_raci} 条流程"),
+                    HomeItem(label="红/黄 KPI", value=f"{red_yellow}/{total_kpi}"),
+                ],
+                actions=[
+                    HomeAction(label="治理概览", view="deliverables"),
+                    HomeAction(label="变更审批", view="designer", hint="设计器 → 变更"),
+                    HomeAction(label="KPI 明细", view="monitor"),
+                ],
+            )
+        )
+        blocks.append(
+            DashboardHomeBlock(
+                key="execution",
+                title="正在推进",
+                description="当前执行中的流程项目",
+                items=[HomeItem(label="执行中项目", value=f"{active_projects} 个")],
+                actions=[HomeAction(label="项目组合", view="projects")],
+            )
+        )
+        headline = (
+            f"{user.display_name}，九步启动已完成 {startup.ready_count}/{startup.total}；"
+            f"当前 {open_findings} 项治理待办、{pending_changes} 张变更待审。"
+        )
+    elif user.role == Role.OWNER.value:
+        owned_processes = list(
+            db.scalars(
+                select(ProcessArch)
+                .where(ProcessArch.level == 3, ProcessArch.owner_user_id == user.id)
+                .order_by(ProcessArch.code)
+            ).all()
+        )
+        owned_total, owned_red_yellow = _kpi_red_yellow(db, user.id)
+        owned_projects = list(
+            db.scalars(
+                select(Project)
+                .where(
+                    Project.owner_user_id == user.id,
+                    Project.status.in_([ProjectStatus.PLANNING.value, ProjectStatus.ACTIVE.value]),
+                    Project.project_type == "IMPROVEMENT",
+                )
+                .order_by(Project.id.desc())
+                .limit(5)
+            ).all()
+        )
+        owned_exceptions = (
+            db.scalar(
+                select(func.count())
+                .select_from(ExceptionEvent)
+                .where(
+                    ExceptionEvent.owner_user_id == user.id,
+                    ExceptionEvent.status.in_(
+                        [ExceptionStatus.OPEN.value, ExceptionStatus.IN_PROGRESS.value]
+                    ),
+                )
+            )
+            or 0
+        )
+        blocks.append(
+            DashboardHomeBlock(
+                key="my_processes",
+                title="我的流程",
+                description="你负责的 L3 端到端流程",
+                items=[
+                    HomeItem(
+                        label=row.code,
+                        value=row.name,
+                        hint=f"健康度 {row.health_score if row.health_score is not None else '—'}",
+                    )
+                    for row in owned_processes[:5]
+                ]
+                or [HomeItem(label="暂无", value="还没有分配到你的 L3 流程")],
+                actions=[HomeAction(label="流程地图", view="map")],
+            )
+        )
+        blocks.append(
+            DashboardHomeBlock(
+                key="my_kpi",
+                title="我的指标",
+                description="你作为责任人的 KPI",
+                items=[
+                    HomeItem(label="指标总数", value=f"{owned_total} 个"),
+                    HomeItem(label="红/黄", value=f"{owned_red_yellow} 个"),
+                    HomeItem(label="待处理异常", value=f"{owned_exceptions} 件"),
+                ],
+                actions=[HomeAction(label="KPI 明细", view="monitor")],
+            )
+        )
+        blocks.append(
+            DashboardHomeBlock(
+                key="my_projects",
+                title="我的改善项目",
+                description="进行中的改善项目与下一步",
+                items=[
+                    HomeItem(label=row.code, value=row.name, hint=f"进度 {row.progress:.0f}%")
+                    for row in owned_projects
+                ]
+                or [HomeItem(label="暂无", value="还没有进行中的改善项目")],
+                actions=[HomeAction(label="项目组合", view="projects")],
+            )
+        )
+        headline = (
+            f"{user.display_name}，你名下有 {len(owned_processes)} 条 L3 流程、"
+            f"{owned_red_yellow} 个红/黄 KPI、{owned_exceptions} 件待处理异常。"
+        )
+    else:
+        blocks.append(
+            DashboardHomeBlock(
+                key="readonly",
+                title="只读概览",
+                description="你可以查看整体进度，但不能修改业务数据",
+                items=[
+                    HomeItem(label="九步启动", value=f"{startup.ready_count}/{startup.total} 步"),
+                    HomeItem(label="治理待办", value=f"{open_findings} 项"),
+                    HomeItem(label="执行中项目", value=f"{active_projects} 个"),
+                ],
+                actions=[
+                    HomeAction(label="启动向导", view="start"),
+                    HomeAction(label="运营监控", view="monitor"),
+                ],
+            )
+        )
+        headline = (
+            f"{user.display_name}，当前九步启动已完成 {startup.ready_count}/{startup.total}，"
+            f"有 {open_findings} 项治理待办。"
+        )
+
+    return DashboardHome(
+        role=user.role,
+        role_label=user.role_label,
+        display_name=user.display_name,
+        headline=headline,
+        blocks=blocks,
+    )

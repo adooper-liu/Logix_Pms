@@ -13,6 +13,7 @@ from app.models.enums import (
     Methodology,
     ProcessState,
     ProjectStatus,
+    ProjectType,
     ReplicationStatus,
     ScopeType,
     StepStatus,
@@ -68,6 +69,7 @@ class ProjectStepUpdate(BaseModel):
 
 class ProjectBase(BaseModel):
     name: str = Field(max_length=160)
+    project_type: ProjectType = ProjectType.IMPROVEMENT
     methodology: Methodology
     status: ProjectStatus = ProjectStatus.PLANNING
     current_stage: int = Field(default=1, ge=1, le=5)
@@ -115,11 +117,26 @@ class ProjectCreate(ProjectBase):
     seed_workflow: bool = Field(default=True, description="是否按标准工作流自动生成 24 个步骤")
 
 
+class SetupProgramCreate(BaseModel):
+    """治理体系落地项目：9 阶段，不走 24 步改善工作流。"""
+
+    name: str = Field(max_length=160)
+    owner: str = Field(default="", max_length=64)
+    owner_user_id: Optional[int] = None
+    sponsor: Optional[str] = None
+    objective: Optional[str] = None
+    scope: Optional[str] = None
+    priority: int = Field(default=2, ge=1, le=5)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
+    project_type: Optional[ProjectType] = None
     methodology: Optional[Methodology] = None
     status: Optional[ProjectStatus] = None
-    current_stage: Optional[int] = Field(default=None, ge=1, le=5)
+    current_stage: Optional[int] = Field(default=None, ge=1, le=9)
     priority: Optional[int] = Field(default=None, ge=1, le=5)
     owner: Optional[str] = None
     owner_user_id: Optional[int] = Field(
@@ -159,6 +176,8 @@ class ProjectOut(ORMModel):
     id: int
     code: str
     name: str
+    project_type: str = "IMPROVEMENT"
+    project_type_label: Optional[str] = None
     methodology: str
     methodology_label: Optional[str] = Field(
         default=None, description="中文标签，如「BPR 阶跃式重组」"
