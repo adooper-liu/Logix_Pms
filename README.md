@@ -47,6 +47,11 @@
 [docs/process-management-best-practices.md](docs/process-management-best-practices.md)；
 各模块的定位、应用场景与使用路径见 [docs/usage-guide.md](docs/usage-guide.md)。
 
+启动路径的九阶段证据口径、当前实例与页面依赖见
+[docs/startup-evidence-example.md](docs/startup-evidence-example.md)；
+三层 / Q1–Q8 / 页面之间的触发与数据依赖见
+[docs/information-architecture.md](docs/information-architecture.md)。
+
 ---
 
 ## 快速开始
@@ -372,6 +377,8 @@ tests/          接口测试、迁移一致性测试、前端模块结构守卫
 docs/           使用指南、行业对标、信息架构、指标口径、BPMN/附件、执行与设计器差距分析
                 「APQC＋十要素」治理体系的能力差距与优先级见 docs/apqc-ten-elements-gap-analysis.md
                 APQC 中文参考译文的约定见 docs/pcf-chinese-translation.md
+                九阶段启动证据的实际口径与实例见 docs/startup-evidence-example.md
+                三层 / Q1–Q8 与页面的依赖关系见 docs/information-architecture.md
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
