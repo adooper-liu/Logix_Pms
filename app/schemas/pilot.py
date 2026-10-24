@@ -42,6 +42,47 @@ class PilotActionOut(BaseModel):
     action: Optional[str] = None
 
 
+class PilotDocumentOut(BaseModel):
+    id: int
+    code: str
+    title: str
+    category: str
+    category_label: Optional[str] = None
+    version_label: Optional[str] = None
+    status_label: Optional[str] = None
+
+
+class PilotRuleOut(BaseModel):
+    id: int
+    code: str
+    title: str
+    matter: str
+    category: str
+    category_label: Optional[str] = None
+    status: str
+    status_label: Optional[str] = None
+    approver: Optional[str] = None
+    amount_limit: Optional[float] = None
+    exception_path: Optional[str] = None
+    evidence_required: Optional[str] = None
+
+
+class PilotExceptionOut(BaseModel):
+    id: int
+    code: str
+    title: str
+    rule_code: Optional[str] = None
+    status: str
+    status_label: Optional[str] = None
+    expires_at: Optional[UtcDateTime] = None
+
+
+class PilotLayerResourcesOut(BaseModel):
+    documents: List[PilotDocumentOut] = []
+    rules: List[PilotRuleOut] = []
+    exceptions: List[PilotExceptionOut] = []
+
+
 class PilotTaskOut(ORMModel):
     id: int
     layer_no: int
@@ -91,6 +132,7 @@ class PilotLayerOut(ORMModel):
     notes: Optional[str] = None
     evidence_items: List[PilotLayerEvidenceOut] = []
     actions: List[PilotActionOut] = []
+    resources: Optional[PilotLayerResourcesOut] = None
     tasks: List[PilotTaskOut] = []
     issues: List[PilotIssueOut] = []
 

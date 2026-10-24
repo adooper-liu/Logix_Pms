@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.timeutil import utcnow
+from app.models.authorization import AuthorizationException, AuthorizationRule
 from app.models.enums import (
     PilotIssueStatus,
     PilotLayerStatus,
@@ -21,16 +22,25 @@ from app.models.enums import (
 )
 from app.models.pilot import PilotIssue, PilotLayer, PilotPath, PilotTask
 from app.models.process import ProcessArch
+from app.models.process_document import ProcessDocument
+from app.models.raci import GovernanceRole
 from app.models.user import User
 from app.schemas.pilot import (
     PilotActionOut,
+    PilotDocumentOut,
+    PilotExceptionOut,
     PilotIssueOut,
     PilotLayerEvidenceOut,
     PilotLayerOut,
+    PilotLayerResourcesOut,
     PilotPathOut,
     PilotPathSummaryOut,
+    PilotRuleOut,
     PilotTaskOut,
 )
+from app.services import authorization as authorization_service
+from app.services import deliverable as deliverable_service
+from app.services import process_document as document_service
 from app.services import startup as startup_service
 
 
@@ -142,7 +152,11 @@ LAYER_DEFINITIONS: List[Dict] = [
         "process": ["上传生效 SOP", "按 A/B/C/D 建授权规则", "定义例外路径和证据"],
         "outputs": ["生效制度/SOP", "授权矩阵", "例外路径", "审批证据"],
         "exit_criteria": "授权覆盖主链路、退出条件与证据齐备。",
-        "evidence": ["effective_documents", "effective_authorization_rules"],
+        "evidence": [
+            "effective_documents",
+            "effective_authorization_rules",
+            "open_authorization_exceptions",
+        ],
         "actions": [
             {"label": "上传制度", "view": "deliverables"},
             {"label": "授权矩阵", "view": "authorization"},
@@ -316,8 +330,136 @@ def _ensure_layers(db: Session, path: PilotPath) -> Dict[int, PilotLayer]:
     return rows
 
 
+def _ancestor_ids(db: Session, process_id: Optional[int]) -> List[int]:
+    ids: List[int] = []
+    current = db.get(ProcessArch, process_id) if process_id else None
+    guard = 0
+    while current is not None and guard < 16:
+        ids.append(current.id)
+        current = db.get(ProcessArch, current.parent_id) if current.parent_id else None
+        guard += 1
+    return ids
+
+
+def _layer4_resources(db: Session, path: PilotPath):
+    """第 4 层的制度、授权规则与例外，按试点流程及其上级范围统计。"""
+    scope = _ancestor_ids(db, path.process_id)
+    doc_stmt = (
+        select(ProcessDocument)
+        .options(selectinload(ProcessDocument.versions))
+        .where(ProcessDocument.is_active.is_(True))
+        .order_by(ProcessDocument.code)
+    )
+    if scope:
+        doc_stmt = doc_stmt.where(ProcessDocument.process_id.in_(scope))
+    else:
+        doc_stmt = doc_stmt.where(ProcessDocument.id.is_(None))
+    documents: List[PilotDocumentOut] = []
+    for document in db.scalars(doc_stmt).all():
+        version = document_service.effective_version_on(document)
+        if version is None:
+            continue
+        documents.append(
+            PilotDocumentOut(
+                id=document.id,
+                code=document.code,
+                title=document.title,
+                category=document.category,
+                category_label=document_service.CATEGORY_LABELS.get(
+                    document.category, document.category
+                ),
+                version_label=f"v{version.version_label}",
+                status_label=deliverable_service.STATUS_LABELS.get(version.status, version.status),
+            )
+        )
+
+    rule_stmt = select(AuthorizationRule).order_by(AuthorizationRule.id.desc())
+    if scope:
+        rule_stmt = rule_stmt.where(
+            or_(
+                AuthorizationRule.process_id.is_(None),
+                AuthorizationRule.process_id.in_(scope),
+            )
+        )
+    else:
+        rule_stmt = rule_stmt.where(AuthorizationRule.process_id.is_(None))
+    rules = db.scalars(rule_stmt).all()
+    effective_rules = [
+        rule
+        for rule in rules
+        if rule.status == authorization_service.AuthorizationStatus.EFFECTIVE.value
+    ]
+    rule_items: List[PilotRuleOut] = []
+    for rule in rules:
+        role = db.get(GovernanceRole, rule.approver_role_id) if rule.approver_role_id else None
+        rule_items.append(
+            PilotRuleOut(
+                id=rule.id,
+                code=rule.code,
+                title=rule.title,
+                matter=rule.matter,
+                category=rule.category,
+                category_label=authorization_service.CATEGORY_LABELS.get(
+                    rule.category, rule.category
+                ),
+                status=rule.status,
+                status_label=authorization_service.STATUS_LABELS.get(rule.status, rule.status),
+                approver=role.name if role else rule.approver_label,
+                amount_limit=float(rule.amount_limit) if rule.amount_limit is not None else None,
+                exception_path=rule.exception_path,
+                evidence_required=rule.evidence_required,
+            )
+        )
+    rule_codes = {rule.id: rule.code for rule in rules}
+
+    exc_stmt = select(AuthorizationException).order_by(AuthorizationException.id.desc())
+    if scope:
+        exc_stmt = exc_stmt.where(
+            or_(
+                AuthorizationException.process_id.is_(None),
+                AuthorizationException.process_id.in_(scope),
+            )
+        )
+    else:
+        exc_stmt = exc_stmt.where(AuthorizationException.process_id.is_(None))
+    exceptions = db.scalars(exc_stmt).all()
+    open_exceptions = [
+        row
+        for row in exceptions
+        if row.status
+        in (
+            authorization_service.AuthorizationExceptionStatus.REQUESTED.value,
+            authorization_service.AuthorizationExceptionStatus.APPROVED.value,
+        )
+    ]
+    exception_items = [
+        PilotExceptionOut(
+            id=row.id,
+            code=row.code,
+            title=row.title,
+            rule_code=rule_codes.get(row.rule_id),
+            status=row.status,
+            status_label=authorization_service.EXCEPTION_STATUS_LABELS.get(row.status, row.status),
+            expires_at=row.expires_at,
+        )
+        for row in exceptions[:30]
+    ]
+    counts = {
+        "effective_documents": len(documents),
+        "effective_authorization_rules": len(effective_rules),
+        "open_authorization_exceptions": len(open_exceptions),
+    }
+    resources = PilotLayerResourcesOut(
+        documents=documents[:30],
+        rules=rule_items[:50],
+        exceptions=exception_items,
+    )
+    return counts, resources
+
+
 def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
-    evidence = startup_service.evidence_snapshot(db)
+    base_evidence = startup_service.evidence_snapshot(db)
+    layer4_evidence, layer4_resources = _layer4_resources(db, path)
     layer_rows = _ensure_layers(db, path)
     tasks = db.scalars(select(PilotTask).where(PilotTask.path_id == path.id)).all()
     issues = db.scalars(select(PilotIssue).where(PilotIssue.path_id == path.id)).all()
@@ -332,13 +474,14 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
     done_count = 0
     for definition in LAYER_DEFINITIONS:
         layer_no = definition["layer_no"]
+        layer_evidence = {**base_evidence, **layer4_evidence} if layer_no == 4 else base_evidence
         items = [
             PilotLayerEvidenceOut(
                 key=key,
                 label=startup_service.EVIDENCE_LABELS[key],
-                value=evidence.get(key, 0),
-                required=True,
-                met=startup_service.evidence_met(key, evidence.get(key, 0)),
+                value=layer_evidence.get(key, 0),
+                required=key != "open_authorization_exceptions",
+                met=startup_service.evidence_met(key, layer_evidence.get(key, 0)),
             )
             for key in definition["evidence"]
         ]
@@ -370,6 +513,7 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
                 notes=row.notes,
                 evidence_items=items,
                 actions=[PilotActionOut(**action) for action in definition["actions"]],
+                resources=layer4_resources if layer_no == 4 else None,
                 tasks=[
                     _task_out(task)
                     for task in sorted(tasks_by_layer.get(layer_no, []), key=lambda t: t.id)

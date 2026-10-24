@@ -2055,6 +2055,8 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "制度与授权设计" in view and "退出门" in view, "第4层工作区未展开"
+            assert "制度、授权与例外（本流程范围）" in view, "第4层缺少制度/授权工作区"
+            page.screenshot(path=str(out_dir / "pilot-layer4.png"), full_page=True)
 
             page.click('#view button:has-text("+ 新增待办")')
             page.wait_for_selector("#mask.show")

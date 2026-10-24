@@ -28,6 +28,13 @@ def test_create_path_has_ten_layers(client):
     assert path["layers"][3]["title"] == "制度与授权设计"
     assert path["layers"][0]["gate_open"] is True
     assert 0 <= path["progress"] <= 100
+    layer4 = path["layers"][3]
+    assert layer4["resources"] is not None
+    assert layer4["resources"]["rules"], "第4层没有返回授权规则"
+    assert any(rule["code"] == "AUTH-2026-001" for rule in layer4["resources"]["rules"]), (
+        "第4层没有按流程范围返回授权规则"
+    )
+    assert layer4["resources"]["exceptions"], "第4层没有返回例外台账"
 
     listed = client.get(f"{API}/pilot/paths").json()
     assert path["id"] in {row["id"] for row in listed}

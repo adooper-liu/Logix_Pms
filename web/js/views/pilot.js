@@ -391,11 +391,15 @@ function nextList(detail, selectedNo) {
 }
 
 function evidenceList(layer) {
-  return layer.evidence_items.map((item) => `
-    <div class="between pilot-line ${item.met ? 'ok' : 'miss'}">
-      <span>${item.met ? '✓' : '○'} ${esc(item.label)}</span>
-      <b>${item.value}${item.met ? '' : ' · 还缺'}</b>
-    </div>`).join('') || '<div class="tiny muted">本层没有必需证据</div>';
+  return layer.evidence_items.map((item) => {
+    const tone = item.met ? 'ok' : item.required ? 'miss' : 'opt';
+    const suffix = item.met ? '' : item.required ? ' · 还缺' : ' · 建议关注';
+    return `
+      <div class="between pilot-line ${tone}">
+        <span>${item.met ? '✓' : '○'} ${esc(item.label)}</span>
+        <b>${item.value}${suffix}</b>
+      </div>`;
+  }).join('') || '<div class="tiny muted">本层没有必需证据</div>';
 }
 
 function taskRows(layer) {
@@ -444,6 +448,40 @@ function issueRows(layer) {
     </div>`).join('') || '<div class="tiny muted">本层没有异常</div>';
 }
 
+function layerResources(resources) {
+  const docs = resources.documents.map((row) => `
+    <div class="pilot-resource"><b>${esc(row.title)}</b>
+      <div class="tiny">${esc(row.code)} · ${esc(row.category_label || row.category)} · ${
+        esc(row.version_label || '')} </div></div>`).join('')
+    || '<div class="tiny muted">还没有生效制度/SOP</div>';
+  const rules = resources.rules.map((row) => `
+    <div class="pilot-resource"><span class="tag t-blu">${esc(row.category_label || row.category)}</span>
+      <b>${esc(row.matter)}</b>
+      <div class="tiny">审批：${esc(row.approver || '未指定')} · ${esc(row.status_label || row.status)}${
+        row.amount_limit !== null ? ' · 限额 ' + num(row.amount_limit, 0) : ''}</div>
+      <div class="tiny">例外：${esc(row.exception_path || '—')}</div>
+      <div class="tiny">证据：${esc(row.evidence_required || '—')}</div></div>`).join('')
+    || '<div class="tiny muted">还没有授权规则</div>';
+  const exceptions = resources.exceptions.map((row) => `
+    <div class="pilot-resource"><b>${esc(row.title)}</b>
+      <div class="tiny">${esc(row.rule_code || '')} · ${esc(row.status_label || row.status)}${
+        row.expires_at ? ' · 至 ' + esc(row.expires_at.slice(0, 10)) : ''}</div></div>`).join('')
+    || '<div class="tiny muted">没有例外记录</div>';
+  return `
+    <div class="pilot-section">
+      <div class="between mb">
+        <h4>制度、授权与例外（本流程范围）</h4>
+        <span class="tiny muted">生效制度 ${resources.documents.length} ·
+          规则 ${resources.rules.length} · 例外 ${resources.exceptions.length}</span>
+      </div>
+      <div class="pilot-three">
+        <div><span class="ev-h">已生效制度/SOP</span>${docs}</div>
+        <div><span class="ev-h">授权规则</span>${rules}</div>
+        <div><span class="ev-h">例外台账</span>${exceptions}</div>
+      </div>
+    </div>`;
+}
+
 function workspace(detail, layer) {
   const isCurrent = layer.layer_no === detail.current_layer;
   const missing = layer.evidence_items.filter((item) => !item.met);
@@ -482,6 +520,8 @@ function workspace(detail, layer) {
           <span class="tiny muted">${esc(layer.exit_criteria)}</span></div>
         ${evidenceList(layer)}
       </div>
+
+      ${layer.resources ? layerResources(layer.resources) : ''}
 
       <div class="pilot-section">
         <div class="between mb"><h4>本层备注</h4>

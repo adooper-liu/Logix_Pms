@@ -534,3 +534,8 @@ a.kpi.stat:hover{border-color:var(--brand);box-shadow:var(--shadow-hover);transf
 .start-subfold[open]>summary{margin-bottom:10px}
 .start-current-flat{background:transparent;border:0;box-shadow:none;
   padding:10px 0 0;margin-top:0}
+.pilot-resource{padding:6px 0;border-top:1px solid var(--line-soft);
+  font-size:12.5px;line-height:1.6}
+.pilot-resource:first-of-type{border-top:0}
+.pilot-resource b{font-weight:600}
+.pilot-line.opt b{color:var(--warn-strong)}
