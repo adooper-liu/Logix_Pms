@@ -117,5 +117,7 @@ class DashboardHome(BaseModel):
     role_label: str
     display_name: str
     headline: str
+    active_project_count: int = 0
+    setup_project_count: int = 0
     blocks: List[DashboardHomeBlock] = []
     next_actions: List[HomeNextAction] = []

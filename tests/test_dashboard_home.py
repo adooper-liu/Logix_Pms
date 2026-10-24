@@ -11,14 +11,12 @@ def test_admin_home_has_setup_and_governance(client):
     assert data["role_label"] == "系统管理员"
     assert data["headline"]
     keys = {block["key"] for block in data["blocks"]}
-    assert {"setup", "governance", "execution"} <= keys
+    assert {"setup", "governance"} <= keys
+    assert "execution" not in keys, "执行概览应已合并进「我的当前推进」"
     setup = next(block for block in data["blocks"] if block["key"] == "setup")
     assert any(action["view"] == "start" for action in setup["actions"])
-
-    execution = next(block for block in data["blocks"] if block["key"] == "execution")
-    labels = {item["label"] for item in execution["items"]}
-    assert {"执行中项目", "体系落地项目"} <= labels
-    assert any(action.get("action") == "dashboard.setupProjects" for action in execution["actions"])
+    assert data["active_project_count"] >= 1
+    assert data["setup_project_count"] >= 0
 
 
 def test_owner_home_is_personal(owner_client):
@@ -55,7 +53,9 @@ def test_home_next_actions_are_real_projects(client, owner_client):
     assert first["current_stage"] >= 1
     assert "next_step_name" in first
     assert isinstance(first["open_exceptions"], int)
+    assert admin["active_project_count"] >= len(actions)
 
     owner = owner_client.get(f"{API}/dashboard/home").json()
     assert owner["next_actions"], "流程 Owner 没有当前推进项目"
     assert all(item["owner"] == "陈经理" for item in owner["next_actions"])
+    assert owner["active_project_count"] >= len(owner["next_actions"])

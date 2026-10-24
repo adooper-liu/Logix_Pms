@@ -100,7 +100,12 @@ const renderDashboard = () => renderAsync('dashboard',
           <div><h3 style="margin:0">我的当前推进</h3>
             <div class="desc" style="margin:2px 0 0">按当前阶段和下一步继续；
               点“继续推进”打开项目详情</div></div>
-          <a class="link-btn" data-act="dashboard.goProjects">项目组合 →</a>
+          <div class="gap">
+            <span class="tag t-gry">在办改善 ${home.active_project_count || 0}</span>
+            <span class="tag t-gry">体系落地 ${home.setup_project_count || 0}</span>
+            <button class="btn-sm" data-act="dashboard.setupProjects">体系落地项目</button>
+            <a class="link-btn" data-act="dashboard.goProjects">项目组合 →</a>
+          </div>
         </div>
         ${nextActions || '<div class="empty">还没有在推进的改善项目</div>'}
       </div>`;

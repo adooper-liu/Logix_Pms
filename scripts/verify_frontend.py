@@ -140,6 +140,11 @@ def main() -> int:
             except Exception:
                 pass
             page.wait_for_timeout(600)
+            if view == "dashboard":
+                try:
+                    page.wait_for_selector("#view .kpi.stat", timeout=8000)
+                except Exception:
+                    pass
             if view == "process_card":
                 # 流程卡要先拉流程清单、再拉详情，两次串行请求，给足时间
                 try:
@@ -1843,6 +1848,7 @@ def main() -> int:
         # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
         def dashboard_entries() -> None:
             goto("dashboard")
+            page.wait_for_selector("#view .kpi.stat", timeout=8000)
             assert "我的当前推进" in page.inner_text("#view"), "驾驶舱缺少当前推进卡"
             continue_btn = page.locator('#view button[data-act="dashboard.openProject"]')
             if continue_btn.count():

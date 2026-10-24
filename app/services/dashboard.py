@@ -418,17 +418,17 @@ def build_home(db: Session, user: User) -> DashboardHome:
         )
         or 0
     )
-    active_projects = (
-        db.scalar(
-            select(func.count())
-            .select_from(Project)
-            .where(
-                Project.status == ProjectStatus.ACTIVE.value,
-                Project.project_type == "IMPROVEMENT",
-            )
+    active_project_query = (
+        select(func.count())
+        .select_from(Project)
+        .where(
+            Project.status == ProjectStatus.ACTIVE.value,
+            Project.project_type == "IMPROVEMENT",
         )
-        or 0
     )
+    if user.role == Role.OWNER.value:
+        active_project_query = active_project_query.where(Project.owner_user_id == user.id)
+    active_projects = db.scalar(active_project_query) or 0
     setup_projects = (
         db.scalar(
             select(func.count())
@@ -485,26 +485,6 @@ def build_home(db: Session, user: User) -> DashboardHome:
                     HomeAction(label="治理概览", view="deliverables"),
                     HomeAction(label="变更审批", view="designer", hint="设计器 → 变更"),
                     HomeAction(label="KPI 明细", view="monitor"),
-                ],
-            )
-        )
-        blocks.append(
-            DashboardHomeBlock(
-                key="execution",
-                title="正在推进",
-                description="当前执行中的流程项目",
-                items=[
-                    HomeItem(label="执行中项目", value=f"{active_projects} 个"),
-                    HomeItem(label="体系落地项目", value=f"{setup_projects} 个"),
-                ],
-                actions=[
-                    HomeAction(label="项目组合", view="projects"),
-                    HomeAction(
-                        label="体系落地项目",
-                        view="projects",
-                        hint="9 阶段 / 27 步",
-                        action="dashboard.setupProjects",
-                    ),
                 ],
             )
         )
@@ -620,6 +600,8 @@ def build_home(db: Session, user: User) -> DashboardHome:
         role_label=user.role_label,
         display_name=user.display_name,
         headline=headline,
+        active_project_count=active_projects,
+        setup_project_count=setup_projects,
         blocks=blocks,
         next_actions=_next_actions(db, user),
     )
