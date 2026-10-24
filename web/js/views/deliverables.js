@@ -11,11 +11,99 @@
 import {
   esc, num, dtShort, dateShort, skeleton, emptyRow, DLV_TONE,
 } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync } from '../core/router.js';
+import { renderAsync, go } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, PATCH, POST, POST_FORM, download } from '../core/api.js';
+import { openDocumentCopy, openTemplateCopy } from '../core/template-copy.js';
+
+on('dlv.goWorkflow', () => go('workflow'));
+on('dlv.tab', ({ tab }) => setDlvTab(tab));
+on('dlv.project', (_data, el) => setDlvProject(el.value));
+on('dlv.openUpload', ({ id }) => openDeliverableUpload(Number(id)));
+on('dlv.openDeliverable', ({ id }) => openDeliverable(Number(id)));
+on('dlv.download', ({ id, version, label }) =>
+  dlDeliverableVersion(Number(id), Number(version), label));
+on('dlv.close', () => closeModal());
+on('dlv.submitUpload', ({ instance }) => submitDeliverableUpload(Number(instance)));
+on('dlv.transition', ({ id, version, target }) =>
+  transitionDeliverable(Number(id), Number(version), target));
+on('dlv.restore', ({ id, version }) => restoreDeliverable(Number(id), Number(version)));
+on('dlv.promote', ({ version }) => {
+  closeModal();
+  openPromote(Number(version));
+});
+on('dlv.openUploadDeliverable', ({ id }) => {
+  closeModal();
+  openDeliverableUpload(Number(id));
+});
+on('dlv.newDocument', () => openNewDocument());
+on('dlv.docProcess', (_data, el) => setDocProcess(el.value));
+on('dlv.docCategory', (_data, el) => setDocCategory(el.value));
+on('dlv.docOrg', (_data, el) => setDocOrg(el.value));
+on('dlv.openDocument', ({ id }) => openDocument(Number(id)));
+on('dlv.docDownload', ({ id, version, label }) =>
+  dlDocumentVersion(Number(id), Number(version), label));
+on('dlv.docTransition', ({ id, version, target }) =>
+  transitionDocument(Number(id), Number(version), target));
+on('dlv.docImpact', ({ id }) => {
+  closeModal();
+  openDocumentImpact(Number(id));
+});
+on('dlv.docUpload', ({ id }) => {
+  closeModal();
+  openDocumentUpload(Number(id));
+});
+on('dlv.docCopy', ({ id }) => {
+  closeModal();
+  openDocumentCopy(Number(id));
+});
+on('dlv.rebase', ({ doc, base, label, document, major }) => {
+  closeModal();
+  openRebase(Number(doc), Number(base), label, Number(document), major === '1');
+});
+on('dlv.submitRebase', ({ variant, base, document, major }) =>
+  submitRebase(Number(variant), Number(base), Number(document), major === '1'));
+on('dlv.refreshVariant', () => {
+  refreshVariantCandidates();
+  refreshDocumentNodes();
+});
+on('dlv.refreshVariantOnly', () => refreshVariantCandidates());
+on('dlv.submitNewDocument', () => submitNewDocument());
+on('dlv.submitDocUpload', ({ document }) => submitDocumentUpload(Number(document)));
+on('dlv.syncPromote', () => syncPromoteLabel());
+on('dlv.submitPromote', ({ version }) => submitPromote(Number(version)));
+on('dlv.newBaseline', () => openNewBaseline());
+on('dlv.auditScan', () => runAuditScan());
+on('dlv.ignoreFinding', ({ id }) => ignoreFinding(Number(id)));
+on('dlv.openBaseline', ({ id }) => openBaseline(Number(id)));
+on('dlv.syncBaselineScope', () => syncBaselineScope());
+on('dlv.submitNewBaseline', () => submitNewBaseline());
+on('dlv.newTemplate', () => openNewTemplate());
+on('dlv.tplTool', (_data, el) => setTplTool(el.value));
+on('dlv.tplFormat', (_data, el) => setTplFormat(el.value));
+on('dlv.tplOrg', (_data, el) => setTplOrg(el.value));
+on('dlv.openTemplate', ({ id }) => openTemplate(Number(id)));
+on('dlv.templateDownload', ({ id, version, label }) =>
+  dlTemplateVersion(Number(id), Number(version), label));
+on('dlv.templateTransition', ({ id, version, target }) =>
+  transitionTemplate(Number(id), Number(version), target));
+on('dlv.templateUpload', ({ id }) => {
+  closeModal();
+  openTemplateUpload(Number(id));
+});
+on('dlv.onlineVersion', ({ id }) => {
+  closeModal();
+  openOnlineVersion(Number(id));
+});
+on('dlv.templateCopy', ({ id }) => {
+  closeModal();
+  openTemplateCopy(Number(id));
+});
+on('dlv.submitTemplateUpload', ({ id }) => submitTemplateUpload(Number(id)));
+on('dlv.submitOnlineVersion', ({ id }) => submitOnlineVersion(Number(id)));
+on('dlv.submitNewTemplate', () => submitNewTemplate());
 
 const FMT_ICON = {
   XLSX: '📊', DOCX: '📄', PPTX: '📽', PDF: '📕', BPMN: '⌗', CSV: '📑', ONLINE: '✍',
@@ -60,13 +148,13 @@ function paintShell() {
       <div class="between">
         <div><h2>交付物与模板库<span class="module-badge">可追溯 · 版本化</span></h2>
           <div class="desc">流程标准文件是唯一源；项目交付物保存实例与来源版本；模板库按工具维护预制模板</div></div>
-        <a class="link-btn" onclick="go('workflow')">查看 24 步标准工作流 →</a>
+        <a class="link-btn" data-act="dlv.goWorkflow">查看 24 步标准工作流 →</a>
       </div>
       <div class="tabs" style="margin-bottom:0">
-        <button class="${tab === 'project' ? 'on' : ''}" onclick="setDlvTab('project')">项目交付物</button>
-        <button class="${tab === 'document' ? 'on' : ''}" onclick="setDlvTab('document')">流程标准文件</button>
-        <button class="${tab === 'template' ? 'on' : ''}" onclick="setDlvTab('template')">工具模板库</button>
-        <button class="${tab === 'baseline' ? 'on' : ''}" onclick="setDlvTab('baseline')">基线与审计</button>
+        <button class="${tab === 'project' ? 'on' : ''}" data-act="dlv.tab" data-tab="project">项目交付物</button>
+        <button class="${tab === 'document' ? 'on' : ''}" data-act="dlv.tab" data-tab="document">流程标准文件</button>
+        <button class="${tab === 'template' ? 'on' : ''}" data-act="dlv.tab" data-tab="template">工具模板库</button>
+        <button class="${tab === 'baseline' ? 'on' : ''}" data-act="dlv.tab" data-tab="baseline">基线与审计</button>
       </div>
     </div>
     <div id="dlvBody">${skeleton(4)}</div>`;
@@ -97,7 +185,7 @@ function paintProjectTab() {
       <div class="between mb">
         <div><h2>项目交付物</h2>
           <div class="desc" style="margin:0">每个标准步骤要产出什么、谁负责、当前是哪一版，都在这里</div></div>
-        <select class="sel" onchange="setDlvProject(this.value)">
+        <select class="sel" data-act="dlv.project">
           ${projects.map((p) => `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>
             ${esc(p.code)} · ${esc(p.name)}</option>`).join('')}
         </select>
@@ -141,10 +229,11 @@ async function loadProjectDeliverables(projectId) {
            <div class="tiny">${esc(cv.file_name || cv.file_ref || '')}</div>`
         : '<span class="tiny">未登记</span>';
       const actions = [
-        canWrite() ? `<button class="btn-sm" onclick="openDeliverableUpload(${i.id})">上传</button>` : '',
-        `<button class="btn-sm" onclick="openDeliverable(${i.id})">详情</button>`,
+        canWrite() ? `<button class="btn-sm" data-act="dlv.openUpload" data-id="${i.id}">上传</button>` : '',
+        `<button class="btn-sm" data-act="dlv.openDeliverable" data-id="${i.id}">详情</button>`,
         cv && cv.has_file
-          ? `<button class="btn-sm" onclick="dlDeliverableVersion(${i.id}, ${cv.id}, '${esc(cv.version_label)}')">下载</button>`
+          ? `<button class="btn-sm" data-act="dlv.download" data-id="${i.id}"
+            data-version="${cv.id}" data-label="${esc(cv.version_label)}">下载</button>`
           : '',
       ].filter(Boolean).join(' ');
       return `<tr>
@@ -177,8 +266,8 @@ function openDeliverableUpload(instanceId) {
     <div class="field"><label>标题</label><input id="dvTitle" placeholder="可留空，默认用交付物名称"></div>
     <div class="field"><label>版本说明</label><textarea id="dvNote" placeholder="这次改了什么"></textarea></div>
     <div class="note">上传后自动生成 R# 版本并计算 SHA-256；审批通过后才会成为生效版。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitDeliverableUpload(${instanceId})">上传</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitUpload" data-instance="${instanceId}">上传</button>`);
 }
 
 async function submitDeliverableUpload(instanceId) {
@@ -218,20 +307,24 @@ function paintDeliverable(d) {
   const rows = d.versions.map((v) => {
     const actions = [];
     if (v.has_file) {
-      actions.push(`<button class="btn-sm" onclick="dlDeliverableVersion(${d.id}, ${v.id}, '${esc(v.version_label)}')">下载</button>`);
+      actions.push(`<button class="btn-sm" data-act="dlv.download" data-id="${d.id}"
+        data-version="${v.id}" data-label="${esc(v.version_label)}">下载</button>`);
     }
     if (canWrite()) {
       (transitions[v.status] || []).forEach((target) => {
-        actions.push(`<button class="btn-sm" onclick="transitionDeliverable(${d.id}, ${v.id}, '${target}')">
+        actions.push(`<button class="btn-sm" data-act="dlv.transition" data-id="${d.id}"
+          data-version="${v.id}" data-target="${esc(target)}">
           ${esc(labels[target] || target)}</button>`);
       });
       if (['APPROVED', 'EFFECTIVE', 'SUPERSEDED'].includes(v.status)
           && !(v.status === 'EFFECTIVE' && v.id === d.current_version_id)) {
-        actions.push(`<button class="btn-sm" onclick="restoreDeliverable(${d.id}, ${v.id})">恢复为现行版</button>`);
+        actions.push(`<button class="btn-sm" data-act="dlv.restore" data-id="${d.id}"
+          data-version="${v.id}">恢复为现行版</button>`);
       }
     }
     if (canManage() && v.has_file && ['APPROVED', 'EFFECTIVE'].includes(v.status)) {
-      actions.push(`<button class="btn-sm" onclick="closeModal();openPromote(${v.id})">晋升为标准</button>`);
+      actions.push(`<button class="btn-sm" data-act="dlv.promote"
+        data-version="${v.id}">晋升为标准</button>`);
     }
     return `<tr>
       <td><b>${esc(v.version_label)}</b> ${v.id === d.current_version_id ? '<span class="tag t-blu">当前</span>' : ''}</td>
@@ -252,13 +345,14 @@ function paintDeliverable(d) {
       ${d.acceptance_criteria ? '<div class="mt">验收口径：' + esc(d.acceptance_criteria) + '</div>' : ''}</div>
     <div class="between mb">
       <div>当前状态：${statusTag(d.status, d.status_label)}</div>
-      ${canWrite() ? `<button class="btn-sm" onclick="closeModal();openDeliverableUpload(${d.id})">上传新版本</button>` : ''}
+      ${canWrite() ? `<button class="btn-sm" data-act="dlv.openUploadDeliverable"
+        data-id="${d.id}">上传新版本</button>` : ''}
     </div>
     <table class="tbl">
       <thead><tr><th>版本</th><th>状态</th><th>文件</th><th>编制</th><th>批准/生效</th><th>操作</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`,
-  '<button class="btn btn-g" onclick="closeModal()">关闭</button>', true);
+  '<button class="btn btn-g" data-act="dlv.close">关闭</button>', true);
 }
 
 async function transitionDeliverable(instanceId, versionId, target) {
@@ -324,21 +418,21 @@ function paintDocumentTab() {
       <div class="between mb">
         <div><h2>流程标准文件</h2>
           <div class="desc" style="margin:0">挂在 L1–L4 节点上的 SOP / 表单，是项目复制时的唯一来源；集团通用对全部组织可见</div></div>
-        ${canManage() ? '<button class="btn btn-p" onclick="openNewDocument()">+ 新建标准文件</button>' : ''}
+        ${canManage() ? '<button class="btn btn-p" data-act="dlv.newDocument">+ 新建标准文件</button>' : ''}
       </div>
       <div class="gap" style="flex-wrap:wrap">
-        <select class="sel" onchange="setDocProcess(this.value)">
+        <select class="sel" data-act="dlv.docProcess">
           <option value="">全部流程</option>
           ${processes.map((p) => `<option value="${p.id}"
             ${String(d.documentProcessId) === String(p.id) ? 'selected' : ''}>
             ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
         </select>
-        <select class="sel" onchange="setDocCategory(this.value)">
+        <select class="sel" data-act="dlv.docCategory">
           <option value="">全部类型</option>
           ${Object.entries(cats).map(([code, label]) => `<option value="${code}"
             ${d.documentCategory === code ? 'selected' : ''}>${esc(label)}</option>`).join('')}
         </select>
-        <select class="sel" onchange="setDocOrg(this.value)">
+        <select class="sel" data-act="dlv.docOrg">
           <option value="">全部组织</option>${orgOptions(d.documentOrgUnitId)}
         </select>
       </div>
@@ -387,7 +481,7 @@ async function loadDocuments() {
       return;
     }
     grid.innerHTML = '<div class="grid g3">' + rows.map((doc) => `
-      <div class="tool" onclick="openDocument(${doc.id})">
+      <button class="tool" type="button" data-act="dlv.openDocument" data-id="${doc.id}">
         <div class="ico">${DOC_ICON[doc.category] || '📄'}</div>
         <h4>${esc(doc.title)}</h4>
         <p>${esc(doc.process_code || '')} ${esc(doc.process_name || '')}
@@ -402,7 +496,7 @@ async function loadDocuments() {
           <span class="tiny">${doc.variant_of_code
             ? '变体 ← ' + esc(doc.variant_of_code) : esc(doc.code)}</span>
         </div>
-      </div>`).join('') + '</div>';
+      </button>`).join('') + '</div>';
   } catch (e) {
     grid.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
   }
@@ -469,11 +563,13 @@ function paintDocument(doc) {
   const rows = doc.versions.map((v) => {
     const actions = [];
     if (v.has_file) {
-      actions.push(`<button class="btn-sm" onclick="dlDocumentVersion(${doc.id}, ${v.id}, '${esc(v.version_display)}')">下载</button>`);
+      actions.push(`<button class="btn-sm" data-act="dlv.docDownload" data-id="${doc.id}"
+        data-version="${v.id}" data-label="${esc(v.version_display)}">下载</button>`);
     }
     if (canManage()) {
       (transitions[v.status] || []).forEach((target) => {
-        actions.push(`<button class="btn-sm" onclick="transitionDocument(${doc.id}, ${v.id}, '${target}')">
+        actions.push(`<button class="btn-sm" data-act="dlv.docTransition" data-id="${doc.id}"
+          data-version="${v.id}" data-target="${esc(target)}">
           ${esc(labels[target] || target)}</button>`);
       });
     }
@@ -494,12 +590,12 @@ function paintDocument(doc) {
   }).join('') || emptyRow(6, '还没有版本');
 
   const footer = [
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>',
-    `<button class="btn btn-g" onclick="closeModal();openDocumentImpact(${doc.id})">变体 / 升级影响</button>`,
+    '<button class="btn btn-g" data-act="dlv.close">关闭</button>',
+    `<button class="btn btn-g" data-act="dlv.docImpact" data-id="${doc.id}">变体 / 升级影响</button>`,
     canManage()
-      ? `<button class="btn btn-g" onclick="closeModal();openDocumentUpload(${doc.id})">上传新版本</button>` : '',
+      ? `<button class="btn btn-g" data-act="dlv.docUpload" data-id="${doc.id}">上传新版本</button>` : '',
     canWrite() && doc.effective_version && doc.effective_version.has_file
-      ? `<button class="btn btn-p" onclick="closeModal();openDocumentCopy(${doc.id})">复制到项目</button>` : '',
+      ? `<button class="btn btn-p" data-act="dlv.docCopy" data-id="${doc.id}">复制到项目</button>` : '',
   ].filter(Boolean).join('');
 
   openModal(doc.process_code + ' · ' + doc.title, `
@@ -550,7 +646,11 @@ function paintDocumentImpact(documentId, impact) {
       <td>${esc(v.base_old_version_display || '—')} → ${esc(v.base_new_version_display || '—')}</td>
       <td><span class="tag ${IMPACT_TONE[v.status] || 't-gry'}">${esc(v.status_label)}</span></td>
       <td>${canManage() && v.requires_reapproval
-        ? `<button class="btn-sm" onclick="closeModal();openRebase(${v.document_id}, ${impact.base_effective_version.id}, '${esc(impact.base_effective_version.version_display)}', ${documentId}, ${v.status === 'BEHIND_MAJOR' || v.status === 'NO_BASE'})">变基</button>`
+        ? `<button class="btn-sm" data-act="dlv.rebase" data-doc="${v.document_id}"
+          data-base="${impact.base_effective_version.id}"
+          data-label="${esc(impact.base_effective_version.version_display)}"
+          data-document="${documentId}"
+          data-major="${v.status === 'BEHIND_MAJOR' || v.status === 'NO_BASE' ? '1' : '0'}">变基</button>`
         : '—'}</td>
     </tr>`).join('') || emptyRow(6, '还没有本地变体');
 
@@ -576,7 +676,7 @@ function paintDocumentImpact(documentId, impact) {
       <thead><tr><th>项目</th><th>交付物</th><th>版本</th><th>来源标准版本</th><th>说明</th></tr></thead>
       <tbody>${refs}</tbody>
     </table>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>', true);
+    '<button class="btn btn-g" data-act="dlv.close">关闭</button>', true);
 }
 
 function openRebase(variantId, baseVersionId, baseLabel, baseDocId, major) {
@@ -585,8 +685,10 @@ function openRebase(variantId, baseVersionId, baseLabel, baseDocId, major) {
     ${major ? '<label class="gap" style="margin-bottom:12px">'
       + '<input type="checkbox" id="rbAck"> 我确认这是 major 升级，需要重新评估内容</label>' : ''}
     <div class="field"><label>变基说明</label><textarea id="rbNote"></textarea></div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitRebase(${variantId}, ${baseVersionId}, ${baseDocId}, ${major})">生成草稿</button>`);
+    `<button class="btn btn-g" data-act="dlv.close">取消</button>
+     <button class="btn btn-p" data-act="dlv.submitRebase" data-variant="${variantId}"
+       data-base="${baseVersionId}" data-document="${baseDocId}"
+       data-major="${major ? '1' : '0'}">生成草稿</button>`);
 }
 
 async function submitRebase(variantId, baseVersionId, baseDocId, major) {
@@ -611,7 +713,7 @@ function openNewDocument() {
   const processes = state.processes || [];  const cats = (state.docMeta && state.docMeta.category_labels) || {};
   openModal('新建流程标准文件', `
     <div class="field"><label>所属流程</label><select class="sel" id="ndProcess"
-      onchange="refreshVariantCandidates();refreshDocumentNodes()">
+      data-act="dlv.refreshVariant">
       ${processes.map((p) => `<option value="${p.id}"
         ${String(state.deliverables.documentProcessId) === String(p.id) ? 'selected' : ''}>
         ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
@@ -621,7 +723,7 @@ function openNewDocument() {
     </select></div>
     <div class="field"><label>标题</label><input id="ndTitle" placeholder="如：采购申请单模板"></div>
     <div class="field"><label>适用范围</label><select class="sel" id="ndOrg"
-      onchange="refreshVariantCandidates()">
+      data-act="dlv.refreshVariantOnly">
       <option value="">集团通用（所有组织可见）</option>${orgOptions(state.deliverables.documentOrgUnitId)}
     </select></div>
     <div class="row2">
@@ -641,8 +743,8 @@ function openNewDocument() {
     <div class="field"><label>说明</label><textarea id="ndDesc" placeholder="适用范围、填写要求"></textarea></div>
     <div class="note">选择「依据上级标准」会建立本地变体：要求上级已有生效版本且策略不是锁定；
       变体记录它依据的上游版本。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitNewDocument()">创建</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitNewDocument">创建</button>`);
   refreshVariantCandidates();
   refreshDocumentNodes();
 }
@@ -731,8 +833,8 @@ function openDocumentUpload(documentId) {
       <input id="pdLabel" placeholder="3.2"></div>
     <div class="field"><label>版本说明</label><textarea id="pdNote"></textarea></div>
     <div class="note">版本只追加不覆盖；上传后为草稿，审批到「已生效」后才能被项目复制。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitDocumentUpload(${documentId})">上传</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitDocUpload" data-document="${documentId}">上传</button>`);
 }
 
 async function submitDocumentUpload(documentId) {
@@ -796,15 +898,15 @@ async function openPromote(versionId) {
         <b>${esc(d.versions.find((v) => v.id === versionId)?.version_label || '')}</b>
         生成标准文件草稿；审批通过后才生效。</div>
       <div class="field"><label>目标标准文件</label>
-        <select class="sel" id="pmDoc" onchange="syncPromoteLabel()">
+        <select class="sel" id="pmDoc" data-act="dlv.syncPromote">
           ${docs.map((doc) => `<option value="${doc.id}">${esc(doc.code)} · ${esc(doc.title)}
             ${doc.effective_version ? '（现行 ' + esc(doc.effective_version.version_display) + '）' : '（无生效版本）'}</option>`).join('')}
         </select></div>
       <div class="field"><label>目标版本号（major.minor）</label>
         <input id="pmLabel" placeholder="2.0"></div>
       <div class="field"><label>晋升说明</label><textarea id="pmNote"></textarea></div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitPromote(${versionId})">生成草稿</button>`);
+    `<button class="btn btn-g" data-act="dlv.close">取消</button>
+     <button class="btn btn-p" data-act="dlv.submitPromote" data-version="${versionId}">生成草稿</button>`);
     syncPromoteLabel();
   } catch (e) {
     toast(e.message, true);
@@ -857,7 +959,7 @@ function paintBaselineTab() {
       <div class="between mb">
         <div><h2>基线与审计</h2>
           <div class="desc" style="margin:0">基线是某个时点的标准版本快照；差异用来回答「基准之后变了什么」</div></div>
-        ${canManage() ? '<button class="btn btn-p" onclick="openNewBaseline()">+ 创建基线</button>' : ''}
+        ${canManage() ? '<button class="btn btn-p" data-act="dlv.newBaseline">+ 创建基线</button>' : ''}
       </div>
     </div>
     <div id="govPanel">${skeleton(2)}</div>
@@ -896,7 +998,7 @@ async function loadGovernance() {
           <span class="tiny">${g.latest_baseline_code
             ? '最新基线：' + esc(g.latest_baseline_name) + '（' + esc(g.latest_baseline_code) + '）'
             : '还没有基线'}</span>
-          ${canManage() ? '<button class="btn btn-p" onclick="runAuditScan()">运行审计</button>' : ''}
+          ${canManage() ? '<button class="btn btn-p" data-act="dlv.auditScan">运行审计</button>' : ''}
         </div>
         <div class="grid g4 stat-row">
           <div class="kpi stat"><div class="num">${g.documents_effective}<small>/${g.documents_total}</small></div>
@@ -960,7 +1062,7 @@ async function loadFindings() {
                 ? ' · ' + esc(row.org_unit_name) : ''}</div></td>
             <td>${esc(row.owner_name || '—')}</td>
             <td>${canManage()
-              ? `<button class="btn-sm" onclick="ignoreFinding(${row.id})">忽略</button>` : '—'}</td>
+              ? `<button class="btn-sm" data-act="dlv.ignoreFinding" data-id="${row.id}">忽略</button>` : '—'}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>`;
@@ -1012,7 +1114,7 @@ async function loadBaselines() {
             <td>${esc(row.process_code || row.org_unit_name || '全部')}</td>
             <td>${row.item_count}</td>
             <td>${esc(row.created_by || '—')}<div class="tiny">${dtShort(row.created_at)}</div></td>
-            <td><button class="btn-sm" onclick="openBaseline(${row.id})">查看 / 差异</button></td>
+            <td><button class="btn-sm" data-act="dlv.openBaseline" data-id="${row.id}">查看 / 差异</button></td>
           </tr>`).join('')}</tbody>
         </table>
       </div>`;
@@ -1078,7 +1180,7 @@ function paintBaseline(detail, diff) {
       <thead><tr><th>类型</th><th>资产</th><th>当时版本</th><th>范围</th><th>流程/交付物</th></tr></thead>
       <tbody>${snapshotRows}</tbody>
     </table>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>', true);
+    '<button class="btn btn-g" data-act="dlv.close">关闭</button>', true);
 }
 
 function openNewBaseline() {
@@ -1088,7 +1190,7 @@ function openNewBaseline() {
     <div class="field"><label>名称</label>
       <input id="blName" placeholder="如：2026 Q4 标准基线"></div>
     <div class="field"><label>范围</label><select class="sel" id="blScope"
-      onchange="syncBaselineScope()">
+      data-act="dlv.syncBaselineScope">
       ${Object.entries(labels).map(([code, label]) =>
         `<option value="${code}">${esc(label)}</option>`).join('')}
     </select></div>
@@ -1103,8 +1205,8 @@ function openNewBaseline() {
       </select></div>
     <div class="field"><label>说明</label><textarea id="blNote"></textarea></div>
     <div class="note">基线只记录当时生效的标准版本，不复制文件；创建后不可修改。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitNewBaseline()">创建</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitNewBaseline">创建</button>`);
   syncBaselineScope();
 }
 
@@ -1153,20 +1255,20 @@ function paintTemplateTab() {
       <div class="between mb">
         <div><h2>工具模板库</h2>
           <div class="desc" style="margin:0">模板是受控的方法资产：版本只追加不覆盖，使用与复制都会留痕</div></div>
-        ${canManage() ? '<button class="btn btn-p" onclick="openNewTemplate()">+ 新建模板</button>' : ''}
+        ${canManage() ? '<button class="btn btn-p" data-act="dlv.newTemplate">+ 新建模板</button>' : ''}
       </div>
       <div class="gap" style="flex-wrap:wrap">
-        <select class="sel" onchange="setTplTool(this.value)">
+        <select class="sel" data-act="dlv.tplTool">
           <option value="">全部工具</option>
           ${tools.map((t) => `<option value="${esc(t.code)}" ${f.templateTool === t.code ? 'selected' : ''}>
             ${esc(t.name)}（阶段${t.stage_no}）</option>`).join('')}
         </select>
-        <select class="sel" onchange="setTplFormat(this.value)">
+        <select class="sel" data-act="dlv.tplFormat">
           <option value="">全部格式</option>
           ${Object.entries(formats).map(([code, label]) =>
             `<option value="${code}" ${f.templateFormat === code ? 'selected' : ''}>${esc(label)}</option>`).join('')}
         </select>
-        <select class="sel" onchange="setTplOrg(this.value)">
+        <select class="sel" data-act="dlv.tplOrg">
           <option value="">全部组织</option>${orgOptions(f.templateOrgUnitId)}
         </select>
       </div>
@@ -1206,7 +1308,7 @@ async function loadTemplates() {
       return;
     }
     grid.innerHTML = '<div class="grid g3">' + rows.map((t) => `
-      <div class="tool" onclick="openTemplate(${t.id})">
+      <button class="tool" type="button" data-act="dlv.openTemplate" data-id="${t.id}">
         <div class="ico">${FMT_ICON[t.format] || '📄'}</div>
         <h4>${esc(t.name)}
           ${t.is_default ? '<span class="tag t-grn">默认</span>' : ''}
@@ -1218,7 +1320,7 @@ async function loadTemplates() {
             ${t.effective_version ? '现行 ' + esc(t.effective_version.version_label) : '无生效版本'}</span>
           <span class="tiny">${esc(t.deliverable_definition_name || '不限交付物')}</span>
         </div>
-      </div>`).join('') + '</div>';
+      </button>`).join('') + '</div>';
   } catch (e) {
     grid.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
   }
@@ -1244,11 +1346,13 @@ function paintTemplate(d, usages) {
   const rows = d.versions.map((v) => {
     const actions = [];
     if (v.has_file) {
-      actions.push(`<button class="btn-sm" onclick="dlTemplateVersion(${d.id}, ${v.id}, '${esc(v.version_label)}')">下载</button>`);
+      actions.push(`<button class="btn-sm" data-act="dlv.templateDownload" data-id="${d.id}"
+        data-version="${v.id}" data-label="${esc(v.version_label)}">下载</button>`);
     }
     if (canManage()) {
       (transitions[v.status] || []).forEach((target) => {
-        actions.push(`<button class="btn-sm" onclick="transitionTemplate(${d.id}, ${v.id}, '${target}')">
+        actions.push(`<button class="btn-sm" data-act="dlv.templateTransition" data-id="${d.id}"
+          data-version="${v.id}" data-target="${esc(target)}">
           ${esc(labels[target] || target)}</button>`);
       });
     }
@@ -1284,13 +1388,13 @@ function paintTemplate(d, usages) {
     : '';
 
   const footer = [
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>',
+    '<button class="btn btn-g" data-act="dlv.close">关闭</button>',
     canManage() && d.format !== 'ONLINE'
-      ? `<button class="btn btn-g" onclick="closeModal();openTemplateUpload(${d.id})">上传新版本</button>` : '',
+      ? `<button class="btn btn-g" data-act="dlv.templateUpload" data-id="${d.id}">上传新版本</button>` : '',
     canManage() && d.format === 'ONLINE'
-      ? `<button class="btn btn-g" onclick="closeModal();openOnlineVersion(${d.id})">新增在线版本</button>` : '',
+      ? `<button class="btn btn-g" data-act="dlv.onlineVersion" data-id="${d.id}">新增在线版本</button>` : '',
     canWrite() && d.effective_version
-      ? `<button class="btn btn-p" onclick="closeModal();openTemplateCopy(${d.id})">复制到项目</button>` : '',
+      ? `<button class="btn btn-p" data-act="dlv.templateCopy" data-id="${d.id}">复制到项目</button>` : '',
   ].filter(Boolean).join('');
 
   openModal((d.tool_name || d.tool_code) + ' · ' + d.name, `
@@ -1327,8 +1431,8 @@ function openTemplateUpload(templateId) {
     <div class="field"><label>占位符 JSON（可选）</label>
       <textarea id="tpPh" placeholder='[{"key":"project_name","label":"项目名称","source":"project.name","required":true}]'></textarea></div>
     <div class="note">版本只追加不覆盖；上传后为草稿，审批到「已生效」后才能被使用。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitTemplateUpload(${templateId})">上传</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitTemplateUpload" data-id="${templateId}">上传</button>`);
 }
 
 async function submitTemplateUpload(templateId) {
@@ -1360,8 +1464,8 @@ function openOnlineVersion(templateId) {
     <div class="field"><label>占位符 JSON（可选）</label>
       <textarea id="tpPh" placeholder='[{"key":"project_name","label":"项目名称","source":"project.name","required":true}]'></textarea></div>
     <div class="note">在线模板不生成文件；复制到项目时创建元数据版本，适合清单/检查表。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitOnlineVersion(${templateId})">创建</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitOnlineVersion" data-id="${templateId}">创建</button>`);
 }
 
 async function submitOnlineVersion(templateId) {
@@ -1436,8 +1540,8 @@ function openNewTemplate() {
     </div>
     <div class="field"><label>说明</label><textarea id="ntDesc" placeholder="适用场景、填写要求"></textarea></div>
     <div class="note">编码自动生成；同工具同格式的第一个模板会成为默认模板。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitNewTemplate()">创建</button>`);
+  `<button class="btn btn-g" data-act="dlv.close">取消</button>
+   <button class="btn btn-p" data-act="dlv.submitNewTemplate">创建</button>`);
 }
 
 async function submitNewTemplate() {
@@ -1465,19 +1569,4 @@ async function submitNewTemplate() {
   }
 }
 
-export {
-  renderDeliverables, setDlvTab, setDlvProject,
-  openDeliverableUpload, submitDeliverableUpload, openDeliverable,
-  transitionDeliverable, restoreDeliverable, dlDeliverableVersion,
-  setDocProcess, setDocCategory, setDocOrg, openDocument, openNewDocument,
-  submitNewDocument, refreshVariantCandidates, refreshDocumentNodes, openDocumentUpload,
-  submitDocumentUpload,
-  transitionDocument, dlDocumentVersion,
-  openDocumentImpact, openRebase, submitRebase,
-  openPromote, syncPromoteLabel, submitPromote,
-  openBaseline, openNewBaseline, submitNewBaseline, syncBaselineScope,
-  runAuditScan, ignoreFinding,
-  setTplTool, setTplFormat, setTplOrg, openNewTemplate, submitNewTemplate,
-  openTemplate, openTemplateUpload, submitTemplateUpload,
-  openOnlineVersion, submitOnlineVersion, transitionTemplate, dlTemplateVersion,
-};
+export { renderDeliverables };
