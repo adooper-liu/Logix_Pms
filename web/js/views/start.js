@@ -387,19 +387,35 @@ function paint(data) {
     actions: viewButton('去画流程', 'designer') + viewButton('看方法工具箱', 'toolbox'),
   });
 
-  const rail = data.steps.map((step) => `
-    <div class="rail-step ${RAIL_TONE[step.status] || 'gray'}${
-      current && current.key === step.key ? ' current' : ''}${
-      step.pilot ? '' : ' is-improvement'}" title="${esc(step.title)} · ${esc(step.status_label)}">
-      <span class="dot">${step.order + 1}</span>
-      <b>${esc(shortTitle(step))}</b>
-      <em>${esc(step.status_label)}</em>
-    </div>`).join('');
+  const timelineParts = [];
+  data.steps.forEach((step, index) => {
+    const isCurrent = !!current && current.key === step.key;
+    const state = step.status === 'READY'
+      ? 'done'
+      : step.status === 'SKIPPED'
+        ? 'skipped'
+        : isCurrent
+          ? 'current'
+          : 'future';
+    const mark = state === 'done' ? '✓' : state === 'skipped' ? '–' : step.order + 1;
+    timelineParts.push(`
+      <div class="tl-step ${state}"
+        title="${esc(step.title)} · ${esc(step.status_label)}">
+        <span class="tl-dot">${mark}</span>
+        <span class="tl-label">${esc(shortTitle(step))}</span>
+        ${isCurrent ? '<span class="tl-now">当前</span>' : ''}
+        ${state === 'skipped' ? '<span class="tl-skip">未验证</span>' : ''}
+      </div>`);
+    if (index < data.steps.length - 1) {
+      timelineParts.push(
+        `<span class="tl-line ${step.status === 'READY' ? 'done' : ''}"></span>`);
+    }
+  });
   const railCard = `
     <div class="card start-rail-card">
       <div class="between mb"><h3>执行层：9 个阶段</h3>
-        <span class="tiny muted">当前阶段展开，其余阶段只显示状态</span></div>
-      <div class="start-rail">${rail}</div>
+        <span class="tiny muted">蓝勾 = 已具备 · 圆环 = 当前全局证据阶段 · 灰 = 还没开始</span></div>
+      <div class="start-timeline">${timelineParts.join('')}</div>
     </div>`;
 
   const q7 = questionCard({
@@ -516,6 +532,7 @@ function paint(data) {
         <i class="fill-ok" style="width:${pct}%"></i>
       </div>
     </div>
+    ${railCard}
     <div class="start-shell">
       <aside class="start-side">${nav}</aside>
       <main class="start-center">
@@ -524,7 +541,6 @@ function paint(data) {
         ${blockHeader('骨架层', '统一语言', '定口径、定边界、定责任')}
         ${q4}${q5}
         ${blockHeader('执行层', '逐层推进', '定方法、留证据、过退出门')}
-        ${railCard}
         ${q6}${q7}
         ${q8}
         ${doneList(done)}${upcomingList(upcoming)}

@@ -1903,7 +1903,10 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "开始使用" in view and "一条流程的试点路径" in view, "启动向导未渲染"
-            assert page.locator("#view .rail-step").count() == 9, "九阶段进度轨不完整"
+            assert page.locator("#view .tl-step").count() == 9, "九阶段时间轴不完整"
+            assert page.locator("#view .tl-step.current").count() == 1, "时间轴没有当前全局证据阶段"
+            assert page.locator("#view .tl-step.done").count() >= 1, "时间轴没有已完成阶段"
+            assert "当前" in page.inner_text("#view .start-timeline")
             assert page.locator("#view .start-shell").count() == 1, "开始页没有三栏布局"
             assert page.locator("#view .start-q").count() == 8, "开始页不是八问"
             for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
@@ -1953,7 +1956,10 @@ def main() -> int:
                 page.wait_for_selector("#mask.show")
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
-                assert "这次先不做（未验证）" in page.inner_text("#view"), "跳过步骤未显示为未验证"
+                assert page.locator("#view .tl-step.skipped").count() >= 1, (
+                    "跳过步骤未在时间轴标记为未验证"
+                )
+                assert "未验证" in page.inner_text("#view .start-timeline")
                 # “已经具备 / 这次先不做”默认折叠，恢复入口在折叠面板里
                 page.locator("#view details.start-fold summary").first.click()
                 page.wait_for_timeout(300)
@@ -1964,9 +1970,7 @@ def main() -> int:
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
                 skipped_keys.remove(key)
-                assert "这次先不做（未验证）" not in page.inner_text("#view"), (
-                    "取消跳过后仍是未验证"
-                )
+                assert page.locator("#view .tl-step.skipped").count() == 0, "取消跳过后仍是未验证"
 
         def process_card_view() -> None:
             goto("process_card")
