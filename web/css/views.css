@@ -78,6 +78,9 @@
   border-radius:10px;padding:8px 10px;background:var(--panel-2)}
 .bpmn-lint-item{padding:5px 4px;border-bottom:1px solid var(--line-soft);cursor:pointer;
   font-size:12px;line-height:1.5}
+button.bpmn-lint-item{display:block;width:100%;text-align:left;font:inherit;color:inherit;
+  background:none;border:0;border-bottom:1px solid var(--line-soft)}
+button.bpmn-lint-item:last-child{border-bottom:none}
 .bpmn-lint-item:last-child{border-bottom:none}
 .bpmn-lint-item:hover{background:var(--panel-hover)}
 .bpmn-lint-item.error{color:var(--bad-strong)}

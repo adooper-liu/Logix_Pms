@@ -11,15 +11,14 @@
 另有一条 IA 覆盖问题已在 Phase 0 修复**（保留在 §2.5 作为回归触发条件）。
 本文只描述这些断裂、成因和修复顺序，不改动 IA 已确定的产品决策。
 
-**当前进度**：Phase 0（补 IA 文档）已完成；Phase 1A/1B 已完成；Phase 2 进行中
-（12 个视图已迁移，只剩 `designer`）。
-本文数字已按 2026-10-24 复核。**Phase 3–4 尚未开始**，
-§2 是问题记录（2.4/2.5 已部分修复），§6 是执行顺序。
+**当前进度**：Phase 0（补 IA 文档）、Phase 1A/1B 已完成；**Phase 2 已完成**
+（13/13 个视图全部迁移到 `data-act`）。**Phase 3–4 尚未开始**，
+§2 是问题记录，§6 是执行顺序。
 
-**测量基线（2026-10-24 复核，Phase 2 进行中）**：25 个手写 JS 模块、11,546 行
-（其中 views 10,103 行）；13 个视图共 55 个导出符号（挂到 window 后约 67 个全局键）；
-内联事件处理器 60 处（designer 45、框架壳/core 15）；
-视图内原生 `confirm`/`prompt` 7 处（全部在 designer）；`data-act` 键 210 个。
+**测量基线（2026-10-24 复核，Phase 2 完成后）**：25 个手写 JS 模块、11,598 行
+（其中 views 10,155 行）；13 个视图共 22 个导出符号（挂到 window 后约 34 个全局键）；
+内联事件处理器 15 处（全部在框架壳/core，视图内为 0）；
+视图内原生 `confirm`/`prompt` 0 处；`data-act` 键 248 个。
 复核命令见附录 A。
 
 若与代码现状不符，以代码为准，并回来更新本文。
@@ -96,12 +95,12 @@ web/js/views/designer/
 `select(key)` / `subscribe(event, fn)`），向下传给各子模块；子模块只依赖这个只读接口，
 `xml.js` 保持纯函数、不接收 `ctx`。没有这层契约，拆完只是把一个大文件变成九个互相 import 的文件。
 
-### 2.2 `window` 全局面 = 55 个视图导出，没有边界
+### 2.2 `window` 全局面 = 22 个视图导出，没有边界
 
 **证据**：`main.js:69-89` 用 `Object.assign(window, { ...dashboard, ...mapView, ... })`
-把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **55 个导出符号**
-（Phase 2 迁移 12 个视图后从 231 降下来），
-加上框架级函数与 `templateCopy`，`window` 上约 **67 个全局键**。
+把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **22 个导出符号**
+（Phase 2 全部迁移后从 231 降下来），
+加上框架级函数与 `templateCopy`，`window` 上约 **34 个全局键**。
 
 **这不是「有风险」，而是已经发生过事故**：`map.js` 与 `pcf.js` 都导出了
 `togglePcfNode`，`Object.assign` 后 `pcf.js` 覆盖了 `map.js` 的实现，
@@ -111,19 +110,19 @@ web/js/views/designer/
 （解析各视图的 `export {}`，重名即测试失败）。
 
 **这个全局面存在的唯一原因**：`onclick="openProject(3)"` 在全局作用域求值。
-实测内联事件处理器 **60 处**（12 个视图已迁移归零；按事件类型分布见 §4.2）：
+实测内联事件处理器 **15 处**（13 个视图全部归零；剩余全在框架壳/core）：
 
-| 视图 | 内联处理器 | 视图 | 内联处理器 |
-|---|---|---|---|
-| designer.js | 45 | 其余 12 个视图 | **0**（已完成） |
-| 框架壳 / core | 15 | | |
+| 位置 | 内联处理器 |
+|---|---|
+| `web/index.html` / `core`（通知、模板复制、模态默认关闭等） | 15 |
+| 13 个视图 | **0**（已完成） |
 
 **后果**：
 
 1. **没有 API 边界**。视图模块的「公开面」= 它的全部导出，
    读者无法分辨 `openDesigner`（跨视图要用）和 `restoreLanes`（纯内部），
    只能全文读 2,448 行才能知道。
-2. **无法静态检查**。ES 模块能校验 import 路径，`window` 上挂的 55 个导出不能。
+2. **无法静态检查**。ES 模块能校验 import 路径，`window` 上挂的 22 个导出不能。
    `tests/test_frontend_structure.py` 原先只能检查「模块文件存在」，检查不了
    「模板里 `onclick="foo()"` 的 foo 是否真实存在」——拼错就是浏览器静默不响应。
    撞名守卫是事后补的；根因仍然是「全部导出即公开面」。
@@ -367,8 +366,8 @@ Object.assign(window, { go, closeModal, state, actions });
 <button class="btn btn-p" data-act="deliverable.open" data-id="3">打开</button>
 ```
 
-在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：现存 60 处
-处理器的分布是 `click 57` / `change 3`，筛选器和表单主要靠 `change`。
+在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：现存 15 处
+处理器的分布是 `click 13` / `change 2`，且全部在框架壳/core。
 另外 `<select>` / checkbox 会同时触发 `input` 与 `change`，
 委托根必须只处理 `change`，否则一次操作会执行两次（已在实现中拦截）。
 
@@ -400,15 +399,16 @@ for (const type of BUBBLING_EVENTS) {
 - 表单回车提交走 `submit`，不会触发 `click`；分页、搜索、筛选必须有 `submit` 兜底。
 - bpmn-js 画布、draw.io iframe、图表库继续用各自的原生监听，不强行套 `data-act`。
 - **可访问性**：`data-act` 只允许挂在 `<button>` / `<a>` 上；静态守卫拒绝
-  `div/span[data-act]`。这会把现有 60 处里的一部分「可点击 div」顺手修成键盘可用控件。
+  `div/span[data-act]`。这会把剩余 15 处框架壳里的「可点击 div」顺手修成键盘可用控件。
 - **转义**：`data-act` 的值必须是静态字符串，禁止拼接用户输入；
   其余 `data-*` 与文本一律走 `esc`。事件委托消除了 `onclick="...${name}..."` 的注入面，
   但组件返回 HTML 字符串时仍必须统一转义。
 
-**迁移策略**：**不要求一次性改完**。新代码走 `data-act`；
-存量 60 处内联处理器中，12 个视图已迁移归零，剩余 `designer` 45 处与框架壳 15 处。
-删除类确认统一用 `confirmDialog`；可点击行统一改成「名称按钮」或主按钮；
-`execution` 的挂起原因改用 `promptDialog`。
+**迁移策略**：13 个视图已全部迁移到 `data-act`，视图内联处理器为 0；
+剩余 15 处都在框架壳/core（通知、模板复制、模态默认关闭、顶栏搜索等），
+随 Phase 3 的 `actions` 收口一起处理。
+删除类确认统一用 `confirmDialog`，输入类用 `promptDialog`；
+可点击行统一改成「名称按钮」或主按钮。
 
 ### 4.3 共享组件清单
 
@@ -511,7 +511,8 @@ for (const type of BUBBLING_EVENTS) {
 
 ### Phase 2 — 逐视图迁移到委托 + 组件（可拆分多个提交）
 
-顺序建议：只剩 `designer`（最后，且与 Phase 3 的拆包一起做）；其余 12 个视图已完成。
+**Phase 2 已完成**：13/13 个视图迁移到 `data-act`，视图内联处理器与原生弹窗均为 0。
+下一阶段是 Phase 3（收窄 window 面、清理 7 处视图间 import、拆 designer）。
 
 每个视图的迁移动作：
 1. 该视图的内联处理器改为 `data-act`（按 §4.2 的事件类型分别处理）；
@@ -523,13 +524,9 @@ for (const type of BUBBLING_EVENTS) {
 - `window` 上的导出数量与内联处理器数量每迁一个视图就降一批；
 - 浏览器端到端自检 `python scripts/verify_frontend.py http://127.0.0.1:8123` 通过。
 
-> **状态：进行中（2026-10-24）。** 12 个视图已完成迁移，只剩 `designer`
-> （45 处处理器 + 7 处原生弹窗），建议与 Phase 3 的拆包一起做。
-> 删除类确认统一用 `confirmDialog`，挂起原因用 `promptDialog`；
-> 可点击行统一改成「名称按钮」或主按钮。
-> 本阶段先只保留 `renderX` 与确有跨视图引用的函数
-> （`openToolByCode` / `openProject` / `newProjectWizard` / `renderRecommendation` 等），
-> 显式 `actions` map 与 `main.js` 收口统一放到 Phase 3，避免中途出现两套入口。
+> **状态：已完成（2026-10-24）。** 13 个视图全部迁移到 `data-act`；
+> 视图内联处理器 0、原生 `confirm`/`prompt` 0；`data-act` 键 248 个。
+> 剩余 15 处内联处理器在框架壳/core，随 Phase 3 的 `actions` 收口处理。
 
 ### Phase 3 — 收窄 window 面 + 拆 designer + 清环
 
@@ -561,7 +558,7 @@ for (const type of BUBBLING_EVENTS) {
 （a）`state` 访问未声明键会告警（dev Proxy 或路径感知分析器，需处理 `st` 别名）；
 （b）模板里 `actions[...]` 引用的键在注册表中；
 （c）没有残留原生 `confirm(` / `prompt(`；
-（d）视图之间无环、`window` 全局键数量低于当前基线（约 67）。
+（d）视图之间无环、`window` 全局键数量低于当前基线（约 34）。
 
 ---
 
@@ -578,7 +575,7 @@ for (const type of BUBBLING_EVENTS) {
 | `data-act` 只出现在 `<button>` / `<a>` 上 | 键盘不可用、可点击 div | Phase 1 |
 | 视图文件不得含原生 `confirm(` / `prompt(` | 弹窗风格不一致 | Phase 1 |
 | 每种事件类型的剩余内联处理器数量 | 迁移漏项（`change` / `input` 最易漏） | Phase 2 |
-| `window` 全局键数量预算（当前约 67） | 全局面在迁移中反弹 | Phase 2 |
+| `window` 全局键数量预算（当前约 34） | 全局面在迁移中反弹 | Phase 3 |
 | 视图之间**无环**；直接 import 只指向 `views/shared/` 或 `core/` | 循环依赖、隐式公共库 | Phase 3 |
 | `core/*` 不得 import `views/*` | 分层倒置 | Phase 3 |
 | designer 子模块只通过 `ctx` 访问画布、XML 纯函数有特征测试 | 拆包后互相 import | Phase 3 |
@@ -605,12 +602,12 @@ for (const type of BUBBLING_EVENTS) {
 | 指标 | 当前值 |
 |---|---|
 | 手写 JS 模块 | 25 |
-| JS 总行数 / views 行数 | 11,546 / 10,103 |
+| JS 总行数 / views 行数 | 11,598 / 10,155 |
 | `designer.js` | 2,448 行；92 个顶层函数声明（约 106 个命名函数） |
-| 视图导出符号 / `window` 全局键 | 55 / 约 67 |
-| 内联事件处理器 | 60（click 57、change 3） |
-| `data-act` 键 | 210（12 个已迁移视图） |
-| 视图内原生 `confirm` / `prompt` | 7（全部在 designer） |
+| 视图导出符号 / `window` 全局键 | 22 / 约 34 |
+| 内联事件处理器 | 15（全部在框架壳/core） |
+| `data-act` 键 | 248（13 个已迁移视图） |
+| 视图内原生 `confirm` / `prompt` | 0 |
 | 组件重复 | 页头 12、表格 49、栅格 18、空状态 27、标签 85 |
 | 视图间直接 import | 7 条边 |
 

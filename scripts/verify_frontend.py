@@ -988,8 +988,9 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert not page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
             # 自动布局必须保留泳道；bpmn-auto-layout 本身只排 flowElements
-            page.once("dialog", lambda dialog: dialog.accept())
             page.click('#view button:has-text("自动布局")')
+            page.wait_for_selector("#uiDialogOk", timeout=5000)
+            page.click("#uiDialogOk")
             page.wait_for_timeout(5000)
             assert "已自动布局并保存" in page.inner_text("#toast")
             assert page.locator('#bpmnCanvas [data-element-id^="Lane_"]').count() >= 1, (
@@ -1196,8 +1197,10 @@ def main() -> int:
             # 新增泳道（自动带默认活动）
             lane_name = f"E2E泳道{int(time.time() * 1000) % 100000}"
             lane_name2 = lane_name + "改"
-            page.once("dialog", lambda dialog: dialog.accept(lane_name))
             page.click('#view button:has-text("+ 泳道")')
+            page.wait_for_selector("#uiDialogInput", timeout=5000)
+            page.fill("#uiDialogInput", lane_name)
+            page.click("#uiDialogOk")
             page.wait_for_timeout(2200)
             added = [item for item in design_model()["nodes"] if item["lane"] == lane_name]
             assert added, "新增泳道后没有默认活动"
@@ -1326,13 +1329,16 @@ def main() -> int:
                 assert "草稿" in page.inner_text("#mBody")
                 close_modal()
 
-                page.once("dialog", lambda dialog: dialog.accept("E2E 评审"))
                 page.click('#view button:has-text("提交评审")')
+                page.wait_for_selector("#uiDialogInput", timeout=5000)
+                page.fill("#uiDialogInput", "E2E 评审")
+                page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
                 assert "待评审" in page.inner_text("#view"), page.inner_text("#view")[:200]
 
-                page.once("dialog", lambda dialog: dialog.accept())
                 page.click('#view button:has-text("发布到运行时")')
+                page.wait_for_selector("#uiDialogOk", timeout=5000)
+                page.click("#uiDialogOk")
                 page.wait_for_timeout(1600)
                 view_text = page.inner_text("#view")
                 assert "已发布" in view_text and "运行时版本 v" in view_text, view_text[:200]

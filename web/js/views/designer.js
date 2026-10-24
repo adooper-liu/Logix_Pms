@@ -1,6 +1,6 @@
 /* 视图：designer */
 import { esc, num, dur, dtShort, emptyRow, NODE_LABEL } from '../core/format.js';
-import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, confirmDialog, promptDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
@@ -9,6 +9,45 @@ import { API_BASE, GET, PATCH, POST, PUT, DEL, getToken } from '../core/api.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 6. 流程设计器 */
+
+on('designer.tab', ({ tab }) => setDesignerTab(tab));
+on('designer.lint', () => runBpmnLint());
+on('designer.autoLayout', () => autoLayoutBpmn());
+on('designer.fullscreen', () => toggleBpmnFullscreen());
+on('designer.addLane', () => addBpmnLane());
+on('designer.sidebar', ({ tab }) => toggleBpmnSidebar(tab));
+on('designer.sidebarTab', ({ tab }) => showBpmnSidebarTab(tab));
+on('designer.closeSidebar', () => closeBpmnSidebar());
+on('designer.fit', () => fitBpmnViewport());
+on('designer.process', (_data, el) => switchProcess(el.value));
+on('designer.publish', () => publishDesign());
+on('designer.reanalyze', () => reanalyze());
+on('designer.versions', () => openVersionHistory());
+on('designer.submitReview', () => submitReview());
+on('designer.rejectReview', () => rejectReview());
+on('designer.export', () => exportBpmn());
+on('designer.import', () => importBpmn());
+on('designer.goExecution', () => go('execution'));
+on('designer.saveName', ({ id }) => saveBpmnName(id));
+on('designer.changeType', ({ id }) => changeBpmnNodeType(id));
+on('designer.moveLane', ({ id }) => moveBpmnNodeToLane(id));
+on('designer.saveActivity', ({ node }) => saveBpmnNodeActivity(node));
+on('designer.saveMetrics', ({ node }) => saveBpmnMetrics(node));
+on('designer.deleteFlow', ({ id }) => deleteBpmnFlow(id));
+on('designer.saveFlow', ({ id }) => saveBpmnFlow(id));
+on('designer.saveLaneName', ({ id }) => saveBpmnLaneName(id));
+on('designer.saveAssignment', ({ node }) => saveBpmnAssignment(node));
+on('designer.addNodeTool', ({ node }) => addBpmnNodeTool(node));
+on('designer.removeNodeTool', ({ node, code }) => removeBpmnNodeTool(node, code));
+on('designer.openNodeDoc', ({ node }) => openNodeDocumentModal(node));
+on('designer.goDeliverables', () => go('deliverables'));
+on('designer.close', () => closeModal());
+on('designer.submitNodeDoc', ({ node }) => submitNodeDocument(node));
+on('designer.executionConfig', () => openExecutionConfig());
+on('designer.openTool', ({ code }) => openToolByCode(code));
+on('designer.lintIssue', ({ index }) => selectLintIssue(Number(index)));
+on('designer.diffVersion', ({ id }) => diffVersion(Number(id)));
+on('designer.rollbackVersion', ({ id }) => rollbackVersion(Number(id)));
 
 async function openDesigner(processId) {
   state.designer.processId = processId;
@@ -69,8 +108,8 @@ function paintDesigner() {
   const tab = st.tab || 'model';
   const tabBar = `
     <div class="seg">
-      <button class="${tab === 'model' ? 'on' : ''}" onclick="setDesignerTab('model')">流程模型</button>
-      <button class="${tab === 'analysis' ? 'on' : ''}" onclick="setDesignerTab('analysis')">
+      <button class="${tab === 'model' ? 'on' : ''}" data-act="designer.tab" data-tab="model">流程模型</button>
+      <button class="${tab === 'analysis' ? 'on' : ''}" data-act="designer.tab" data-tab="analysis">
         指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
     </div>`;
 
@@ -79,19 +118,19 @@ function paintDesigner() {
       <div class="mb designer-toolbar bpmn-toolbar">
         <div class="gap bpmn-toolbar-left">
           <span class="tiny">专业 BPMN 2.0 画布（bpmn-js）</span>
-          <button class="btn-sm" onclick="runBpmnLint()">运行校验</button>
-          <button class="btn-sm" onclick="autoLayoutBpmn()">自动布局</button>
-          <button class="btn-sm" onclick="toggleBpmnFullscreen()">全屏</button>
-          ${editable ? '<button class="btn-sm" onclick="addBpmnLane()">+ 泳道</button>' : ''}
+          <button class="btn-sm" data-act="designer.lint">运行校验</button>
+          <button class="btn-sm" data-act="designer.autoLayout">自动布局</button>
+          <button class="btn-sm" data-act="designer.fullscreen">全屏</button>
+          ${editable ? '<button class="btn-sm" data-act="designer.addLane">+ 泳道</button>' : ''}
           <button class="btn-sm" id="bpmnPropsToggle"
-            onclick="toggleBpmnSidebar('props')">属性</button>
+            data-act="designer.sidebar" data-tab="props">属性</button>
           <button class="btn-sm bpmn-lint-toggle" id="bpmnLintToggle"
-            onclick="toggleBpmnSidebar('lint')">校验问题</button>
+            data-act="designer.sidebar" data-tab="lint">校验问题</button>
           <span class="tiny" id="bpmnSaveState">${
             model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
               : '编辑后自动保存草稿'}</span>
         </div>
-        <button class="btn-sm bpmn-fit-btn" onclick="fitBpmnViewport()">适应画布</button>
+        <button class="btn-sm bpmn-fit-btn" data-act="designer.fit">适应画布</button>
         <div class="tiny bpmn-toolbar-hint">单击选中 · 双击改名 · 点「属性」查看/编辑指标与执行配置</div>
       </div>
       <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
@@ -99,10 +138,10 @@ function paintDesigner() {
         <div class="bpmn-drawer-head">
           <div class="seg bpmn-drawer-tabs">
             <button id="bpmnTabProps" class="on"
-              onclick="showBpmnSidebarTab('props')">属性</button>
-            <button id="bpmnTabLint" onclick="showBpmnSidebarTab('lint')">校验</button>
+              data-act="designer.sidebarTab" data-tab="props">属性</button>
+            <button id="bpmnTabLint" data-act="designer.sidebarTab" data-tab="lint">校验</button>
           </div>
-          <button class="btn-sm" onclick="closeBpmnSidebar()">收起</button>
+          <button class="btn-sm" data-act="designer.closeSidebar">收起</button>
         </div>
         <div class="bpmn-drawer-body">
           <div id="bpmnPropsPanel" class="bpmn-drawer-pane">
@@ -158,27 +197,27 @@ function paintDesigner() {
           ${tabBar}
         </div>
         <div class="designer-head-primary">
-          <select class="sel sel-sm" onchange="switchProcess(this.value)">${opts}</select>
+          <select class="sel sel-sm" data-act="designer.process">${opts}</select>
           ${publishable
-            ? '<button class="btn-sm btn-p" onclick="publishDesign()">发布到运行时</button>' : ''}
-          <button class="btn-sm btn-p" onclick="reanalyze()">重新测算</button>
+            ? '<button class="btn-sm btn-p" data-act="designer.publish">发布到运行时</button>' : ''}
+          <button class="btn-sm btn-p" data-act="designer.reanalyze">重新测算</button>
         </div>
       </div>
       <div class="designer-head-bar">
         <div class="designer-head-actions">
-          <button class="btn-sm btn-g" onclick="openVersionHistory()">版本历史</button>
+          <button class="btn-sm btn-g" data-act="designer.versions">版本历史</button>
           ${model.status === 'DRAFT' && editable
-            ? '<button class="btn-sm btn-g" onclick="submitReview()">提交评审</button>' : ''}
+            ? '<button class="btn-sm btn-g" data-act="designer.submitReview">提交评审</button>' : ''}
           ${model.status === 'IN_REVIEW' && canManage()
-            ? '<button class="btn-sm btn-g" onclick="rejectReview()">驳回</button>' : ''}
-          <button class="btn-sm btn-g" onclick="exportBpmn()">导出 BPMN</button>
-          ${editable ? '<button class="btn-sm btn-g" onclick="importBpmn()">导入 BPMN</button>' : ''}
+            ? '<button class="btn-sm btn-g" data-act="designer.rejectReview">驳回</button>' : ''}
+          <button class="btn-sm btn-g" data-act="designer.export">导出 BPMN</button>
+          ${editable ? '<button class="btn-sm btn-g" data-act="designer.import">导入 BPMN</button>' : ''}
           ${inReview
             ? '<span class="tiny">评审中，暂不可编辑</span>'
             : editable
               ? ''
               : '<span class="tiny">只读（你不是这条流程的 Owner）</span>'}
-          <a class="link-btn link-btn-sm" onclick="go('execution')">去流程执行 →</a>
+          <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
         </div>
       </div>
     </div>
@@ -620,7 +659,7 @@ function bpmnPanelHeader(bo) {
   </div>`;
 }
 
-function bpmnNameEditor(bo, saveCall, hint) {
+function bpmnNameEditor(bo, hint) {
   const editable = !!state.designer.editable;
   return `
     <div class="field"><label>名称</label>
@@ -628,7 +667,8 @@ function bpmnNameEditor(bo, saveCall, hint) {
         editable ? '' : ' readonly'}></div>
     ${editable
       ? `<div class="between mb"><span class="tiny muted">${esc(hint)}</span>
-          <button class="btn-sm" onclick="${saveCall}">保存名称</button></div>`
+          <button class="btn-sm" data-act="designer.saveName"
+            data-id="${esc(bo.id)}">保存名称</button></div>`
       : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`;
 }
 
@@ -689,14 +729,15 @@ function renderBpmnNodePanel(panel, element) {
     ? `<option value="" selected>${esc(node.owner_role)}（未关联岗位）</option>` : '';
   panel.innerHTML = `
     ${bpmnPanelHeader(bo)}
-    ${bpmnNameEditor(bo, `saveBpmnName('${esc(bo.id)}')`, '双击画布元素也可直接改名')}
+    ${bpmnNameEditor(bo, '双击画布元素也可直接改名')}
     ${isFlowNode ? `
       <div class="row2">
         <div class="field"><label>节点类型</label>
           <div class="gap">
             <select id="bpNodeType"${editable ? '' : ' disabled'}>${typeOpts}</select>
             ${editable
-              ? `<button class="btn-sm" onclick="changeBpmnNodeType('${esc(bo.id)}')">应用类型</button>`
+              ? `<button class="btn-sm" data-act="designer.changeType"
+                data-id="${esc(bo.id)}">应用类型</button>`
               : ''}
           </div></div>
         <div class="field"><label>所属泳道</label>
@@ -705,7 +746,8 @@ function renderBpmnNodePanel(panel, element) {
               ${lanes.length ? laneOpts : '<option value="">没有泳道</option>'}
             </select>
             ${editable && lanes.length
-              ? `<button class="btn-sm" onclick="moveBpmnNodeToLane('${esc(bo.id)}')">移动</button>`
+              ? `<button class="btn-sm" data-act="designer.moveLane"
+                data-id="${esc(bo.id)}">移动</button>`
               : ''}
           </div></div>
       </div>` : ''}
@@ -717,7 +759,8 @@ function renderBpmnNodePanel(panel, element) {
               <option value="">未关联</option>${activityOpts}
             </select>
             ${pmsEditable
-              ? `<button class="btn-sm" onclick="saveBpmnNodeActivity('${esc(node.node_key)}')">关联</button>`
+              ? `<button class="btn-sm" data-act="designer.saveActivity"
+                data-node="${esc(node.node_key)}">关联</button>`
               : ''}
           </div>
           ${node.process_arch_id
@@ -752,7 +795,8 @@ function renderBpmnNodePanel(panel, element) {
       <div id="bpMetaSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载表单与规则…</div></div>
       ${pmsEditable
         ? `<div class="between mt"><div class="hint">指标保存后不影响图形；发布后才影响运行时。</div>
-            <button class="btn-sm btn-p" onclick="saveBpmnMetrics('${esc(node.node_key)}')">保存指标</button></div>`
+            <button class="btn-sm btn-p" data-act="designer.saveMetrics"
+              data-node="${esc(node.node_key)}">保存指标</button></div>`
         : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`
       : '<div class="tiny muted">该元素没有 PMS 测算数据</div>'}
     ${canConfigExec
@@ -792,8 +836,10 @@ function renderBpmnFlowPanel(panel, element) {
       <div class="hint">条件与概率写入 BPMN，发布后参与运行时分支。</div>
       ${editable
         ? `<div class="gap">
-            <button class="btn-sm btn-g" onclick="deleteBpmnFlow('${esc(bo.id)}')">删除连线</button>
-            <button class="btn-sm btn-p" onclick="saveBpmnFlow('${esc(bo.id)}')">保存连线</button>
+            <button class="btn-sm btn-g" data-act="designer.deleteFlow"
+              data-id="${esc(bo.id)}">删除连线</button>
+            <button class="btn-sm btn-p" data-act="designer.saveFlow"
+              data-id="${esc(bo.id)}">保存连线</button>
           </div>` : ''}
     </div>`;
 }
@@ -810,12 +856,13 @@ function renderBpmnLanePanel(panel, element) {
         editable ? '' : ' readonly'}></div>
     ${editable
       ? `<div class="between mb"><span class="tiny muted">节点 ${refs.length} 个</span>
-          <button class="btn-sm btn-p" onclick="saveBpmnLaneName('${esc(bo.id)}')">保存名称</button></div>`
+          <button class="btn-sm btn-p" data-act="designer.saveLaneName"
+            data-id="${esc(bo.id)}">保存名称</button></div>`
       : ''}
     <div class="hint">${names.length
       ? '包含：' + names.map((name) => esc(name)).join('、')
       : '泳道里还没有节点'}</div>
-    ${editable ? '<button class="btn-sm btn-g" onclick="addBpmnLane()">+ 添加泳道</button>' : ''}`;
+    ${editable ? '<button class="btn-sm btn-g" data-act="designer.addLane">+ 添加泳道</button>' : ''}`;
 }
 
 function renderBpmnProcessPanel(panel, element) {
@@ -832,7 +879,7 @@ function renderBpmnProcessPanel(panel, element) {
       <input value="${esc(bo.name || '')}" readonly></div>
     <div class="mb"><div class="tiny muted mb">泳道</div>${rows}</div>
     ${state.designer.editable
-      ? '<button class="btn-sm btn-g" onclick="addBpmnLane()">+ 添加泳道</button>' : ''}`;
+      ? '<button class="btn-sm btn-g" data-act="designer.addLane">+ 添加泳道</button>' : ''}`;
 }
 
 async function renderBpmnAssignment(nodeKey) {
@@ -860,8 +907,8 @@ async function renderBpmnAssignment(nodeKey) {
   slot.innerHTML = `
     <div class="designer-exec-config bpmn-assign">
       <div class="between mb"><h3 style="margin:0">执行配置</h3>
-        <button class="btn-sm btn-p" onclick="saveBpmnAssignment('${esc(nodeKey)}')">
-          保存执行配置</button></div>
+        <button class="btn-sm btn-p" data-act="designer.saveAssignment"
+          data-node="${esc(nodeKey)}">保存执行配置</button></div>
       <div class="desc" style="margin:0 0 8px">候选角色 / 组织 / 默认处理人 / 节点时限 / 升级；
         只影响发布后的新实例</div>
       <div class="row2">
@@ -950,8 +997,8 @@ function renderBpmnNodeTools(nodeKey, rows) {
       <span>${esc(row.tool_name || row.tool_code)}</span>
       <span class="gap">
         <span class="tag t-gry">${esc(row.level_label || row.level)}</span>
-        ${editable ? `<button class="btn-sm" onclick="removeBpmnNodeTool('${esc(nodeKey)}',
-          '${esc(row.tool_code)}')">移除</button>` : ''}
+        ${editable ? `<button class="btn-sm" data-act="designer.removeNodeTool"
+          data-node="${esc(nodeKey)}" data-code="${esc(row.tool_code)}">移除</button>` : ''}
       </span>
     </div>`).join('') || '<div class="tiny muted">还没有绑定推荐工具</div>';
   slot.innerHTML = `
@@ -961,7 +1008,8 @@ function renderBpmnNodeTools(nodeKey, rows) {
       <div class="gap mt">
         <select id="bpToolCode"><option value="">选择工具</option>${toolOptions}</select>
         <select id="bpToolLevel">${levelOptions}</select>
-        <button class="btn-sm btn-p" onclick="addBpmnNodeTool('${esc(nodeKey)}')">绑定</button>
+        <button class="btn-sm btn-p" data-act="designer.addNodeTool"
+          data-node="${esc(nodeKey)}">绑定</button>
       </div>` : ''}`;
 }
 
@@ -1007,9 +1055,9 @@ function renderBpmnNodeDocs(nodeKey, rows) {
     ${list}
     <div class="gap mt">
       ${canManage()
-        ? `<button class="btn-sm" onclick="openNodeDocumentModal('${esc(nodeKey)}')">
-            + 新增标准文件</button>` : ''}
-      <a class="link-btn link-btn-sm" onclick="go('deliverables')">去交付物与模板库</a>
+        ? `<button class="btn-sm" data-act="designer.openNodeDoc"
+            data-node="${esc(nodeKey)}">+ 新增标准文件</button>` : ''}
+      <a class="link-btn link-btn-sm" data-act="designer.goDeliverables">去交付物与模板库</a>
     </div>`;
 }
 
@@ -1025,8 +1073,9 @@ function openNodeDocumentModal(nodeKey) {
       <div class="field"><label>说明</label><input id="ndDesc"></div>
     </div>
     <div class="note">文件会挂到当前活动；版本、审批与上传在「交付物与模板库」里继续维护。</div>`,
-  `<button class="btn btn-g" onclick="closeModal()">取消</button>
-   <button class="btn btn-p" onclick="submitNodeDocument('${esc(nodeKey)}')">创建</button>`);
+  `<button class="btn btn-g" data-act="designer.close">取消</button>
+   <button class="btn btn-p" data-act="designer.submitNodeDoc"
+     data-node="${esc(nodeKey)}">创建</button>`);
 }
 
 async function submitNodeDocument(nodeKey) {
@@ -1055,7 +1104,7 @@ function renderBpmnNodeMeta(forms, rules) {
   slot.innerHTML = `
     <div class="between mb"><b>表单与分支规则</b>
       ${canManage()
-        ? '<button class="btn-sm" onclick="openExecutionConfig()">去执行页配置</button>' : ''}
+        ? '<button class="btn-sm" data-act="designer.executionConfig">去执行页配置</button>' : ''}
     </div>
     <div class="tiny">表单：${esc(formText)}</div>
     <div class="tiny">分支规则：${rules.length} 条</div>`;
@@ -1172,7 +1221,8 @@ async function saveBpmnFlow(flowId) {
 }
 
 async function deleteBpmnFlow(flowId) {
-  if (!confirm('删除这条连线？')) return;
+  const ok = await confirmDialog('删除这条连线？', { danger: true, okText: '删除' });
+  if (!ok) return;
   const st = state.designer;
   const modeler = st.bpmnModeler;
   const element = modeler && modeler.get('elementRegistry').get(flowId);
@@ -1404,7 +1454,9 @@ async function addBpmnLane() {
   const st = state.designer;
   const modeler = st.bpmnModeler;
   if (!modeler) return;
-  const input = window.prompt('输入泳道名称（部门 / 角色）：', '新泳道');
+  const input = await promptDialog('输入泳道名称（部门 / 角色）：', {
+    title: '添加泳道', value: '新泳道', okText: '添加',
+  });
   if (input === null) return;
   const name = input.trim() || '新泳道';
   if (bpmnLanes().some((lane) => (lane.businessObject.name || '') === name)) {
@@ -1695,8 +1747,8 @@ function renderBpmnLint() {
       const title = help ? help.title : '建模规范提示';
       const detail = help ? help.detail : (issue.message || '');
       const raw = issue.rule + (issue.message ? '：' + issue.message : '');
-      return `<div class="bpmn-lint-item ${category}" onclick="selectLintIssue(${index})"
-          title="${esc(raw)}">
+      return `<button class="bpmn-lint-item ${category}" type="button"
+          data-act="designer.lintIssue" data-index="${index}" title="${esc(raw)}">
         <div class="bpmn-lint-head">
           <span class="tag ${category === 'error' ? 't-red' : 't-yel'}">${
             category === 'error' ? '错误' : '警告'}</span>
@@ -1706,7 +1758,7 @@ function renderBpmnLint() {
         <div class="bpmn-lint-detail">${esc(detail)}</div>
         ${help && help.action
           ? `<div class="bpmn-lint-action muted">建议：${esc(help.action)}</div>` : ''}
-      </div>`;
+      </button>`;
     }).join('')}`;
 }
 
@@ -1955,7 +2007,9 @@ function restoreLanes(xml) {
 async function autoLayoutBpmn() {
   const modeler = state.designer.bpmnModeler;
   if (!modeler) return;
-  if (!confirm('自动布局会重新排列节点并覆盖当前画布布局，确定继续？')) return;
+  const ok = await confirmDialog('自动布局会重新排列节点并覆盖当前画布布局，确定继续？',
+    { title: '自动布局', okText: '继续' });
+  if (!ok) return;
   try {
     await loadBpmnAutoLayout();
     const { xml } = await modeler.saveXML({ format: true });
@@ -2059,7 +2113,9 @@ function validationHtml(model) {
 }
 
 async function submitReview() {
-  const note = window.prompt('评审说明（可选；取消则不提交）', '');
+  const note = await promptDialog('评审说明（可选；取消则不提交）', {
+    title: '提交评审', okText: '提交', placeholder: '说明本次变更',
+  });
   if (note === null) return;
   try {
     await POST('/processes/' + state.designer.processId + '/design/submit-review', {
@@ -2073,7 +2129,9 @@ async function submitReview() {
 }
 
 async function rejectReview() {
-  const note = window.prompt('驳回原因（可选）', '');
+  const note = await promptDialog('驳回原因（可选）', {
+    title: '驳回评审', okText: '驳回', placeholder: '说明需要修改的地方',
+  });
   if (note === null) return;
   try {
     await POST('/processes/' + state.designer.processId + '/design/reject', {
@@ -2087,9 +2145,10 @@ async function rejectReview() {
 }
 
 async function publishDesign() {
-  if (!confirm('发布后，新启动的流程实例将使用这个模型；运行中的实例仍用启动时快照。确定发布？')) {
-    return;
-  }
+  const ok = await confirmDialog(
+    '发布后，新启动的流程实例将使用这个模型；运行中的实例仍用启动时快照。确定发布？',
+    { title: '发布到运行时', okText: '发布' });
+  if (!ok) return;
   try {
     await POST('/processes/' + state.designer.processId + '/design/publish', {
       expected_version: state.designer.model.version,
@@ -2121,9 +2180,9 @@ async function openVersionHistory() {
       <td class="tiny">${v.published_at ? dtShort(v.published_at) : '—'}</td>
       <td>
         ${v.id !== current.version_id
-          ? `<button class="btn-sm" onclick="diffVersion(${v.id})">对比当前</button>` : ''}
+          ? `<button class="btn-sm" data-act="designer.diffVersion" data-id="${v.id}">对比当前</button>` : ''}
         ${v.version !== current.version
-          ? `<button class="btn-sm" onclick="rollbackVersion(${v.id})">回滚到此版</button>` : ''}
+          ? `<button class="btn-sm" data-act="designer.rollbackVersion" data-id="${v.id}">回滚到此版</button>` : ''}
       </td>
     </tr>`).join('') || emptyRow(6, '还没有模型版本');
   openModal('模型版本历史', `
@@ -2132,7 +2191,7 @@ async function openVersionHistory() {
       <thead><tr><th>版本</th><th>状态</th><th>说明</th><th>创建人</th><th>发布时间</th><th></th></tr></thead>
       <tbody>${body}</tbody>
     </table>`,
-    '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+    '<button class="btn btn-g" data-act="designer.close">关闭</button>');
 }
 
 async function diffVersion(versionId) {
@@ -2158,14 +2217,17 @@ async function diffVersion(versionId) {
         (x) => x.source_key + ' → ' + x.target_key + '：' + x.fields.join('、')),
     ].join('') || '<div class="empty">两个版本没有差异</div>';
     openModal(`版本差异 · v${d.from_version} → v${d.to_version}`, content,
-      '<button class="btn btn-g" onclick="closeModal()">关闭</button>');
+      '<button class="btn btn-g" data-act="designer.close">关闭</button>');
   } catch (e) {
     toast(e.message, true);
   }
 }
 
 async function rollbackVersion(versionId) {
-  if (!confirm('回滚会在当前模型上创建一个新草稿，发布后才影响运行时。继续？')) return;
+  const ok = await confirmDialog(
+    '回滚会在当前模型上创建一个新草稿，发布后才影响运行时。继续？',
+    { title: '回滚模型版本', okText: '回滚' });
+  if (!ok) return;
   try {
     await POST(
       '/processes/' + state.designer.processId + '/design/versions/' +
@@ -2330,8 +2392,9 @@ function paintSuggestions(a) {
       ${s.related_nodes && s.related_nodes.length
         ? '<div class="tiny" style="margin-top:6px">涉及节点：' +
           s.related_nodes.map((k) => esc(nameOf[k] || k)).join('、') + '</div>' : ''}
-      ${s.suggested_tool ? '<button class="tool" onclick="openToolByCode(\'' + s.suggested_tool +
-        '\')">→ 用「' + esc(s.suggested_tool) + '」动手</button>' : ''}
+      ${s.suggested_tool ? '<button class="tool" type="button" data-act="designer.openTool"'
+        + ' data-code="' + esc(s.suggested_tool) + '">→ 用「' + esc(s.suggested_tool) +
+        '」动手</button>' : ''}
     </div>`).join('');
 }
 
@@ -2434,15 +2497,4 @@ async function saveBpmnAssignment(nodeKey) {
   }
 }
 
-export {
-  addBpmnLane, autoLayoutBpmn, changeBpmnNodeType, closeBpmnSidebar,
-  deleteBpmnFlow, diffVersion, exportBpmn, fitBpmnViewport, importBpmn,
-  moveBpmnNodeToLane, openDesigner, openVersionHistory, reanalyze,
-  rejectReview, renderDesigner, rollbackVersion, runBpmnLint,
-  saveBpmnAssignment, saveBpmnFlow, saveBpmnLaneName, saveBpmnMetrics,
-  saveBpmnName, saveBpmnNodeActivity, addBpmnNodeTool, removeBpmnNodeTool,
-  openNodeDocumentModal, submitNodeDocument, openExecutionConfig,
-  selectLintIssue, setDesignerTab, showBpmnSidebarTab,
-  submitReview, switchProcess, toggleBpmnFullscreen, toggleBpmnSidebar,
-  publishDesign,
-};
+export { renderDesigner, openDesigner, switchProcess };
