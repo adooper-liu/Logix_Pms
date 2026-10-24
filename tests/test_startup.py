@@ -8,11 +8,11 @@ PILOT_KEYS = {
     "scope",
     "strategy",
     "architecture",
-    "org_raci",
     "policy",
     "process_design",
     "workload",
     "performance",
+    "review_release",
 }
 
 
@@ -29,11 +29,11 @@ def test_startup_status_shape(client):
         "scope",
         "strategy",
         "architecture",
-        "org_raci",
         "policy",
         "process_design",
         "workload",
         "performance",
+        "review_release",
         "improvement",
     ]
     assert 0 <= data["readiness_pct"] <= 100
@@ -45,7 +45,7 @@ def test_startup_status_shape(client):
 
     for step in data["steps"]:
         assert step["status"] in {"NOT_STARTED", "IN_PROGRESS", "READY", "SKIPPED"}
-        assert step["status_label"] in {"未开始", "进行中", "已就绪", "未验证（已跳过）"}
+        assert step["status_label"] in {"还没开始", "进行中", "已具备", "这次先不做（未验证）"}
         assert step["title"] and step["goal"] and step["input"] and step["output"]
         assert step["estimated"]
         assert isinstance(step["evidence"], dict)
@@ -72,7 +72,7 @@ def test_startup_status_shape(client):
 
 def test_startup_evidence_zero_is_good(client):
     data = client.get(f"{API}/start/status").json()
-    raci = _step(data, "org_raci")
+    raci = _step(data, "architecture")
     invalid = next(item for item in raci["evidence_items"] if item["key"] == "invalid_processes")
     assert invalid["value"] == 0
     assert invalid["met"] is True
@@ -81,6 +81,19 @@ def test_startup_evidence_zero_is_good(client):
     mapped = next(item for item in architecture["evidence_items"] if item["key"] == "pcf_mapped_l3")
     assert mapped["value"] > 0
     assert mapped["met"] is True
+
+
+def test_policy_requires_structured_authorization(client):
+    """S4 不能只看制度文件：结构化授权规则也是必需证据。"""
+    policy = _step(client.get(f"{API}/start/status").json(), "policy")
+    items = {item["key"]: item for item in policy["evidence_items"]}
+    rules = items["effective_authorization_rules"]
+    assert rules["required"] is True
+    assert rules["value"] >= 4
+    assert rules["met"] is True
+    # 种子数据没有生效制度文件，所以 S4 仍不应就绪
+    if items["effective_documents"]["value"] == 0:
+        assert policy["status"] != "READY"
 
 
 def test_startup_status_for_owner(owner_client):
@@ -101,7 +114,7 @@ def test_skip_marks_unverified_and_unblocks_next(client):
         data = skipped.json()
         step = _step(data, "workload")
         assert step["status"] == "SKIPPED"
-        assert step["status_label"] == "未验证（已跳过）"
+        assert step["status_label"] == "这次先不做（未验证）"
         assert step["skipped"] is True
         assert step["skip_reason"] == "样本复核中"
         assert step["skipped_by"] == "系统管理员"

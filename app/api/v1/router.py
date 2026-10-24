@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_user
 from app.api.v1 import (
     auth,
+    authorization,
     baselines,
     benchmark,
     changes,
@@ -71,6 +72,7 @@ protected.include_router(positions.router)
 protected.include_router(workload.router)
 protected.include_router(strategy.router)
 protected.include_router(raci.router)
+protected.include_router(authorization.router)
 protected.include_router(data_governance.router)
 protected.include_router(startup.router)
 protected.include_router(knowledge.router)

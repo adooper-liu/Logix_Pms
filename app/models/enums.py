@@ -291,6 +291,28 @@ class GovernanceRoleType(str, Enum):
     OTHER = "OTHER"
 
 
+class AuthorizationCategory(str, Enum):
+    """分级授权类别：决定谁有权批、留什么证据。"""
+
+    A = "A"  # 集团治理委员会：跨法人/重大资本开支/重大流程重构
+    B = "B"  # 单元负责人 + BPM：单元内跨部门/制度性调整/重要系统变更
+    C = "C"  # 工厂负责人：工厂内流程/表单/参数调整
+    D = "D"  # 岗位/班组按标准执行：标准执行、低风险参数
+
+
+class AuthorizationStatus(str, Enum):
+    DRAFT = "DRAFT"
+    EFFECTIVE = "EFFECTIVE"
+    RETIRED = "RETIRED"
+
+
+class AuthorizationExceptionStatus(str, Enum):
+    REQUESTED = "REQUESTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CLOSED = "CLOSED"
+
+
 class RaciType(str, Enum):
     A = "A"  # 唯一负责
     R = "R"  # 执行

@@ -52,6 +52,7 @@ export const TITLES = {
   data: '数据治理',
   start: '开始使用',
   process_card: '流程卡',
+  authorization: '授权矩阵',
   knowledge: '流程知识库',
   pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',

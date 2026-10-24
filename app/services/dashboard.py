@@ -376,18 +376,18 @@ def build_home(db: Session, user: User) -> DashboardHome:
         blocks.append(
             DashboardHomeBlock(
                 key="setup",
-                title="启动进度",
-                description="从范围与授权到运营复制，按九步路径推进",
+                title="流程试点进度",
+                description="从立项定界到改善复制，按 9 个阶段推进",
                 items=[
                     HomeItem(
-                        label="已完成",
-                        value=f"{startup.ready_count}/{startup.total} 步",
-                        hint=f"就绪率 {startup.readiness_pct}%",
+                        label="已具备",
+                        value=f"{startup.ready_count}/{startup.total} 个阶段",
+                        hint=f"完成度 {startup.readiness_pct}%",
                     ),
                     HomeItem(label="下一步", value=next_title),
                 ],
                 actions=[
-                    HomeAction(label="打开启动向导", view="start"),
+                    HomeAction(label="打开试点路径", view="start"),
                     HomeAction(label="战略目标", view="strategy"),
                     HomeAction(label="流程地图", view="map"),
                 ],
@@ -432,7 +432,7 @@ def build_home(db: Session, user: User) -> DashboardHome:
             )
         )
         headline = (
-            f"{user.display_name}，九步启动已完成 {startup.ready_count}/{startup.total}；"
+            f"{user.display_name}，流程试点已具备 {startup.ready_count}/{startup.total} 个阶段；"
             f"当前 {open_findings} 项治理待办、{pending_changes} 张变更待审。"
         )
     elif user.role == Role.OWNER.value:
@@ -534,7 +534,7 @@ def build_home(db: Session, user: User) -> DashboardHome:
             )
         )
         headline = (
-            f"{user.display_name}，当前九步启动已完成 {startup.ready_count}/{startup.total}，"
+            f"{user.display_name}，当前流程试点已具备 {startup.ready_count}/{startup.total} 个阶段，"
             f"有 {open_findings} 项治理待办。"
         )
 

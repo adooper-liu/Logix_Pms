@@ -45,19 +45,19 @@ function evidencePanel(step) {
     </div>`;
   return `
     <aside class="start-evidence">
-      <h4>出门证据</h4>
-      ${group('已具备', have, 'ok')}
-      ${group('仍缺（必需）', missing, 'miss')}
-      ${suggest.length ? group('建议补充', suggest, 'opt') : ''}
-      ${step.skipped ? `<div class="note mt">已跳过，未计入就绪${
+      <h4>这一步要留下什么</h4>
+      ${group('已经有的', have, 'ok')}
+      ${group('还缺的', missing, 'miss')}
+      ${suggest.length ? group('有更好，没有也能先跑', suggest, 'opt') : ''}
+      ${step.skipped ? `<div class="note mt">这次先不做，不算完成${
         step.skip_reason ? '；原因：' + esc(step.skip_reason) : ''}${
         step.skipped_by ? ' · ' + esc(step.skipped_by) : ''}</div>` : ''}
       <div class="gap mt">
         ${step.skipped
           ? `<button class="btn-sm" data-act="start.unskip" data-key="${esc(step.key)}">
-               取消跳过</button>`
+               恢复这一阶段</button>`
           : `<button class="btn-sm" data-act="start.skip" data-key="${esc(step.key)}">
-               跳过本步（标记未验证）</button>`}
+               这次先不做（标记未验证）</button>`}
       </div>
     </aside>`;
 }
@@ -129,8 +129,8 @@ function doneList(steps) {
   return `
     <div class="card">
       <div class="between mb">
-        <h3>已完成 / 已跳过（${steps.length}）</h3>
-        <span class="tiny muted">就绪度按“已就绪”计数，跳过不算完成</span>
+        <h3>已经具备 / 这次先不做（${steps.length}）</h3>
+        <span class="tiny muted">只有“已具备”计入完成；“这次先不做”不算</span>
       </div>
       <div class="start-done">
         ${steps.map((step) => `
@@ -140,7 +140,7 @@ function doneList(steps) {
               <span class="tiny muted">${esc(step.estimated || '')}</span>
               ${step.skipped
                 ? `<button class="btn-sm" data-act="start.unskip"
-                     data-key="${esc(step.key)}">取消跳过</button>`
+                     data-key="${esc(step.key)}">恢复这一阶段</button>`
                 : ''}
             </span>
           </div>`).join('')}
@@ -153,11 +153,11 @@ function completionCard(data) {
   return `
     <div class="card start-complete">
       <h3>${skipped
-        ? `九步已推进完 ${data.ready_count}/${data.total}`
-        : `九步已全部就绪 ${data.ready_count}/${data.total}`}</h3>
+        ? `能做的都做了 ${data.ready_count}/${data.total}`
+        : `九个阶段都齐了 ${data.ready_count}/${data.total}`}</h3>
       <div class="desc">${skipped
-        ? `其中 ${skipped} 步标记为未验证；进入运营后仍可在本页取消跳过并补齐证据。`
-        : '进入运营监控与流程卡持续运行；后续改善走受控变更与版本发布。'}</div>
+        ? `其中 ${skipped} 个阶段标了“这次先不做”；进入运营后仍可回到本页恢复并补齐。`
+        : '进入运营监控与流程卡持续运行；后续改善走同一条改善链，改完发布新版本。'}</div>
       <div class="gap">
         <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
         <button class="btn btn-g" data-act="start.go" data-view="monitor">运营监控</button>
@@ -170,9 +170,9 @@ function pilotReadyBanner(data) {
   if (data.pilot_ready_count < data.pilot_total || data.ready_count >= data.total) return '';
   return `
     <div class="card start-complete">
-      <h3>首次上线已就绪 ${data.pilot_ready_count}/${data.pilot_total}</h3>
-      <div class="desc">S0–S7 已具备出门证据，可以进入日常运营；
-        S8 改善闭环不阻塞首次上线，继续在运营中推进。</div>
+      <h3>前 8 个阶段已齐，第一条流程可以上线</h3>
+      <div class="desc">从“立项定界”到“评审与固化”都齐了；第 9 阶段“改善与复制”
+        在运营中继续做，不挡上线。</div>
       <div class="gap">
         <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
         <button class="btn btn-g" data-act="start.go" data-view="monitor">运营监控</button>
@@ -202,28 +202,30 @@ function paint(data) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">九步启动路径</span></h2>
-          <div class="desc">从范围与授权到改善复制，每一步只回答一个问题；状态由现有数据计算</div>
+          <h2>开始使用<span class="module-badge">一条流程的试点路径</span></h2>
+          <div class="desc">先把一条流程从立项走到评审固化；每个阶段只问一个问题，做完要留下看得见的东西。其他模块用到时再展开。</div>
         </div>
         <div class="gap">
-          <span class="tag t-blu">首次上线 ${data.pilot_ready_count}/${data.pilot_total}</span>
+          <span class="tag t-blu">能上线 ${data.pilot_ready_count}/${data.pilot_total}</span>
           <span class="tag ${data.ready_count >= data.total ? 't-grn' : 't-yel'}">
             ${data.ready_count}/${data.total} · ${pct}%</span>
         </div>
       </div>
+      <div class="start-chain">战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本</div>
+      <div class="tiny muted" style="margin-top:6px">统一原则 · 统一基线 · 分级授权 · 受控差异</div>
       <div class="start-rail">${rail}</div>
       <div class="pipe" style="margin-top:12px">
         <i class="fill-ok" style="width:${pct}%"></i>
       </div>
       <div class="between mt">
         <span class="tiny muted">
-          首次上线 = S0–S7（8 步，含制度与授权）；S8 改善闭环不阻塞日常运营。
-          体系就绪度 ≠ 项目进度，9 阶段 / 27 步的执行进度在项目里单独管理。
+          前 8 个阶段（到“评审与固化”）齐了，第一条流程就能上线；第 9 阶段“改善与复制”
+          在运营中持续做。这页看“该留下的东西齐不齐”，项目页看“事情做到哪一步”。
         </span>
         <button class="btn-sm" data-act="start.setupProjects">体系落地项目 →</button>
       </div>
       ${data.skipped_count
-        ? `<div class="note mt">${data.skipped_count} 步已跳过：跳过表示“未验证”，不计入就绪，也不阻塞后续步骤。</div>`
+        ? `<div class="note mt">${data.skipped_count} 个阶段标了“这次先不做”：不计入完成，也不挡后续；随时可以恢复。</div>`
         : ''}
     </div>
     ${pilotReadyBanner(data)}
@@ -246,8 +248,8 @@ on('start.setupProjects', () => {
 
 on('start.skip', async ({ key }) => {
   const reason = await promptDialog(
-    '跳过只表示本轮不验证该步骤，不会算作就绪；请说明原因（可留空）。',
-    { title: '跳过步骤', okText: '跳过', value: '' },
+    '“这次先不做”只表示本轮不验证，不算完成；请说明原因（可留空）。',
+    { title: '这次先不做', okText: '确认', value: '' },
   );
   if (reason === undefined) return;
   try {
@@ -255,21 +257,21 @@ on('start.skip', async ({ key }) => {
       { reason: reason || null });
     state.start.data = data;
     paint(data);
-    toast('已标记为未验证');
+    toast('已标记为这次先不做');
   } catch (e) {
     toast(e.message, true);
   }
 });
 
 on('start.unskip', async ({ key }) => {
-  const ok = await confirmDialog('取消后该步骤会重新按现有数据判定。',
-    { title: '取消跳过', okText: '取消跳过' });
+  const ok = await confirmDialog('恢复后该阶段会重新按现有数据判定。',
+    { title: '恢复阶段', okText: '恢复' });
   if (!ok) return;
   try {
     const data = await DEL('/start/steps/' + encodeURIComponent(key) + '/skip');
     state.start.data = data;
     paint(data);
-    toast('已取消跳过');
+    toast('已恢复这一阶段');
   } catch (e) {
     toast(e.message, true);
   }

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
+from app.models import AuthorizationException, AuthorizationRule
 from app.models.benchmark import (
     BenchmarkCategory,
     BenchmarkFramework,
@@ -68,6 +69,7 @@ from app.models.user import AuditLog, User
 from app.models.workload import CapacityCalendar, WorkMeasurementStandard
 from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
 from app.seed import (
+    authorization_data,
     benchmark_data,
     change_data,
     corpus,
@@ -720,6 +722,68 @@ def _seed_raci(db: Session, code_to_id: Dict[str, int], role_ids: Dict[str, int]
     db.flush()
 
 
+def _seed_authorization(
+    db: Session,
+    code_to_id: Dict[str, int],
+    role_ids: Dict[str, int],
+    user_ids: Dict[str, int],
+) -> None:
+    now = utcnow()
+    for row in authorization_data.AUTHORIZATION_RULES:
+        process_id = code_to_id.get(row["process"]) if row.get("process") else None
+        db.add(
+            AuthorizationRule(
+                code=row["code"],
+                title=row["title"],
+                matter=row["matter"],
+                process_id=process_id,
+                category=row["category"],
+                risk_level=row["risk_level"],
+                amount_limit=row["amount_limit"],
+                impact_scope=row.get("impact_scope"),
+                reversibility=row.get("reversibility"),
+                frequency=row.get("frequency"),
+                approver_role_id=role_ids.get(row.get("approver_role")),
+                approver_label=row.get("approver_label"),
+                exception_path=row.get("exception_path"),
+                evidence_required=row.get("evidence_required"),
+                status=row["status"],
+                version=1,
+                owner_user_id=_owner_user_id(row.get("owner"), user_ids),
+            )
+        )
+    db.flush()
+
+    rules = {row.code: row.id for row in db.scalars(select(AuthorizationRule)).all()}
+    for row in authorization_data.AUTHORIZATION_EXCEPTIONS:
+        rule_id = rules.get(row["rule"])
+        if not rule_id:
+            continue
+        decided = row["status"] != "REQUESTED"
+        db.add(
+            AuthorizationException(
+                code=row["code"],
+                rule_id=rule_id,
+                process_id=code_to_id.get(row["process"]) if row.get("process") else None,
+                title=row["title"],
+                reason=row["reason"],
+                scope=row.get("scope"),
+                status=row["status"],
+                requested_by_id=_owner_user_id(row.get("requested_by"), user_ids),
+                requested_by_name=row.get("requested_by"),
+                requested_at=now,
+                decided_by_id=_owner_user_id(row.get("decided_by"), user_ids),
+                decided_by_name=row.get("decided_by"),
+                decided_at=now if decided else None,
+                decision_note=row.get("decision_note"),
+                expires_at=(
+                    datetime.fromisoformat(row["expires_at"]) if row.get("expires_at") else None
+                ),
+            )
+        )
+    db.flush()
+
+
 def _seed_data_governance(
     db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]
 ) -> None:
@@ -1259,6 +1323,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     role_ids = _seed_governance_roles(db, user_ids)
     code_to_id = _seed_process_arch(db, user_ids, org_name_ids)
     _seed_raci(db, code_to_id, role_ids)
+    _seed_authorization(db, code_to_id, role_ids, user_ids)
     _seed_data_governance(db, code_to_id, user_ids)
     _seed_workflow(db)
     _seed_tools(db)

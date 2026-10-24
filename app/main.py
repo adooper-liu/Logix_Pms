@@ -33,6 +33,7 @@ SPA_VIEWS = {
     "strategy",
     "map",
     "process_card",
+    "authorization",
     "pcf",
     "workflow",
     "projects",

@@ -27,6 +27,7 @@ VIEWS = [
     ("strategy", "战略目标"),
     ("map", "企业流程地图"),
     ("process_card", "流程卡"),
+    ("authorization", "授权矩阵"),
     ("workflow", "五阶段标准工作流"),
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
@@ -1800,19 +1801,20 @@ def main() -> int:
             goto("start")
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
-            assert "开始使用" in view and "九步启动路径" in view, "启动向导未渲染"
+            assert "开始使用" in view and "一条流程的试点路径" in view, "启动向导未渲染"
             assert page.locator("#view .rail-step").count() == 9, "九步进度轨不完整"
 
-            assert "首次上线" in view, "启动页缺少首次上线范围说明"
-            assert "S0–S7" in view, "启动页缺少首次上线范围"
+            assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
             assert page.locator("#view .seg button[data-mode]").count() == 0, "模式开关应已移除"
             has_current = page.locator("#view .start-current").count() == 1
-            assert has_current or "全部就绪" in view or "已推进完" in view, "启动页没有当前步"
+            assert has_current or "九个阶段都齐了" in view or "能做的都做了" in view, (
+                "启动页没有当前步"
+            )
             assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
 
             if has_current:
-                assert "出门证据" in view, "启动向导缺少证据面板"
-                assert "已具备" in view and ("仍缺" in view or "建议补充" in view), (
+                assert "这一步要留下什么" in view, "启动向导缺少证据面板"
+                assert "已经有的" in view and ("还缺的" in view or "有更好" in view), (
                     "证据面板缺少缺项"
                 )
                 # 跳过 = 未验证，且可以取消
@@ -1823,7 +1825,7 @@ def main() -> int:
                 page.wait_for_selector("#mask.show")
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
-                assert "未验证（已跳过）" in page.inner_text("#view"), "跳过步骤未显示为未验证"
+                assert "这次先不做（未验证）" in page.inner_text("#view"), "跳过步骤未显示为未验证"
                 unskip = page.locator(f'#view button[data-act="start.unskip"][data-key="{key}"]')
                 assert unskip.count(), "跳过后的步骤没有取消跳过入口"
                 unskip.first.click()
@@ -1831,7 +1833,9 @@ def main() -> int:
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1400)
                 skipped_keys.remove(key)
-                assert "未验证（已跳过）" not in page.inner_text("#view"), "取消跳过后仍是未验证"
+                assert "这次先不做（未验证）" not in page.inner_text("#view"), (
+                    "取消跳过后仍是未验证"
+                )
 
         def process_card_view() -> None:
             goto("process_card")
@@ -1857,6 +1861,54 @@ def main() -> int:
                 page.select_option("#view select.sel", value=options[1])
                 page.wait_for_timeout(1200)
                 assert "流程卡" in page.inner_text("#view")
+
+        def authorization_view() -> None:
+            goto("authorization")
+            page.wait_for_timeout(900)
+            view = page.inner_text("#view")
+            assert "授权矩阵" in view and "已生效规则" in view, "授权矩阵未渲染"
+
+            page.click('#view button:has-text("+ 新建规则")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#azTitle", "自检用授权规则")
+            page.fill("#azMatter", "自检用关键事项")
+            page.select_option("#azCategory", "C")
+            page.fill("#azApproverLabel", "自检审批人")
+            page.fill("#azException", "自检例外路径")
+            page.fill("#azEvidence", "自检审批证据")
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1200)
+            assert "自检用授权规则" in page.inner_text("#view"), "新建规则未出现在列表"
+
+            row = page.locator('#view tr:has-text("自检用授权规则")').first
+            row.locator('button:has-text("生效")').click()
+            page.wait_for_selector("#mask.show")
+            page.click("#uiDialogOk")
+            page.wait_for_timeout(1200)
+            assert "已生效" in page.inner_text("#view"), "规则未生效"
+
+            page.click('#view .seg button:has-text("例外台账")')
+            page.wait_for_timeout(300)
+            page.click('#view button:has-text("+ 申请例外")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#aeTitle", "自检用例外")
+            page.fill("#aeReason", "自检原因")
+            page.click('#mFoot button:has-text("提交申请")')
+            page.wait_for_timeout(1200)
+            page.click('#view .seg button:has-text("例外台账")')
+            page.wait_for_timeout(300)
+            assert "自检用例外" in page.inner_text("#view"), "例外申请未出现在台账"
+
+            exc_row = page.locator('#view tr:has-text("自检用例外")').first
+            exc_row.locator('button:has-text("批准")').click()
+            page.wait_for_selector("#mask.show")
+            page.fill("#uiDialogInput", "自检批准")
+            page.click("#uiDialogOk")
+            page.wait_for_timeout(1200)
+            page.click('#view .seg button:has-text("例外台账")')
+            page.wait_for_timeout(300)
+            assert "自检用例外" in page.inner_text("#view"), "例外行不见了"
+            assert "已批准" in page.inner_text("#view"), "例外未批准"
 
         # 指标口径：页面上必须有可悬停的说明
         def metric_help() -> None:
@@ -2125,6 +2177,7 @@ def main() -> int:
         check("战略目标承接", strategy_view)
         check("开始使用九步向导", start_view)
         check("流程卡聚合视图", process_card_view)
+        check("授权矩阵与例外台账", authorization_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
         check("工作流步骤详情", workflow_step_modal)
@@ -2187,6 +2240,20 @@ def main() -> int:
                   if (e.title.includes('自检用')) {
                     await fetch('/api/v1/monitor/exceptions/' + e.id, { method: 'DELETE', headers: h });
                     out.push('exception:' + e.code);
+                  }
+                }
+                const authRules = await fetch('/api/v1/authorization/rules', { headers: h }).then(r => r.json());
+                for (const r of authRules) {
+                  if (r.title.includes('自检用')) {
+                    await fetch('/api/v1/authorization/rules/' + r.id, {
+                      method: 'PATCH',
+                      headers: { ...h, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ title: r.title }),
+                    });
+                    await fetch('/api/v1/authorization/rules/' + r.id, {
+                      method: 'DELETE', headers: h,
+                    });
+                    out.push('authorization-rule:' + r.code);
                   }
                 }
                 return out;

@@ -44,6 +44,7 @@ from app.schemas.startup import (
     StartupStepOut,
 )
 from app.services import audit as audit_service
+from app.services import authorization as authorization_service
 from app.services import kpi as kpi_service
 from app.services import process_document as document_service
 from app.services import raci as raci_service
@@ -52,173 +53,193 @@ from app.services import workload as workload_service
 STEP_DEFINITIONS: List[Dict] = [
     {
         "key": "scope",
-        "title": "1. 范围与授权",
-        "goal": "确定试点 L3、赞助人、流程 Owner、数据 Owner 与停止条件。",
-        "input": "痛点、战略、法人/工厂范围、可用资源。",
-        "output": "试点章程、Owner 名单、范围/非范围、停止条件。",
-        "exit_criteria": "试点 L3 有 Owner；至少有一个治理角色；试点项目有赞助人。",
-        "estimated": "2–3 天",
+        "title": "1. 立项定界",
+        "goal": "先别铺开：选一条痛点明确、跨岗位或跨组织、能算清结果的流程，"
+        "定一个负责人和一个发起人。",
+        "input": "痛点、战略、法人/工厂范围、可用的人和时间。",
+        "output": "一页试点章程、负责人/发起人名单、范围与非范围、停止条件。",
+        "exit_criteria": "试点流程有且只有一个负责人；至少一个治理角色；有发起人/赞助人。",
+        "estimated": "1–2 周",
         "pilot": True,
         "actions": [
-            {"label": "维护战略目标", "view": "strategy"},
-            {"label": "组织与治理角色", "view": "orgs"},
+            {"label": "去定目标", "view": "strategy"},
+            {"label": "去任命角色", "view": "orgs"},
+            {"label": "去建试点项目", "view": "projects"},
         ],
-        "next_hint": "先给试点 L3 指定 Owner，并在「组织与人员 → 治理角色」建至少一个治理角色。",
+        "next_hint": "先在「流程地图」选一条 L3，给它指定负责人；"
+        "再到「组织与人员 → 治理角色」确认谁对结果负责。",
     },
     {
         "key": "strategy",
-        "title": "2. 战略基线",
-        "goal": "把年度经营目标翻译成试点流程可承接的目标与指标。",
-        "input": "年度经营计划、必赢之战、客户/质量/成本目标。",
-        "output": "目标卡、目标 → L1/L2/L3 → KPI 映射。",
-        "exit_criteria": "目标有责任人与目标值，并已承接到具体流程。",
-        "estimated": "2 天",
+        "title": "2. 战略与现状基线",
+        "goal": "说清楚为什么做、承接哪条经营目标、现在基线是多少；"
+        "用少量指标衡量，不追求一次定全。",
+        "input": "年度经营计划、现状数据、访谈和流程走查记录。",
+        "output": "目标卡、现状基线、目标—流程—指标映射。",
+        "exit_criteria": "目标有责任人和目标值，有现状基线，并且已经挂到这条流程上。",
+        "estimated": "2–4 周",
         "pilot": True,
-        "actions": [{"label": "打开战略目标", "view": "strategy"}],
-        "next_hint": "在「战略目标」创建年度目标，并用「承接」把它链到试点 L3 和 KPI。",
+        "actions": [{"label": "去定目标和基线", "view": "strategy"}],
+        "next_hint": "在「战略目标」建一条年度目标，填目标值和现状基线，再挂到试点流程上。",
     },
     {
         "key": "architecture",
-        "title": "3. 架构基线",
-        "goal": "用 PCF 作为共同语言，建立 L1–L3 架构与对标映射。",
-        "input": "PCF、现有流程清单、法人/工厂边界。",
-        "output": "L1–L3 架构 V0.1、PCF 覆盖与差异映射。",
-        "exit_criteria": "L1/L2/L3 均已有节点；试点 L3 已映射到 PCF。",
-        "estimated": "3–5 天",
+        "title": "3. 流程架构设计",
+        "goal": "用同一套分类语言把这条流程放进 L1–L3 地图，标出边界、上下游，"
+        "并让每个关键事项只有一个负责人。",
+        "input": "PCF 分类、现有流程清单、组织边界、关键决策事项。",
+        "output": "L1–L3 架构、PCF 映射、RACI 矩阵。",
+        "exit_criteria": "L1/L2/L3 都有节点；试点流程能对应到 PCF 分类；每个关键事项恰好一个 A。",
+        "estimated": "3–5 周",
         "pilot": True,
         "actions": [
-            {"label": "打开流程地图", "view": "map"},
-            {"label": "查看 PCF 框架", "view": "pcf"},
+            {"label": "去建流程地图", "view": "map"},
+            {"label": "去看 PCF", "view": "pcf"},
+            {"label": "去配权责", "view": "designer"},
         ],
-        "next_hint": "在「企业流程地图」补全 L1–L3，并在「PCF 分类框架」完成试点流程的对标映射。",
-    },
-    {
-        "key": "org_raci",
-        "title": "4. 组织与权责",
-        "goal": "把流程责任落实到岗位与治理角色，并明确唯一 A。",
-        "input": "组织树、岗位、人员、关键决策/控制事项。",
-        "output": "RACI 矩阵、角色成员。",
-        "exit_criteria": "每个关键事项恰好一个 A；治理扫描无 RACI_INVALID。",
-        "estimated": "2–3 天",
-        "pilot": True,
-        "actions": [
-            {"label": "组织与治理角色", "view": "orgs"},
-            {"label": "在设计器维护权责", "view": "designer"},
-        ],
-        "next_hint": "在流程设计器「权责」页为关键事项配置 A/R/C/I，确保每个事项唯一 A。",
+        "next_hint": "在「企业流程地图」补 L1–L3，在「PCF 分类框架」做对标映射，"
+        "在「流程设计器 → 权责」保证每个事项唯一 A。",
     },
     {
         "key": "policy",
-        "title": "5. 制度与授权",
-        "goal": "把控制、权限和例外规则落成可执行、可审计的标准文件。",
-        "input": "风险/合规要求、现有制度、授权边界。",
-        "output": "制度/SOP 清单、适用范围、生效与废止安排。",
-        "exit_criteria": "至少一份标准文件处于生效状态，并标明适用范围。",
-        "estimated": "3–5 天",
+        "title": "4. 制度与授权设计",
+        "goal": "定清楚哪些事必须按制度、谁有权批、例外找谁；规则要能查到人、金额/风险和证据。",
+        "input": "风险/合规要求、现有制度、金额/风险阈值、例外场景。",
+        "output": "制度/SOP、A/B/C/D 授权规则、例外路径和审批证据。",
+        "exit_criteria": "至少一份生效的制度/SOP；至少一条生效的授权规则，"
+        "写清审批人、例外路径和审批证据。",
+        "estimated": "2–4 周",
         "pilot": True,
-        "actions": [{"label": "打开交付物与模板库", "view": "deliverables"}],
-        "next_hint": "在「交付物与模板库 → 流程标准文件」上传制度/SOP，并完成审批生效。",
+        "actions": [
+            {"label": "去上传制度", "view": "deliverables"},
+            {"label": "去定审批规则", "view": "authorization"},
+        ],
+        "next_hint": "先上传一份能生效的 SOP，再到「授权矩阵」按 A/B/C/D 建规则，"
+        "写清审批人、例外路径和证据。",
     },
     {
         "key": "process_design",
-        "title": "6. 流程与表单/工具",
-        "goal": "把 L4 活动、控制点、表单与工具固化成可执行模型。",
-        "input": "L3 架构、SIPOC、控制点、系统配置清单。",
-        "output": "BPMN 模型、SOP、表单/规则、工具绑定。",
-        "exit_criteria": "至少一条 L3 已发布模型，且表单/规则/工具至少有一项绑定。",
-        "estimated": "5–10 天",
+        "title": "5. 流程/表单/工具设计",
+        "goal": "把流程拆成岗位看得懂的步骤，写清楚输入、输出、角色、控制点，"
+        "以及配套的表单和工具。",
+        "input": "SIPOC、泳道图、控制点、系统配置和表单字段。",
+        "output": "L4 步骤/SOP、表单、规则、工具绑定。",
+        "exit_criteria": "至少一份表单，并且表单/规则/工具至少绑定一项。",
+        "estimated": "3–6 周",
         "pilot": True,
         "actions": [
-            {"label": "打开流程设计器", "view": "designer"},
-            {"label": "打开工作流手册", "view": "workflow"},
+            {"label": "去画流程", "view": "designer"},
+            {"label": "去看方法手册", "view": "workflow"},
         ],
-        "next_hint": "在流程设计器完成 BPMN 与表单/工具绑定，再发布模型。",
+        "next_hint": "在流程设计器把 L4 步骤、表单、规则和工具串起来；先小范围能用，再求全。",
     },
     {
         "key": "workload",
-        "title": "7. 工作量与产能",
-        "goal": "建立可信标准工时与产能基线，支撑排程与人员配置。",
-        "input": "L4 活动、岗位、现场观测/抽样、可用工时。",
-        "output": "标准工时卡、产能日历、负荷率。",
-        "exit_criteria": "至少一条已验证标准工时和一条产能记录；未验证工时不进入成本口径。",
-        "estimated": "5–10 天",
+        "title": "6. 工作量测量",
+        "goal": "先定方法，再现场观测、评定、宽放和审核；标准工时只做能力基线，不用来扣个人。",
+        "input": "作业分解、现场观测/抽样、岗位和可用工时。",
+        "output": "标准工时卡、能力负荷表。",
+        "exit_criteria": "至少一条已验证的标准工时；至少一条当月产能记录。",
+        "estimated": "4–8 周",
         "pilot": True,
         "actions": [
-            {"label": "打开工作量", "view": "monitor", "hint": "运营监控 → 工作量"},
+            {"label": "去登记工时", "view": "monitor", "hint": "运营监控 → 工作量"},
         ],
-        "next_hint": "在「运营监控 → 工作量」登记标准工时并验证，再补当月产能。",
+        "next_hint": "先稳定方法，再做 5 次以上观测；在「运营监控 → 工作量」录工时、验证，"
+        "并补当月产能。",
     },
     {
         "key": "performance",
-        "title": "8. 绩效与监测",
-        "goal": "用结果/过程/健康度指标验证流程是否偏离目标。",
-        "input": "目标、基线、数据来源、统计频率。",
-        "output": "KPI 定义卡、红黄绿状态、异常闭环。",
-        "exit_criteria": "至少一张完整 KPI 卡（公式/阈值/责任人）且已有数据点。",
-        "estimated": "1–3 天建卡；监测周期 30 天",
+        "title": "7. 试运行与绩效监测",
+        "goal": "小范围试运行，建立 2–5 个结果/过程/健康度指标，让红黄灯和异常有人处理、能闭环。",
+        "input": "试运行记录、指标数据、异常台账、客户/下游反馈。",
+        "output": "KPI 卡、红黄绿阈值、异常台账、试运行报告。",
+        "exit_criteria": "至少一张完整 KPI 卡（公式、阈值、责任人）并且有数据点。",
+        "estimated": "4–8 周",
         "pilot": True,
-        "actions": [{"label": "打开运营监控", "view": "monitor"}],
-        "next_hint": "在「运营监控 → KPI 明细」补齐公式、红黄绿阈值与责任人，并录入数据点。",
+        "actions": [{"label": "去看 KPI 和异常", "view": "monitor"}],
+        "next_hint": "在「运营监控 → KPI 明细」补齐公式、红黄绿阈值和责任人，"
+        "至少录入一个数据点；异常要有人闭环。",
+    },
+    {
+        "key": "review_release",
+        "title": "8. 评审与固化",
+        "goal": "门禁评审：模型、制度、培训、权限都到位后发布 V1.0；旧版归档，回退方案写清楚。",
+        "input": "评审记录、培训记录、权限配置、回退方案。",
+        "output": "V1.0 发布包、培训记录、权限清单、回退方案。",
+        "exit_criteria": "至少一条 L3 已发布模型，并且有生效的制度/SOP 支撑发布。",
+        "estimated": "2–4 周",
+        "pilot": True,
+        "actions": [
+            {"label": "去发布模型", "view": "designer"},
+            {"label": "去看制度版本", "view": "deliverables"},
+        ],
+        "next_hint": "在流程设计器完成校验并发布；把 SOP 生效、培训和权限记录补齐，再发 V1.0。",
     },
     {
         "key": "improvement",
-        "title": "9. 改善、变更与运营复制",
-        "goal": "把红黄 KPI 变成受控的改善项目与版本变更，并让经验持续复制。",
-        "input": "红/黄 KPI、异常、根因、影响分析、运行数据与治理待办。",
-        "output": "改善项目卡、变更单、V1.x 版本、月度复盘与复制资产包。",
-        "exit_criteria": "至少一个改善项目已立项、一张变更单已应用，且无未闭环治理待办。",
-        "estimated": "30–90 天/轮",
+        "title": "9. 改善与复制",
+        "goal": "问题走同一条改善链：看现场→找根因→试办法→验结果→改标准→教全员；"
+        "把好方法复制到相似组织。",
+        "input": "红黄指标、异常、根因、改善验证结果、复制条件。",
+        "output": "改善项目卡、变更单、新版本、复制资产包和知识条目。",
+        "exit_criteria": "至少一个改善项目、一张已应用变更单，且没有未闭环的治理待办。",
+        "estimated": "每轮 8–12 周",
         "pilot": False,
         "actions": [
-            {"label": "查看改善候选", "view": "monitor", "hint": "运营监控 → KPI 明细"},
-            {"label": "项目组合", "view": "projects"},
-            {"label": "变更申请", "view": "designer", "hint": "流程设计器 → 变更"},
-            {"label": "治理概览", "view": "deliverables"},
-            {"label": "流程卡", "view": "process_card"},
+            {"label": "从红黄指标转改善", "view": "monitor"},
+            {"label": "看改善项目", "view": "projects"},
+            {"label": "去提变更", "view": "designer"},
+            {"label": "看治理待办", "view": "deliverables"},
+            {"label": "看流程卡", "view": "process_card"},
         ],
-        "next_hint": "先处理治理待办，再在 KPI 明细点「转改善」；发布门禁流程走「设计器 → 变更」审批。",
+        "next_hint": "先处理未闭环治理待办，再从红黄 KPI 转改善项目；"
+        "改完走变更单，发布新版本并沉淀知识。",
     },
 ]
 
 STEP_KEYS = {step["key"] for step in STEP_DEFINITIONS}
 
 EVIDENCE_LABELS: Dict[str, str] = {
-    "l3_with_owner": "有 Owner 的试点 L3",
+    "l3_with_owner": "试点流程有负责人",
     "governance_roles": "治理角色",
-    "sponsor_projects": "有赞助人的试点项目",
-    "objectives": "目标",
-    "linked_objectives": "已承接目标",
-    "objectives_with_owner": "有责任人与目标值的目标",
-    "l1": "L1",
-    "l2": "L2",
-    "l3": "L3",
-    "pcf_mapped_l3": "已映射 PCF 的 L3",
+    "sponsor_projects": "有发起人的试点项目",
+    "objectives": "年度目标",
+    "linked_objectives": "目标已挂到流程",
+    "objectives_with_owner": "目标有责任人和目标值",
+    "objectives_with_baseline": "目标有现状基线",
+    "l1": "L1 节点",
+    "l2": "L2 节点",
+    "l3": "L3 节点",
+    "pcf_mapped_l3": "已对应 PCF 分类的 L3",
     "benchmark_maps": "PCF 对标映射",
-    "positions": "岗位",
-    "raci_matters": "RACI 事项",
-    "invalid_processes": "RACI 不完整流程",
-    "documents": "标准文件",
-    "effective_documents": "已生效文件",
-    "l3_published": "已发布 L3 模型",
+    "positions": "岗位主数据",
+    "raci_matters": "关键事项的 RACI",
+    "invalid_processes": "权责冲突（应为 0）",
+    "documents": "制度/SOP 文件",
+    "effective_documents": "已生效的制度/SOP",
+    "effective_authorization_rules": "已生效的授权规则",
+    "open_authorization_exceptions": "未闭环的授权例外",
+    "l3_published": "已发布的流程模型",
     "bindings": "表单/规则/工具绑定",
     "forms": "表单",
     "rules": "规则",
     "node_tools": "工具绑定",
-    "verified_standards": "已验证工时",
-    "capacity_rows": "产能记录",
+    "verified_standards": "已验证的标准工时",
+    "capacity_rows": "当月产能记录",
     "actual_worklogs": "实际工时记录",
-    "kpi_cards": "完整 KPI 卡",
+    "kpi_cards": "完整的 KPI 卡",
     "kpi_records": "KPI 数据点",
-    "red_yellow": "红/黄 KPI",
+    "red_yellow": "红/黄指标",
     "improvement_projects": "改善项目",
-    "applied_changes": "已应用变更",
+    "applied_changes": "已应用的变更",
     "open_findings": "未闭环治理待办",
     "knowledge_items": "知识条目",
     "kpi_records_30d": "近 30 天数据",
 }
 
 # 这些指标 0 才是好结果；其余指标 > 0 才算“已有证据”
-ZERO_IS_GOOD = {"invalid_processes", "open_findings"}
+ZERO_IS_GOOD = {"invalid_processes", "open_findings", "open_authorization_exceptions"}
 
 # (evidence key, 是否必需)。必需项全部满足才算 READY；可选项只用于“建议补充”。
 EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
@@ -231,6 +252,7 @@ EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
         ("objectives", True),
         ("linked_objectives", True),
         ("objectives_with_owner", True),
+        ("objectives_with_baseline", True),
     ],
     "architecture": [
         ("l1", True),
@@ -238,22 +260,22 @@ EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
         ("l3", True),
         ("pcf_mapped_l3", True),
         ("benchmark_maps", False),
-    ],
-    "org_raci": [
         ("positions", True),
         ("raci_matters", True),
         ("invalid_processes", True),
     ],
     "policy": [
         ("effective_documents", True),
+        ("effective_authorization_rules", True),
         ("documents", False),
+        ("open_authorization_exceptions", False),
     ],
     "process_design": [
-        ("l3_published", True),
+        ("forms", True),
         ("bindings", True),
-        ("forms", False),
         ("rules", False),
         ("node_tools", False),
+        ("l3_published", False),
     ],
     "workload": [
         ("verified_standards", True),
@@ -264,6 +286,10 @@ EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
         ("kpi_cards", True),
         ("kpi_records", True),
         ("red_yellow", False),
+    ],
+    "review_release": [
+        ("l3_published", True),
+        ("effective_documents", True),
     ],
     "improvement": [
         ("improvement_projects", True),
@@ -289,12 +315,12 @@ def _met(key: str, value: int) -> bool:
 
 def _status(started: bool, ready: bool, skipped: bool) -> Tuple[str, str]:
     if skipped:
-        return "SKIPPED", "未验证（已跳过）"
+        return "SKIPPED", "这次先不做（未验证）"
     if ready:
-        return "READY", "已就绪"
+        return "READY", "已具备"
     if started:
         return "IN_PROGRESS", "进行中"
-    return "NOT_STARTED", "未开始"
+    return "NOT_STARTED", "还没开始"
 
 
 def _kpi_card_stats(db: Session) -> Tuple[int, int, int]:
@@ -380,6 +406,15 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
             StrategyObjective.target_value.is_not(None),
         ),
     )
+    objectives_with_baseline = _count(
+        db,
+        select(func.count())
+        .select_from(StrategyObjective)
+        .where(
+            StrategyObjective.status == "ACTIVE",
+            StrategyObjective.baseline_value.is_not(None),
+        ),
+    )
     l1 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 1))
     l2 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 2))
     l3 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 3))
@@ -414,6 +449,8 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         ).all()
         if document_service.effective_version_on(document) is not None
     )
+    effective_authorization_rules = authorization_service.effective_rule_count(db)
+    open_authorization_exceptions = authorization_service.open_exception_count(db)
     l3_published = _count(
         db,
         select(func.count())
@@ -466,6 +503,7 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         "objectives": objectives,
         "linked_objectives": linked_objectives,
         "objectives_with_owner": objectives_with_owner,
+        "objectives_with_baseline": objectives_with_baseline,
         "l1": l1,
         "l2": l2,
         "l3": l3,
@@ -476,6 +514,8 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         "invalid_processes": invalid_raci,
         "documents": documents,
         "effective_documents": effective_documents,
+        "effective_authorization_rules": effective_authorization_rules,
+        "open_authorization_exceptions": open_authorization_exceptions,
         "l3_published": l3_published,
         "bindings": forms + rules + node_tools,
         "forms": forms,

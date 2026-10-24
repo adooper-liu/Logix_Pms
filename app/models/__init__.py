@@ -3,6 +3,7 @@
 注意：导入顺序无关紧要，但必须全部被导入，否则 Base.metadata 不完整。
 """
 
+from app.models.authorization import AuthorizationException, AuthorizationRule
 from app.models.baseline import AssetBaseline
 from app.models.benchmark import (
     BenchmarkCategory,
@@ -21,6 +22,9 @@ from app.models.deliverable import (
 from app.models.enums import (
     AssetVariationPolicy,
     AuditAction,
+    AuthorizationCategory,
+    AuthorizationExceptionStatus,
+    AuthorizationStatus,
     BaselineScope,
     ChangeImpactLevel,
     ChangeStatus,
@@ -127,6 +131,8 @@ __all__ = [
     "ProcessBenchmarkMap",
     "AssetBaseline",
     "GovernanceFinding",
+    "AuthorizationRule",
+    "AuthorizationException",
     "StartupStepSkip",
     "ProcessInstance",
     "ProcessTask",
@@ -191,6 +197,9 @@ __all__ = [
     "ImprovementSource",
     "ReplicationStatus",
     "GovernanceRoleType",
+    "AuthorizationCategory",
+    "AuthorizationStatus",
+    "AuthorizationExceptionStatus",
     "RaciType",
     "DataDomainType",
     "DataFrequency",
