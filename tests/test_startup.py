@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
+from sqlalchemy import select
+
+from app.core.database import SessionLocal
+from app.models.authorization import AuthorizationRule
+from app.models.enums import AuthorizationStatus, DeliverableStatus
+from app.models.process import ProcessArch
+from app.models.process_document import ProcessDocument, ProcessDocumentVersion
+from app.models.user import User
+
 API = "/api/v1"
 
 PILOT_KEYS = {
@@ -154,3 +165,122 @@ def test_skip_requires_manager(owner_client, viewer_client):
     assert owner_client.post(f"{API}/start/steps/policy/skip", json={}).status_code == 403
     assert viewer_client.post(f"{API}/start/steps/policy/skip", json={}).status_code == 403
     assert viewer_client.delete(f"{API}/start/steps/policy/skip").status_code == 403
+
+
+def _make_pilot_ready():
+    """直接落库构造 S4/阶段 8 证据；返回清理函数，避免污染其他用例。"""
+    db = SessionLocal()
+    process = db.scalar(select(ProcessArch).where(ProcessArch.level == 3).limit(1))
+    admin = db.scalar(select(User).where(User.username == "admin"))
+    old_published = process.published_model_version
+    for document in db.scalars(
+        select(ProcessDocument).where(ProcessDocument.code == "DOC-GATE-TEST")
+    ).all():
+        db.query(ProcessDocumentVersion).filter(
+            ProcessDocumentVersion.document_id == document.id
+        ).delete()
+        db.delete(document)
+    for rule in db.scalars(
+        select(AuthorizationRule).where(AuthorizationRule.code == "AUTH-GATE-TEST")
+    ).all():
+        db.delete(rule)
+    db.flush()
+
+    document = ProcessDocument(
+        code="DOC-GATE-TEST",
+        title="门禁测试 SOP",
+        process_id=process.id,
+        category="SOP",
+        is_active=True,
+    )
+    db.add(document)
+    db.flush()
+    version = ProcessDocumentVersion(
+        document_id=document.id,
+        version_label="1.0",
+        status=DeliverableStatus.EFFECTIVE.value,
+        valid_from=date.today() - timedelta(days=1),
+        approved_by="系统管理员",
+        approved_by_id=admin.id,
+    )
+    db.add(version)
+    db.flush()
+    document.current_version_id = version.id
+    db.add(
+        AuthorizationRule(
+            code="AUTH-GATE-TEST",
+            title="门禁测试规则",
+            matter="门禁测试事项",
+            category="B",
+            status=AuthorizationStatus.EFFECTIVE.value,
+            approver_label="测试审批人",
+            exception_path="测试例外路径",
+            evidence_required="测试证据",
+            owner_user_id=admin.id,
+        )
+    )
+    process.published_model_version = max(process.published_model_version or 0, 1)
+    db.commit()
+    process_id = process.id
+    db.close()
+
+    def cleanup() -> None:
+        session = SessionLocal()
+        try:
+            for document in session.scalars(
+                select(ProcessDocument).where(ProcessDocument.code == "DOC-GATE-TEST")
+            ).all():
+                session.query(ProcessDocumentVersion).filter(
+                    ProcessDocumentVersion.document_id == document.id
+                ).delete()
+                session.delete(document)
+            for rule in session.scalars(
+                select(AuthorizationRule).where(AuthorizationRule.code == "AUTH-GATE-TEST")
+            ).all():
+                session.delete(rule)
+            row = session.get(ProcessArch, process_id)
+            if row is not None:
+                row.published_model_version = old_published
+            session.commit()
+        finally:
+            session.close()
+
+    return cleanup
+
+
+def test_pilot_confirm_gate(client):
+    # 任一试点阶段被跳过或未就绪时，门禁必须拒绝
+    client.post(f"{API}/start/steps/policy/skip", json={"reason": "门禁测试"})
+    try:
+        rejected = client.post(f"{API}/start/pilot/confirm", json={"note": "测试"})
+        assert rejected.status_code == 409, rejected.text
+        assert "首次上线条件未满足" in rejected.json()["detail"]
+    finally:
+        client.delete(f"{API}/start/steps/policy/skip")
+
+    cleanup = _make_pilot_ready()
+    try:
+        status = client.get(f"{API}/start/status").json()
+        assert status["pilot_gate_open"] is True, status["pilot_missing_steps"]
+
+        confirmed = client.post(f"{API}/start/pilot/confirm", json={"note": "试运行通过"})
+        assert confirmed.status_code == 200, confirmed.text
+        data = confirmed.json()
+        assert data["pilot_confirmed"] is True
+        assert data["pilot_confirmed_by"] == "系统管理员"
+        assert data["pilot_confirm_note"] == "试运行通过"
+        assert data["pilot_stale"] is False
+        assert data["pilot_missing_steps"] == []
+
+        revoked = client.delete(f"{API}/start/pilot/confirm")
+        assert revoked.status_code == 200
+        assert revoked.json()["pilot_confirmed"] is False
+    finally:
+        cleanup()
+        client.delete(f"{API}/start/pilot/confirm")
+
+
+def test_pilot_confirm_requires_manager(owner_client, viewer_client):
+    assert owner_client.post(f"{API}/start/pilot/confirm", json={}).status_code == 403
+    assert viewer_client.post(f"{API}/start/pilot/confirm", json={}).status_code == 403
+    assert viewer_client.delete(f"{API}/start/pilot/confirm").status_code == 403

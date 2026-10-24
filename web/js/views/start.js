@@ -4,7 +4,7 @@
  * readiness 由后端按真实证据计算；人工“跳过”只表示本轮不验证，不计入就绪。
  */
 
-import { esc } from '../core/format.js';
+import { esc, dtShort } from '../core/format.js';
 import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
 import { renderAsync, go } from '../core/router.js';
 import { GET, POST, DEL } from '../core/api.js';
@@ -172,16 +172,33 @@ function completionCard(data) {
     </div>`;
 }
 
-function pilotReadyBanner(data) {
-  if (data.pilot_ready_count < data.pilot_total || data.ready_count >= data.total) return '';
+function pilotGateCard(data) {
+  if (data.pilot_confirmed) {
+    const stale = data.pilot_stale
+      ? `<div class="note mb">证据已变化，当前不再满足上线条件：${
+        data.pilot_missing_steps.map(esc).join('、')}。请补齐后重新确认。</div>`
+      : '';
+    return `
+      <div class="card start-complete">
+        <h3>第一条流程已确认上线</h3>
+        <div class="desc">确认人：${esc(data.pilot_confirmed_by || '—')} · ${
+          dtShort(data.pilot_confirmed_at)}${
+          data.pilot_confirm_note ? ' · ' + esc(data.pilot_confirm_note) : ''}</div>
+        ${stale}
+        <div class="gap">
+          <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
+          <button class="btn btn-g" data-act="start.revokePilot">撤销确认</button>
+        </div>
+      </div>`;
+  }
+  if (!data.pilot_gate_open) return '';
   return `
     <div class="card start-complete">
-      <h3>前 8 个阶段已齐，第一条流程可以上线</h3>
-      <div class="desc">从“立项定界”到“评审与固化”都齐了；第 9 阶段“改善与复制”
-        在运营中继续做，不挡上线。</div>
+      <h3>前 8 个阶段已齐，可以确认上线</h3>
+      <div class="desc">从“立项定界”到“评审与固化”都齐了；确认后默认首页切到驾驶舱，
+        第 9 阶段“改善与复制”在运营中继续。</div>
       <div class="gap">
-        <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
-        <button class="btn btn-g" data-act="start.go" data-view="monitor">运营监控</button>
+        <button class="btn btn-p" data-act="start.confirmPilot">确认首次上线</button>
         <button class="btn btn-g" data-act="start.setupProjects">体系落地项目</button>
       </div>
     </div>`;
@@ -218,7 +235,9 @@ function paint(data) {
           <div class="desc">先把一条流程从立项走到评审固化；每个阶段只问一个问题，做完要留下看得见的东西。其他模块用到时再展开。</div>
         </div>
         <div class="gap">
-          <span class="tag t-blu">能上线 ${data.pilot_ready_count}/${data.pilot_total}</span>
+          ${data.pilot_confirmed
+            ? '<span class="tag t-grn">已确认上线</span>'
+            : `<span class="tag t-blu">能上线 ${data.pilot_ready_count}/${data.pilot_total}</span>`}
           <span class="tag ${data.ready_count >= data.total ? 't-grn' : 't-yel'}">
             ${data.ready_count}/${data.total} · ${pct}%</span>
         </div>
@@ -246,8 +265,12 @@ function paint(data) {
       ${data.skipped_count
         ? `<div class="note mt">${data.skipped_count} 个阶段标了“这次先不做”：不计入完成，也不挡后续；随时可以恢复。</div>`
         : ''}
+      ${!data.pilot_confirmed && !data.pilot_gate_open
+        ? `<div class="note mt">还差 ${data.pilot_missing_steps.length} 个阶段：${
+          data.pilot_missing_steps.map(esc).join('、')}。</div>`
+        : ''}
     </div>
-    ${pilotReadyBanner(data)}
+    ${pilotGateCard(data)}
     ${current ? currentCard(current) : completionCard(data)}
     ${doneList(done)}
     ${upcomingList(upcoming)}`;
@@ -260,6 +283,34 @@ on('start.go', ({ view }) => go(view));
 on('start.guidedPcf', () => {
   state.map.openGuidedPcf = true;
   go('map');
+});
+
+on('start.confirmPilot', async () => {
+  const note = await promptDialog('上线备注（可留空）',
+    { title: '确认首次上线', okText: '确认', value: '' });
+  if (note === undefined) return;
+  try {
+    const data = await POST('/start/pilot/confirm', { note: note || null });
+    state.start.data = data;
+    paint(data);
+    toast('已确认首次上线');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('start.revokePilot', async () => {
+  const ok = await confirmDialog('撤销后默认首页会回到开始使用，确定继续？',
+    { title: '撤销首次上线', okText: '撤销', danger: true });
+  if (!ok) return;
+  try {
+    const data = await DEL('/start/pilot/confirm');
+    state.start.data = data;
+    paint(data);
+    toast('已撤销首次上线确认');
+  } catch (e) {
+    toast(e.message, true);
+  }
 });
 
 on('start.setupProjects', () => {

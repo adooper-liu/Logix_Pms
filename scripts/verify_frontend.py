@@ -110,7 +110,11 @@ def main() -> int:
                 token,
             )
             expected = "管理驾驶舱"
-            if not status or status["pilot_ready_count"] < status["pilot_total"]:
+            if (
+                not status
+                or not status["pilot_confirmed"]
+                or status["pilot_ready_count"] < status["pilot_total"]
+            ):
                 expected = "开始使用"
             assert page.inner_text("#pageTitle") == expected, (
                 f"默认落地页应为「{expected}」，实际「{page.inner_text('#pageTitle')}」"
@@ -1893,6 +1897,21 @@ def main() -> int:
             assert "A 定方向" in view and "B 建体系" in view and "C 跑闭环" in view, (
                 "阶段没有按 A/B/C 分组展示"
             )
+            gate = page.evaluate(
+                """async () => {
+                    const token = localStorage.getItem('psm_token');
+                    const res = await fetch('/api/v1/start/status', {
+                        headers: { Authorization: 'Bearer ' + token },
+                    });
+                    return res.ok ? await res.json() : null;
+                }"""
+            )
+            if gate and gate["pilot_confirmed"]:
+                assert "已确认上线" in view and "撤销确认" in view
+            elif gate and gate["pilot_gate_open"]:
+                assert "确认首次上线" in view
+            else:
+                assert "还差 " in view and "个阶段" in view, "启动页缺少上线缺口说明"
 
             assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
             assert page.locator("#view .seg button[data-mode]").count() == 0, "模式开关应已移除"

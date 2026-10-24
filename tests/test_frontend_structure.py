@@ -181,7 +181,7 @@ def test_default_view_is_start():
     auth_src = (JS_ROOT / "core" / "auth.js").read_text(encoding="utf-8")
     assert "const explicit = explicitView()" in auth_src
     assert "let view = 'start'" in auth_src
-    assert "startup.pilot_ready_count >= startup.pilot_total" in auth_src
+    assert "startup.pilot_confirmed && startup.pilot_ready_count >= startup.pilot_total" in auth_src
 
 
 def test_workload_page_consumes_boundary_note():

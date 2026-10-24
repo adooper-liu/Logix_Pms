@@ -33,7 +33,7 @@ from app.models.process import NodeTool, ProcessArch
 from app.models.process_document import ProcessDocument
 from app.models.project import Project
 from app.models.raci import GovernanceRole, RaciAssignment
-from app.models.startup import StartupStepSkip
+from app.models.startup import StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.user import User
 from app.models.workload import CapacityCalendar, WorkMeasurementStandard
@@ -304,6 +304,17 @@ EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
 
 class StartupStepNotFound(ValueError):
     """步骤不存在或不在九步定义里。"""
+
+
+class PilotGateError(ValueError):
+    """首次上线门禁未通过；missing 是仍未就绪的阶段标题。"""
+
+    def __init__(self, missing: List[str]):
+        self.missing = missing
+        super().__init__("首次上线条件未满足：" + "、".join(missing))
+
+
+PILOT_KEY = "PILOT_GO_LIVE"
 
 
 def _count(db: Session, stmt) -> int:
@@ -602,6 +613,14 @@ def status(db: Session) -> StartupStatusOut:
         (step.key for step in pilot_steps if step.status not in ("READY", "SKIPPED")),
         None,
     )
+    pilot_gate_open = pilot_ready_count >= len(pilot_steps)
+    pilot_missing_steps = [step.title for step in pilot_steps if step.status != "READY"]
+    confirm = db.scalar(select(StartupPilotConfirm).where(StartupPilotConfirm.key == PILOT_KEY))
+    confirmed_by = (
+        db.get(User, confirm.confirmed_by_user_id)
+        if confirm and confirm.confirmed_by_user_id
+        else None
+    )
     return StartupStatusOut(
         total=len(steps),
         ready_count=ready_count,
@@ -614,6 +633,13 @@ def status(db: Session) -> StartupStatusOut:
         skipped_count=skipped_count,
         next_step=next_step,
         next_pilot_step=next_pilot_step,
+        pilot_gate_open=pilot_gate_open,
+        pilot_confirmed=confirm is not None,
+        pilot_confirmed_by=confirmed_by.display_name if confirmed_by else None,
+        pilot_confirmed_at=confirm.confirmed_at if confirm else None,
+        pilot_confirm_note=confirm.note if confirm else None,
+        pilot_stale=confirm is not None and not pilot_gate_open,
+        pilot_missing_steps=pilot_missing_steps,
         steps=steps,
     )
 
@@ -656,5 +682,46 @@ def unskip_step(db: Session, step_key: str, user: User) -> StartupStatusOut:
             None,
             f"取消跳过启动步骤 {step_key}",
         )
+        db.commit()
+    return status(db)
+
+
+def confirm_pilot(db: Session, user: User, note: Optional[str]) -> StartupStatusOut:
+    """首次上线确认：只有 S0–S7 全部就绪才允许落库。"""
+    current = status(db)
+    if not current.pilot_gate_open:
+        raise PilotGateError(current.pilot_missing_steps)
+    row = db.scalar(select(StartupPilotConfirm).where(StartupPilotConfirm.key == PILOT_KEY))
+    if row is None:
+        row = StartupPilotConfirm(key=PILOT_KEY)
+        db.add(row)
+    row.confirmed_by_user_id = user.id
+    row.confirmed_at = utcnow()
+    row.note = (note or "").strip() or None
+    row.evidence_snapshot = {
+        "pilot_ready_count": current.pilot_ready_count,
+        "pilot_total": current.pilot_total,
+        "steps": [
+            {"key": step.key, "title": step.title, "status": step.status} for step in current.steps
+        ],
+    }
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "startup_pilot",
+        None,
+        f"确认首次上线：{current.pilot_ready_count}/{current.pilot_total} 阶段就绪",
+    )
+    db.commit()
+    return status(db)
+
+
+def revoke_pilot(db: Session, user: User) -> StartupStatusOut:
+    """撤销首次上线确认；下一次登录会回到启动页。"""
+    row = db.scalar(select(StartupPilotConfirm).where(StartupPilotConfirm.key == PILOT_KEY))
+    if row is not None:
+        db.delete(row)
+        audit_service.record(db, user, "UPDATE", "startup_pilot", None, "撤销首次上线确认")
         db.commit()
     return status(db)

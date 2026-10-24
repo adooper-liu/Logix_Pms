@@ -90,7 +90,7 @@ from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
-from app.models.startup import StartupStepSkip
+from app.models.startup import StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
@@ -138,6 +138,7 @@ __all__ = [
     "AuthorizationRule",
     "AuthorizationException",
     "StartupStepSkip",
+    "StartupPilotConfirm",
     "ProcessInstance",
     "ProcessTask",
     "ProcessTaskEvent",

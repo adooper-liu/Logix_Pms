@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import UtcDateTime
+
 
 class StartupActionOut(BaseModel):
     label: str
@@ -55,7 +57,18 @@ class StartupStatusOut(BaseModel):
     skipped_count: int = 0
     next_step: Optional[str] = None
     next_pilot_step: Optional[str] = None
+    pilot_gate_open: bool = False
+    pilot_confirmed: bool = False
+    pilot_confirmed_by: Optional[str] = None
+    pilot_confirmed_at: Optional[UtcDateTime] = None
+    pilot_confirm_note: Optional[str] = None
+    pilot_stale: bool = False
+    pilot_missing_steps: List[str] = []
     steps: List[StartupStepOut] = []
+
+
+class StartupPilotConfirmIn(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=400)
 
 
 class StartupSkipIn(BaseModel):

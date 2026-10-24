@@ -145,7 +145,7 @@ export async function loadMeta() {
 
 /**
  * 登录/启动后的落地页：显式 hash/路径优先；
- * 否则首次上线 S0–S7 未就绪进「开始使用」，8/8 后进角色化驾驶舱。
+ * 否则只有“已确认首次上线且 8 个阶段仍就绪”才进驾驶舱，其余进「开始使用」。
  */
 export async function enterDefaultView() {
   const explicit = explicitView();
@@ -156,7 +156,9 @@ export async function enterDefaultView() {
   let view = 'start';
   try {
     const startup = await GET('/start/status');
-    if (startup.pilot_ready_count >= startup.pilot_total) view = 'dashboard';
+    if (startup.pilot_confirmed && startup.pilot_ready_count >= startup.pilot_total) {
+      view = 'dashboard';
+    }
   } catch (e) {
     // 启动页会自己展示错误与重试，不要把用户挡在空白页
   }
