@@ -13,6 +13,7 @@ from app.api.v1 import (
     benchmark,
     changes,
     dashboard,
+    data_governance,
     deliverables,
     designer,
     execution,
@@ -25,6 +26,7 @@ from app.api.v1 import (
     process_documents,
     process_map,
     projects,
+    raci,
     sketches,
     strategy,
     tool_templates,
@@ -65,6 +67,8 @@ protected.include_router(orgs.router)
 protected.include_router(positions.router)
 protected.include_router(workload.router)
 protected.include_router(strategy.router)
+protected.include_router(raci.router)
+protected.include_router(data_governance.router)
 protected.include_router(knowledge.router)
 api_router.include_router(protected)
 

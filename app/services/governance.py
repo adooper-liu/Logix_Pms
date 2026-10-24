@@ -27,8 +27,10 @@ from app.models.project import Project
 from app.models.tool_template import ToolTemplate
 from app.models.user import User
 from app.schemas.baseline import AuditScanResult, FindingOut
+from app.services import data_governance as data_service
 from app.services import notifications as notification_service
 from app.services import process_document as document_service
+from app.services import raci as raci_service
 from app.services import tool_template as template_service
 
 TYPE_LABELS: Dict[str, str] = {
@@ -37,6 +39,9 @@ TYPE_LABELS: Dict[str, str] = {
     "NO_EFFECTIVE": "资产未生效",
     "REVIEW_OVERDUE": "模板复审逾期",
     "KPI_OVER_CAP": "KPI 数量超限",
+    "RACI_INVALID": "权责矩阵不完整",
+    "DATA_DOMAIN_NO_OWNER": "数据域无所有者",
+    "DATA_FLOW_INCOMPLETE": "数据流登记不完整",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -284,6 +289,51 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
             f"责任人 KPI 超过 {KPI_CAP} 个：{owner.display_name if owner else owner_id}",
             f"当前 {len(rows)} 个承重指标；建议聚焦 3–5 个结果指标",
             owner_user_id=owner_id,
+        )
+
+    # RACI：每个事项必须且只能有一个 A
+    for result in raci_service.invalid_processes(db):
+        process = db.get(ProcessArch, result.process_id)
+        add(
+            "RACI_INVALID",
+            "MEDIUM",
+            "process",
+            result.process_id,
+            f"权责矩阵不完整：{process.code if process else result.process_id}",
+            "；".join(result.errors),
+            org_unit_id=process.org_unit_id if process else None,
+            owner_user_id=process.owner_user_id if process else None,
+        )
+
+    # 数据治理：数据域必须有所有者；关键数据流必须登记来源/主键/质量规则
+    for domain in data_service.domain_issues(db):
+        add(
+            "DATA_DOMAIN_NO_OWNER",
+            "HIGH",
+            "data_domain",
+            domain.id,
+            f"数据域没有所有者：{domain.name}",
+            "请指定数据所有者，否则口径冲突与访问规则无人负责",
+            org_unit_id=domain.org_unit_id,
+        )
+    for flow in data_service.flow_issues(db):
+        missing = []
+        if not (flow.source_system or "").strip():
+            missing.append("来源系统")
+        if not (flow.primary_key or "").strip():
+            missing.append("主键")
+        if not (flow.quality_rule or "").strip():
+            missing.append("质量规则")
+        if not missing:
+            continue
+        add(
+            "DATA_FLOW_INCOMPLETE",
+            "MEDIUM",
+            "data_flow",
+            flow.id,
+            f"数据流登记不完整：{flow.name}",
+            "缺少：" + "、".join(missing),
+            org_unit_id=flow.domain.org_unit_id if flow.domain else None,
         )
 
     return findings

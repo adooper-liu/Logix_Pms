@@ -19,7 +19,7 @@ export const state = {
   toolboxFilter: null,
   designer: {
     processId: null, processCode: null, model: null, analysis: null, tab: 'model',
-    changes: null, changeMeta: null,
+    changes: null, changeMeta: null, raci: null, raciMeta: null, governanceRoles: null,
   },
   knowledge: { type: '', sort: 'recent', keyword: '', tag: '', page: 1 },
   pcf: {
@@ -28,6 +28,7 @@ export const state = {
   },
   monitor: { status: '', tab: 'overview', kind: '', period: '' },
   strategy: { year: new Date().getFullYear() },
+  dataGov: null,
   execution: { tab: 'tasks', filter: 'open' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
@@ -46,6 +47,7 @@ export const TITLES = {
   designer: '流程设计器',
   monitor: '运营监控与KPI',
   strategy: '战略目标',
+  data: '数据治理',
   knowledge: '流程知识库',
   pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',

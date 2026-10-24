@@ -20,6 +20,7 @@ import { createLint } from './lint.js';
 import { createVersions } from './versions.js';
 import { createTransfer } from './transfer.js';
 import { createChanges } from './changes.js';
+import { createRaci } from './raci.js';
 
 /** 深拷贝模型，用作「服务端已确认」的回滚基准。 */
 function cloneModel(model) {
@@ -51,6 +52,7 @@ const assignment = createAssignment(ctx);
 const versions = createVersions(ctx);
 const transfer = createTransfer(ctx);
 const changes = createChanges(ctx);
+const raci = createRaci(ctx);
 
 Object.assign(ctx, {
   renderSelection: panels.renderSelection,
@@ -88,7 +90,8 @@ export function renderDesigner() {
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
-      const [model, analysis, positions, tools, toolMeta, docMeta, changes, changeMeta] =
+      const [model, analysis, positions, tools, toolMeta, docMeta, changes, changeMeta,
+        raciMatrix, governanceRoles, raciMeta] =
         await Promise.all([
           GET('/processes/' + id + '/design'),
           POST('/processes/' + id + '/design/analyze', {}),
@@ -98,6 +101,9 @@ export function renderDesigner() {
           GET('/process-documents/meta'),
           GET('/changes?process_id=' + id),
           GET('/changes/meta'),
+          GET('/governance/raci?process_id=' + id),
+          GET('/governance/roles?active_only=true'),
+          GET('/governance/meta'),
         ]);
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
@@ -108,6 +114,9 @@ export function renderDesigner() {
       state.docMeta = docMeta;
       state.designer.changes = changes;
       state.designer.changeMeta = changeMeta;
+      state.designer.raci = raciMatrix;
+      state.designer.governanceRoles = governanceRoles;
+      state.designer.raciMeta = raciMeta;
       state.designer.processCode = (list.find((r) => r.id === id) || {}).code;
     }
   };
@@ -139,6 +148,8 @@ function paintDesigner() {
         指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
       <button class="${tab === 'change' ? 'on' : ''}" data-act="designer.tab" data-tab="change">
         变更${(st.changes || []).length ? ' · ' + st.changes.length : ''}</button>
+      <button class="${tab === 'raci' ? 'on' : ''}" data-act="designer.tab" data-tab="raci">
+        权责${st.raci && st.raci.matters ? ' · ' + st.raci.matters.length : ''}</button>
     </div>`;
 
   const bpmnPane = `
@@ -187,6 +198,7 @@ function paintDesigner() {
 
   const modelPane = bpmnPane;
   const changePane = changes.paneHtml();
+  const raciPane = raci.paneHtml();
 
   const analysisPane = `
     <div class="grid g2">
@@ -252,8 +264,10 @@ function paintDesigner() {
         </div>
       </div>
     </div>
-    ${tab === 'analysis' ? analysisPane : tab === 'change' ? changePane : modelPane}`;
-  if (tab !== 'analysis' && tab !== 'change') canvas.mount();
+    ${tab === 'analysis' ? analysisPane
+      : tab === 'change' ? changePane
+        : tab === 'raci' ? raciPane : modelPane}`;
+  if (tab !== 'analysis' && tab !== 'change' && tab !== 'raci') canvas.mount();
 }
 
 function paintMetrics(a) {

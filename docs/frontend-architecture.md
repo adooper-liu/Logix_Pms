@@ -15,8 +15,8 @@
 （`window` 收窄为 4 个键、跨视图直接 import 清零、内联处理器清零、
 `designer.js` 拆包）。**Phase 4 尚未开始**，§6 是执行顺序。
 
-**测量基线（2026-10-24 复核，P0/P1 治理能力补齐后）**：37 个手写 JS 模块、13,023 行
-（其中 views 11,573 行）；14 个视图、20 个导出符号，`window` 只保留
+**测量基线（2026-10-24 复核，P0/P1 治理能力补齐后）**：39 个手写 JS 模块、13,702 行
+（其中 views 12,248 行）；15 个视图、21 个导出符号，`window` 只保留
 `{ go, closeModal, state, actions }` 4 个键 + actions 命名空间；
 内联事件处理器 0；视图间直接 import 0；视图内原生 `confirm`/`prompt` 0；
 `data-act` 键 260 个；`designer.js` 7 行薄壳 + 9 个职责模块（单文件最大 551 行）。
@@ -48,9 +48,9 @@
 
 > **拆分结果（2026-10-24）**：`designer.js` 从 2,448 行降为 7 行薄壳，
 > 只 `export { actions, openDesigner, renderDesigner } from './designer/index.js'`。
-> 实现拆成 10 个模块：`index`(431) / `canvas`(324) / `providers`(105) /
+> 实现拆成 11 个模块：`index`(445) / `canvas`(324) / `providers`(105) /
 > `xml`(373) / `panels`(551) / `assignment`(372) / `lint`(260) /
-> `versions`(215) / `changes`(272) / `transfer`(85)。子模块之间不互相 import，
+> `versions`(215) / `changes`(272) / `raci`(143) / `transfer`(85)。子模块之间不互相 import，
 > 统一通过 `index.js` 注入的 `ctx`（`getModeler` / `getElement` /
 > `select` / `subscribe` + 协作动作）访问画布与彼此的服务；
 > `xml.js` 保持纯函数。守卫见 §7 与 `tests/test_frontend_structure.py`。
@@ -95,6 +95,7 @@ web/js/views/designer/
   lint.js             # bpmnlint 规则 → 中文化映射
   versions.js         # 版本历史 / 差异 / 回滚
   changes.js          # 变更申请 / 影响分析 / 发布门禁
+  raci.js             # 事项权责矩阵（A/R/C/I）
   transfer.js         # 导入导出
 ```
 
@@ -635,10 +636,10 @@ for (const type of BUBBLING_EVENTS) {
 
 | 指标 | 当前值（P0 治理能力补齐后） |
 |---|---|
-| 手写 JS 模块 | 37 |
-| JS 总行数 / views 行数 | 13,023 / 11,573 |
-| `designer.js` | 7 行薄壳；10 个模块，最大 `panels.js` 551 行 |
-| 视图导出符号 / `window` 全局键 | 20 / 4 + actions 命名空间 |
+| 手写 JS 模块 | 39 |
+| JS 总行数 / views 行数 | 13,702 / 12,248 |
+| `designer.js` | 7 行薄壳；11 个模块，最大 `panels.js` 551 行 |
+| 视图导出符号 / `window` 全局键 | 21 / 4 + actions 命名空间 |
 | 内联事件处理器 | 0 |
 | `data-act` 键 | 260 |
 | 视图间直接 import | 0 |

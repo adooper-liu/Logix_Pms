@@ -30,6 +30,7 @@ VIEWS = [
     ("toolbox", "方法论工具箱"),
     ("designer", "流程设计器"),
     ("monitor", "运营监控与KPI"),
+    ("data", "数据治理"),
     ("knowledge", "流程知识库"),
     ("execution", "流程执行"),
     ("deliverables", "交付物与模板库"),
@@ -678,6 +679,18 @@ def main() -> int:
             page.click("#uiDialogOk")
             page.wait_for_timeout(1000)
             assert position_name not in page.inner_text("#view")
+
+            # 治理角色：与系统权限分离的角色主数据
+            page.click('#view .tabs button:has-text("治理角色")')
+            page.wait_for_timeout(600)
+            gov = page.inner_text("#view")
+            assert "治理角色" in gov and "新建治理角色" in gov, gov[:200]
+            page.click('#view button:has-text("+ 新建治理角色")')
+            page.wait_for_selector("#mask.show")
+            modal = page.inner_text("#mBody")
+            assert "角色名称" in modal and "角色类型" in modal, modal[:160]
+            close_modal()
+            page.wait_for_timeout(300)
 
         # 草图：draw.io embed 的 proto=json 收发的是 JSON 字符串
         def sketch_drawio_protocol() -> None:
@@ -1455,6 +1468,19 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
+            page.click('#view .seg button:has-text("权责")')
+            page.wait_for_timeout(600)
+            raci_view = page.inner_text("#view")
+            assert "权责矩阵" in raci_view, "设计器权责页未渲染"
+            assert "A 唯一负责" in raci_view or "缺少 A" in raci_view, "权责页缺少 A 状态"
+            page.click('#view button:has-text("+ 事项权责")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            raci_modal = page.inner_text("#mBody")
+            assert "事项 / 决策" in raci_modal and "RACI" in raci_modal, "权责弹窗缺字段"
+            close_modal()
+            page.wait_for_timeout(300)
+
         # 运营监控：KPI 明细 + 异常处理弹窗
         def monitor() -> None:
             goto("monitor")
@@ -1532,6 +1558,31 @@ def main() -> int:
             assert "根因分析" in body, f"异常弹窗内容缺失：{body[:120]!r}"
             close_modal()
             page.wait_for_timeout(400)
+
+        # 数据治理：数据域/数据流登记与缺口概览
+        def data_governance_view() -> None:
+            goto("data")
+            page.wait_for_timeout(800)
+            view = page.inner_text("#view")
+            assert "数据治理" in view and "数据域" in view and "数据流" in view, view[:200]
+            assert "无所有者数据域" in view, "数据治理缺少缺口概览"
+
+            page.click('#view button:has-text("+ 新建数据域")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            modal = page.inner_text("#mBody")
+            assert "数据所有者" in modal and "数据管家" in modal, "数据域弹窗缺字段"
+            close_modal()
+            page.wait_for_timeout(300)
+
+            page.click('#view button:has-text("+ 新建数据流")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            modal = page.inner_text("#mBody")
+            assert "提取频率" in modal and "质量规则" in modal, "数据流弹窗缺字段"
+            assert "关联流程" in modal and "主键" in modal, "数据流弹窗缺关联字段"
+            close_modal()
+            page.wait_for_timeout(300)
 
         # 知识库：打开条目（会写入查阅次数）+ 快速找工具
         def knowledge() -> None:
@@ -1983,6 +2034,7 @@ def main() -> int:
         check("设计器版本治理（草稿→评审→发布）", designer_version_governance)
         check("设计器变更申请与影响分析", designer_change_tab)
         check("监控异常处理弹窗", monitor)
+        check("数据治理数据域与数据流", data_governance_view)
         check("知识库详情 + 快速找工具", knowledge)
         check("项目甘特图与里程碑", project_gantt)
         check("新建流程架构", process_create)

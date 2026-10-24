@@ -29,6 +29,13 @@ on('orgs.submitUserEdit', ({ id }) => submitUserEdit(Number(id)));
 on('orgs.userFilter', ({ filter }, el) => {
   setUserFilter(filter, el.type === 'checkbox' ? el.checked : el.value);
 });
+on('orgs.newRole', () => openRoleModal());
+on('orgs.editRole', ({ id }) => openRoleModal(Number(id)));
+on('orgs.submitRole', ({ id }) => submitRole(id ? Number(id) : null));
+on('orgs.deleteRole', ({ id }) => deleteRoleAction(Number(id)));
+on('orgs.addMember', ({ role }) => openMemberModal(Number(role)));
+on('orgs.submitMember', ({ role }) => submitMember(Number(role)));
+on('orgs.removeMember', ({ role, member }) => removeMember(Number(role), Number(member)));
 
 function adminState() {
   state.admin = state.admin || {
@@ -62,14 +69,18 @@ const renderOrgs = () => {
       GET('/auth/users'),
       GET('/auth/meta'),
       GET('/positions?active_only=false'),
+      GET('/governance/roles'),
+      GET('/governance/meta'),
     ]),
-    ([tree, flat, orgMeta, users, authMeta, positions]) => {
+    ([tree, flat, orgMeta, users, authMeta, positions, roles, governanceMeta]) => {
       state.adminTree = tree;
       state.adminOrgs = flat;
       state.adminOrgMeta = orgMeta;
       state.adminUsers = users;
       state.adminAuthMeta = authMeta;
       state.adminPositions = positions;
+      state.adminRoles = roles;
+      state.adminGovernanceMeta = governanceMeta;
       paintShell();
     });
 };
@@ -89,11 +100,14 @@ function paintShell() {
           人员与角色（${(state.adminUsers || []).length}）</button>
         <button class="${a.tab === 'position' ? 'on' : ''}" data-act="orgs.tab" data-tab="position">
           岗位（${(state.adminPositions || []).length}）</button>
+        <button class="${a.tab === 'governance' ? 'on' : ''}" data-act="orgs.tab"
+          data-tab="governance">治理角色（${(state.adminRoles || []).length}）</button>
       </div>
     </div>
     <div id="adminBody"></div>`;
   if (a.tab === 'org') paintOrgTab();
   else if (a.tab === 'position') paintPositionTab();
+  else if (a.tab === 'governance') paintGovernanceTab();
   else paintUserTab();
 }
 
@@ -363,6 +377,169 @@ async function deletePositionAction(positionId) {
   try {
     await DEL('/positions/' + positionId);
     toast('岗位已删除');
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* -------------------------------------------------- 治理角色 */
+
+function paintGovernanceTab() {
+  const body = document.getElementById('adminBody');
+  const rows = (state.adminRoles || []).map((row) => {
+    const members = (row.members || []).map((member) => `
+      <span class="tag ${member.is_primary ? 't-blu' : 't-gry'}">${
+        esc(member.user_name || '用户 ' + member.user_id)}${member.is_primary ? ' · 主责' : ''}
+        <button class="btn-sm" data-act="orgs.removeMember"
+          data-role="${row.id}" data-member="${member.id}" title="移除成员">×</button>
+      </span>`).join(' ') || '<span class="muted">未绑定成员</span>';
+    return `
+      <tr>
+        <td><b>${esc(row.name)}</b><div class="tiny">${esc(row.code)}</div>
+          ${row.description ? `<div class="tiny muted">${esc(row.description)}</div>` : ''}</td>
+        <td>${esc(row.role_type_label)}</td>
+        <td>${esc(row.org_unit_name || '集团通用')}</td>
+        <td>${members}</td>
+        <td>${row.is_active
+          ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
+        <td><div class="gap">
+          <button class="btn-sm" data-act="orgs.addMember" data-role="${row.id}">加成员</button>
+          <button class="btn-sm" data-act="orgs.editRole" data-id="${row.id}">编辑</button>
+          <button class="btn-sm btn-g" data-act="orgs.deleteRole" data-id="${row.id}">删除</button>
+        </div></td>
+      </tr>`;
+  }).join('') || emptyRow(6, '还没有治理角色');
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="between mb">
+        <div><h3>治理角色（${(state.adminRoles || []).length}）</h3>
+          <div class="desc">治理角色与系统权限分离：系统角色决定“能不能改”，
+            治理角色决定“对流程/事项承担什么责任”</div></div>
+        <button class="btn btn-p" data-act="orgs.newRole">+ 新建治理角色</button>
+      </div>
+      <table class="tbl">
+        <thead><tr><th>角色</th><th>类型</th><th>组织范围</th><th>成员</th>
+          <th>状态</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function openRoleModal(roleId = null) {
+  const role = (state.adminRoles || []).find((item) => item.id === roleId) || null;
+  const meta = state.adminGovernanceMeta || { role_type_labels: {} };
+  const typeOptions = Object.entries(meta.role_type_labels || {}).map(([value, label]) =>
+    `<option value="${esc(value)}"${role && role.role_type === value ? ' selected' : ''}>${
+      esc(label)}</option>`).join('');
+  const orgOptions = (state.adminOrgs || []).map((org) =>
+    `<option value="${org.id}"${role && role.org_unit_id === org.id ? ' selected' : ''}>${
+      esc(org.name)} · ${esc(org.code)}</option>`).join('');
+
+  openModal(role ? '编辑治理角色 · ' + role.code : '新建治理角色', `
+    <div class="row2">
+      <div class="field"><label>角色名称 *</label>
+        <input id="grName" value="${esc(role ? role.name : '')}" placeholder="如 集团端到端流程所有者"></div>
+      <div class="field"><label>角色编码</label>
+        <input id="grCode" value="${esc(role ? role.code : '')}" placeholder="留空自动生成"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>角色类型</label><select id="grType">${typeOptions}</select></div>
+      <div class="field"><label>组织范围</label>
+        <select id="grOrg"><option value="">集团通用</option>${orgOptions}</select></div>
+    </div>
+    <div class="field"><label>职责说明</label>
+      <textarea id="grDesc" rows="2">${esc(role ? role.description || '' : '')}</textarea></div>
+    <div class="field"><label>状态</label>
+      <select id="grActive">
+        <option value="true"${!role || role.is_active ? ' selected' : ''}>启用</option>
+        <option value="false"${role && !role.is_active ? ' selected' : ''}>停用</option>
+      </select></div>
+    <div class="note">治理角色用于 RACI 与责任矩阵；系统权限仍在「人员与角色」里维护。</div>`,
+    `<button class="btn btn-g" data-act="orgs.close">取消</button>
+     <button class="btn btn-p" data-act="orgs.submitRole"
+       data-id="${role ? role.id : ''}">${role ? '保存' : '创建'}</button>`);
+}
+
+async function submitRole(roleId) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  const name = val('grName').trim();
+  if (!name) return toast('请填写角色名称', true);
+  const payload = {
+    name,
+    role_type: val('grType'),
+    org_unit_id: val('grOrg') ? Number(val('grOrg')) : null,
+    description: val('grDesc').trim() || null,
+    is_active: val('grActive') === 'true',
+  };
+  if (val('grCode').trim()) payload.code = val('grCode').trim();
+  try {
+    if (roleId) await PATCH('/governance/roles/' + roleId, payload);
+    else await POST('/governance/roles', payload);
+    closeModal();
+    toast(roleId ? '治理角色已更新' : '治理角色已创建');
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteRoleAction(roleId) {
+  const role = (state.adminRoles || []).find((item) => item.id === roleId);
+  if (!role) return;
+  const ok = await confirmDialog(`删除治理角色「${role.name}」？被 RACI 使用时会被拒绝。`,
+    { danger: true, okText: '删除' });
+  if (!ok) return;
+  try {
+    await DEL('/governance/roles/' + roleId);
+    toast('治理角色已删除');
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openMemberModal(roleId) {
+  const role = (state.adminRoles || []).find((item) => item.id === roleId);
+  if (!role) return;
+  const options = (state.adminUsers || []).map((user) =>
+    `<option value="${user.id}">${esc(user.display_name)} · ${esc(user.role_label || user.role)}</option>`)
+    .join('');
+  openModal('添加角色成员 · ' + role.name, `
+    <div class="field"><label>人员 *</label>
+      <select id="gmUser"><option value="">请选择</option>${options}</select></div>
+    <div class="field"><label>是否主责</label>
+      <select id="gmPrimary"><option value="false">否</option><option value="true">是</option></select></div>
+    <div class="note">同一角色可有多名成员；主责用于展示与默认联系人。</div>`,
+    `<button class="btn btn-g" data-act="orgs.close">取消</button>
+     <button class="btn btn-p" data-act="orgs.submitMember"
+       data-role="${roleId}">添加</button>`);
+}
+
+async function submitMember(roleId) {
+  const user = document.getElementById('gmUser')?.value;
+  if (!user) return toast('请选择人员', true);
+  try {
+    await POST('/governance/roles/' + roleId + '/members', {
+      user_id: Number(user),
+      is_primary: document.getElementById('gmPrimary')?.value === 'true',
+    });
+    closeModal();
+    toast('角色成员已添加');
+    RENDERERS.orgs();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function removeMember(roleId, memberId) {
+  try {
+    await DEL('/governance/roles/' + roleId + '/members/' + memberId);
+    toast('角色成员已移除');
     RENDERERS.orgs();
   } catch (e) {
     toast(e.message, true);

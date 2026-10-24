@@ -44,6 +44,7 @@ def test_frontend_has_modules():
         "toolbox.js",
         "designer.js",
         "monitor.js",
+        "data.js",
         "knowledge.js",
         "execution.js",
         "deliverables.js",
@@ -65,6 +66,7 @@ def test_frontend_has_modules():
         "versions.js",
         "transfer.js",
         "changes.js",
+        "raci.js",
     } <= designer_modules
 
 
@@ -141,6 +143,7 @@ def test_view_modules_are_registered():
         "toolbox",
         "designer",
         "monitor",
+        "data",
         "knowledge",
         "execution",
         "deliverables",
@@ -329,6 +332,7 @@ def test_designer_shell_is_thin_and_wires_submodules():
         "createVersions",
         "createTransfer",
         "createChanges",
+        "createRaci",
     ):
         assert f"{factory}(ctx)" in index_src, f"index.js 没有组装 {factory}"
     for hook in (
@@ -371,6 +375,7 @@ def test_designer_submodules_do_not_import_each_other():
         "versions.js",
         "transfer.js",
         "changes.js",
+        "raci.js",
         "index.js",
     }
     bad = []
@@ -415,6 +420,7 @@ def test_every_view_module_exports_a_renderer():
         "toolbox.js": "renderToolbox",
         "designer.js": "renderDesigner",
         "monitor.js": "renderMonitor",
+        "data.js": "renderData",
         "knowledge.js": "renderKnowledge",
         "execution.js": "renderExecution",
         "deliverables.js": "renderDeliverables",

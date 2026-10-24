@@ -130,7 +130,7 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `viewer` | `viewer123` | VIEWER | 只读 |
 
 种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、24 份步骤契约、32 个交付物定义（每个项目自动生成 32 个交付物实例）、5 个演示组织单元与 4 个演示账号（已挂到演示组织）、
-16 个 KPI × 6 个月时序、5 条标准工时卡、3 条产能记录、3 个战略目标、1 份变更申请、8 条异常事件、9 篇知识条目、4 个演示用户、
+16 个 KPI × 6 个月时序、5 条标准工时卡、3 条产能记录、3 个战略目标、1 份变更申请、7 个治理角色、14 条 RACI、5 个数据域、3 条数据流、8 条异常事件、9 篇知识条目、4 个演示用户、
 4 套对标框架（SCOR + APQC PCF v8.0 跨行业/消费品/消费电子，共 6,135 个标准分类、
 62 条显式流程映射（L4 继承后 249 条）、3,453 条 PCF 指标）。
 
@@ -156,7 +156,7 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：14 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器跑两段：15 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
@@ -364,7 +364,7 @@ web/            前端（原生 ES 模块，无构建步骤）
 scripts/
   seed.py             命令行灌库
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
-  verify_frontend.py  无头浏览器联调自检（14 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器联调自检（15 个视图 + 交互路径 + 主题切换 + 截图）
   pcf_zh.py           APQC PCF 中文参考译文覆盖层工具（覆盖率/校验/切片/合并/标点归一化）
   pcf_zh_align.py     把译文里的活动名引用对齐到分类树正式译名（官方译名优先）
   pcf_zh_audit.py     中文覆盖层一致性审计（同英文多译文、交叉引用、标点口径、孤儿键）
@@ -390,7 +390,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 
 ```text
 main.js
-  └─ views/*        十四个视图，各自 import 需要的 core
+  └─ views/*        十五个视图，各自 import 需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
             └─ core/{api, auth, state, theme, ui, format}.js
 ```
@@ -449,10 +449,10 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 前端不维护映射表，避免「后端加了新枚举、前端忘了同步」。
 
 **测试守卫**：[tests/test_frontend_structure.py](tests/test_frontend_structure.py) 会在
-pytest 里检查 import 路径是否存在、十四个视图是否都注册且有 renderer、样式表是否被引用，
+pytest 里检查 import 路径是否存在、十五个视图是否都注册且有 renderer、样式表是否被引用，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**十四个模块与对应接口**：
+**十五个模块与对应接口**：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
@@ -468,8 +468,9 @@ pytest 里检查 import 路径是否存在、十四个视图是否都注册且�
 | 流程设计器 | `/processes/{id}/design`、`/processes/{id}/bpmn`、`/changes` | bpmn-js 专业 BPMN 2.0 画布（调色板/折点/撤销重做/复制粘贴，布局与折点持久化，自动布局保留泳道，隐藏执行引擎不支持的构造）；右侧属性栏按元素类型编辑节点类型/泳道/负责人/指标/分派与 SLA、连线标签/条件/概率、泳道新增与改名；另可新增泳道（带默认活动）、跨泳道移动节点；草稿 → 评审 → 发布、版本历史/差异/回滚；变更申请与影响分析，启用门禁的流程必须带已批准变更单发布；BPMN 导入/导出 |
 | 架构草图 | `/sketches` | 独立 draw.io 白板：自由画布、mxfile 版本保存、关联流程/项目；**不参与 BPMN 建模与流程执行** |
 | 运营监控与KPI | `/monitor/kpi-radar`、`/exceptions`、`/workload/summary` | 四维度雷达、KPI 明细 + 6 个月走势；KPI 定义卡（结果/过程/健康度、公式与分子分母、粒度/频率/来源、红黄绿阈值、责任人与版本）；改善候选自动扫描（红/黄且无进行中项目）与一键生成改善项目；工作量页（标准工时、产能、实际工时与理论负荷率）；异常闭环处理 |
+| 数据治理 | `/data-governance/domains`、`/data-governance/flows` | 数据域（类型/所有者/管家）与数据流（来源/目标/频率/主键/字段定义/允许值/质量规则/保留期/跨法人可见性/数据主体权利）；缺口概览与治理扫描 |
 | 流程知识库 | `/knowledge`、`/knowledge/meta/tags` | 类型/标签/关键词筛选、热度排序、阅读详情、按问题找工具 |
-| 组织与人员 | `/org-units`、`/auth/users` | 组织树维护、人员账号与角色、归属组织、启停与口令重置（仅 ADMIN） |
+| 组织与人员 | `/org-units`、`/auth/users`、`/governance/roles` | 组织树维护、人员账号与角色、归属组织、启停与口令重置；治理角色与成员（委员会/集团所有者/单元所有者/流程管家/BPM 办公室/数据所有者/风险法务，仅 ADMIN） |
 
 **两处值得说明的取舍**：
 
@@ -507,6 +508,9 @@ pytest 里检查 import 路径是否存在、十四个视图是否都注册且�
 | `kpi_definition` / `kpi_record` | KPI 定义卡（类型/公式/分子分母/粒度/频率/来源/阈值/责任人/版本）与月度时序 |
 | `strategy_objective` / `objective_process_link` | 年度战略目标与「目标 → 流程 → 可选 KPI」的承接关系 |
 | `process_change_request` | 变更申请：原因/范围、影响分析（人员/系统/数据/权限/控制/培训/KPI）、测试证据、回退方案、审批状态 |
+| `governance_role` / `governance_role_member` | 治理角色（委员会/集团所有者/单元所有者/管家/BPM 办公室/数据所有者/风险法务）与成员 |
+| `raci_assignment` | 事项 × 治理角色 × A/R/C/I；同一事项唯一 A |
+| `data_domain` / `data_flow` | 数据域（所有者/管家）与数据流（来源/主键/频率/质量规则/保留期/跨法人可见性） |
 | `work_measurement_standard` | 标准工时卡：L4 活动 × 岗位 × 方法 × 观测/评定/宽放 × 样本 × 频次 × 验证状态 |
 | `capacity_calendar` | 产能日历：组织 × 岗位 × 期间 × 人数 × 可用工时 × 出勤率 × 设备可用率 |
 | `exception_event` | 异常事件闭环台账 |
@@ -616,7 +620,7 @@ pytest 里检查 import 路径是否存在、十四个视图是否都注册且�
 | GET | `/baselines/{id}/diff` | 基线 vs 当前有效版本：已变更 / 新增 / 已移除 / 未变 |
 | GET | `/baselines/governance` | 治理概览：资产有效性、落后变体、固定旧版交付物、基线覆盖率、模板使用 |
 | GET | `/baselines/findings` | 治理待办清单，支持 status / type 过滤 |
-| POST | `/baselines/audit-scan` | 一致性扫描（MANAGER+）：资产有效性、KPI 数量超限（流程/责任人 > 5） |
+| POST | `/baselines/audit-scan` | 一致性扫描（MANAGER+）：资产有效性、KPI 数量超限（流程/责任人 > 5）、RACI 缺少/重复 A |
 | GET | `/baselines/meta` | 范围与差异状态中文标签 |
 
 ### 流程项目组合
@@ -769,6 +773,28 @@ pytest 里检查 import 路径是否存在、十四个视图是否都注册且�
 | POST | `/changes/{id}/reject` | 驳回（可带原因） |
 | POST | `/changes/{id}/cancel` | 取消 |
 | POST | `/processes/{id}/design/publish` | 启用 `requires_change_request` 的流程必须带 `change_request_id`，发布成功后变更单进入已应用 |
+
+### 治理角色与 RACI
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/governance/meta` | 角色类型与 A/R/C/I 中文标签 |
+| GET/POST | `/governance/roles` | 治理角色清单 / 新建 |
+| PATCH/DELETE | `/governance/roles/{id}` | 修改 / 删除（被 RACI 使用时拒绝） |
+| POST | `/governance/roles/{id}/members` | 添加角色成员（可设主责） |
+| DELETE | `/governance/roles/{id}/members/{member_id}` | 移除成员 |
+| GET | `/governance/raci?process_id=` | 流程权责矩阵（按事项分组，含完整性校验） |
+| POST | `/governance/raci` | 新增/更新一条 RACI；同一事项只能有一个 A |
+| DELETE | `/governance/raci/{id}` | 删除 RACI 记录 |
+
+### 数据治理
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/data-governance/meta` | 数据域类型与提取频率中文标签 |
+| GET | `/data-governance/summary` | 数据域/数据流数量与缺口（无所有者、缺质量规则/来源/主键） |
+| GET/POST | `/data-governance/domains` | 数据域清单 / 新建（必须指定数据所有者） |
+| PATCH/DELETE | `/data-governance/domains/{id}` | 修改 / 删除（仍有数据流时拒绝） |
+| GET/POST | `/data-governance/flows` | 数据流清单 / 新建；支持 domain_id、process_id 过滤 |
+| PATCH/DELETE | `/data-governance/flows/{id}` | 修改 / 删除 |
 
 ### 工作量与产能
 | 方法 | 路径 | 说明 |
@@ -1009,7 +1035,8 @@ OWNER 的归属按 **`owner_user_id` 外键**判断（项目、异常事件与�
 | 运营监控 | 登记异常、处理异常、新建 KPI、录入数据点、红/黄 KPI 转改善项目 | 异常 OWNER+；KPI 与转改善需 MANAGER+ |
 | 知识库 | 新建知识条目 | MANAGER+ |
 | 交付物与模板库 | 上传交付物版本、审批/恢复、新建/上传流程标准文件、审批、复制到项目、项目成果晋升、模板管理 | 交付物与复制跟随项目 Owner；标准文件与模板管理需 MANAGER+ |
-| 组织单元 | 新建/修改/停用组织；新建/编辑人员、分配组织与角色、重置口令 | 仅系统管理员（ADMIN） |
+| 组织单元 | 新建/修改/停用组织；新建/编辑人员、分配组织与角色、重置口令；治理角色与成员 | 仅系统管理员（ADMIN） |
+| 数据治理 | 维护数据域、数据流、所有者和质量规则 | MANAGER+ |
 
 无权限时按钮直接隐藏或禁用，后端仍会独立校验（前端隐藏不等于后端放行）。
 

@@ -11,6 +11,7 @@ from app.models.benchmark import (
     ProcessBenchmarkMap,
 )
 from app.models.change import ProcessChangeRequest
+from app.models.data_governance import DataDomain, DataFlow
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -24,10 +25,13 @@ from app.models.enums import (
     ChangeImpactLevel,
     ChangeStatus,
     ChangeType,
+    DataDomainType,
+    DataFrequency,
     DeliverableStatus,
     DeliverableType,
     ExceptionSeverity,
     ExceptionStatus,
+    GovernanceRoleType,
     ImprovementSource,
     InstanceStatus,
     KnowledgeType,
@@ -39,6 +43,7 @@ from app.models.enums import (
     ProcessDocumentCategory,
     ProcessState,
     ProjectStatus,
+    RaciType,
     ReplicationStatus,
     Role,
     ScopeType,
@@ -78,6 +83,7 @@ from app.models.org import OrgUnit, Position
 from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
@@ -140,6 +146,11 @@ __all__ = [
     "StrategyObjective",
     "ObjectiveProcessLink",
     "ProcessChangeRequest",
+    "GovernanceRole",
+    "GovernanceRoleMember",
+    "RaciAssignment",
+    "DataDomain",
+    "DataFlow",
     # 枚举
     "Methodology",
     "ProjectStatus",
@@ -175,4 +186,8 @@ __all__ = [
     "ChangeStatus",
     "ImprovementSource",
     "ReplicationStatus",
+    "GovernanceRoleType",
+    "RaciType",
+    "DataDomainType",
+    "DataFrequency",
 ]

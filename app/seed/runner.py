@@ -20,6 +20,7 @@ from app.models.benchmark import (
     ProcessBenchmarkMap,
 )
 from app.models.change import ProcessChangeRequest
+from app.models.data_governance import DataDomain, DataFlow
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -58,6 +59,7 @@ from app.models.process import (
 )
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool
@@ -70,8 +72,10 @@ from app.seed import (
     change_data,
     corpus,
     corpus_data,
+    data_governance_data,
     deliverable_data,
     pcf_data,
+    raci_data,
     strategy_data,
     workload_data,
 )
@@ -670,6 +674,96 @@ def _seed_changes(db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, i
     db.flush()
 
 
+def _seed_governance_roles(db: Session, user_ids: Dict[str, int]) -> Dict[str, int]:
+    ids: Dict[str, int] = {}
+    for row in raci_data.GOVERNANCE_ROLES:
+        role = GovernanceRole(
+            code=row["code"],
+            name=row["name"],
+            role_type=row["role_type"],
+            description=row.get("description"),
+            is_active=True,
+        )
+        db.add(role)
+        db.flush()
+        ids[row["code"]] = role.id
+        for member in row.get("members", []):
+            user_id = user_ids.get(member["user"])
+            if not user_id:
+                continue
+            db.add(
+                GovernanceRoleMember(
+                    role_id=role.id,
+                    user_id=user_id,
+                    is_primary=member.get("is_primary", False),
+                )
+            )
+    db.flush()
+    return ids
+
+
+def _seed_raci(db: Session, code_to_id: Dict[str, int], role_ids: Dict[str, int]) -> None:
+    for row in raci_data.RACI_ASSIGNMENTS:
+        process_id = code_to_id.get(row["process"])
+        role_id = role_ids.get(row["role"])
+        if not process_id or not role_id:
+            continue
+        db.add(
+            RaciAssignment(
+                process_id=process_id,
+                matter=row["matter"],
+                role_id=role_id,
+                raci=row["raci"],
+                note=row.get("note"),
+            )
+        )
+    db.flush()
+
+
+def _seed_data_governance(
+    db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]
+) -> None:
+    domain_ids: Dict[str, int] = {}
+    for row in data_governance_data.DATA_DOMAINS:
+        domain = DataDomain(
+            code=row["code"],
+            name=row["name"],
+            domain_type=row["domain_type"],
+            owner_user_id=_owner_user_id(row.get("owner"), user_ids),
+            steward_user_id=_owner_user_id(row.get("steward"), user_ids),
+            description=row.get("description"),
+            is_active=True,
+        )
+        db.add(domain)
+        db.flush()
+        domain_ids[row["code"]] = domain.id
+    for row in data_governance_data.DATA_FLOWS:
+        domain_id = domain_ids.get(row["domain"])
+        if not domain_id:
+            continue
+        db.add(
+            DataFlow(
+                code=row["code"],
+                name=row["name"],
+                domain_id=domain_id,
+                process_id=code_to_id.get(row["process"]) if row.get("process") else None,
+                source_system=row.get("source_system"),
+                target_system=row.get("target_system"),
+                frequency=row.get("frequency", "DAILY"),
+                primary_key=row.get("primary_key"),
+                field_definitions=row.get("field_definitions"),
+                allowed_values=row.get("allowed_values"),
+                quality_rule=row.get("quality_rule"),
+                purpose=row.get("purpose"),
+                retention_period=row.get("retention_period"),
+                cross_legal_visibility=row.get("cross_legal_visibility"),
+                data_subject_rights=row.get("data_subject_rights"),
+                is_active=True,
+            )
+        )
+    db.flush()
+
+
 def _seed_exceptions(
     db: Session,
     code_to_id: Dict[str, int],
@@ -1089,6 +1183,11 @@ def _wipe(db: Session) -> None:
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        DataFlow,
+        DataDomain,
+        RaciAssignment,
+        GovernanceRoleMember,
+        GovernanceRole,
         ObjectiveProcessLink,
         StrategyObjective,
         WorkMeasurementStandard,
@@ -1157,7 +1256,10 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     org_name_ids = {org.name: org.id for org in db.scalars(select(OrgUnit)).all()}
     position_ids = _seed_positions(db, org_ids)
     user_ids = _seed_users(db, org_ids, position_ids)
+    role_ids = _seed_governance_roles(db, user_ids)
     code_to_id = _seed_process_arch(db, user_ids, org_name_ids)
+    _seed_raci(db, code_to_id, role_ids)
+    _seed_data_governance(db, code_to_id, user_ids)
     _seed_workflow(db)
     _seed_tools(db)
     _seed_step_contracts(db)

@@ -273,6 +273,50 @@ class ReplicationStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+class GovernanceRoleType(str, Enum):
+    """治理角色类型；与系统权限角色（ADMIN/MANAGER/OWNER）正交。"""
+
+    COMMITTEE = "COMMITTEE"  # 集团流程治理委员会
+    ENTERPRISE_OWNER = "ENTERPRISE_OWNER"  # 集团端到端流程所有者
+    UNIT_OWNER = "UNIT_OWNER"  # 业务单元/工厂流程所有者
+    STEWARD = "STEWARD"  # 流程管理员/管家
+    BPM_OFFICE = "BPM_OFFICE"  # BPM / 卓越运营办公室
+    DATA_OWNER = "DATA_OWNER"  # 数据所有者/管家
+    RISK_LEGAL = "RISK_LEGAL"  # 风险、法务、财务、内控
+    OTHER = "OTHER"
+
+
+class RaciType(str, Enum):
+    A = "A"  # 唯一负责
+    R = "R"  # 执行
+    C = "C"  # 咨询
+    I = "I"  # 知会  # noqa: E741
+
+
+class DataDomainType(str, Enum):
+    CUSTOMER = "CUSTOMER"
+    SUPPLIER = "SUPPLIER"
+    MATERIAL = "MATERIAL"
+    PROJECT = "PROJECT"
+    ASSET = "ASSET"
+    ORG = "ORG"
+    LEGAL = "LEGAL"
+    PLANT = "PLANT"
+    COST_CENTER = "COST_CENTER"
+    KPI = "KPI"
+    PROCESS = "PROCESS"
+    OTHER = "OTHER"
+
+
+class DataFrequency(str, Enum):
+    REAL_TIME = "REAL_TIME"
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    AD_HOC = "AD_HOC"
+
+
 class ProcessDocumentCategory(str, Enum):
     """流程标准配套文件的分类。"""
 
