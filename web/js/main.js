@@ -19,6 +19,7 @@ import { openNotifications, refreshNotifications } from './core/notifications.js
 
 import * as dashboard from './views/dashboard.js';
 import * as startView from './views/start.js';
+import * as pilotView from './views/pilot.js';
 import * as strategyView from './views/strategy.js';
 import * as mapView from './views/map.js';
 import * as processCardView from './views/process_card.js';
@@ -38,6 +39,7 @@ import * as sketchesView from './views/sketches.js';
 
 register('dashboard', dashboard.renderDashboard);
 register('start', startView.renderStart);
+register('pilot', pilotView.renderPilot);
 register('strategy', strategyView.renderStrategy);
 register('map', mapView.renderMap);
 register('process_card', processCardView.renderProcessCard);

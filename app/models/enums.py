@@ -386,3 +386,41 @@ class BaselineScope(str, Enum):
     ALL = "ALL"
     PROCESS = "PROCESS"
     ORG = "ORG"
+
+
+class PilotPathStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+
+
+class PilotLayerStatus(str, Enum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    BLOCKED = "BLOCKED"
+    DONE = "DONE"
+
+
+class PilotTaskStatus(str, Enum):
+    TODO = "TODO"
+    DOING = "DOING"
+    DONE = "DONE"
+
+
+class PilotIssueStatus(str, Enum):
+    OPEN = "OPEN"
+    INVESTIGATING = "INVESTIGATING"
+    VERIFYING = "VERIFYING"
+    CLOSED = "CLOSED"
+
+
+class PilotPriority(str, Enum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class PilotSeverity(str, Enum):
+    BLOCKER = "BLOCKER"
+    MAJOR = "MAJOR"
+    MINOR = "MINOR"

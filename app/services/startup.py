@@ -325,6 +325,15 @@ def _met(key: str, value: int) -> bool:
     return value == 0 if key in ZERO_IS_GOOD else value > 0
 
 
+def evidence_snapshot(db: Session) -> Dict[str, int]:
+    """供启动页和十层单页复用的证据快照，避免两套口径。"""
+    return _collect_evidence(db)
+
+
+def evidence_met(key: str, value: int) -> bool:
+    return _met(key, value)
+
+
 def _status(started: bool, ready: bool, skipped: bool) -> Tuple[str, str]:
     if skipped:
         return "SKIPPED", "这次先不做（未验证）"

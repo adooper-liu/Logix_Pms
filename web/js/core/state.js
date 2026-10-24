@@ -31,6 +31,7 @@ export const state = {
   dataGov: null,
   processCard: { processId: null },
   start: { data: null },
+  pilot: { pathId: null, layerNo: null, data: null, paths: null, meta: null, users: null },
   execution: { tab: 'tasks', filter: 'open' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
@@ -51,6 +52,7 @@ export const TITLES = {
   strategy: '战略目标',
   data: '数据治理',
   start: '开始使用',
+  pilot: '十层单页',
   process_card: '流程卡',
   authorization: '授权矩阵',
   knowledge: '流程知识库',

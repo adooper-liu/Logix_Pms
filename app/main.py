@@ -34,6 +34,7 @@ SPA_VIEWS = {
     "map",
     "process_card",
     "authorization",
+    "pilot",
     "pcf",
     "workflow",
     "projects",

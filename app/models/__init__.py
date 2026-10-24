@@ -44,6 +44,12 @@ from app.models.enums import (
     Methodology,
     NodeType,
     OrgUnitType,
+    PilotIssueStatus,
+    PilotLayerStatus,
+    PilotPathStatus,
+    PilotPriority,
+    PilotSeverity,
+    PilotTaskStatus,
     ProcessDocumentCategory,
     ProcessState,
     ProjectStatus,
@@ -85,6 +91,7 @@ from app.models.knowledge import KnowledgeItem, KnowledgeTag
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit, Position
+from app.models.pilot import PilotIssue, PilotLayer, PilotPath, PilotTask
 from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
@@ -137,6 +144,10 @@ __all__ = [
     "GovernanceFinding",
     "AuthorizationRule",
     "AuthorizationException",
+    "PilotPath",
+    "PilotLayer",
+    "PilotTask",
+    "PilotIssue",
     "StartupStepSkip",
     "StartupPilotConfirm",
     "ProcessInstance",
@@ -206,6 +217,12 @@ __all__ = [
     "AuthorizationCategory",
     "AuthorizationStatus",
     "AuthorizationExceptionStatus",
+    "PilotPathStatus",
+    "PilotLayerStatus",
+    "PilotTaskStatus",
+    "PilotIssueStatus",
+    "PilotPriority",
+    "PilotSeverity",
     "RaciType",
     "DataDomainType",
     "DataFrequency",

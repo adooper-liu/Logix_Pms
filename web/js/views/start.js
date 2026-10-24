@@ -90,9 +90,9 @@ function statusTag(step) {
   return `<span class="tag ${STATUS_TONE[step.status] || 't-gry'}">${esc(step.status_label)}</span>`;
 }
 
-function currentCard(step) {
+function currentCard(step, flat = false) {
   return `
-    <div class="card start-current">
+    <div class="${flat ? 'start-current start-current-flat' : 'card start-current'}">
       <div class="start-current-hd">
         <div>
           <h3>${esc(step.title)}</h3>
@@ -406,12 +406,21 @@ function paint(data) {
     id: 'q7', no: 'Q7', title: '输出什么', map: '证据地图',
     status: current ? statusTag(current) : '<span class="tag t-grn">全部完成</span>',
     answer: current
-      ? `当前阶段：${esc(current.title)}。下面只展开这一层，其余阶段收起。`
-      : '九个阶段都已具备或标记为本次不做。',
-    extra: current ? '' : completionCard(data),
+      ? `全局证据进度：${esc(current.title)}。这里看的是系统里已有的证据，`
+        + '不是某个试点项目的当前层。'
+      : '全局证据进度：九个阶段都已具备或标记为本次不做。',
+    extra: current
+      ? `<details class="start-subfold" id="pilot-current-stage">
+          <summary><span>展开当前阶段工作区</span>
+            <span class="tiny muted">${esc(current.title)} · ${esc(current.status_label)}</span>
+          </summary>
+          ${currentCard(current, true)}
+        </details>`
+      : completionCard(data),
     actions: current
       ? '<button class="btn btn-g" data-act="start.jump" data-target="q8">看退出门和下一步</button>'
-      : '',
+        + viewButton('打开十层单页', 'pilot')
+      : viewButton('打开十层单页', 'pilot'),
   });
 
   const gateStatus = data.pilot_confirmed
@@ -422,7 +431,7 @@ function paint(data) {
   const q8 = questionCard({
     id: 'q8', no: 'Q8', title: '下一步', map: '下一层地图', status: gateStatus,
     answer: current
-      ? `当前阶段退出门：${esc(current.exit_criteria)}`
+      ? `全局证据阶段退出门：${esc(current.exit_criteria)}`
       : '前 8 个阶段已齐，确认上线后进入日常运营。',
     extra: `${current && current.next_hint ? `<div class="note mb">${esc(current.next_hint)}</div>` : ''}
       ${data.skipped_count
@@ -457,11 +466,12 @@ function paint(data) {
   const gateCard = pilotGateCard(data);
   const aside = `
     <div class="card start-aside-card">
-      <div class="tiny muted">当前落在哪一层</div>
+      <div class="tiny muted">全局证据进度（不是项目当前层）</div>
       <h3>${current ? esc(shortTitle(current)) : '已完成'}</h3>
       <div class="gap">${current ? statusTag(current) : ''}
         ${current && current.estimated ? `<span class="tag t-blu">预计 ${esc(current.estimated)}</span>` : ''}</div>
-      <button class="btn-sm mt" data-act="start.jump" data-target="q7">看当前阶段</button>
+      <button class="btn-sm mt" data-act="start.openCurrentStage">展开当前阶段</button>
+      <div class="tiny muted mt">项目当前层在「十层单页」里看。</div>
     </div>
     ${gateCard || `
       <div class="card start-aside-card">
@@ -516,7 +526,6 @@ function paint(data) {
         ${blockHeader('执行层', '逐层推进', '定方法、留证据、过退出门')}
         ${railCard}
         ${q6}${q7}
-        ${current ? currentCard(current) : ''}
         ${q8}
         ${doneList(done)}${upcomingList(upcoming)}
       </main>
@@ -529,7 +538,18 @@ function paint(data) {
 on('start.go', ({ view }) => go(view));
 
 on('start.jump', ({ target }) => {
+  if (target === 'q7') {
+    const details = document.getElementById('pilot-current-stage');
+    if (details) details.open = true;
+  }
   const el = document.getElementById(target);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+on('start.openCurrentStage', () => {
+  const details = document.getElementById('pilot-current-stage');
+  if (details) details.open = true;
+  const el = document.getElementById('q7');
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 

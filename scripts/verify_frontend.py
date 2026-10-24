@@ -28,6 +28,7 @@ VIEWS = [
     ("map", "企业流程地图"),
     ("process_card", "流程卡"),
     ("authorization", "授权矩阵"),
+    ("pilot", "十层单页"),
     ("workflow", "五阶段标准工作流"),
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
@@ -1898,6 +1899,8 @@ def main() -> int:
             assert page.locator("#view .start-q").count() == 8, "开始页不是八问"
             for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
                 assert marker in view, f"开始页缺少「{marker}」"
+            assert "全局证据进度" in view, "Q7 没有标明全局证据进度"
+            assert "不是某个试点项目的当前层" in view, "Q7 没有区分项目当前层"
             gate = page.evaluate(
                 """async () => {
                     const token = localStorage.getItem('psm_token');
@@ -1923,6 +1926,12 @@ def main() -> int:
             assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
 
             if has_current:
+                page.click('#view button[data-act="start.openCurrentStage"]')
+                page.wait_for_timeout(300)
+                assert page.locator("#view details#pilot-current-stage").evaluate(
+                    "el => el.open"
+                ), "右侧「展开当前阶段」没有打开 Q7 工作区"
+                view = page.inner_text("#view")
                 assert "这一步要留下什么" in view, "启动向导缺少证据面板"
                 assert "已经有的" in view and ("还缺的" in view or "有更好" in view), (
                     "证据面板缺少缺项"
@@ -2022,6 +2031,46 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert "自检用例外" in page.inner_text("#view"), "例外行不见了"
             assert "已批准" in page.inner_text("#view"), "例外未批准"
+
+        def pilot_view() -> None:
+            goto("pilot")
+            page.wait_for_timeout(1200)
+            assert "十层单页" in page.inner_text("#view"), "十层单页未渲染"
+
+            page.click('#view button:has-text("+ 新建试点路径")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#plName", "自检用十层路径")
+            options = page.eval_on_selector_all(
+                "#plProcess option", "els => els.map(e => e.value).filter(Boolean)"
+            )
+            assert options, "没有可选的 L3/L4 流程"
+            page.select_option("#plProcess", value=options[0])
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1400)
+            view = page.inner_text("#view")
+            assert "自检用十层路径" in view, "试点路径未创建"
+            assert page.locator("#view .pilot-layer").count() == 10, "十层导航不完整"
+
+            page.click('#view .pilot-layer[data-layer="4"]')
+            page.wait_for_timeout(900)
+            view = page.inner_text("#view")
+            assert "制度与授权设计" in view and "退出门" in view, "第4层工作区未展开"
+
+            page.click('#view button:has-text("+ 新增待办")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#ptTitle", "自检用待办")
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1200)
+            assert "自检用待办" in page.inner_text("#view"), "待办未出现"
+
+            page.click('#view button:has-text("+ 新增异常")')
+            page.wait_for_selector("#mask.show")
+            page.fill("#piTitle", "自检用阻断异常")
+            page.select_option("#piSeverity", "BLOCKER")
+            page.click('#mFoot button:has-text("创建")')
+            page.wait_for_timeout(1200)
+            assert "自检用阻断异常" in page.inner_text("#view"), "异常未出现"
+            assert "被阻断" in page.inner_text("#view"), "阻断异常未让本层变为被阻断"
 
         # 指标口径：页面上必须有可悬停的说明
         def metric_help() -> None:
@@ -2292,6 +2341,7 @@ def main() -> int:
         check("开始使用九步向导", start_view)
         check("流程卡聚合视图", process_card_view)
         check("授权矩阵与例外台账", authorization_view)
+        check("十层单页与第4层工作区", pilot_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
         check("工作流步骤详情", workflow_step_modal)
@@ -2380,6 +2430,13 @@ def main() -> int:
                       method: 'POST', headers: h,
                     });
                     out.push('standard:' + s.code);
+                  }
+                }
+                const pilotPaths = await fetch('/api/v1/pilot/paths', { headers: h }).then(r => r.json());
+                for (const p of pilotPaths) {
+                  if (p.name.includes('自检用')) {
+                    await fetch('/api/v1/pilot/paths/' + p.id, { method: 'DELETE', headers: h });
+                    out.push('pilot-path:' + p.name);
                   }
                 }
                 return out;

@@ -23,6 +23,7 @@ from app.api.v1 import (
     monitor,
     notifications,
     orgs,
+    pilot,
     positions,
     process_card,
     process_documents,
@@ -75,6 +76,7 @@ protected.include_router(raci.router)
 protected.include_router(authorization.router)
 protected.include_router(data_governance.router)
 protected.include_router(startup.router)
+protected.include_router(pilot.router)
 protected.include_router(knowledge.router)
 api_router.include_router(protected)
 
