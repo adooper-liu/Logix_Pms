@@ -1,14 +1,27 @@
 /* 视图：monitor */
 import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS } from '../core/router.js';
+import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PATCH } from '../core/api.js';
 
 /* ============================================================ 7. 运营监控与KPI */
+
+on('monitor.tab', ({ tab }) => setMonitorTab(tab));
+on('monitor.status', (_data, el) => setMonitorStatus(el.value));
+on('monitor.openException', ({ id }) => openException(Number(id)));
+on('monitor.newException', () => newExceptionModal());
+on('monitor.newKpi', () => newKpiModal());
+on('monitor.close', () => closeModal());
+on('monitor.saveException', ({ id }) => saveException(Number(id)));
+on('monitor.submitException', () => submitException());
+on('monitor.submitKpi', () => submitKpi());
+on('monitor.addRecord', ({ kpi, name }) => addKpiRecordModal(Number(kpi), name));
+on('monitor.submitRecord', ({ kpi }) => submitKpiRecord(Number(kpi)));
+on('monitor.goExecution', () => go('execution'));
 
 const renderMonitor = () => {
   const qs = state.monitor.status ? '?status=' + state.monitor.status : '';
@@ -65,8 +78,8 @@ const renderMonitor = () => {
                 + (delta > 0 ? '↑ ' : delta < 0 ? '↓ ' : '→ ') + num(Math.abs(delta), 2) + '</span>'}</td>
             <td><canvas class="spark" width="110" height="26" data-spark="${series.kpi_id}"></canvas></td>
             <td>${canManage()
-              ? '<button class="btn-sm" onclick="addKpiRecordModal(' + series.kpi_id + ', \''
-                + esc(series.name).replace(/'/g, '') + '\')">录入</button>'
+              ? `<button class="btn-sm" data-act="monitor.addRecord" data-kpi="${series.kpi_id}"
+                data-name="${esc(series.name)}">录入</button>`
               : ''}</td>
           </tr>`;
       }).join('') || emptyRow(7, '暂无 KPI');
@@ -76,8 +89,10 @@ const renderMonitor = () => {
         .sort((a, b) => a.reach - b.reach)
         .slice(0, 5);
       const quickRows = quick.map(({ series, latest, reach }) => `
-        <tr class="clk" onclick="setMonitorTab('kpi')">
-          <td><b>${esc(series.name)}</b><div class="tiny">${esc(series.code)}</div></td>
+        <tr class="clk">
+          <td><button class="project-open" type="button" data-act="monitor.tab"
+              data-tab="kpi"><b>${esc(series.name)}</b></button>
+            <div class="tiny">${esc(series.code)}</div></td>
           <td>${num(latest, 2)} ${esc(series.unit || '')}</td>
           <td class="muted">${num(series.target_value, 2)}</td>
           <td>${bar(Math.min(reach, 130), null, 80)}</td>
@@ -94,7 +109,8 @@ const renderMonitor = () => {
           <td><span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span></td>
           <td>${e.owner ? esc(e.owner) : '<span class="muted">未指派</span>'}</td>
           <td><span class="tag ${EXC_COLOR[e.status]}">${EXC_LABEL[e.status]}</span></td>
-          <td><button class="btn-sm" onclick="openException(${e.id})">${canEdit ? '处理' : '查看'}</button></td>
+          <td><button class="btn-sm" data-act="monitor.openException"
+            data-id="${e.id}">${canEdit ? '处理' : '查看'}</button></td>
         </tr>`;
       }).join('') || emptyRow(6, '没有符合条件的异常事件');
 
@@ -102,12 +118,12 @@ const renderMonitor = () => {
         .filter((e) => e.status === 'OPEN' || e.status === 'IN_PROGRESS')
         .slice(0, 3);
       const recentRows = recent.map((e) => `
-        <div class="alert-row" onclick="openException(${e.id})">
+        <button class="alert-row" type="button" data-act="monitor.openException" data-id="${e.id}">
           <span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span>
           <div class="alert-main"><b>${esc(e.title)}</b>
             <div class="tiny">${esc(e.owner || '未指派')}${e.is_overdue ? ' · 已超期' : ''}</div></div>
           <span class="alert-go">›</span>
-        </div>`).join('') || '<div class="empty">没有未闭环异常</div>';
+        </button>`).join('') || '<div class="empty">没有未闭环异常</div>';
 
       const periods = (d.radar.series.find((series) => series.points.length) || { points: [] })
         .points.map((p) => p.period);
@@ -133,9 +149,9 @@ const renderMonitor = () => {
 
       const tabs = `
         <div class="seg">
-          <button class="${tab === 'overview' ? 'on' : ''}" onclick="setMonitorTab('overview')">概览</button>
-          <button class="${tab === 'kpi' ? 'on' : ''}" onclick="setMonitorTab('kpi')">KPI 明细</button>
-          <button class="${tab === 'exceptions' ? 'on' : ''}" onclick="setMonitorTab('exceptions')">异常台账</button>
+          <button class="${tab === 'overview' ? 'on' : ''}" data-act="monitor.tab" data-tab="overview">概览</button>
+          <button class="${tab === 'kpi' ? 'on' : ''}" data-act="monitor.tab" data-tab="kpi">KPI 明细</button>
+          <button class="${tab === 'exceptions' ? 'on' : ''}" data-act="monitor.tab" data-tab="exceptions">异常台账</button>
         </div>`;
 
       const overview = `
@@ -154,7 +170,7 @@ const renderMonitor = () => {
             <div class="between mb">
               <div><h3 style="margin:0">异常概览</h3>
                 <div class="desc" style="margin:2px 0 0">未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
-              <a class="link-btn" onclick="setMonitorTab('exceptions')">全部台账 →</a>
+              <a class="link-btn" data-act="monitor.tab" data-tab="exceptions">全部台账 →</a>
             </div>
             <div class="kpi-strip">
               <div><b>${s.open + s.in_progress}</b><span>${metricHelp('open_exceptions', '未闭环')}</span></div>
@@ -174,7 +190,7 @@ const renderMonitor = () => {
             <div class="between mb">
               <div><h3 style="margin:0">${metricHelp('achievement_rate', '最弱 5 项')}</h3>
                 <div class="desc" style="margin:2px 0 0">按达成率从低到高，优先处理</div></div>
-              <a class="link-btn" onclick="setMonitorTab('kpi')">全部 ${d.radar.series.length} 项 →</a>
+              <a class="link-btn" data-act="monitor.tab" data-tab="kpi">全部 ${d.radar.series.length} 项 →</a>
             </div>
             <table class="tbl">
               <thead><tr><th>指标</th><th>${metricHelp('latest_value', '当前值')}</th><th>${metricHelp('target_value', '目标')}</th><th>${metricHelp('achievement_rate', '达成率')}</th></tr></thead>
@@ -201,7 +217,7 @@ const renderMonitor = () => {
           <div class="between mb">
             <div><h3 style="margin:0">异常事件台账</h3>
               <div class="desc" style="margin:2px 0 0">闭环管理：登记 → 处理 → 解决 → 关闭</div></div>
-            <select class="sel" onchange="setMonitorStatus(this.value)">
+            <select class="sel" data-act="monitor.status">
               <option value="">全部状态</option>
               ${['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((v) =>
                 '<option value="' + v + '"' + (state.monitor.status === v ? ' selected' : '') + '>' +
@@ -221,9 +237,9 @@ const renderMonitor = () => {
               <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
                 · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
             <div class="gap">
-              <a class="link-btn" onclick="go('execution')">任务队列 →</a>
-              ${canWrite() ? '<button class="btn btn-p" onclick="newExceptionModal()">+ 登记异常</button>' : ''}
-              ${canManage() ? '<button class="btn btn-g" onclick="newKpiModal()">+ 新建 KPI</button>' : ''}
+              <a class="link-btn" data-act="monitor.goExecution">任务队列 →</a>
+              ${canWrite() ? '<button class="btn btn-p" data-act="monitor.newException">+ 登记异常</button>' : ''}
+              ${canManage() ? '<button class="btn btn-g" data-act="monitor.newKpi">+ 新建 KPI</button>' : ''}
             </div>
           </div>
           <div class="mt">${tabs}</div>
@@ -485,8 +501,8 @@ async function openException(id) {
       ${e.resolved_at ? '<div class="note">解决时间：' + esc(dtShort(e.resolved_at)) +
         (e.closed_at ? ' · 关闭时间：' + esc(dtShort(e.closed_at)) : '') + '</div>' : ''}
       ${canEdit ? '' : '<div class="note">只读：仅流程管理科、系统管理员或该异常的责任人可以处理。</div>'}`,
-      `<button class="btn btn-g" onclick="closeModal()">${canEdit ? '取消' : '关闭'}</button>
-       ${canEdit ? '<button class="btn btn-p" onclick="saveException(' + e.id + ')">保存</button>' : ''}`);
+      `<button class="btn btn-g" data-act="monitor.close">${canEdit ? '取消' : '关闭'}</button>
+       ${canEdit ? `<button class="btn btn-p" data-act="monitor.saveException" data-id="${e.id}">保存</button>` : ''}`);
   } catch (err) {
     if (modalAlive(gen)) openModal('加载失败', '<div class="errbar"><div>' + esc(err.message) + '</div></div>');
   }
@@ -531,8 +547,8 @@ async function newExceptionModal() {
     <div class="field"><label>关联流程</label>
       <select id="neProcess"><option value="">不关联</option></select></div>
     <div class="note">要求闭环时间会按浏览器本地时区提交，后端统一转成 UTC 存储。</div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitException()">登记</button>`);
+    `<button class="btn btn-g" data-act="monitor.close">取消</button>
+     <button class="btn btn-p" data-act="monitor.submitException">登记</button>`);
 
   try {
     const rows = await GET('/process-map/flat');
@@ -611,8 +627,8 @@ function newKpiModal() {
       <div class="field"><label>责任人</label><input id="nkOwner" placeholder="指标 Owner"></div>
       <div class="field"><label>统计口径说明</label><input id="nkDesc" placeholder="数据怎么来的"></div>
     </div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitKpi()">创建</button>`);
+    `<button class="btn btn-g" data-act="monitor.close">取消</button>
+     <button class="btn btn-p" data-act="monitor.submitKpi">创建</button>`);
 
   GET('/process-map/flat').then((rows) => {
     const sel = document.getElementById('nkProcess');
@@ -669,8 +685,8 @@ function addKpiRecordModal(kpiId, kpiName) {
       <div class="field"><label>数值 *</label><input id="nrValue" type="number" step="0.01"></div>
     </div>
     <div class="field"><label>备注</label><input id="nrNote" placeholder="如：口径调整 / 异常月份"></div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitKpiRecord(${kpiId})">保存</button>`);
+    `<button class="btn btn-g" data-act="monitor.close">取消</button>
+     <button class="btn btn-p" data-act="monitor.submitRecord" data-kpi="${kpiId}">保存</button>`);
 }
 
 async function submitKpiRecord(kpiId) {
@@ -696,4 +712,4 @@ async function submitKpiRecord(kpiId) {
 }
 
 
-export { renderMonitor, addKpiRecordModal, drawOverallTrend, drawRadar, drawSpark, newExceptionModal, newKpiModal, openException, saveException, setMonitorStatus, setMonitorTab, submitException, submitKpi, submitKpiRecord };
+export { renderMonitor, drawOverallTrend, drawRadar, drawSpark };

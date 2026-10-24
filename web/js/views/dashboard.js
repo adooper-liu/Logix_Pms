@@ -1,13 +1,28 @@
 /* 视图：dashboard */
 import { esc, num, M_ICON, methodTag, statusTag, bar, emptyRow, HEAT_CLASS, HEAT_LABEL } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
-import { viewEl } from '../core/ui.js';
+import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go } from '../core/router.js';
 import { GET } from '../core/api.js';
 import { openProject } from './projects.js';
 
 /* ============================================================ 1. 管理驾驶舱 */
+
+on('dashboard.kpi', ({ key }) => {
+  if (key === 'active_projects') openProjects({ status: 'ACTIVE' });
+  else if (key === 'improvement_targets') openImprovementMap();
+  else if (key === 'open_exceptions') openExceptions();
+  else openProjects();
+});
+on('dashboard.stage', ({ stage }) => openStage(Number(stage)));
+on('dashboard.methodology', ({ methodology }) => openMethodology(methodology));
+on('dashboard.openProject', ({ id }) => openProject(Number(id)));
+on('dashboard.openProcess', ({ code }) => openProcessOnMap(code));
+on('dashboard.go', ({ view }) => go(view));
+on('dashboard.goImprovementMap', () => openImprovementMap());
+on('dashboard.goExceptions', () => openExceptions());
+on('dashboard.goProjects', () => go('projects'));
 
 const METHOD_COLOR = {
   BPR: 'var(--bad)', BPI: 'var(--warn-strong)', LEAN: 'var(--ok-strong)', HYBRID: 'var(--purple-strong)',
@@ -25,12 +40,6 @@ const renderDashboard = () => renderAsync('dashboard',
     const primary = ['active_projects', 'improvement_targets', 'open_exceptions', 'avg_improvement']
       .map((key) => byKey[key]).filter(Boolean);
     const tone = { NORMAL: '', WATCH: 'is-watch', RISK: 'is-risk' };
-    const kpiAction = {
-      active_projects: "openProjects({status:'ACTIVE'})",
-      improvement_targets: 'openImprovementMap()',
-      open_exceptions: 'openExceptions()',
-      avg_improvement: 'openProjects()',
-    };
     const kpiInfo = {
       active_projects: {
         icon: '▦', tone: 'brand',
@@ -53,7 +62,7 @@ const renderDashboard = () => renderAsync('dashboard',
       const info = kpiInfo[c.key] || { icon: '·', tone: 'brand', sub: '' };
       return `
       <a class="kpi stat clickable ${tone[c.status] || ''}" href="#"
-         onclick="${kpiAction[c.key] || 'openProjects()'};return false">
+         data-act="dashboard.kpi" data-key="${esc(c.key)}">
         <div class="glow ${info.tone}"></div>
         <div class="row">
           <div class="ico ${info.tone}">${info.icon}</div>
@@ -70,7 +79,7 @@ const renderDashboard = () => renderAsync('dashboard',
     const stages = d.stage_health.map((s) => {
       const pct = s.project_count ? s.avg_progress : null;
       return `
-      <a class="stage-row clickable" href="#" onclick="openStage(${s.stage_no});return false">
+      <a class="stage-row clickable" href="#" data-act="dashboard.stage" data-stage="${s.stage_no}">
         <div class="stagebar">
           <span class="nm">${metricHelp('stage_progress', '阶段' + s.stage_no)}</span>
           <span class="bar"><i class="fill-${s.health === 'RISK' ? 'bad' : s.health === 'WATCH' ? 'warn' : 'brand'}"
@@ -84,7 +93,8 @@ const renderDashboard = () => renderAsync('dashboard',
     }).join('');
 
     const methods = d.methodology_distribution.map((m) => `
-      <a class="method-item" href="#" onclick="openMethodology('${m.methodology}');return false">
+      <a class="method-item" href="#" data-act="dashboard.methodology"
+        data-methodology="${esc(m.methodology)}">
         <span class="sw" style="background:${METHOD_COLOR[m.methodology] || 'var(--brand)'}"></span>
         <span>${M_ICON[m.methodology] || ''} ${esc(m.label)}</span>
         <b>${m.count} · ${num(m.share * 100, 0)}%</b>
@@ -103,8 +113,9 @@ const renderDashboard = () => renderAsync('dashboard',
            <div class="donut-hole"><b>0</b><span>项目</span></div></div>`;
 
     const board = d.project_board.map((p) => `
-      <tr class="clk" onclick="openProject(${p.id})">
-        <td><b>${esc(p.name)}</b>
+      <tr class="clk">
+        <td><button class="project-open" type="button" data-act="dashboard.openProject"
+            data-id="${p.id}"><b>${esc(p.name)}</b></button>
           <div class="tiny">${esc(p.code)} · Owner: ${esc(p.owner)}${
             p.is_overdue ? ' · <span style="color:var(--bad)">已超期</span>' : ''}</div></td>
         <td>${methodTag(p.methodology, state.meta.methodology[p.methodology])}</td>
@@ -115,8 +126,9 @@ const renderDashboard = () => renderAsync('dashboard',
       </tr>`).join('') || emptyRow(5, '当前没有在办项目');
 
     const priorityRows = priority.map((p) => `
-      <tr class="clk" onclick="openProcessOnMap('${esc(p.code)}')">
-        <td><b>${esc(p.name)}</b>
+      <tr class="clk">
+        <td><button class="project-open" type="button" data-act="dashboard.openProcess"
+            data-code="${esc(p.code)}"><b>${esc(p.name)}</b></button>
           <div class="tiny">${esc(p.code)} · Owner: ${esc(p.owner || '未指定')}</div></td>
         <td><span class="tag ${HEAT_CLASS[p.heat_level] || 'heat-low'}">
           ${HEAT_LABEL[p.heat_level] || p.heat_level} ${num(p.priority_score, 0)}</span></td>
@@ -126,13 +138,14 @@ const renderDashboard = () => renderAsync('dashboard',
       </tr>`).join('') || emptyRow(4, '暂无待改善流程');
 
     const alerts = d.health_alerts.slice(0, 4).map((a) => `
-      <div class="alert-row ${a.level === 'HIGH' ? 'ri-high' : 'ri-medium'}" onclick="go('map')">
+      <button class="alert-row ${a.level === 'HIGH' ? 'ri-high' : 'ri-medium'}"
+        type="button" data-act="dashboard.go" data-view="map">
         <span class="tag ${a.level === 'HIGH' ? 't-red' : 't-yel'}">
           ${a.health_score === null ? '—' : num(a.health_score, 0)}</span>
         <div class="alert-main"><b>${esc(a.name)}</b>
           <div class="tiny">${esc(a.reason)}</div></div>
         <span class="alert-go">›</span>
-      </div>`).join('') || '<div class="empty">暂无健康度预警</div>';
+      </button>`).join('') || '<div class="empty">暂无健康度预警</div>';
 
     const es = d.exception_summary;
     const meta = `${metricHelp('closed_this_year', '今年结项')} <b>${num(byKey.closed_this_year ? byKey.closed_this_year.value : 0, 0)}</b>
@@ -143,24 +156,24 @@ const renderDashboard = () => renderAsync('dashboard',
         <div class="between">
           <div><h2>管理驾驶舱<span class="module-badge">全局概览</span></h2>
             <div class="desc">先看需要关注的事，再看项目推进</div></div>
-          <a class="link-btn" onclick="go('projects')">项目组合 →</a>
+          <a class="link-btn" data-act="dashboard.goProjects">项目组合 →</a>
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
         <div class="mainline">
-          <a class="mainline-step" onclick="go('map')"><b>1</b>流程地图</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="map"><b>1</b>流程地图</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('projects')"><b>2</b>项目组合</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="projects"><b>2</b>项目组合</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('workflow')"><b>3</b>方法手册</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="workflow"><b>3</b>方法手册</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('designer')"><b>4</b>设计器</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="designer"><b>4</b>设计器</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('execution')"><b>5</b>流程执行</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="execution"><b>5</b>流程执行</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('monitor')"><b>6</b>运营监控</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="monitor"><b>6</b>运营监控</a>
           <span class="mainline-arrow">→</span>
-          <a class="mainline-step" onclick="go('knowledge')"><b>7</b>知识库</a>
+          <a class="mainline-step" data-act="dashboard.go" data-view="knowledge"><b>7</b>知识库</a>
         </div>
       </div>
 
@@ -175,15 +188,16 @@ const renderDashboard = () => renderAsync('dashboard',
           <div class="between mb">
             <div><h3 style="margin:0">${metricHelp('health_alert', '风险提醒')}</h3>
               <div class="desc" style="margin:2px 0 0">健康度低于 70 分或痛点 ≥ 4</div></div>
-            <a class="link-btn" onclick="go('map')">流程地图 →</a>
+            <a class="link-btn" data-act="dashboard.go" data-view="map">流程地图 →</a>
           </div>
           ${alerts}
-          <div class="alert-row ri-bad" onclick="go('monitor')">
+          <button class="alert-row ri-bad" type="button"
+            data-act="dashboard.go" data-view="monitor">
             <span class="tag t-red">${es.open + es.in_progress}</span>
             <div class="alert-main"><b>${metricHelp('open_exceptions', '未闭环异常')}</b>
               <div class="tiny">超期 ${es.overdue} · 已闭环 ${es.resolved + es.closed}</div></div>
             <span class="alert-go">›</span>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -205,7 +219,7 @@ const renderDashboard = () => renderAsync('dashboard',
           <div class="between mb">
             <div><h3 style="margin:0">改善优先级</h3>
               <div class="desc" style="margin:2px 0 0">该改什么 · L3 流程综合得分 Top 5</div></div>
-            <a class="link-btn" onclick="openImprovementMap()">进入地图 →</a>
+            <a class="link-btn" data-act="dashboard.goImprovementMap">进入地图 →</a>
           </div>
           <table class="tbl">
             <thead><tr><th>流程</th><th>优先级</th><th>${metricHelp('health_score', '健康度')}</th><th>项目</th></tr></thead>
@@ -217,7 +231,7 @@ const renderDashboard = () => renderAsync('dashboard',
           <div class="between mb">
             <div><h3 style="margin:0">重点项目</h3>
               <div class="desc" style="margin:2px 0 0">正在做什么 · 在办项目推进情况</div></div>
-            <a class="link-btn" onclick="go('projects')">查看全部 →</a>
+            <a class="link-btn" data-act="dashboard.goProjects">查看全部 →</a>
           </div>
           <table class="tbl">
             <thead><tr><th>项目</th><th>方法</th><th>当前阶段</th>
@@ -262,4 +276,4 @@ function openProcessOnMap(code) {
   go('map');
 }
 
-export { renderDashboard, openExceptions, openImprovementMap, openMethodology, openProcessOnMap, openProjects, openStage };
+export { renderDashboard };

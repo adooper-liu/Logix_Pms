@@ -1508,7 +1508,7 @@ def main() -> int:
             assert page.locator("#view select").nth(1).input_value() == "1"
 
             goto("dashboard")
-            page.click("#view .card:has(h3:has-text('改善优先级')) tbody tr >> nth=0")
+            page.click("#view .card:has(h3:has-text('改善优先级')) .project-open >> nth=0")
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "企业流程地图"
             page.wait_for_selector("#mask.show")

@@ -1,12 +1,36 @@
 /* 视图：workflow */
 import { esc, CAT_ICON, methodTag, skeleton, TOOL_LEVEL_TONE } from '../core/format.js';
-import { openModal, closeModal, viewEl } from '../core/ui.js';
+import { openModal, closeModal, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
+import { openTemplateCopy } from '../core/template-copy.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 3. 五阶段标准工作流 */
+
+on('workflow.stage', ({ stage }) => setWfStage(Number(stage)));
+on('workflow.step', ({ step }) => openWfStep(step));
+on('workflow.tab', ({ tab }) => setWfTab(tab));
+on('workflow.recommend', () => runRecommend('rcResult'));
+on('workflow.goProjects', () => go('projects'));
+on('workflow.close', () => closeModal());
+on('workflow.toolboxStep', () => {
+  closeModal();
+  openToolboxForStep();
+});
+on('workflow.goDeliverables', () => {
+  closeModal();
+  go('deliverables');
+});
+on('workflow.copyTemplate', ({ id }) => {
+  closeModal();
+  openTemplateCopy(Number(id));
+});
+on('workflow.openTool', ({ code }) => {
+  closeModal();
+  openToolByCode(code);
+});
 
 const STAGE_COLORS = [
   'var(--stage-1)', 'var(--stage-2)', 'var(--stage-3)', 'var(--stage-4)', 'var(--stage-5)',
@@ -24,14 +48,14 @@ const renderWorkflow = () => renderAsync('workflow',
 
     const pills = stages.map((s, i) => `
       <button class="stage-pill${s.stage_no === current.stage_no ? ' on' : ''}"
-              style="--pill:${STAGE_COLORS[i]}" onclick="setWfStage(${s.stage_no})">
+              style="--pill:${STAGE_COLORS[i]}" data-act="workflow.stage" data-stage="${s.stage_no}">
         <b>阶段${s.stage_no}</b><span>${esc(s.stage_name)}</span>
         <em>${s.steps.length} 步</em>
       </button>`).join('');
 
     const steps = current.steps.map((st) => `
-      <div class="step wf-step" style="--step-color:${stageColor};border-left-color:${stageColor}"
-           onclick="openWfStep('${st.step_no}')">
+      <button class="step wf-step" type="button" style="--step-color:${stageColor};border-left-color:${stageColor}"
+           data-act="workflow.step" data-step="${esc(st.step_no)}">
         <div class="wf-step-hd">
           <span class="wf-step-no" style="background:linear-gradient(135deg,${stageColor},var(--brand2))">
             ${esc(st.step_no)}</span>
@@ -39,7 +63,7 @@ const renderWorkflow = () => renderAsync('workflow',
         </div>
         <span>${esc(st.deliverables)}</span>
         ${st.tools ? `<div class="wf-step-tools">推荐工具：${esc(st.tools)}</div>` : ''}
-      </div>`).join('');
+      </button>`).join('');
 
     const stepsPane = `
       <div class="stage-pills">${pills}</div>
@@ -60,7 +84,7 @@ const renderWorkflow = () => renderAsync('workflow',
           <span class="dot"></span><h3>阶段${current.stage_no} 步骤清单</h3>
           <div class="sp"></div>
           <span class="tiny">${current.steps.length} 个步骤 · 点击查看方法、工具与交付物</span>
-          <a class="link-btn" style="margin-left:10px" onclick="setWfTab('method')">方法论匹配 →</a>
+          <a class="link-btn" style="margin-left:10px" data-act="workflow.tab" data-tab="method">方法论匹配 →</a>
         </div>
         <div class="wf-grid">${steps}</div>
       </section>`;
@@ -109,7 +133,7 @@ const renderWorkflow = () => renderAsync('workflow',
           <div class="field"><label>计划周期（月）</label>
             <input id="rcDur" type="number" value="6" min="1" max="36"></div>
         </div>
-        <button class="btn btn-p" id="rcBtn" onclick="runRecommend('rcResult')">运行匹配引擎</button>
+        <button class="btn btn-p" id="rcBtn" data-act="workflow.recommend">运行匹配引擎</button>
         <div id="rcResult" class="mt"></div>
       </div>`;
 
@@ -119,13 +143,13 @@ const renderWorkflow = () => renderAsync('workflow',
           <div><h2>五阶段标准工作流<span class="module-badge">方法手册 · 教学引导</span></h2>
             <div class="desc">全公司共用的方法手册 · ${total} 个标准步骤；项目实际进度请在「流程项目组合」里推进</div></div>
           <div class="seg">
-            <button class="${wf.tab === 'steps' ? 'on' : ''}" onclick="setWfTab('steps')">五阶段步骤</button>
-            <button class="${wf.tab === 'method' ? 'on' : ''}" onclick="setWfTab('method')">方法论匹配</button>
+            <button class="${wf.tab === 'steps' ? 'on' : ''}" data-act="workflow.tab" data-tab="steps">五阶段步骤</button>
+            <button class="${wf.tab === 'method' ? 'on' : ''}" data-act="workflow.tab" data-tab="method">方法论匹配</button>
           </div>
         </div>
       </div>
       <div class="note mt">这是教学与方法手册，不跟踪具体项目。项目立项后，24 步实例在
-        <a class="link" onclick="go('projects')">流程项目组合</a> 的项目详情里推进。</div>
+        <a class="link" data-act="workflow.goProjects">流程项目组合</a> 的项目详情里推进。</div>
       ${wf.tab === 'method' ? methodPane : stepsPane}`;
   });
 
@@ -156,9 +180,9 @@ function openWfStep(stepNo) {
     <div class="field"><label>所属阶段</label>
       <input value="阶段${found.stage_no}" readonly></div>
     <div id="wfRec">${skeleton(3)}</div>`,
-    `<button class="btn btn-g" onclick="closeModal()">关闭</button>
-     <button class="btn btn-g" onclick="closeModal();openToolboxForStep()">去工具箱看推荐工具</button>
-     <button class="btn btn-p" onclick="closeModal();go('deliverables')">去模板库</button>`, true);
+    `<button class="btn btn-g" data-act="workflow.close">关闭</button>
+     <button class="btn btn-g" data-act="workflow.toolboxStep">去工具箱看推荐工具</button>
+     <button class="btn btn-p" data-act="workflow.goDeliverables">去模板库</button>`, true);
   paintStepRecommendations(stepNo);
 }
 
@@ -188,10 +212,10 @@ async function paintStepRecommendations(stepNo) {
     box.innerHTML = renderStepRecommendations(rec);
     const foot = document.getElementById('mFoot');
     if (foot && rec.tools.length) {
-      foot.innerHTML = `<button class="btn btn-g" onclick="closeModal()">关闭</button>
-        <button class="btn btn-g" onclick="closeModal();openToolboxForStep()">
+      foot.innerHTML = `<button class="btn btn-g" data-act="workflow.close">关闭</button>
+        <button class="btn btn-g" data-act="workflow.toolboxStep">
           去工具箱（只看本步骤 ${rec.tools.length} 个推荐工具）</button>
-        <button class="btn btn-p" onclick="closeModal();go('deliverables')">去模板库</button>`;
+        <button class="btn btn-p" data-act="workflow.goDeliverables">去模板库</button>`;
     }
   } catch (e) {
     if (box.isConnected) {
@@ -209,7 +233,7 @@ function renderTemplateChips(templates) {
           ? '<span class="tag t-grn">现行 ' + esc(t.effective_version.version_label) + '</span>'
           : '<span class="tag t-gry">无生效版本</span>'}</span>
       <span>${t.effective_version
-        ? `<button class="btn-sm" onclick="closeModal();openTemplateCopy(${t.id})">复制到项目</button>`
+        ? `<button class="btn-sm" data-act="workflow.copyTemplate" data-id="${t.id}">复制到项目</button>`
         : ''}</span>
     </div>`).join('');
 }
@@ -217,7 +241,7 @@ function renderTemplateChips(templates) {
 function renderStepRecommendations(rec) {
   const rows = rec.tools.map((t) => `
     <tr>
-      <td><a class="link" onclick="closeModal();openToolByCode('${esc(t.code)}')"><b>${esc(t.name)}</b></a>
+      <td><a class="link" data-act="workflow.openTool" data-code="${esc(t.code)}"><b>${esc(t.name)}</b></a>
         <div class="tiny">${esc(t.code)} · ${esc(t.category_label || '')}</div></td>
       <td><span class="tag ${TOOL_LEVEL_TONE[t.level] || 't-gry'}">${esc(t.level_label)}</span></td>
       <td>${renderTemplateChips(t.templates)}</td>
@@ -284,10 +308,10 @@ function renderRecommendation(r) {
 
     <h3 class="mt">推荐工具链（${r.recommended_tools.length} 个）</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${r.recommended_tools.map((t) => '<span class="tag ' +
+      ${r.recommended_tools.map((t) => '<button type="button" class="tag ' +
         ({ DIAGNOSE: 't-blu', DESIGN: 't-red', DEPLOY: 't-yel', MONITOR: 't-grn' }[t.category] || 't-blu') +
-        '" style="cursor:pointer" onclick="openToolByCode(\'' + t.code + '\')">' +
-        (CAT_ICON[t.category] || '') + ' ' + esc(t.name) + '</span>').join('')}
+        ' tag-button" data-act="workflow.openTool" data-code="' + esc(t.code) + '">' +
+        (CAT_ICON[t.category] || '') + ' ' + esc(t.name) + '</button>').join('')}
     </div>
 
     <h3 class="mt">风险提示</h3>
@@ -297,7 +321,4 @@ function renderRecommendation(r) {
 }
 
 
-export {
-  renderWorkflow, openWfStep, openToolboxForStep, renderStepRecommendations,
-  renderRecommendation, runRecommend, setWfStage, setWfTab,
-};
+export { renderWorkflow, renderRecommendation };
