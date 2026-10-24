@@ -102,6 +102,12 @@ if (typeof document !== 'undefined') {
         const tag = el.tagName;
         if (tag === 'SELECT' || el.type === 'checkbox' || el.type === 'radio') return;
       }
+      // 原生 <select> 打开下拉时也会先触发 click；如果 click 就重渲染，
+      // 下拉会“一闪而过”。表单控件的值变化统一交给 change。
+      if (type === 'click') {
+        const tag = el.tagName;
+        if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+      }
       if (type === 'keydown') {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         // 原生 button/a 由浏览器合成 click，避免重复触发

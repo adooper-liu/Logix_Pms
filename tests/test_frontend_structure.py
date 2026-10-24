@@ -192,6 +192,13 @@ def test_workload_page_consumes_boundary_note():
     assert "boundary_note" in monitor_src
 
 
+def test_select_does_not_act_on_click():
+    """原生下拉打开时会先触发 click；在 click 上重渲染会让下拉一闪而过。"""
+    ui_src = (JS_ROOT / "core" / "ui.js").read_text(encoding="utf-8")
+    assert "if (type === 'click')" in ui_src
+    assert "tag === 'SELECT'" in ui_src
+
+
 def test_knowledge_view_wires_pagination():
     """知识库标题写「N 条」，就必须把 page 传下去并提供翻页入口。
 

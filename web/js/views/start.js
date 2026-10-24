@@ -264,7 +264,7 @@ function gapGroups(data) {
   }));
 }
 
-function questionCard({ id, no, title, map, status, answer, chips, extra, actions }) {
+function questionCard({ id, no, title, map, status, answer, chips, extra, actions, deps }) {
   return `
     <div class="card start-q" id="${id}">
       <div class="start-q-hd">
@@ -274,6 +274,7 @@ function questionCard({ id, no, title, map, status, answer, chips, extra, action
         <div class="start-q-status">${status || ''}</div>
       </div>
       <div class="start-q-answer">${answer}</div>
+      ${deps ? `<div class="start-deps">${deps}</div>` : ''}
       ${chips ? `<div class="gap">${chips}</div>` : ''}
       ${extra || ''}
       ${actions ? `<div class="gap mt">${actions}</div>` : ''}
@@ -287,6 +288,13 @@ function blockHeader(tag, title, desc) {
 
 function viewButton(label, view, cls = 'btn btn-g') {
   return `<button class="${cls}" data-act="start.go" data-view="${esc(view)}">${esc(label)}</button>`;
+}
+
+function depsHtml(prev, input, output, next) {
+  return `<span><b>前置</b>${esc(prev)}</span>`
+    + `<span><b>输入</b>${esc(input)}</span>`
+    + `<span><b>输出</b>${esc(output)}</span>`
+    + `<span><b>下一步</b>${esc(next)}</span>`;
 }
 
 function navDot(step) {
@@ -320,6 +328,8 @@ function paint(data) {
   const q1Missing = (strategy.evidence_items || []).filter((item) => item.required && !item.met);
   const q1 = questionCard({
     id: 'q1', no: 'Q1', title: '要什么', map: '战略地图', status: statusTag(strategy),
+    deps: depsHtml('无（从这里开始）', '年度经营计划、现状数据', '目标卡 + 现状基线',
+      'Q2 有什么'),
     answer: strategy.status === 'READY'
       ? '目标、目标值和现状基线都已挂到这条流程上。'
       : `还缺 ${q1Missing.length} 项：${q1Missing.map((item) => esc(item.label)).join('、')}。`,
@@ -331,6 +341,8 @@ function paint(data) {
 
   const q2 = questionCard({
     id: 'q2', no: 'Q2', title: '有什么', map: '价值流地图', status: statusTag(arch),
+    deps: depsHtml('Q1 战略目标', '流程地图、组织、制度、工具', '资产盘点',
+      'Q3 还缺什么'),
     answer: `已有 ${valueOf(arch, 'l1')} 个 L1、${valueOf(arch, 'l2')} 个 L2、`
       + `${valueOf(arch, 'l3')} 个 L3；${valueOf(arch, 'positions')} 个岗位、`
       + `${valueOf(policy, 'documents')} 份制度/文件、${valueOf(design, 'forms')} 份表单、`
@@ -348,6 +360,8 @@ function paint(data) {
     .map((item) => `<span class="tag t-red">${esc(item.label)}</span>`).join(' ');
   const q3 = questionCard({
     id: 'q3', no: 'Q3', title: '还缺什么', map: '差距地图',
+    deps: depsHtml('Q1–Q2', '全部必需证据', '缺口清单',
+      'Q4 做什么 / Q7 当前阶段'),
     status: missingCount
       ? `<span class="tag t-yel">还缺 ${missingCount} 项</span>`
       : '<span class="tag t-grn">必需证据已齐</span>',
@@ -362,6 +376,8 @@ function paint(data) {
 
   const q4 = questionCard({
     id: 'q4', no: 'Q4', title: '做什么', map: '流程地图', status: statusTag(arch),
+    deps: depsHtml('Q1 / Q3', 'PCF、流程清单', 'L1–L3 + PCF 映射',
+      'Q5 输入什么'),
     answer: `L1 ${valueOf(arch, 'l1')} · L2 ${valueOf(arch, 'l2')} · L3 ${valueOf(arch, 'l3')}；`
       + `已对应 PCF 的 L3 ${valueOf(arch, 'pcf_mapped_l3')} 个。`,
     chips: chipsFor(arch, ['l1', 'l2', 'l3', 'pcf_mapped_l3', 'benchmark_maps']),
@@ -371,6 +387,8 @@ function paint(data) {
 
   const q5 = questionCard({
     id: 'q5', no: 'Q5', title: '输入什么', map: '岗位地图', status: statusTag(arch),
+    deps: depsHtml('Q4 流程地图', '组织树、岗位', 'RACI / 岗位边界',
+      'Q6 用什么'),
     answer: `岗位 ${valueOf(arch, 'positions')} 个；RACI 关键事项 `
       + `${valueOf(arch, 'raci_matters')} 个；权责冲突 ${valueOf(arch, 'invalid_processes')} 个。`,
     chips: chipsFor(arch, ['positions', 'raci_matters', 'invalid_processes']),
@@ -380,6 +398,8 @@ function paint(data) {
 
   const q6 = questionCard({
     id: 'q6', no: 'Q6', title: '用什么', map: '方法工具箱', status: statusTag(design),
+    deps: depsHtml('Q5 权责', '控制点、表单字段、工具', '表单/规则/工具绑定',
+      'Q7 输出什么'),
     answer: `表单 ${valueOf(design, 'forms')} 份 · 规则 ${valueOf(design, 'rules')} 条 · `
       + `工具绑定 ${valueOf(design, 'node_tools')} 个；累计绑定 ${valueOf(design, 'bindings')} 项。`,
     chips: chipsFor(design, ['forms', 'rules', 'node_tools', 'bindings']),
@@ -420,10 +440,12 @@ function paint(data) {
 
   const q7 = questionCard({
     id: 'q7', no: 'Q7', title: '输出什么', map: '证据地图',
+    deps: depsHtml('Q6 方法/工具', '当前阶段证据', '证据清单',
+      'Q8 下一步'),
     status: current ? statusTag(current) : '<span class="tag t-grn">全部完成</span>',
     answer: current
-      ? `全局证据进度：${esc(current.title)}。这里看的是系统里已有的证据，`
-        + '不是某个试点项目的当前层。'
+      ? `全局证据进度：${esc(current.title)}。全局 = 全公司流程/制度/授权/工时/KPI 的证据汇总，`
+        + '不限定某一条试点路径；这里不是项目当前层。'
       : '全局证据进度：九个阶段都已具备或标记为本次不做。',
     extra: current
       ? `<details class="start-subfold" id="pilot-current-stage">
@@ -446,6 +468,8 @@ function paint(data) {
       : `<span class="tag t-yel">还差 ${data.pilot_missing_steps.length} 个阶段</span>`;
   const q8 = questionCard({
     id: 'q8', no: 'Q8', title: '下一步', map: '下一层地图', status: gateStatus,
+    deps: depsHtml('Q7 证据', '退出门', '下一阶段 / 上线确认',
+      '十层单页 / 项目详情'),
     answer: current
       ? `全局证据阶段退出门：${esc(current.exit_criteria)}`
       : '前 8 个阶段已齐，确认上线后进入日常运营。',
@@ -488,6 +512,7 @@ function paint(data) {
         ${current && current.estimated ? `<span class="tag t-blu">预计 ${esc(current.estimated)}</span>` : ''}</div>
       <button class="btn-sm mt" data-act="start.openCurrentStage">展开当前阶段</button>
       <div class="tiny muted mt">项目当前层在「十层单页」里看。</div>
+      <div class="tiny muted mt">全局 = 全公司证据汇总，不分试点路径。</div>
     </div>
     ${gateCard || `
       <div class="card start-aside-card">
@@ -508,6 +533,12 @@ function paint(data) {
         <button class="btn-sm" data-act="start.go" data-view="knowledge">知识库</button>
       </div>
       <div class="tiny muted mt">按问题取用，不预设绑定。</div>
+    </div>
+    <div class="card start-aside-card">
+      <h3>三层与页面</h3>
+      <div class="start-map-line"><b>地图层</b>战略目标 → 企业流程地图 → 差距</div>
+      <div class="start-map-line"><b>骨架层</b>PCF / 流程地图 → 组织与人员 / 设计器</div>
+      <div class="start-map-line"><b>执行层</b>设计器 / 工具箱 → 当前阶段 → 十层单页 / 项目</div>
     </div>`;
 
   viewEl().innerHTML = `

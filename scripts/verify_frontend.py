@@ -1918,7 +1918,9 @@ def main() -> int:
             for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
                 assert marker in view, f"开始页缺少「{marker}」"
             assert "全局证据进度" in view, "Q7 没有标明全局证据进度"
-            assert "不是某个试点项目的当前层" in view, "Q7 没有区分项目当前层"
+            assert "不限定某一条试点路径" in view, "Q7 没有解释全局口径"
+            assert "这里不是项目当前层" in view, "Q7 没有区分项目当前层"
+            assert "前置" in view and "下一步" in view, "Q 卡缺少依赖关系提示"
             gate = page.evaluate(
                 """async () => {
                     const token = localStorage.getItem('psm_token');
@@ -2002,6 +2004,16 @@ def main() -> int:
                 page.select_option("#view select.sel", value=options[1])
                 page.wait_for_timeout(1200)
                 assert "流程卡" in page.inner_text("#view")
+
+        def select_click_stable() -> None:
+            goto("projects")
+            page.wait_for_timeout(700)
+            sel = page.locator('#view select[data-key="status"]')
+            assert sel.count() == 1, "项目筛选下拉不存在"
+            sel.click()
+            page.wait_for_timeout(300)
+            assert sel.evaluate("el => el.isConnected"), "点击下拉后控件被重渲染（一闪而过）"
+            page.keyboard.press("Escape")
 
         def authorization_view() -> None:
             goto("authorization")
@@ -2361,6 +2373,7 @@ def main() -> int:
         check("战略目标承接", strategy_view)
         check("开始使用九步向导", start_view)
         check("流程卡聚合视图", process_card_view)
+        check("下拉选择稳定", select_click_stable)
         check("授权矩阵与例外台账", authorization_view)
         check("十层单页与第4层工作区", pilot_view)
         check("指标口径提示", metric_help)
