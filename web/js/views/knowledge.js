@@ -1,14 +1,32 @@
 /* 视图：knowledge */
 import { esc, fmtDate, KN_COLOR, KN_LABEL, methodTag, skeleton } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS } from '../core/router.js';
+import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { AUTH, canManage } from '../core/auth.js';
 import { GET, POST } from '../core/api.js';
 import { metricHelp } from '../core/metrics.js';
 import { openToolByCode } from './toolbox.js';
 
 /* ============================================================ 8. 流程知识库 */
+
+/* 事件委托：模板只写 data-act，不再把处理函数挂到 window。
+ * 同名动作在 core/ui.js 的 on() 注册时会被拒绝，避免再次出现全局覆盖。 */
+on('knowledge.open', ({ id }) => openKnowledge(Number(id)));
+on('knowledge.setType', ({ value }) => setK('type', value));
+on('knowledge.setSort', (_data, el) => setK('sort', el.value));
+on('knowledge.setTag', (_data, el) => setK('tag', el.value));
+on('knowledge.clear', () => clearK());
+on('knowledge.page', ({ page }) => setKPage(Number(page)));
+on('knowledge.match', () => kbMatch());
+on('knowledge.new', () => newKnowledgeModal());
+on('knowledge.goWorkflow', () => go('workflow'));
+on('knowledge.close', () => closeModal());
+on('knowledge.openTool', ({ code }) => {
+  closeModal();
+  openToolByCode(code);
+});
+on('knowledge.submit', () => submitKnowledge());
 
 const renderKnowledge = () => {
   const k = state.knowledge;
@@ -23,7 +41,7 @@ const renderKnowledge = () => {
       .then(([page, tags]) => ({ page, tags })),
     (d) => {
       const cards = d.page.items.map((it) => `
-        <div class="tool" onclick="openKnowledge(${it.id})">
+        <button class="tool" type="button" data-act="knowledge.open" data-id="${it.id}">
           <div class="ico">${it.type === 'CASE' ? '📄' : it.type === 'TEMPLATE' ? '📋' : '💡'}</div>
           <h4>${esc(it.title)}</h4>
           <p>${esc(it.summary)}</p>
@@ -34,21 +52,21 @@ const renderKnowledge = () => {
             </span>
             <span class="tiny">⬇ ${it.download_count} 次 · ${fmtDate(it.created_at)}</span>
           </div>
-        </div>`).join('') || '<div class="empty">没有符合条件的条目</div>';
+        </button>`).join('') || '<div class="empty">没有符合条件的条目</div>';
 
       const typeTab = (v, label) =>
-        '<button class="' + (k.type === v ? 'on' : '') + '" onclick="setK(\'type\',\'' + v + '\')">' +
-        label + '</button>';
+        '<button class="' + (k.type === v ? 'on' : '') +
+        '" data-act="knowledge.setType" data-value="' + v + '">' + label + '</button>';
       const pageSize = d.page.page_size || 50;
       const pages = Math.max(1, Math.ceil(d.page.total / pageSize));
       const current = Math.min(Math.max(1, d.page.page || k.page || 1), pages);
       const pager = pages > 1 ? `
         <div class="pager">
           <button class="btn-sm" ${current <= 1 ? 'disabled' : ''}
-            onclick="setKPage(${current - 1})">上一页</button>
+            data-act="knowledge.page" data-page="${current - 1}">上一页</button>
           <span class="tiny">第 ${current} / ${pages} 页 · 共 ${d.page.total} 条</span>
           <button class="btn-sm" ${current >= pages ? 'disabled' : ''}
-            onclick="setKPage(${current + 1})">下一页</button>
+            data-act="knowledge.page" data-page="${current + 1}">下一页</button>
         </div>` : '';
 
       viewEl().innerHTML = `
@@ -57,19 +75,19 @@ const renderKnowledge = () => {
             <div><h2>流程知识库（${d.page.total} 条）<span class="module-badge">经验沉淀 · 复用</span></h2>
               <div class="desc" style="margin:0">方法论模板、案例复盘、最佳实践沉淀与复用</div></div>
             <div class="gap">
-              <a class="link-btn" onclick="go('workflow')">方法手册 →</a>
-              ${canManage() ? '<button class="btn btn-p" onclick="newKnowledgeModal()">+ 新建条目</button>' : ''}
-              <select class="sel" onchange="setK('sort', this.value)">
+              <a class="link-btn" data-act="knowledge.goWorkflow">方法手册 →</a>
+              ${canManage() ? '<button class="btn btn-p" data-act="knowledge.new">+ 新建条目</button>' : ''}
+              <select class="sel" data-act="knowledge.setSort">
                 <option value="recent"${k.sort === 'recent' ? ' selected' : ''}>按时间</option>
                 <option value="hot"${k.sort === 'hot' ? ' selected' : ''}>按热度</option>
               </select>
-              <select class="sel" onchange="setK('tag', this.value)">
+              <select class="sel" data-act="knowledge.setTag">
                 <option value="">全部标签</option>
                 ${d.tags.tags.map((t) => '<option value="' + esc(t.tag) + '"' +
                   (k.tag === t.tag ? ' selected' : '') + '>' + esc(t.tag) + '（' + t.count + '）</option>').join('')}
               </select>
               ${(k.type || k.tag || k.keyword)
-                ? '<button class="btn-sm" onclick="clearK()">清空筛选</button>' : ''}
+                ? '<button class="btn-sm" data-act="knowledge.clear">清空筛选</button>' : ''}
             </div>
           </div>
           <div class="tabs" style="margin-bottom:0;max-width:520px">
@@ -87,7 +105,7 @@ const renderKnowledge = () => {
           <div class="gap mb" style="flex-wrap:wrap">
             <input id="kbQ" class="sel" style="flex:1;min-width:260px"
               placeholder="描述你遇到的问题，如：跨部门互相推诿">
-            <button class="btn btn-p" id="kbQBtn" onclick="kbMatch()">找工具</button>
+            <button class="btn btn-p" id="kbQBtn" data-act="knowledge.match">找工具</button>
           </div>
           <div id="kbMatch"></div>
         </div>`;
@@ -124,9 +142,9 @@ async function openKnowledge(id) {
       <div style="white-space:pre-wrap;font-size:13px;line-height:1.85;color:var(--text)">${esc(it.content)}</div>
       <div class="tiny mt">作者：${esc(it.author || '—')} · ${fmtDate(it.created_at)}
         · ${metricHelp('download_count', '查阅')} ${it.download_count} 次${it.tool_code ? ' · 关联工具 ' + esc(it.tool_code) : ''}</div>`,
-      `<button class="btn btn-g" onclick="closeModal()">关闭</button>
-       ${it.tool_code ? '<button class="btn btn-p" onclick="closeModal();openToolByCode(\'' +
-         esc(it.tool_code) + '\')">查看关联工具</button>' : ''}`, true);
+      `<button class="btn btn-g" data-act="knowledge.close">关闭</button>
+       ${it.tool_code ? `<button class="btn btn-p" data-act="knowledge.openTool"
+         data-code="${esc(it.tool_code)}">查看关联工具</button>` : ''}`, true);
 
     // 查阅计数不阻塞阅读，放在内容渲染之后异步回写
     POST('/knowledge/' + id + '/read', { increment: 1 })
@@ -165,8 +183,8 @@ function newKnowledgeModal() {
       <textarea id="nkContent" style="min-height:160px"
         placeholder="背景 / 方案 / 过程 / 结果 / 踩坑 / 可复用点"></textarea></div>
     <div class="field"><label>作者</label><input id="nkAuthor" placeholder="默认填当前用户"></div>`,
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitKnowledge()">保存</button>`, true);
+    `<button class="btn btn-g" data-act="knowledge.close">取消</button>
+     <button class="btn btn-p" data-act="knowledge.submit">保存</button>`, true);
 }
 
 async function submitKnowledge() {
@@ -216,7 +234,8 @@ async function kbMatch() {
             h.matched_on.map(esc).join('、') || '—'}</div></td>
             <td class="muted">${esc(h.tool.purpose)}</td>
             <td><span class="tag t-blu">阶段${h.tool.stage_no}</span></td>
-            <td><button class="btn-sm" onclick="openToolByCode('${h.tool.code}')">查看</button></td>
+            <td><button class="btn-sm" data-act="knowledge.openTool"
+              data-code="${esc(h.tool.code)}">查看</button></td>
           </tr>`).join('') + '</tbody></table>'
       : '<div class="note">没有匹配到工具，换一种说法试试。</div>';
   } catch (e) {
@@ -225,4 +244,4 @@ async function kbMatch() {
 }
 
 
-export { renderKnowledge, clearK, kbMatch, newKnowledgeModal, openKnowledge, setK, setKPage, submitKnowledge };
+export { renderKnowledge };

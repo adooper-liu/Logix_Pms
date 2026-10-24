@@ -11,13 +11,15 @@
 另有一条 IA 覆盖问题已在 Phase 0 修复**（保留在 §2.5 作为回归触发条件）。
 本文只描述这些断裂、成因和修复顺序，不改动 IA 已确定的产品决策。
 
-**当前进度**：Phase 0（补 IA 文档）已完成；§2.4 的 `knowledge` 分页已作为独立快速修复完成。
-本文数字已按 2026-10-24 复核。**Phase 1–4 的架构改造尚未开始**，
+**当前进度**：Phase 0（补 IA 文档）已完成；Phase 1A（actions 注册表、多事件委托、
+confirm/prompt）与 Phase 1B（`knowledge` 试点）已完成；§2.4 的 `knowledge` 分页已修复。
+本文数字已按 2026-10-24 复核。**Phase 2–4 尚未开始**，
 §2 是问题记录（2.4/2.5 已部分修复），§6 是执行顺序。
 
-**测量基线（2026-10-24 复核）**：24 个手写 JS 模块、10,984 行（其中 views 9,715 行）；
-13 个视图共 231 个导出符号（挂到 window 后约 243 个全局键）；
-内联事件处理器 372 处；原生 `confirm`/`prompt` 20 处。复核命令见附录 A。
+**测量基线（2026-10-24 复核，Phase 1 后）**：25 个手写 JS 模块、11,171 行
+（其中 views 9,734 行）；13 个视图共 224 个导出符号（挂到 window 后约 236 个全局键）；
+内联事件处理器 357 处（knowledge 已归零）；视图内原生 `confirm`/`prompt` 20 处；
+`data-act` 键 12 个。复核命令见附录 A。
 
 若与代码现状不符，以代码为准，并回来更新本文。
 
@@ -93,11 +95,12 @@ web/js/views/designer/
 `select(key)` / `subscribe(event, fn)`），向下传给各子模块；子模块只依赖这个只读接口，
 `xml.js` 保持纯函数、不接收 `ctx`。没有这层契约，拆完只是把一个大文件变成九个互相 import 的文件。
 
-### 2.2 `window` 全局面 = 231 个视图导出，没有边界
+### 2.2 `window` 全局面 = 224 个视图导出，没有边界
 
 **证据**：`main.js:69-89` 用 `Object.assign(window, { ...dashboard, ...mapView, ... })`
-把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **231 个导出符号**，
-加上框架级函数与 `templateCopy`，`window` 上约 **243 个全局键**。
+把**每个视图模块的全部导出**摊到全局。实测 13 个视图共 **224 个导出符号**
+（Phase 1B 迁移 `knowledge` 后从 231 降下来），
+加上框架级函数与 `templateCopy`，`window` 上约 **236 个全局键**。
 
 **这不是「有风险」，而是已经发生过事故**：`map.js` 与 `pcf.js` 都导出了
 `togglePcfNode`，`Object.assign` 后 `pcf.js` 覆盖了 `map.js` 的实现，
@@ -107,7 +110,7 @@ web/js/views/designer/
 （解析各视图的 `export {}`，重名即测试失败）。
 
 **这个全局面存在的唯一原因**：`onclick="openProject(3)"` 在全局作用域求值。
-实测内联事件处理器 **372 处**（按事件类型分布见 §4.2）：
+实测内联事件处理器 **357 处**（knowledge 已迁移归零；按事件类型分布见 §4.2）：
 
 | 视图 | 内联处理器 | 视图 | 内联处理器 |
 |---|---|---|---|
@@ -115,14 +118,14 @@ web/js/views/designer/
 | execution.js | 60 | monitor.js | 21 |
 | designer.js | 45 | dashboard.js | 18 |
 | map.js | 42 | workflow.js | 16 |
-| orgs.js | 28 | knowledge.js | 13 |
+| orgs.js | 28 | knowledge.js | **0**（已完成） |
 
 **后果**：
 
 1. **没有 API 边界**。视图模块的「公开面」= 它的全部导出，
    读者无法分辨 `openDesigner`（跨视图要用）和 `restoreLanes`（纯内部），
    只能全文读 2,448 行才能知道。
-2. **无法静态检查**。ES 模块能校验 import 路径，`window` 上挂的 231 个导出不能。
+2. **无法静态检查**。ES 模块能校验 import 路径，`window` 上挂的 224 个导出不能。
    `tests/test_frontend_structure.py` 原先只能检查「模块文件存在」，检查不了
    「模板里 `onclick="foo()"` 的 foo 是否真实存在」——拼错就是浏览器静默不响应。
    撞名守卫是事后补的；根因仍然是「全部导出即公开面」。
@@ -366,8 +369,9 @@ Object.assign(window, { go, closeModal, state, actions });
 <button class="btn btn-p" data-act="deliverable.open" data-id="3">打开</button>
 ```
 
-在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：现存 372 处处理器的分布是
-`click 335` / `change 33` / `input 3` / `ontoggle 1`，筛选器和表单主要靠 `change`/`input`。
+在 `core/ui.js` 统一挂委托根。**不能只监听 `click`**：迁移 `knowledge` 后现存 357 处
+处理器的分布是 `click 322` / `change 31` / `input 3` / `ontoggle 1`，
+筛选器和表单主要靠 `change`/`input`。
 
 ```js
 const DELEGATES = {};               // data-act → handler
@@ -397,14 +401,15 @@ for (const type of BUBBLING_EVENTS) {
 - 表单回车提交走 `submit`，不会触发 `click`；分页、搜索、筛选必须有 `submit` 兜底。
 - bpmn-js 画布、draw.io iframe、图表库继续用各自的原生监听，不强行套 `data-act`。
 - **可访问性**：`data-act` 只允许挂在 `<button>` / `<a>` 上；静态守卫拒绝
-  `div/span[data-act]`。这会把现有 372 处里的一部分「可点击 div」顺手修成键盘可用控件。
+  `div/span[data-act]`。这会把现有 357 处里的一部分「可点击 div」顺手修成键盘可用控件。
 - **转义**：`data-act` 的值必须是静态字符串，禁止拼接用户输入；
   其余 `data-*` 与文本一律走 `esc`。事件委托消除了 `onclick="...${name}..."` 的注入面，
   但组件返回 HTML 字符串时仍必须统一转义。
 
 **迁移策略**：**不要求一次性改完**。新代码走 `data-act`；
-存量 372 处内联处理器在 §6 的 Phase 2 逐视图迁移，
+存量 357 处内联处理器在 §6 的 Phase 2 逐视图迁移，
 每个视图迁移完即删掉该视图对应的 window 导出与 action 注册。
+`knowledge` 已作为试点完成：15 处处理器改为 12 个 `data-act` 键，window 导出从 8 个降到 1 个。
 
 ### 4.3 共享组件清单
 
@@ -477,7 +482,7 @@ for (const type of BUBBLING_EVENTS) {
 `git status` 干净或只剩本次文档提交。
 
 > **状态：已完成。** 三页已补齐并重新编号（13/13），优先级已重排，
-> 跨页面关系图已补两条。Phase 1–4 尚未开始；`knowledge` 分页作为独立快速修复已完成。
+> 跨页面关系图已补两条。Phase 1A/1B 已完成；Phase 2–4 尚未开始。
 
 ### Phase 1 — 交互原语 + 垂直试点（前置解锁）
 
@@ -486,29 +491,31 @@ for (const type of BUBBLING_EVENTS) {
 - 新建 `core/actions.js` 叶子注册表（`registerActions` 启动时查重）。
 - 新建 `core/ui.js` 的多事件委托根 `on(act, handler)`
   （click / change / input / submit / keydown；`toggle` 不冒泡，单独处理）。
-- 新建 `confirmDialog` / `promptDialog`，先把试点视图的 20 处原生弹窗替换掉。
-- 补静态守卫：视图导出唯一（已加）、action / `data-act` 键唯一、
-  `data-act` 只出现在 `<button>`/`<a>`、视图内无原生 `confirm(` / `prompt(`。
+- 新建 `confirmDialog` / `promptDialog`；存量 20 处原生弹窗随 Phase 2 逐视图替换。
+- 补静态守卫：视图导出唯一、`data-act` 键带前缀且只挂交互元素、
+  原生弹窗数量不增长、actions 叶子不得 import 视图。
 
 **1B：`knowledge` 垂直试点（端到端验证契约）**
 
-- 把 `knowledge` 的 13 处内联处理器改成 `data-act`；
+- 把 `knowledge` 的 15 处内联处理器（含分页 2 处）改成 `data-act`；
 - 分页控件已在快速修复中完成（`page` 参数 + 上一页/下一页）；
-  试点阶段只需补一条 E2E，确认能翻到第二页；
-- 用这个试点里**真实出现**的重复，反推 `pageHead` / `dataTable` / `emptyState`
-  的接口，再落到 `core/components/`。
+- 用这个试点验证「委托 + actions + 分页」的组合，组件抽取留到 Phase 2
+  用更多视图的真实重复再定接口。
 
 **验收**：`python scripts/check.py` 与 E2E 通过；`knowledge` 的内联处理器归零；
 分页可访问全部数据。
 
-> 不要在这一阶段先建齐 5 个组件。先让一个视图跑通，再按实测重复抽；
-> 否则组件接口是凭想象定的，Phase 2 还得返工。
+> **状态：1A/1B 已完成（2026-10-24）。**
+> `actions.js`、多事件委托、`confirmDialog` / `promptDialog` 已落地；
+> `knowledge` 内联处理器归零，window 导出从 8 个降到 1 个，分页 E2E 通过。
+> 组件抽取按「不先建齐」原则留到 Phase 2。
 
 ### Phase 2 — 逐视图迁移到委托 + 组件（可拆分多个提交）
 
 顺序建议：**从小的、依赖少的视图开始**——
-`knowledge` → `toolbox` → `sketches` → `pcf` → `orgs` → `projects` →
-`workflow` → `monitor` → `execution` → `map` → `deliverables` → `designer`（最后）。
+`toolbox` → `sketches` → `pcf` → `orgs` → `projects` →
+`workflow` → `monitor` → `execution` → `map` → `deliverables` → `designer`（最后）；
+`knowledge` 已在 Phase 1B 完成。
 
 每个视图的迁移动作：
 1. 该视图的内联处理器改为 `data-act`（按 §4.2 的事件类型分别处理）；
@@ -550,7 +557,7 @@ for (const type of BUBBLING_EVENTS) {
 （a）`state` 访问未声明键会告警（dev Proxy 或路径感知分析器，需处理 `st` 别名）；
 （b）模板里 `actions[...]` 引用的键在注册表中；
 （c）没有残留原生 `confirm(` / `prompt(`；
-（d）视图之间无环、`window` 全局键数量低于当前基线（约 243）。
+（d）视图之间无环、`window` 全局键数量低于当前基线（约 236）。
 
 ---
 
@@ -567,7 +574,7 @@ for (const type of BUBBLING_EVENTS) {
 | `data-act` 只出现在 `<button>` / `<a>` 上 | 键盘不可用、可点击 div | Phase 1 |
 | 视图文件不得含原生 `confirm(` / `prompt(` | 弹窗风格不一致 | Phase 1 |
 | 每种事件类型的剩余内联处理器数量 | 迁移漏项（`change` / `input` 最易漏） | Phase 2 |
-| `window` 全局键数量预算（当前约 243） | 全局面在迁移中反弹 | Phase 2 |
+| `window` 全局键数量预算（当前约 236） | 全局面在迁移中反弹 | Phase 2 |
 | 视图之间**无环**；直接 import 只指向 `views/shared/` 或 `core/` | 循环依赖、隐式公共库 | Phase 3 |
 | `core/*` 不得 import `views/*` | 分层倒置 | Phase 3 |
 | designer 子模块只通过 `ctx` 访问画布、XML 纯函数有特征测试 | 拆包后互相 import | Phase 3 |
@@ -593,12 +600,13 @@ for (const type of BUBBLING_EVENTS) {
 
 | 指标 | 当前值 |
 |---|---|
-| 手写 JS 模块 | 24 |
-| JS 总行数 / views 行数 | 10,984 / 9,715 |
+| 手写 JS 模块 | 25 |
+| JS 总行数 / views 行数 | 11,171 / 9,734 |
 | `designer.js` | 2,448 行；92 个顶层函数声明（约 106 个命名函数） |
-| 视图导出符号 / `window` 全局键 | 231 / 约 243 |
-| 内联事件处理器 | 372（click 335、change 33、input 3、toggle 1） |
-| 原生 `confirm` / `prompt` | 20（16 + 4） |
+| 视图导出符号 / `window` 全局键 | 224 / 约 236 |
+| 内联事件处理器 | 357（click 322、change 31、input 3、toggle 1） |
+| `data-act` 键 | 12（`knowledge` 试点） |
+| 视图内原生 `confirm` / `prompt` | 20（16 + 4） |
 | 组件重复 | 页头 12、表格 49、栅格 18、空状态 27、标签 85 |
 | 视图间直接 import | 7 条边 |
 
@@ -618,8 +626,11 @@ for ev in click change input submit keydown toggle; do
   printf '%-8s ' "$ev"; grep -roE "on$ev=\"" web/js web/index.html | wc -l
 done
 
-# 原生对话框
-grep -roE '\b(confirm|prompt|alert)\(' web/js | wc -l
+# 原生对话框（只数视图；core/ui.js 的实现和注释不算）
+grep -roE '\b(confirm|prompt|alert)\(' web/js/views | wc -l
+
+# data-act 键（应带视图前缀）
+grep -rhoE 'data-act="[^"]+"' web/js/views | sort -u | wc -l
 
 # 组件重复次数
 grep -roE 'class="[^"]*page-head[^"]*"' web/js/views | wc -l

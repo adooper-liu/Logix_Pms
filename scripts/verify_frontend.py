@@ -300,6 +300,50 @@ def main() -> int:
             page.wait_for_selector("#pcfMetricBox table", timeout=10000)
             assert "指标 ID" in page.inner_text("#pcfMetricBox")
 
+        # 交互原语：confirm / prompt 走自建模态框，关闭等于取消
+        def ui_dialogs() -> None:
+            goto("dashboard")
+            ok = page.evaluate(
+                """async () => {
+                  const ui = await import('/static/js/core/ui.js');
+                  const pending = ui.confirmDialog('确认测试');
+                  document.getElementById('uiDialogOk').click();
+                  return await pending;
+                }"""
+            )
+            assert ok is True, ok
+
+            cancelled = page.evaluate(
+                """async () => {
+                  const ui = await import('/static/js/core/ui.js');
+                  const pending = ui.confirmDialog('取消测试');
+                  document.getElementById('uiDialogCancel').click();
+                  return await pending;
+                }"""
+            )
+            assert cancelled is False, cancelled
+
+            closed = page.evaluate(
+                """async () => {
+                  const ui = await import('/static/js/core/ui.js');
+                  const pending = ui.confirmDialog('关闭测试');
+                  ui.closeModal();
+                  return await pending;
+                }"""
+            )
+            assert closed is False, closed
+
+            answer = page.evaluate(
+                """async () => {
+                  const ui = await import('/static/js/core/ui.js');
+                  const pending = ui.promptDialog('输入测试', {value: 'abc'});
+                  document.getElementById('uiDialogInput').value = 'xyz';
+                  document.getElementById('uiDialogOk').click();
+                  return await pending;
+                }"""
+            )
+            assert answer == "xyz", answer
+
         def benchmark_switch() -> None:
             goto("map")
             options = page.eval_on_selector_all(
@@ -1722,6 +1766,7 @@ def main() -> int:
         check("架构树计数", map_tree_counts)
         check("流程详情配套文件入口", map_documents_entry)
         check("对标框架切换", benchmark_switch)
+        check("交互原语：确认/输入对话框", ui_dialogs)
         check("PCF 分类浏览（层级/双语/指标）", pcf_browser)
         check("从 PCF 生成草稿向导（预览）", pcf_draft_wizard)
         check("主题切换", theme_switch)

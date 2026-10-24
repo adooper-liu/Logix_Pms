@@ -15,6 +15,7 @@ import { register, go, initialView, onSearch, RENDERERS } from './core/router.js
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, tab } from './core/ui.js';
+import { actions } from './core/actions.js';
 import * as templateCopy from './core/template-copy.js';
 import {
   markAllNotificationsRead, openNotification, openNotifications, refreshNotifications,
@@ -68,7 +69,7 @@ window.addEventListener('pms:login', () => { refreshNotifications(); });
 // 模板里 onclick/onchange 需要的操作面
 Object.assign(window, {
   // 框架级
-  applyTheme, go, closeModal, tab, state, RENDERERS, logout,
+  applyTheme, go, closeModal, tab, state, RENDERERS, logout, actions,
   openNotifications, openNotification, markAllNotificationsRead, scanNotifications,
   // 业务操作
   ...dashboard,

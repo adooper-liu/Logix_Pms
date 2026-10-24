@@ -31,6 +31,7 @@ def test_frontend_has_modules():
         "state.js",
         "theme.js",
         "ui.js",
+        "actions.js",
     } <= names
     # 各业务视图
     assert {
@@ -94,6 +95,52 @@ def test_knowledge_view_wires_pagination():
     assert "'page=' +" in src, "knowledge.js 没有把 page 传给后端"
     assert "setKPage" in src, "knowledge.js 没有翻页动作"
     assert "上一页" in src and "下一页" in src, "knowledge.js 没有渲染翻页按钮"
+
+
+def test_actions_registry_is_a_leaf():
+    """actions.js 不能 import 视图，否则视图↔注册表会成环。"""
+    src = (JS_ROOT / "core" / "actions.js").read_text(encoding="utf-8")
+    assert "registerActions" in src and "actionKeys" in src
+    assert not re.search(r"from\s+['\"]\.\./views/", src), "actions.js 不得 import 视图"
+    assert not re.search(r"from\s+['\"]\./views/", src), "actions.js 不得 import 视图"
+
+
+def test_ui_delegation_covers_multiple_event_types():
+    """只监听 click 会漏掉筛选器的 change/input 和表单 submit。"""
+    src = (JS_ROOT / "core" / "ui.js").read_text(encoding="utf-8")
+    for event in ("click", "change", "input", "submit", "keydown"):
+        assert f"'{event}'" in src, f"委托根缺少 {event} 事件"
+    assert "data-act" in src and "export function on(" in src
+    assert "confirmDialog" in src and "promptDialog" in src
+
+
+def test_data_act_is_only_on_interactive_elements():
+    """data-act 不允许挂在 div/span 上，否则键盘不可用。"""
+    bad = []
+    for module in _modules():
+        src = module.read_text(encoding="utf-8")
+        for match in re.finditer(r"<(div|span)\b[^>]*\bdata-act=", src):
+            bad.append(f"{module.name}: {match.group(0)[:80]}")
+    assert not bad, "data-act 只能挂在 button/a 上：\n" + "\n".join(bad)
+
+
+def test_data_act_keys_are_namespaced():
+    keys = set()
+    for module in (JS_ROOT / "views").glob("*.js"):
+        src = module.read_text(encoding="utf-8")
+        keys |= set(re.findall(r'data-act="([^"]+)"', src))
+    pattern = re.compile(r"^[a-z][a-z0-9]*\.[A-Za-z][A-Za-z0-9_]*$")
+    invalid = sorted(key for key in keys if not pattern.match(key))
+    assert not invalid, f"data-act 键必须带视图前缀：{invalid}"
+
+
+def test_native_dialogs_do_not_grow():
+    """Phase 1A 不改存量视图；用基线数量防止新代码继续引入原生弹窗。"""
+    hits = []
+    for module in (JS_ROOT / "views").glob("*.js"):
+        src = module.read_text(encoding="utf-8")
+        hits.extend(re.findall(r"\b(confirm|prompt|alert)\(", src))
+    assert len(hits) <= 20, f"原生 confirm/prompt/alert 数量增加：{len(hits)} > 20"
 
 
 def test_view_exports_do_not_collide():
