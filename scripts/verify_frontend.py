@@ -321,6 +321,25 @@ def main() -> int:
             assert "L1 新建 1" in text and "L2 新建 1" in text, text
             close_modal()
 
+        # 从启动页直接进入 1+3+10 引导：选 1 个 L1 → 3 个 L2 → 10 个 L3
+        def pcf_guided_wizard() -> None:
+            goto("start")
+            page.wait_for_timeout(700)
+            page.click('#view button:has-text("1+3+10 建架构")')
+            page.wait_for_selector("#mask.show", timeout=8000)
+            page.wait_for_selector('#pcfGuided input[data-act="map.guidedL1"]', timeout=12000)
+            assert page.inner_text("#pageTitle") == "企业流程地图"
+            page.locator('#pcfGuided input[data-act="map.guidedL1"]').first.check()
+            page.wait_for_timeout(400)
+            page.click('#pcfGuided button:has-text("套用推荐")')
+            page.wait_for_timeout(500)
+            guided = page.inner_text("#pcfGuided")
+            assert "已选 3/3" in guided, guided[:240]
+            assert "已选 0/10" not in guided, guided[:240]
+            page.click('#mFoot button:has-text("预览")')
+            page.wait_for_selector('#pcfPreview:has-text("将新建")', timeout=8000)
+            close_modal()
+
         # PCF 分类浏览：层级、双语、官方定义与指标
         def pcf_browser() -> None:
             goto("pcf")
@@ -1803,6 +1822,9 @@ def main() -> int:
             view = page.inner_text("#view")
             assert "开始使用" in view and "一条流程的试点路径" in view, "启动向导未渲染"
             assert page.locator("#view .rail-step").count() == 9, "九步进度轨不完整"
+            assert "A 定方向" in view and "B 建体系" in view and "C 跑闭环" in view, (
+                "阶段没有按 A/B/C 分组展示"
+            )
 
             assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
             assert page.locator("#view .seg button[data-mode]").count() == 0, "模式开关应已移除"
@@ -2171,6 +2193,7 @@ def main() -> int:
         check("交互原语：确认/输入对话框", ui_dialogs)
         check("PCF 分类浏览（层级/双语/指标）", pcf_browser)
         check("从 PCF 生成草稿向导（预览）", pcf_draft_wizard)
+        check("PCF 1+3+10 引导", pcf_guided_wizard)
         check("主题切换", theme_switch)
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)

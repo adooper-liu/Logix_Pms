@@ -94,6 +94,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "pilot": True,
         "actions": [
             {"label": "去建流程地图", "view": "map"},
+            {"label": "1+3+10 建架构", "view": "map", "action": "start.guidedPcf"},
             {"label": "去看 PCF", "view": "pcf"},
             {"label": "去配权责", "view": "designer"},
         ],

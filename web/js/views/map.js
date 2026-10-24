@@ -45,6 +45,13 @@ on('map.pcfSearch', (_data, el) => filterPcfDraftTree(el.value));
 on('map.pcfCheck', ({ external }, el) => togglePcfNode(external, el.checked));
 on('map.pcfPreview', () => previewPcfDraft());
 on('map.pcfGenerate', () => generatePcfDraft());
+on('map.pcfMode', ({ mode }) => setPcfDraftMode(mode));
+on('map.guidedL1', ({ external }, el) => {
+  if (el.checked) selectGuidedL1(external);
+});
+on('map.guidedL2', ({ external }, el) => toggleGuidedL2(external, el.checked));
+on('map.guidedL3', ({ external }, el) => toggleGuidedL3(external, el.checked));
+on('map.guidedRecommend', () => applyGuidedRecommendation());
 on('map.refreshParents', (_data, el) => refreshParentOptions(el.value));
 on('map.saveProcessNew', () => saveProcess(null));
 on('map.saveProcess', ({ id }) => saveProcess(Number(id)));
@@ -345,6 +352,10 @@ const renderMap = () => {
       state.map.benchmark = await GET(
         '/benchmark/frameworks/' + state.map.benchmarkFramework + '/coverage?process_level=3');
     }
+    if (state.map.openGuidedPcf) {
+      state.map.openGuidedPcf = false;
+      openPcfDraftWizard('guided');
+    }
     const pending = state.map.pendingJump;
     state.map.pendingJump = null;
     if (pending) {
@@ -522,6 +533,9 @@ const pcfDraft = {
   selected: new Set(),
   open: new Set(),
   keyword: '',
+  mode: 'expert',
+  guidedL1: null,
+  guidedL2: new Set(),
 };
 
 function pcfFrameworkOptions() {
@@ -533,13 +547,16 @@ function pcfFrameworkOptions() {
     .join('');
 }
 
-function openPcfDraftWizard() {
+function openPcfDraftWizard(mode = 'expert') {
   const primary = (state.map.frameworks || []).find((f) => f.is_primary);
   pcfDraft.framework = primary ? primary.code : 'APQC_PCF';
   pcfDraft.selected = new Set();
   pcfDraft.open = new Set();
   pcfDraft.keyword = '';
   pcfDraft.tree = [];
+  pcfDraft.mode = mode === 'guided' ? 'guided' : 'expert';
+  pcfDraft.guidedL1 = null;
+  pcfDraft.guidedL2 = new Set();
   pcfDraft.gen = openModal('从 PCF 生成流程架构草稿', `
     <div class="row2">
       <div class="field"><label>分类框架</label>
@@ -550,11 +567,25 @@ function openPcfDraftWizard() {
         <label class="pcf-label"><input type="checkbox" id="pcfActivities" checked>
           <span>同时生成 L4 活动（不勾选只生成 L3）</span></label></div>
     </div>
-    <div class="field"><label>搜索分类</label>
-      <input id="pcfSearch" placeholder="按编码、中文名或英文名过滤"
-        data-act="map.pcfSearch"></div>
-    <div id="pcfTree" class="pcf-tree"><div class="empty">加载中…</div></div>
-    <div id="pcfPreview" class="pcf-preview">勾选 L1/L2 会选中其下全部 L3；生成时自动补齐上级 L1/L2。</div>`,
+    <div class="seg mb">
+      <button class="${pcfDraft.mode === 'expert' ? 'on' : ''}"
+        data-act="map.pcfMode" data-mode="expert">专家模式</button>
+      <button class="${pcfDraft.mode === 'guided' ? 'on' : ''}"
+        data-act="map.pcfMode" data-mode="guided">1+3+10 引导</button>
+    </div>
+    <div id="pcfExpertPanel" class="${pcfDraft.mode === 'guided' ? 'hide' : ''}">
+      <div class="field"><label>搜索分类</label>
+        <input id="pcfSearch" placeholder="按编码、中文名或英文名过滤"
+          data-act="map.pcfSearch"></div>
+      <div id="pcfTree" class="pcf-tree"><div class="empty">加载中…</div></div>
+      <div class="tiny muted">勾选 L1/L2 会选中其下全部 L3；生成时自动补齐上级 L1/L2。</div>
+    </div>
+    <div id="pcfGuidedPanel" class="${pcfDraft.mode === 'guided' ? '' : 'hide'}">
+      <div class="note mb">推荐先选 <b>1 个 L1、3 个 L2、10 个 L3</b>，
+        少选也能生成；目标不是一次建全，而是先跑通一段。</div>
+      <div id="pcfGuided"><div class="empty">加载中…</div></div>
+    </div>
+    <div id="pcfPreview" class="pcf-preview">生成时会自动补齐上级 L1/L2。</div>`,
   `<button class="btn btn-g" data-act="map.close">取消</button>
    <button class="btn btn-g" data-act="map.pcfPreview">预览</button>
    <button class="btn btn-p" data-act="map.pcfGenerate">生成草稿</button>`, true);
@@ -568,6 +599,7 @@ async function loadPcfDraftTree(gen) {
     if (!modalAlive(gen)) return;
     pcfDraft.tree = tree;
     renderPcfDraftTree();
+    renderGuidedPanel();
     resetPcfPreview();
   } catch (e) {
     if (modalAlive(gen)) {
@@ -705,6 +737,134 @@ function resetPcfPreview() {
     box.textContent = `已选 ${pcfDraft.selected.size} 个 L3 分类；`
       + '生成时自动补齐上级 L1/L2。';
   }
+}
+
+/* -------------------------------------------------- 1+3+10 引导 */
+
+function setPcfDraftMode(mode) {
+  pcfDraft.mode = mode === 'guided' ? 'guided' : 'expert';
+  document.querySelectorAll('#mBody [data-act="map.pcfMode"]').forEach((btn) => {
+    btn.classList.toggle('on', btn.dataset.mode === pcfDraft.mode);
+  });
+  const expert = document.getElementById('pcfExpertPanel');
+  const guided = document.getElementById('pcfGuidedPanel');
+  if (expert) expert.classList.toggle('hide', pcfDraft.mode !== 'expert');
+  if (guided) guided.classList.toggle('hide', pcfDraft.mode !== 'guided');
+  if (pcfDraft.mode === 'guided') renderGuidedPanel();
+}
+
+function guidedL1Node() {
+  return (pcfDraft.tree || []).find(
+    (node) => node.level === 1 && node.external_id === pcfDraft.guidedL1) || null;
+}
+
+function guidedL2Nodes() {
+  const l1 = guidedL1Node();
+  return l1 ? (l1.children || []).filter((node) => node.level === 2) : [];
+}
+
+function guidedL3Nodes() {
+  const out = [];
+  guidedL2Nodes().forEach((l2) => {
+    if (!pcfDraft.guidedL2.has(l2.external_id)) return;
+    (l2.children || []).forEach((l3) => {
+      if (l3.level === 3) out.push(l3);
+    });
+  });
+  return out;
+}
+
+function renderGuidedPanel() {
+  const box = document.getElementById('pcfGuided');
+  if (!box) return;
+  const l1Nodes = (pcfDraft.tree || []).filter((node) => node.level === 1);
+  const l2Nodes = guidedL2Nodes();
+  const l3Nodes = guidedL3Nodes();
+  const l1Html = l1Nodes.map((node) => `
+    <label class="pcf-label">
+      <input type="radio" name="pcfGuidedL1"${
+        pcfDraft.guidedL1 === node.external_id ? ' checked' : ''}
+        data-act="map.guidedL1" data-external="${esc(node.external_id)}">
+      <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
+    </label>`).join('');
+  const l2Html = l2Nodes.map((node) => `
+    <label class="pcf-label">
+      <input type="checkbox"${pcfDraft.guidedL2.has(node.external_id) ? ' checked' : ''}
+        data-act="map.guidedL2" data-external="${esc(node.external_id)}">
+      <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
+    </label>`).join('');
+  const l3Html = l3Nodes.map((node) => `
+    <label class="pcf-label">
+      <input type="checkbox"${pcfDraft.selected.has(node.external_id) ? ' checked' : ''}
+        data-act="map.guidedL3" data-external="${esc(node.external_id)}">
+      <span class="map-code">${esc(node.code)}</span><span>${esc(node.name)}</span>
+    </label>`).join('');
+  box.innerHTML = `
+    <div class="pcf-step">
+      <h4>第 1 步：选 1 个 L1
+        <span class="pcf-count">${pcfDraft.guidedL1 ? '已选 1/1' : '还没选'}</span></h4>
+      <div class="pcf-list">${l1Html || '<div class="tiny muted">没有可用的 L1</div>'}</div>
+    </div>
+    <div class="pcf-step">
+      <h4>第 2 步：选 L2
+        <span class="pcf-count">已选 ${pcfDraft.guidedL2.size}/3（推荐）</span>
+        ${pcfDraft.guidedL1
+          ? '<button class="btn-sm" data-act="map.guidedRecommend">套用推荐</button>' : ''}</h4>
+      <div class="pcf-list">${pcfDraft.guidedL1
+        ? (l2Html || '<div class="tiny muted">该 L1 下没有 L2</div>')
+        : '<div class="tiny muted">先选一个 L1</div>'}</div>
+    </div>
+    <div class="pcf-step">
+      <h4>第 3 步：选 L3
+        <span class="pcf-count">已选 ${pcfDraft.selected.size}/10（推荐）</span></h4>
+      <div class="pcf-list">${pcfDraft.guidedL2.size
+        ? (l3Html || '<div class="tiny muted">所选 L2 下没有 L3</div>')
+        : '<div class="tiny muted">先选 L2，再从这里挑 L3</div>'}</div>
+    </div>`;
+}
+
+function selectGuidedL1(external) {
+  pcfDraft.guidedL1 = external;
+  pcfDraft.guidedL2 = new Set();
+  pcfDraft.selected = new Set();
+  resetPcfPreview();
+  renderGuidedPanel();
+}
+
+function toggleGuidedL2(external, checked) {
+  const l2 = guidedL2Nodes().find((node) => node.external_id === external);
+  if (!l2) return;
+  if (checked) {
+    pcfDraft.guidedL2.add(external);
+  } else {
+    pcfDraft.guidedL2.delete(external);
+    (l2.children || []).forEach((l3) => pcfDraft.selected.delete(l3.external_id));
+  }
+  resetPcfPreview();
+  renderGuidedPanel();
+}
+
+function toggleGuidedL3(external, checked) {
+  if (checked) pcfDraft.selected.add(external);
+  else pcfDraft.selected.delete(external);
+  resetPcfPreview();
+  renderGuidedPanel();
+}
+
+function applyGuidedRecommendation() {
+  const l1Nodes = (pcfDraft.tree || []).filter((node) => node.level === 1);
+  if (!pcfDraft.guidedL1 && l1Nodes.length) {
+    pcfDraft.guidedL1 = l1Nodes[0].external_id;
+  }
+  const l2s = guidedL2Nodes().slice(0, 3);
+  pcfDraft.guidedL2 = new Set(l2s.map((node) => node.external_id));
+  const l3Ids = [];
+  l2s.forEach((l2) => (l2.children || []).forEach((l3) => {
+    if (l3.level === 3 && l3.external_id) l3Ids.push(l3.external_id);
+  }));
+  pcfDraft.selected = new Set(l3Ids.slice(0, 10));
+  resetPcfPreview();
+  renderGuidedPanel();
 }
 
 function pcfRequestPayload() {

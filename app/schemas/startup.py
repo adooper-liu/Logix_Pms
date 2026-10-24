@@ -11,6 +11,7 @@ class StartupActionOut(BaseModel):
     label: str
     view: str
     hint: Optional[str] = None
+    action: Optional[str] = None
 
 
 class StartupEvidenceOut(BaseModel):

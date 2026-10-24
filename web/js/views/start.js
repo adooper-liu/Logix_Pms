@@ -62,6 +62,12 @@ function evidencePanel(step) {
     </aside>`;
 }
 
+function actionAttrs(action) {
+  return action.action === 'start.guidedPcf'
+    ? 'data-act="start.guidedPcf"'
+    : 'data-act="start.go"';
+}
+
 function stepBody(step) {
   return `
     <div class="start-main">
@@ -73,7 +79,7 @@ function stepBody(step) {
       ${step.next_hint ? `<div class="note mb">${esc(step.next_hint)}</div>` : ''}
       <div class="gap">
         ${step.actions.map((action) => `<button class="btn btn-g"
-          data-act="start.go" data-view="${esc(action.view)}"
+          ${actionAttrs(action)} data-view="${esc(action.view)}"
           title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}
       </div>
     </div>
@@ -189,7 +195,7 @@ function paint(data) {
   const upcoming = currentIndex < 0 ? [] : data.steps.slice(currentIndex + 1);
   const pct = data.readiness_pct;
 
-  const rail = data.steps.map((step) => `
+  const railFor = (steps) => steps.map((step) => `
     <div class="rail-step ${RAIL_TONE[step.status] || 'gray'}${
       current && current.key === step.key ? ' current' : ''}${
       step.pilot ? '' : ' is-improvement'}" title="${esc(step.title)} · ${esc(step.status_label)}">
@@ -197,6 +203,12 @@ function paint(data) {
       <b>${esc(shortTitle(step))}</b>
       <em>${esc(step.status_label)}</em>
     </div>`).join('');
+
+  const phaseGroups = [
+    { name: 'A 定方向', range: '阶段 1–3', steps: data.steps.slice(0, 3) },
+    { name: 'B 建体系', range: '阶段 4–6', steps: data.steps.slice(3, 6) },
+    { name: 'C 跑闭环', range: '阶段 7–9', steps: data.steps.slice(6, 9) },
+  ];
 
   viewEl().innerHTML = `
     <div class="card page-head">
@@ -213,7 +225,13 @@ function paint(data) {
       </div>
       <div class="start-chain">战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本</div>
       <div class="tiny muted" style="margin-top:6px">统一原则 · 统一基线 · 分级授权 · 受控差异</div>
-      <div class="start-rail">${rail}</div>
+      <div class="start-phases">
+        ${phaseGroups.map((group, index) => `
+          <div class="phase-block phase-${index}">
+            <div class="phase-label"><b>${group.name}</b><span>${group.range}</span></div>
+            <div class="start-rail">${railFor(group.steps)}</div>
+          </div>`).join('')}
+      </div>
       <div class="pipe" style="margin-top:12px">
         <i class="fill-ok" style="width:${pct}%"></i>
       </div>
@@ -222,6 +240,7 @@ function paint(data) {
           前 8 个阶段（到“评审与固化”）齐了，第一条流程就能上线；第 9 阶段“改善与复制”
           在运营中持续做。这页看“该留下的东西齐不齐”，项目页看“事情做到哪一步”。
         </span>
+        <button class="btn-sm" data-act="start.guidedPcf">1+3+10 建架构</button>
         <button class="btn-sm" data-act="start.setupProjects">体系落地项目 →</button>
       </div>
       ${data.skipped_count
@@ -237,6 +256,11 @@ function paint(data) {
 /* -------------------------------------------------- 交互 */
 
 on('start.go', ({ view }) => go(view));
+
+on('start.guidedPcf', () => {
+  state.map.openGuidedPcf = true;
+  go('map');
+});
 
 on('start.setupProjects', () => {
   state.projects.filter = {
