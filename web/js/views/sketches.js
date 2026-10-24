@@ -1,10 +1,19 @@
 /* 视图：架构草图 —— 独立的 draw.io 白板，不参与 BPMN 建模与流程执行。 */
 import { esc, dtShort, emptyRow } from '../core/format.js';
-import { toast, openModal, closeModal, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
+
+on('sketch.open', ({ id }) => openSketchEditor(Number(id)));
+on('sketch.edit', ({ id }) => editSketchModal(Number(id)));
+on('sketch.delete', ({ id }) => deleteSketch(Number(id)));
+on('sketch.create', () => createSketchModal());
+on('sketch.close', () => closeModal());
+on('sketch.closeEditor', () => closeSketchEditor());
+on('sketch.submitNew', () => submitSketch(null));
+on('sketch.submit', ({ id }) => submitSketch(Number(id)));
 
 const EMPTY_MXFILE = `<mxfile host="embed.diagrams.net">
   <diagram id="page-1" name="Page-1">
@@ -67,10 +76,12 @@ const renderSketches = () => {
           <td class="tiny">${esc(s.created_by_name || '—')}</td>
           <td class="tiny">${dtShort(s.updated_at)}</td>
           <td>
-            <button class="btn-sm" onclick="openSketchEditor(${s.id})"${
+            <button class="btn-sm" data-act="sketch.open" data-id="${s.id}"${
               canWrite() ? '' : ' disabled'}>打开</button>
-            ${canWrite() ? `<button class="btn-sm" onclick="editSketchModal(${s.id})">编辑信息</button>` : ''}
-            ${canManage() ? `<button class="btn-sm" onclick="deleteSketch(${s.id})">删除</button>` : ''}
+            ${canWrite() ? `<button class="btn-sm" data-act="sketch.edit"
+              data-id="${s.id}">编辑信息</button>` : ''}
+            ${canManage() ? `<button class="btn-sm" data-act="sketch.delete"
+              data-id="${s.id}">删除</button>` : ''}
           </td>
         </tr>`).join('') || emptyRow(5, '还没有架构草图');
 
@@ -83,7 +94,7 @@ const renderSketches = () => {
                 不作为可执行流程模型</div>
             </div>
             ${canWrite()
-              ? '<button class="btn btn-p" onclick="createSketchModal()">+ 新建草图</button>' : ''}
+              ? '<button class="btn btn-p" data-act="sketch.create">+ 新建草图</button>' : ''}
           </div>
         </div>
         <div class="card">
@@ -129,16 +140,16 @@ function selectValue(id, value) {
 
 function createSketchModal() {
   openModal('新建架构草图', sketchForm(null),
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitSketch(null)">创建</button>`);
+    `<button class="btn btn-g" data-act="sketch.close">取消</button>
+     <button class="btn btn-p" data-act="sketch.submitNew">创建</button>`);
 }
 
 function editSketchModal(id) {
   const sketch = (state.sketches || []).find((s) => s.id === id);
   if (!sketch) return;
   openModal('编辑草图信息', sketchForm(sketch),
-    `<button class="btn btn-g" onclick="closeModal()">取消</button>
-     <button class="btn btn-p" onclick="submitSketch(${id})">保存</button>`);
+    `<button class="btn btn-g" data-act="sketch.close">取消</button>
+     <button class="btn btn-p" data-act="sketch.submit" data-id="${id}">保存</button>`);
   selectValue('skProcess', sketch.process_id);
   selectValue('skProject', sketch.project_id);
 }
@@ -180,7 +191,7 @@ async function openSketchEditor(id) {
       若使用外部 embed 服务，草图内容会发送到该服务；生产建议自托管。</div>
     <iframe id="drawioFrame" class="drawio-frame" src="${esc(embedUrl)}"
       title="draw.io 架构草图"></iframe>`,
-    '<button class="btn btn-g" onclick="closeSketchEditor()">关闭</button>', true);
+    '<button class="btn btn-g" data-act="sketch.closeEditor">关闭</button>', true);
 
   const frame = document.getElementById('drawioFrame');
   const saveXml = async (xml) => {
@@ -233,7 +244,7 @@ function closeSketchEditor() {
 }
 
 async function deleteSketch(id) {
-  if (!confirm('确定删除这张架构草图？')) return;
+  if (!(await confirmDialog('确定删除这张架构草图？', { danger: true, okText: '删除' }))) return;
   try {
     await DEL('/sketches/' + id);
     toast('草图已删除');
@@ -243,7 +254,4 @@ async function deleteSketch(id) {
   }
 }
 
-export {
-  renderSketches, closeSketchEditor, createSketchModal, deleteSketch,
-  editSketchModal, openSketchEditor, submitSketch,
-};
+export { renderSketches };

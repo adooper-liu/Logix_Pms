@@ -513,7 +513,7 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
-            page.click("#toolChips span >> nth=0")
+            page.click("#toolChips button >> nth=0")
             page.wait_for_timeout(1500)
             res = page.inner_text("#toolMatchResult")
             assert "匹配分" in res, f"预设问题未匹配到工具：{res[:160]!r}"
@@ -723,6 +723,15 @@ def main() -> int:
                 )
                 assert "E2E-OK" in (detail.get("mxfile_xml") or ""), detail.get("mxfile_xml")
                 page.click('#mFoot button:has-text("关闭")')
+                page.wait_for_timeout(300)
+
+                # 删除确认走自建模态框（不是浏览器原生 confirm）
+                row.locator('button:has-text("删除")').click()
+                page.wait_for_selector("#uiDialogOk", timeout=5000)
+                assert "确定删除这张架构草图" in page.inner_text("#mBody")
+                page.click("#uiDialogCancel")
+                page.wait_for_timeout(300)
+                assert not page.locator("#mask").evaluate("e => e.classList.contains('show')")
             finally:
                 page.evaluate(
                     """async (id) => {

@@ -32,6 +32,7 @@
 .tbl tr:hover td{background:var(--panel-hover)}
 .tbl tr.clk{cursor:pointer}
 .tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.tag-button{border:none;font:inherit;cursor:pointer}
 .t-red{background:var(--bad-soft);color:var(--bad-strong)}.t-yel{background:var(--warn-soft);color:var(--warn-strong)}
 .t-grn{background:var(--ok-soft);color:var(--ok-strong)}.t-blu{background:var(--brand-soft);color:var(--brand)}
 .t-pur{background:var(--purple-soft);color:var(--purple-strong)}.t-gry{background:var(--panel-3);color:var(--sub)}

@@ -1,12 +1,27 @@
 /* 视图：toolbox */
 import { esc, num, CAT_ICON, skeleton, TOOL_LEVEL_TONE } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl } from '../core/ui.js';
+import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
 import { metricHelp } from '../core/metrics.js';
 
 /* ============================================================ 5. 方法论工具箱 */
+
+on('toolbox.category', ({ category }) => {
+  state.toolboxCat = category;
+  RENDERERS.toolbox();
+});
+on('toolbox.open', ({ code }) => openToolByCode(code));
+on('toolbox.clearFilter', () => clearToolboxFilter());
+on('toolbox.goWorkflow', () => go('workflow'));
+on('toolbox.match', () => matchTools());
+on('toolbox.quickMatch', ({ query }) => quickMatch(query));
+on('toolbox.close', () => closeModal());
+on('toolbox.closeGoWorkflow', () => {
+  closeModal();
+  go('workflow');
+});
 
 const renderToolbox = () => renderAsync('toolbox',
   () => GET('/tools/grouped'),
@@ -30,7 +45,7 @@ const renderToolbox = () => renderAsync('toolbox',
 
     const tabs = visibleGroups.map((g) => `
       <button class="${g.category === active ? 'on' : ''}"
-        onclick="state.toolboxCat='${g.category}';RENDERERS.toolbox()">
+        data-act="toolbox.category" data-category="${esc(g.category)}">
         ${CAT_ICON[g.category]} ${esc(g.label)}（${g.tools.length}）
       </button>`).join('');
 
@@ -53,7 +68,7 @@ const renderToolbox = () => renderAsync('toolbox',
         ? `<span class="tag ${TOOL_LEVEL_TONE[meta.level] || 't-gry'}">${esc(meta.level_label)}</span>`
         : '';
       return `
-      <div class="tool" onclick="openToolByCode('${t.code}')">
+      <button class="tool" type="button" data-act="toolbox.open" data-code="${esc(t.code)}">
         <div class="ico">${CAT_ICON[t.category] || '⚒'}</div>
         <h4>${esc(t.name)}</h4>
         <p>${esc(t.purpose)}</p>
@@ -62,13 +77,13 @@ const renderToolbox = () => renderAsync('toolbox',
             阶段${t.stage_no}</span>
           <span class="gap" style="gap:6px">${levelTag}<span class="tiny">${t.steps.length} 步</span></span>
         </div>
-      </div>`;
+      </button>`;
     }).join('') || '<div class="empty">没有匹配的工具</div>';
 
     const filterBanner = filter
       ? `<div class="note mb between">
           <div>只显示 <b>${esc(filter.label)}</b> 的推荐工具（${total} 个），已按「必用 → 推荐 → 可选」排序</div>
-          <button class="btn-sm" onclick="clearToolboxFilter()">显示全部工具</button>
+          <button class="btn-sm" data-act="toolbox.clearFilter">显示全部工具</button>
         </div>`
       : '';
 
@@ -80,7 +95,7 @@ const renderToolbox = () => renderAsync('toolbox',
             <div class="desc" style="margin:0">${filter
               ? '当前只展示步骤契约中配置的工具；点击卡片查看适用场景与标准操作'
               : '按用途分类；点击卡片查看适用场景、标准操作与常见误用'}</div></div>
-          <a class="link-btn" onclick="go('workflow')">回到五阶段步骤 →</a>
+          <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>
         </div>
         ${filterBanner}
         <div class="tabs" style="margin-bottom:0">${tabs || '<span class="tiny">没有匹配的工具</span>'}</div>
@@ -93,12 +108,13 @@ const renderToolbox = () => renderAsync('toolbox',
           <input id="toolQ" class="sel" style="flex:1;min-width:260px"
             placeholder="如：审批太多、周期太长；跨部门互相推诿；方案推不动"
             value="${esc(state.toolQuery || '')}">
-          <button class="btn btn-p" id="toolQBtn" onclick="matchTools()">匹配</button>
+          <button class="btn btn-p" id="toolQBtn" data-act="toolbox.match">匹配</button>
         </div>
         <div class="gap mb" id="toolChips" style="flex-wrap:wrap">
           ${['审批太多，周期太长', '跨部门互相推诿、权责不清', '方案推行遇到阻力',
              '优化完又退回老样子', '不知道问题出在哪个环节', '返工率高'].map((q) =>
-            '<span class="tag t-gry" style="cursor:pointer" onclick="quickMatch(\'' + q + '\')">' + esc(q) + '</span>'
+            '<button type="button" class="tag t-gry tag-button" data-act="toolbox.quickMatch" data-query="' +
+              esc(q) + '">' + esc(q) + '</button>'
           ).join('')}
         </div>
         <div id="toolMatchResult"></div>
@@ -149,7 +165,7 @@ function paintToolMatch(r) {
           <td class="muted">${esc(h.tool.purpose)}</td>
           <td>${h.matched_on.map((m) => '<span class="tag t-gry">' + esc(m) + '</span> ').join('') || '—'}</td>
           <td><b>${num(h.score, 1)}</b></td>
-          <td><button class="btn-sm" onclick="openToolByCode('${h.tool.code}')">查看</button></td>
+          <td><button class="btn-sm" data-act="toolbox.open" data-code="${esc(h.tool.code)}">查看</button></td>
         </tr>`).join('')}
       </tbody>
     </table>
@@ -191,13 +207,10 @@ function paintTool(t) {
 
     ${t.template_ref ? '<h3>模板 / 工具指引</h3><div class="note mb">' + esc(t.template_ref) + '</div>' : ''}
     ${t.pitfalls ? '<h3>常见误用</h3><div class="warnbox">' + esc(t.pitfalls) + '</div>' : ''}`,
-    `<button class="btn btn-g" onclick="closeModal()">关闭</button>
-     <button class="btn btn-p" onclick="closeModal();go('workflow')">看它在哪一步用</button>`,
+    `<button class="btn btn-g" data-act="toolbox.close">关闭</button>
+     <button class="btn btn-p" data-act="toolbox.closeGoWorkflow">看它在哪一步用</button>`,
     true);
 }
 
 
-export {
-  renderToolbox, clearToolboxFilter, matchTools, openToolByCode, paintTool,
-  paintToolMatch, quickMatch,
-};
+export { renderToolbox, openToolByCode };
