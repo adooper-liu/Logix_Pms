@@ -290,7 +290,7 @@ def main() -> int:
             page.fill("#pcfQ", "采购物料与服务")
             page.wait_for_timeout(500)
             assert "采购物料与服务" in page.inner_text("#pcfRows")
-            page.click('#pcfRows .pcf-row:has-text("采购物料与服务")')
+            page.click('#pcfRows .pcf-row-main:has-text("采购物料与服务")')
             page.wait_for_selector("#pcfDetail h3", timeout=8000)
             detail = page.inner_text("#pcfDetail")
             assert "Procure materials and services" in detail, detail[:160]

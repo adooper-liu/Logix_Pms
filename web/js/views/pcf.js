@@ -1,9 +1,15 @@
 /* 视图：APQC PCF 分类框架（学习 / 识别 / 指标） */
 import { esc } from '../core/format.js';
-import { viewEl } from '../core/ui.js';
+import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { GET } from '../core/api.js';
+
+on('pcf.framework', (_data, el) => setPcfFramework(el.value));
+on('pcf.search', (_data, el) => setPcfKeyword(el.value));
+on('pcf.select', ({ id }) => selectPcfNode(Number(id)));
+on('pcf.expand', ({ id }) => togglePcfBrowseNode(Number(id)));
+on('pcf.goMap', () => go('map'));
 
 const LEVELS = {
   1: { label: 'L1 流程类', en: 'Category', desc: '最高层级的流程分类（业务域）' },
@@ -86,8 +92,8 @@ function paintPcf() {
         <div><h2>APQC PCF 分类框架<span class="module-badge">分类宪法 · 学习与识别</span></h2>
           <div class="desc">L1–L5 分类字典、中英文对照、官方定义与指标；PCF 是分类，不是流程图</div></div>
         <div class="gap">
-          <select class="sel" onchange="setPcfFramework(this.value)">${frameworkOptions}</select>
-          <a class="link-btn" onclick="go('map')">去流程地图 →</a>
+          <select class="sel" data-act="pcf.framework">${frameworkOptions}</select>
+          <a class="link-btn" data-act="pcf.goMap">去流程地图 →</a>
         </div>
       </div>
       <div class="pcf-levels">${levelCards}</div>
@@ -99,7 +105,7 @@ function paintPcf() {
           <span class="tiny" id="pcfVisibleCount"></span>
         </div>
         <input id="pcfQ" class="sel" placeholder="搜索编码、中文名或英文名"
-          value="${esc(state.pcf.keyword)}" oninput="setPcfKeyword(this.value)">
+          value="${esc(state.pcf.keyword)}" data-act="pcf.search">
         <div class="pcf-rows" id="pcfRows"></div>
       </div>
       <div class="card pcf-detail" id="pcfDetail"></div>
@@ -128,8 +134,7 @@ function setPcfKeyword(value) {
   searchTimer = setTimeout(() => paintPcfRows(), 160);
 }
 
-function togglePcfBrowseNode(event, id) {
-  event.stopPropagation();
+function togglePcfBrowseNode(id) {
   if (state.pcf.expanded.has(id)) state.pcf.expanded.delete(id);
   else state.pcf.expanded.add(id);
   paintPcfRows();
@@ -197,13 +202,15 @@ function paintPcfRows() {
     const nameZh = node.name_zh || node.name;
     const showEn = node.name_en && node.name_en !== nameZh;
     return `<div class="pcf-row${node.id === state.pcf.selectedId ? ' on' : ''}"
-        data-id="${node.id}" style="padding-left:${indent}px" onclick="selectPcfNode(${node.id})">
+        data-id="${node.id}" style="padding-left:${indent}px">
       <button class="pcf-caret${hasKids ? '' : ' empty'}"
-        onclick="togglePcfBrowseNode(event, ${node.id})">${hasKids ? (open ? '▾' : '▸') : '·'}</button>
-      <span class="map-code">${esc(node.code)}</span>
-      <span class="pcf-row-name">${esc(nameZh)}</span>
-      ${showEn ? `<span class="pcf-row-en">${esc(node.name_en)}</span>` : ''}
-      ${node.metric_count ? `<span class="tag t-gry">${node.metric_count} 指标</span>` : ''}
+        data-act="pcf.expand" data-id="${node.id}">${hasKids ? (open ? '▾' : '▸') : '·'}</button>
+      <button class="pcf-row-main" type="button" data-act="pcf.select" data-id="${node.id}">
+        <span class="map-code">${esc(node.code)}</span>
+        <span class="pcf-row-name">${esc(nameZh)}</span>
+        ${showEn ? `<span class="pcf-row-en">${esc(node.name_en)}</span>` : ''}
+        ${node.metric_count ? `<span class="tag t-gry">${node.metric_count} 指标</span>` : ''}
+      </button>
     </div>`;
   }).join('') || '<div class="empty">没有匹配的分类</div>';
   const count = document.getElementById('pcfVisibleCount');
@@ -290,4 +297,4 @@ async function paintPcfDetail(node) {
   }
 }
 
-export { renderPcf, selectPcfNode, setPcfFramework, setPcfKeyword, togglePcfBrowseNode };
+export { renderPcf };
