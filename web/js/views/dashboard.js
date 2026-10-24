@@ -75,6 +75,35 @@ const renderDashboard = () => renderAsync('dashboard',
             </div>`).join('')}
         </div>
       </div>`;
+    const nextActions = (home.next_actions || []).map((item) => `
+      <div class="next-action">
+        <div style="min-width:0">
+          <b>${esc(item.code)} ${esc(item.name)}</b>
+          <div class="tiny">阶段 ${item.current_stage} ${esc(item.stage_name)} ·
+            进度 ${num(item.progress, 0)}%</div>
+          <div class="tiny">下一步：${esc(item.next_step_no || '—')} ${
+            esc(item.next_step_name || '')}</div>
+          ${item.next_suggestion
+            ? `<div class="tiny muted">${esc(item.next_suggestion)}</div>` : ''}
+        </div>
+        <div class="gap">
+          ${item.open_exceptions
+            ? `<span class="tag t-red">${item.open_exceptions} 项异常</span>` : ''}
+          ${item.is_overdue ? '<span class="tag t-yel">已逾期</span>' : ''}
+          <button class="btn-sm" data-act="dashboard.openProject"
+            data-id="${item.project_id}">继续推进</button>
+        </div>
+      </div>`).join('');
+    const nextActionsHtml = `
+      <div class="card">
+        <div class="between mb">
+          <div><h3 style="margin:0">我的当前推进</h3>
+            <div class="desc" style="margin:2px 0 0">按当前阶段和下一步继续；
+              点“继续推进”打开项目详情</div></div>
+          <a class="link-btn" data-act="dashboard.goProjects">项目组合 →</a>
+        </div>
+        ${nextActions || '<div class="empty">还没有在推进的改善项目</div>'}
+      </div>`;
     const byKey = Object.fromEntries(d.cards.map((c) => [c.key, c]));
     const primary = ['active_projects', 'improvement_targets', 'open_exceptions', 'avg_improvement']
       .map((key) => byKey[key]).filter(Boolean);
@@ -199,24 +228,10 @@ const renderDashboard = () => renderAsync('dashboard',
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
-        <div class="mainline">
-          <a class="mainline-step" data-act="dashboard.go" data-view="map"><b>1</b>流程地图</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="projects"><b>2</b>项目组合</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="workflow"><b>3</b>方法手册</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="designer"><b>4</b>设计器</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="execution"><b>5</b>流程执行</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="monitor"><b>6</b>运营监控</a>
-          <span class="mainline-arrow">→</span>
-          <a class="mainline-step" data-act="dashboard.go" data-view="knowledge"><b>7</b>知识库</a>
-        </div>
       </div>
 
       ${homeHtml}
+      ${nextActionsHtml}
 
       <div class="grid g2">
         <div class="card">

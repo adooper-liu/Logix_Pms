@@ -16,12 +16,13 @@ from app.models.enums import (
     Methodology,
     ProjectStatus,
     Role,
+    StepStatus,
 )
 from app.models.governance import GovernanceFinding
 from app.models.knowledge import KnowledgeItem
 from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch
-from app.models.project import Project, ProjectStep
+from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.user import User
 from app.schemas.dashboard import (
     DashboardHome,
@@ -30,6 +31,7 @@ from app.schemas.dashboard import (
     HealthAlert,
     HomeAction,
     HomeItem,
+    HomeNextAction,
     KpiCard,
     MethodologySlice,
     ProjectBoardItem,
@@ -322,6 +324,81 @@ def _kpi_red_yellow(db: Session, owner_user_id: int | None = None) -> tuple[int,
     return total, red_yellow
 
 
+def _next_actions(db: Session, user: User, limit: int = 3) -> List[HomeNextAction]:
+    """当前用户最该继续推进的改善项目：阶段、下一步和阻塞项都来自真实记录。"""
+    stmt = (
+        select(Project)
+        .where(
+            Project.status == ProjectStatus.ACTIVE.value,
+            Project.project_type == "IMPROVEMENT",
+        )
+        .order_by(Project.priority, Project.end_date, Project.id.desc())
+    )
+    if user.role == Role.OWNER.value:
+        stmt = stmt.where(Project.owner_user_id == user.id)
+    projects = list(db.scalars(stmt).all())[:limit]
+    today = date.today()
+    result: List[HomeNextAction] = []
+    for project in projects:
+        steps = list(
+            db.scalars(
+                select(ProjectStep)
+                .where(ProjectStep.project_id == project.id)
+                .order_by(ProjectStep.stage_no, ProjectStep.step_no)
+            ).all()
+        )
+        head = next(
+            (
+                step
+                for step in steps
+                if step.status not in (StepStatus.DONE.value, StepStatus.SKIPPED.value)
+            ),
+            None,
+        )
+        template = (
+            db.scalar(select(WorkflowTemplate).where(WorkflowTemplate.step_no == head.step_no))
+            if head
+            else None
+        )
+        suggestion = None
+        if head:
+            suggestion = template.action if template else "按标准工作流推进该步骤。"
+            if template and template.key_points:
+                suggestion += f" 关键要点：{template.key_points}"
+        open_exceptions = int(
+            db.scalar(
+                select(func.count())
+                .select_from(ExceptionEvent)
+                .where(
+                    ExceptionEvent.project_id == project.id,
+                    ExceptionEvent.status.in_(
+                        [ExceptionStatus.OPEN.value, ExceptionStatus.IN_PROGRESS.value]
+                    ),
+                )
+            )
+            or 0
+        )
+        result.append(
+            HomeNextAction(
+                project_id=project.id,
+                code=project.code,
+                name=project.name,
+                owner=project.owner,
+                current_stage=project.current_stage,
+                stage_name=STAGE_NAMES.get(project.current_stage, f"阶段 {project.current_stage}"),
+                progress=project.progress,
+                next_step_no=head.step_no if head else None,
+                next_step_name=head.name if head else None,
+                next_suggestion=suggestion,
+                open_exceptions=open_exceptions,
+                is_overdue=bool(
+                    project.end_date and project.end_date < today and project.progress < 100
+                ),
+            )
+        )
+    return result
+
+
 def build_home(db: Session, user: User) -> DashboardHome:
     """角色化工作台：不同角色只看到自己需要先处理的事。"""
     startup = startup_service.status(db)
@@ -544,4 +621,5 @@ def build_home(db: Session, user: User) -> DashboardHome:
         display_name=user.display_name,
         headline=headline,
         blocks=blocks,
+        next_actions=_next_actions(db, user),
     )

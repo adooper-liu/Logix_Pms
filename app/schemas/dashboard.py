@@ -97,9 +97,25 @@ class DashboardHomeBlock(BaseModel):
     actions: List[HomeAction] = []
 
 
+class HomeNextAction(BaseModel):
+    project_id: int
+    code: str
+    name: str
+    owner: Optional[str] = None
+    current_stage: int
+    stage_name: str
+    progress: float
+    next_step_no: Optional[str] = None
+    next_step_name: Optional[str] = None
+    next_suggestion: Optional[str] = None
+    open_exceptions: int = 0
+    is_overdue: bool = False
+
+
 class DashboardHome(BaseModel):
     role: str
     role_label: str
     display_name: str
     headline: str
     blocks: List[DashboardHomeBlock] = []
+    next_actions: List[HomeNextAction] = []

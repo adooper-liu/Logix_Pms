@@ -42,3 +42,20 @@ def test_viewer_home_is_readonly(viewer_client):
     assert data["role"] == "VIEWER"
     assert [block["key"] for block in data["blocks"]] == ["readonly"]
     assert data["headline"]
+    assert len(data["next_actions"]) <= 3
+
+
+def test_home_next_actions_are_real_projects(client, owner_client):
+    admin = client.get(f"{API}/dashboard/home").json()
+    actions = admin["next_actions"]
+    assert actions, "驾驶舱缺少当前推进项目"
+    assert len(actions) <= 3
+    first = actions[0]
+    assert first["project_id"] and first["code"] and first["stage_name"]
+    assert first["current_stage"] >= 1
+    assert "next_step_name" in first
+    assert isinstance(first["open_exceptions"], int)
+
+    owner = owner_client.get(f"{API}/dashboard/home").json()
+    assert owner["next_actions"], "流程 Owner 没有当前推进项目"
+    assert all(item["owner"] == "陈经理" for item in owner["next_actions"])

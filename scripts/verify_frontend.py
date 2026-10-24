@@ -1843,9 +1843,18 @@ def main() -> int:
         # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
         def dashboard_entries() -> None:
             goto("dashboard")
-            page.click('#view .mainline-step:has-text("流程地图")')
-            page.wait_for_timeout(700)
-            assert page.inner_text("#pageTitle") == "企业流程地图"
+            assert "我的当前推进" in page.inner_text("#view"), "驾驶舱缺少当前推进卡"
+            continue_btn = page.locator('#view button[data-act="dashboard.openProject"]')
+            if continue_btn.count():
+                continue_btn.first.click()
+                page.wait_for_selector("#mask.show")
+                page.wait_for_timeout(1400)
+                assert "概览" in page.inner_text("#mBody"), "继续推进未打开项目详情"
+                close_modal()
+            else:
+                page.click('#view a:has-text("项目组合")')
+                page.wait_for_timeout(700)
+                assert page.inner_text("#pageTitle") == "流程项目组合"
 
             goto("dashboard")
             page.click("#view a.kpi.stat >> nth=0")
