@@ -172,14 +172,14 @@ def test_spa_views_cover_all_registered_views():
 
 
 def test_default_view_is_start():
-    """未指定 hash/路径时默认进「开始使用」；最小启动 7/7 后改落驾驶舱。"""
+    """未指定 hash/路径时默认进「开始使用」；首次上线 S0–S7 就绪后改落驾驶舱。"""
     router_src = (JS_ROOT / "core" / "router.js").read_text(encoding="utf-8")
     assert "export function explicitView()" in router_src
 
     auth_src = (JS_ROOT / "core" / "auth.js").read_text(encoding="utf-8")
     assert "const explicit = explicitView()" in auth_src
     assert "let view = 'start'" in auth_src
-    assert "startup.minimal_ready_count >= startup.minimal_total" in auth_src
+    assert "startup.pilot_ready_count >= startup.pilot_total" in auth_src
 
 
 def test_workload_page_consumes_boundary_note():

@@ -5,6 +5,9 @@
 - 未就绪时给出下一步动作与跳转入口；
 - 流程卡复用同一套判定。
 
+“首次上线”范围 = S0–S7（8 步，含制度与授权）；S8 改善闭环不阻塞首次上线。
+默认首页以 pilot_ready_count 是否达到 pilot_total 为切换门槛。
+
 唯一的写操作是人工“跳过”：它只记录“本轮不把现有数据作为就绪证据”，
 不修改任何业务对象，也不与 24 步 / 9 阶段项目的步骤状态混用。
 """
@@ -55,7 +58,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "试点章程、Owner 名单、范围/非范围、停止条件。",
         "exit_criteria": "试点 L3 有 Owner；至少有一个治理角色；试点项目有赞助人。",
         "estimated": "2–3 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [
             {"label": "维护战略目标", "view": "strategy"},
             {"label": "组织与治理角色", "view": "orgs"},
@@ -70,7 +73,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "目标卡、目标 → L1/L2/L3 → KPI 映射。",
         "exit_criteria": "目标有责任人与目标值，并已承接到具体流程。",
         "estimated": "2 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [{"label": "打开战略目标", "view": "strategy"}],
         "next_hint": "在「战略目标」创建年度目标，并用「承接」把它链到试点 L3 和 KPI。",
     },
@@ -82,7 +85,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "L1–L3 架构 V0.1、PCF 覆盖与差异映射。",
         "exit_criteria": "L1/L2/L3 均已有节点；试点 L3 已映射到 PCF。",
         "estimated": "3–5 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [
             {"label": "打开流程地图", "view": "map"},
             {"label": "查看 PCF 框架", "view": "pcf"},
@@ -97,7 +100,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "RACI 矩阵、角色成员。",
         "exit_criteria": "每个关键事项恰好一个 A；治理扫描无 RACI_INVALID。",
         "estimated": "2–3 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [
             {"label": "组织与治理角色", "view": "orgs"},
             {"label": "在设计器维护权责", "view": "designer"},
@@ -112,7 +115,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "制度/SOP 清单、适用范围、生效与废止安排。",
         "exit_criteria": "至少一份标准文件处于生效状态，并标明适用范围。",
         "estimated": "3–5 天",
-        "minimal": False,
+        "pilot": True,
         "actions": [{"label": "打开交付物与模板库", "view": "deliverables"}],
         "next_hint": "在「交付物与模板库 → 流程标准文件」上传制度/SOP，并完成审批生效。",
     },
@@ -124,7 +127,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "BPMN 模型、SOP、表单/规则、工具绑定。",
         "exit_criteria": "至少一条 L3 已发布模型，且表单/规则/工具至少有一项绑定。",
         "estimated": "5–10 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [
             {"label": "打开流程设计器", "view": "designer"},
             {"label": "打开工作流手册", "view": "workflow"},
@@ -139,7 +142,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "标准工时卡、产能日历、负荷率。",
         "exit_criteria": "至少一条已验证标准工时和一条产能记录；未验证工时不进入成本口径。",
         "estimated": "5–10 天",
-        "minimal": True,
+        "pilot": True,
         "actions": [
             {"label": "打开工作量", "view": "monitor", "hint": "运营监控 → 工作量"},
         ],
@@ -152,8 +155,8 @@ STEP_DEFINITIONS: List[Dict] = [
         "input": "目标、基线、数据来源、统计频率。",
         "output": "KPI 定义卡、红黄绿状态、异常闭环。",
         "exit_criteria": "至少一张完整 KPI 卡（公式/阈值/责任人）且已有数据点。",
-        "estimated": "30 天",
-        "minimal": True,
+        "estimated": "1–3 天建卡；监测周期 30 天",
+        "pilot": True,
         "actions": [{"label": "打开运营监控", "view": "monitor"}],
         "next_hint": "在「运营监控 → KPI 明细」补齐公式、红黄绿阈值与责任人，并录入数据点。",
     },
@@ -165,7 +168,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "output": "改善项目卡、变更单、V1.x 版本、月度复盘与复制资产包。",
         "exit_criteria": "至少一个改善项目已立项、一张变更单已应用，且无未闭环治理待办。",
         "estimated": "30–90 天/轮",
-        "minimal": False,
+        "pilot": False,
         "actions": [
             {"label": "查看改善候选", "view": "monitor", "hint": "运营监控 → KPI 明细"},
             {"label": "项目组合", "view": "projects"},
@@ -524,7 +527,7 @@ def status(db: Session) -> StartupStatusOut:
                 output=definition["output"],
                 exit_criteria=definition["exit_criteria"],
                 estimated=definition["estimated"],
-                minimal=definition["minimal"],
+                pilot=definition["pilot"],
                 status=state,
                 status_label=label,
                 skipped=skip is not None,
@@ -547,29 +550,29 @@ def status(db: Session) -> StartupStatusOut:
         )
 
     ready_count = sum(1 for step in steps if step.status == "READY")
-    minimal_steps = [step for step in steps if step.minimal]
-    minimal_ready_count = sum(1 for step in minimal_steps if step.status == "READY")
+    pilot_steps = [step for step in steps if step.pilot]
+    pilot_ready_count = sum(1 for step in pilot_steps if step.status == "READY")
     skipped_count = sum(1 for step in steps if step.status == "SKIPPED")
     next_step = next(
         (step.key for step in steps if step.status not in ("READY", "SKIPPED")),
         None,
     )
-    next_minimal_step = next(
-        (step.key for step in minimal_steps if step.status not in ("READY", "SKIPPED")),
+    next_pilot_step = next(
+        (step.key for step in pilot_steps if step.status not in ("READY", "SKIPPED")),
         None,
     )
     return StartupStatusOut(
         total=len(steps),
         ready_count=ready_count,
         readiness_pct=round(ready_count * 100 / len(steps), 1) if steps else 0.0,
-        minimal_total=len(minimal_steps),
-        minimal_ready_count=minimal_ready_count,
-        minimal_readiness_pct=(
-            round(minimal_ready_count * 100 / len(minimal_steps), 1) if minimal_steps else 0.0
+        pilot_total=len(pilot_steps),
+        pilot_ready_count=pilot_ready_count,
+        pilot_readiness_pct=(
+            round(pilot_ready_count * 100 / len(pilot_steps), 1) if pilot_steps else 0.0
         ),
         skipped_count=skipped_count,
         next_step=next_step,
-        next_minimal_step=next_minimal_step,
+        next_pilot_step=next_pilot_step,
         steps=steps,
     )
 

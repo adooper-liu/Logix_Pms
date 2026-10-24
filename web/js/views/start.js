@@ -6,7 +6,7 @@
 
 import { esc } from '../core/format.js';
 import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
-import { renderAsync, go, RENDERERS } from '../core/router.js';
+import { renderAsync, go } from '../core/router.js';
 import { GET, POST, DEL } from '../core/api.js';
 import { state } from '../core/state.js';
 
@@ -22,22 +22,6 @@ const RAIL_TONE = {
   NOT_STARTED: 'gray',
   SKIPPED: 'purple',
 };
-const MODE_KEY = 'pms_start_mode';
-
-function currentMode() {
-  if (state.start.mode !== 'full' && state.start.mode !== 'minimal') state.start.mode = 'minimal';
-  return state.start.mode;
-}
-
-function ensureModeFromStorage() {
-  if (state.start.modeLoaded) return;
-  try {
-    state.start.mode = localStorage.getItem(MODE_KEY) === 'full' ? 'full' : 'minimal';
-  } catch (e) {
-    state.start.mode = 'minimal';
-  }
-  state.start.modeLoaded = true;
-}
 
 function shortTitle(step) {
   return step.title.replace(/^\d+\.\s*/, '');
@@ -164,31 +148,8 @@ function doneList(steps) {
     </div>`;
 }
 
-function completionCard(mode, data) {
-  const scope = mode === 'minimal' ? data.steps.filter((step) => step.minimal) : data.steps;
-  const skipped = scope.filter((step) => step.status === 'SKIPPED').length;
-  if (mode === 'minimal') {
-    const fullLeft = data.steps.filter((step) => !step.minimal);
-    const fullPending = fullLeft.filter((step) => step.status !== 'READY');
-    return `
-      <div class="card start-complete">
-        <h3>${skipped
-          ? `最小启动已推进完 ${data.minimal_ready_count}/${data.minimal_total}`
-          : `最小启动已完成 ${data.minimal_ready_count}/${data.minimal_total}`}</h3>
-        <div class="desc">${skipped
-          ? `其中 ${skipped} 步标记为未验证；未验证不等于完成，可随时取消跳过。`
-          : '六类最小产物已经具备；可以进入日常运营，也可以继续完整路径。'}</div>
-        ${fullPending.length
-          ? `<div class="note mb">完整路径还有 ${fullPending.length} 步未就绪：
-              ${fullPending.map((step) => esc(shortTitle(step))).join('、')}。</div>`
-          : '<div class="note mb">完整路径的 9 步也已全部就绪。</div>'}
-        <div class="gap">
-          <button class="btn btn-p" data-act="start.mode" data-mode="full">继续完整路径</button>
-          <button class="btn btn-g" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
-          <button class="btn btn-g" data-act="start.setupProjects">体系落地项目</button>
-        </div>
-      </div>`;
-  }
+function completionCard(data) {
+  const skipped = data.steps.filter((step) => step.status === 'SKIPPED').length;
   return `
     <div class="card start-complete">
       <h3>${skipped
@@ -205,25 +166,33 @@ function completionCard(mode, data) {
     </div>`;
 }
 
+function pilotReadyBanner(data) {
+  if (data.pilot_ready_count < data.pilot_total || data.ready_count >= data.total) return '';
+  return `
+    <div class="card start-complete">
+      <h3>首次上线已就绪 ${data.pilot_ready_count}/${data.pilot_total}</h3>
+      <div class="desc">S0–S7 已具备出门证据，可以进入日常运营；
+        S8 改善闭环不阻塞首次上线，继续在运营中推进。</div>
+      <div class="gap">
+        <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
+        <button class="btn btn-g" data-act="start.go" data-view="monitor">运营监控</button>
+        <button class="btn btn-g" data-act="start.setupProjects">体系落地项目</button>
+      </div>
+    </div>`;
+}
+
 function paint(data) {
-  ensureModeFromStorage();
-  const mode = currentMode();
-  const scope = mode === 'minimal'
-    ? data.steps.filter((step) => step.minimal)
-    : data.steps;
-  const currentIndex = scope.findIndex(
+  const currentIndex = data.steps.findIndex(
     (step) => step.status !== 'READY' && step.status !== 'SKIPPED');
-  const done = currentIndex < 0 ? scope : scope.slice(0, currentIndex);
-  const current = currentIndex < 0 ? null : scope[currentIndex];
-  const upcoming = currentIndex < 0 ? [] : scope.slice(currentIndex + 1);
-  const readyCount = mode === 'minimal' ? data.minimal_ready_count : data.ready_count;
-  const total = mode === 'minimal' ? data.minimal_total : data.total;
-  const pct = mode === 'minimal' ? data.minimal_readiness_pct : data.readiness_pct;
+  const done = currentIndex < 0 ? data.steps : data.steps.slice(0, currentIndex);
+  const current = currentIndex < 0 ? null : data.steps[currentIndex];
+  const upcoming = currentIndex < 0 ? [] : data.steps.slice(currentIndex + 1);
+  const pct = data.readiness_pct;
 
   const rail = data.steps.map((step) => `
     <div class="rail-step ${RAIL_TONE[step.status] || 'gray'}${
       current && current.key === step.key ? ' current' : ''}${
-      step.minimal ? ' is-minimal' : ''}" title="${esc(step.title)} · ${esc(step.status_label)}">
+      step.pilot ? '' : ' is-improvement'}" title="${esc(step.title)} · ${esc(step.status_label)}">
       <span class="dot">${step.order + 1}</span>
       <b>${esc(shortTitle(step))}</b>
       <em>${esc(step.status_label)}</em>
@@ -237,14 +206,9 @@ function paint(data) {
           <div class="desc">从范围与授权到改善复制，每一步只回答一个问题；状态由现有数据计算</div>
         </div>
         <div class="gap">
-          <div class="seg">
-            <button class="${mode === 'minimal' ? 'on' : ''}"
-              data-act="start.mode" data-mode="minimal">最小启动 7 步</button>
-            <button class="${mode === 'full' ? 'on' : ''}"
-              data-act="start.mode" data-mode="full">完整路径 9 步</button>
-          </div>
-          <span class="tag ${readyCount >= total ? 't-grn' : 't-yel'}">
-            ${readyCount}/${total} · ${pct}%</span>
+          <span class="tag t-blu">首次上线 ${data.pilot_ready_count}/${data.pilot_total}</span>
+          <span class="tag ${data.ready_count >= data.total ? 't-grn' : 't-yel'}">
+            ${data.ready_count}/${data.total} · ${pct}%</span>
         </div>
       </div>
       <div class="start-rail">${rail}</div>
@@ -253,7 +217,8 @@ function paint(data) {
       </div>
       <div class="between mt">
         <span class="tiny muted">
-          体系就绪度 ≠ 项目进度：这里按证据计算；9 阶段 / 27 步的执行进度在项目里单独管理。
+          首次上线 = S0–S7（8 步，含制度与授权）；S8 改善闭环不阻塞日常运营。
+          体系就绪度 ≠ 项目进度，9 阶段 / 27 步的执行进度在项目里单独管理。
         </span>
         <button class="btn-sm" data-act="start.setupProjects">体系落地项目 →</button>
       </div>
@@ -261,7 +226,8 @@ function paint(data) {
         ? `<div class="note mt">${data.skipped_count} 步已跳过：跳过表示“未验证”，不计入就绪，也不阻塞后续步骤。</div>`
         : ''}
     </div>
-    ${current ? currentCard(current) : completionCard(mode, data)}
+    ${pilotReadyBanner(data)}
+    ${current ? currentCard(current) : completionCard(data)}
     ${doneList(done)}
     ${upcomingList(upcoming)}`;
 }
@@ -269,16 +235,6 @@ function paint(data) {
 /* -------------------------------------------------- 交互 */
 
 on('start.go', ({ view }) => go(view));
-
-on('start.mode', ({ mode }) => {
-  state.start.mode = mode === 'full' ? 'full' : 'minimal';
-  state.start.modeLoaded = true;
-  try {
-    localStorage.setItem(MODE_KEY, state.start.mode);
-  } catch (e) { /* 隐私模式下忽略 */ }
-  if (state.start.data) paint(state.start.data);
-  else RENDERERS.start();
-});
 
 on('start.setupProjects', () => {
   state.projects.filter = {
@@ -320,7 +276,6 @@ on('start.unskip', async ({ key }) => {
 });
 
 const renderStart = () => {
-  ensureModeFromStorage();
   renderAsync(
     'start',
     () => GET('/start/status'),

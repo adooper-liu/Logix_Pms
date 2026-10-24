@@ -32,7 +32,7 @@ class StartupStepOut(BaseModel):
     output: str
     exit_criteria: str
     estimated: str = ""
-    minimal: bool = True
+    pilot: bool = True  # 是否属于「首次上线」范围（S0–S7）；S8 不阻塞首次上线
     status: str
     status_label: str
     skipped: bool = False
@@ -48,12 +48,12 @@ class StartupStatusOut(BaseModel):
     total: int
     ready_count: int
     readiness_pct: float
-    minimal_total: int
-    minimal_ready_count: int
-    minimal_readiness_pct: float
+    pilot_total: int
+    pilot_ready_count: int
+    pilot_readiness_pct: float
     skipped_count: int = 0
     next_step: Optional[str] = None
-    next_minimal_step: Optional[str] = None
+    next_pilot_step: Optional[str] = None
     steps: List[StartupStepOut] = []
 
 

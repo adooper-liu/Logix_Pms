@@ -4,11 +4,12 @@ from __future__ import annotations
 
 API = "/api/v1"
 
-MINIMAL_KEYS = {
+PILOT_KEYS = {
     "scope",
     "strategy",
     "architecture",
     "org_raci",
+    "policy",
     "process_design",
     "workload",
     "performance",
@@ -22,7 +23,7 @@ def _step(data: dict, key: str) -> dict:
 def test_startup_status_shape(client):
     data = client.get(f"{API}/start/status").json()
     assert data["total"] == 9
-    assert data["minimal_total"] == 7
+    assert data["pilot_total"] == 8
     assert len(data["steps"]) == 9
     assert [step["key"] for step in data["steps"]] == [
         "scope",
@@ -36,10 +37,11 @@ def test_startup_status_shape(client):
         "improvement",
     ]
     assert 0 <= data["readiness_pct"] <= 100
-    assert 0 <= data["minimal_readiness_pct"] <= 100
-    assert {step["key"] for step in data["steps"] if step["minimal"]} == MINIMAL_KEYS
-    if data["next_minimal_step"] is not None:
-        assert data["next_minimal_step"] in MINIMAL_KEYS
+    assert 0 <= data["pilot_readiness_pct"] <= 100
+    assert {step["key"] for step in data["steps"] if step["pilot"]} == PILOT_KEYS
+    assert _step(data, "improvement")["pilot"] is False
+    if data["next_pilot_step"] is not None:
+        assert data["next_pilot_step"] in PILOT_KEYS
 
     for step in data["steps"]:
         assert step["status"] in {"NOT_STARTED", "IN_PROGRESS", "READY", "SKIPPED"}

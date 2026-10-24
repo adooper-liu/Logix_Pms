@@ -95,7 +95,7 @@ def main() -> int:
 
         skipped_keys: list[str] = []
 
-        # 默认入口与专家模式：登录后应落在「开始使用」（除非最小启动已 7/7），
+        # 默认入口与专家模式：登录后应落在「开始使用」（除非首次上线 S0–S7 已 8/8），
         # 专家工具默认收起；开启后再跑后面的 16 个视图巡检。
         def default_entry_and_expert_mode() -> None:
             token = page.evaluate("() => localStorage.getItem('psm_token')")
@@ -109,7 +109,7 @@ def main() -> int:
                 token,
             )
             expected = "管理驾驶舱"
-            if not status or status["minimal_ready_count"] < status["minimal_total"]:
+            if not status or status["pilot_ready_count"] < status["pilot_total"]:
                 expected = "开始使用"
             assert page.inner_text("#pageTitle") == expected, (
                 f"默认落地页应为「{expected}」，实际「{page.inner_text('#pageTitle')}」"
@@ -1803,13 +1803,11 @@ def main() -> int:
             assert "开始使用" in view and "九步启动路径" in view, "启动向导未渲染"
             assert page.locator("#view .rail-step").count() == 9, "九步进度轨不完整"
 
-            # 最小启动可能已经 7/7；切到完整路径，确保至少有一个未完成步骤可检查证据面板
-            page.click('#view .seg button[data-mode="full"]')
-            page.wait_for_timeout(500)
-            assert page.locator('#view .seg button[data-mode="full"].on').count() == 1
-            view = page.inner_text("#view")
+            assert "首次上线" in view, "启动页缺少首次上线范围说明"
+            assert "S0–S7" in view, "启动页缺少首次上线范围"
+            assert page.locator("#view .seg button[data-mode]").count() == 0, "模式开关应已移除"
             has_current = page.locator("#view .start-current").count() == 1
-            assert has_current or "全部就绪" in view or "已推进完" in view, "完整路径没有当前步"
+            assert has_current or "全部就绪" in view or "已推进完" in view, "启动页没有当前步"
             assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
 
             if has_current:
@@ -1834,10 +1832,6 @@ def main() -> int:
                 page.wait_for_timeout(1400)
                 skipped_keys.remove(key)
                 assert "未验证（已跳过）" not in page.inner_text("#view"), "取消跳过后仍是未验证"
-
-            page.click('#view .seg button[data-mode="minimal"]')
-            page.wait_for_timeout(400)
-            assert page.locator('#view .seg button[data-mode="minimal"].on').count() == 1
 
         def process_card_view() -> None:
             goto("process_card")
