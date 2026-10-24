@@ -518,7 +518,7 @@ for (const type of BUBBLING_EVENTS) {
 ### Phase 2 — 逐视图迁移到委托 + 组件（可拆分多个提交）
 
 顺序建议：**从小的、依赖少的视图开始**——
-`workflow` → `monitor` → `execution` → `map` → `deliverables` → `designer`（最后）；
+`dashboard` → `workflow` → `monitor` → `execution` → `map` → `deliverables` → `designer`（最后）；
 `knowledge`、`toolbox`、`sketches`、`pcf`、`orgs`、`projects` 已完成。
 
 每个视图的迁移动作：
