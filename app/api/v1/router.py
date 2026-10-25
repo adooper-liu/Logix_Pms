@@ -29,6 +29,7 @@ from app.api.v1 import (
     process_card,
     process_documents,
     process_map,
+    process_tasks,
     projects,
     raci,
     sketches,
@@ -53,6 +54,7 @@ protected.include_router(dashboard.router)
 protected.include_router(process_map.router)
 protected.include_router(process_card.router)
 protected.include_router(process_documents.router)
+protected.include_router(process_tasks.router)
 protected.include_router(benchmark.router)
 protected.include_router(baselines.router)
 protected.include_router(workflow.router)

@@ -21,6 +21,7 @@ from app.models.enums import WorkMeasurementSource, WorkMeasurementStatus
 from app.models.execution import ProcessTask, TaskWorklog
 from app.models.org import OrgUnit, Position
 from app.models.process import ProcessArch
+from app.models.process_task import ProcessTaskDefinition
 from app.models.user import User
 from app.models.workload import (
     CapacityCalendar,
@@ -62,6 +63,7 @@ MIN_OBSERVATIONS = 5
 
 MEASUREMENT_FIELDS = {
     "activity_id",
+    "task_id",
     "position_id",
     "org_unit_id",
     "method_description",
@@ -146,6 +148,13 @@ def _validate_position_org(db: Session, position_id: int, org_unit_id: Optional[
 
 def validate_standard(db: Session, data: Dict) -> None:
     _validate_activity(db, data["activity_id"])
+    task_id = data.get("task_id")
+    if task_id is not None:
+        task = db.get(ProcessTaskDefinition, task_id)
+        if task is None:
+            raise WorkloadError(f"L5 任务 {task_id} 不存在")
+        if task.activity_id != data["activity_id"]:
+            raise WorkloadError("L5 任务必须属于所选 L4 活动")
     _validate_position_org(db, data["position_id"], data.get("org_unit_id"))
     valid_from = data.get("valid_from")
     valid_to = data.get("valid_to")
@@ -407,6 +416,9 @@ def standard_out(db: Session, row: WorkMeasurementStandard) -> WorkMeasurementSt
         activity_id=row.activity_id,
         activity_code=activity.code if activity else None,
         activity_name=activity.name if activity else None,
+        task_id=row.task_id,
+        task_code=row.task.code if row.task else None,
+        task_name=row.task.name if row.task else None,
         position_id=row.position_id,
         position_name=position.name if position else None,
         org_unit_id=row.org_unit_id,
