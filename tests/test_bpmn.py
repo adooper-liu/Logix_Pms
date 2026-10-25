@@ -162,6 +162,49 @@ def test_bpmn_layout_and_waypoints_persist(client):
         client.delete(f"{API}/process-map/{pid}")
 
 
+DOC_DEFAULT_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  id="D4" targetNamespace="http://example.com/bpmn">
+  <bpmn:process id="P4">
+    <bpmn:startEvent id="start" name="开始"/>
+    <bpmn:exclusiveGateway id="gw" name="判断" default="f2"/>
+    <bpmn:task id="ok" name="通过">
+      <bpmn:documentation>正常路径的处理说明</bpmn:documentation>
+    </bpmn:task>
+    <bpmn:task id="fallback" name="兜底"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="gw">
+      <bpmn:documentation>进入判断</bpmn:documentation>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f2" sourceRef="gw" targetRef="fallback"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="gw" targetRef="ok"/>
+  </bpmn:process>
+</bpmn:definitions>
+"""
+
+
+def test_documentation_and_default_branch_round_trip(client):
+    pid = _create_process(client, "L3-BPMN-DOC")
+    try:
+        imported = client.post(f"{API}/processes/{pid}/bpmn", json={"xml": DOC_DEFAULT_XML})
+        assert imported.status_code == 200, imported.text
+        model = imported.json()
+        node = next(n for n in model["nodes"] if n["node_key"] == "ok")
+        assert node["description"] == "正常路径的处理说明"
+        flow = next(e for e in model["edges"] if e["source_key"] == "start")
+        assert flow["description"] == "进入判断"
+        default_edge = next(
+            e for e in model["edges"] if e["source_key"] == "gw" and e["target_key"] == "fallback"
+        )
+        assert default_edge["is_default"] is True
+
+        exported = client.get(f"{API}/processes/{pid}/bpmn").text
+        assert "正常路径的处理说明" in exported
+        assert "进入判断" in exported
+        assert "default=" in exported
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
 def test_import_rejects_parallel_gateway(client):
     pid = _create_process(client, "L3-BPMN-PAR")
     try:

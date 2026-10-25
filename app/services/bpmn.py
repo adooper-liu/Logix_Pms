@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from fastapi import HTTPException
 
@@ -76,6 +76,13 @@ def _q(ns: str, tag: str) -> str:
 
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+def _documentation(el: ET.Element) -> Optional[str]:
+    for child in el:
+        if _local(child.tag) == "documentation" and child.text:
+            return child.text.strip()
+    return None
 
 
 def _elem_id(key: str) -> str:
@@ -182,12 +189,17 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
                 ET.SubElement(lane_el, _q(BPMN_NS, "flowNodeRef")).text = _elem_id(node.node_key)
 
     # 节点
+    node_elements: Dict[str, Any] = {}
     for node in ordered:
         tag = NODE_TO_BPMN.get(node.node_type, "task")
         el = ET.SubElement(
             process_el, _q(BPMN_NS, tag), {"id": _elem_id(node.node_key), "name": node.name}
         )
+        if getattr(node, "description", None):
+            doc = ET.SubElement(el, _q(BPMN_NS, "documentation"))
+            doc.text = node.description
         _add_extension(el, node)
+        node_elements[node.node_key] = el
 
     # 连线
     flow_ids: Dict[int, str] = {}
@@ -204,6 +216,9 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
         if edge.probability is not None and edge.probability != 1.0:
             attrs[_q(PMS_NS, "probability")] = str(edge.probability)
         flow = ET.SubElement(process_el, _q(BPMN_NS, "sequenceFlow"), attrs)
+        if getattr(edge, "description", None):
+            doc = ET.SubElement(flow, _q(BPMN_NS, "documentation"))
+            doc.text = edge.description
         if edge.condition:
             condition = ET.SubElement(
                 flow,
@@ -211,6 +226,10 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
                 {_q(XSI_NS, "type"): "bpmn:tFormalExpression"},
             )
             condition.text = edge.condition
+        if getattr(edge, "is_default", False):
+            source = node_elements.get(edge.source_key)
+            if source is not None:
+                source.set("default", flow_id)
 
     # 图形信息（可选，但让导入到其他建模工具时不会全挤在原点）
     diagram = ET.SubElement(definitions, _q(BPMNDI_NS, "BPMNDiagram"), {"id": "Diagram_1"})
@@ -387,6 +406,7 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
                 lane_of[ref.text.strip()] = lane_name
 
     positions = _parse_bounds(root)
+    default_flow_ids = {el.get("default") for el in process_el if el.get("default")}
     nodes: List[Dict] = []
     node_ids: set[str] = set()
     unsupported: List[str] = []
@@ -427,6 +447,7 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
                 "node_type": node_type,
                 "lane": lane_of.get(element_id, "主流程")[:64],
                 "owner_role": owner_role,
+                "description": _documentation(el),
                 "duration_minutes": _metric_number(metrics, "durationMinutes", 0.0),
                 "wait_minutes": _metric_number(metrics, "waitMinutes", 0.0),
                 "cost": _metric_number(metrics, "cost", 0.0),
@@ -486,6 +507,8 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
                 "label": (el.get("name") or None) and el.get("name")[:64],
                 "condition": condition[:128] if condition else None,
                 "probability": probability_value,
+                "description": _documentation(el),
+                "is_default": el.get("id") in default_flow_ids,
                 # 区分「显式为 1.0」和「XML 没写」：后者才允许用旧快照兜底
                 "_probability_explicit": probability is not None,
             }

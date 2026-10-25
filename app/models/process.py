@@ -157,6 +157,7 @@ class ProcessNode(Base):
     lane: Mapped[str] = mapped_column(String(64), default="主流程")  # 泳道 = 部门/角色
 
     owner_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 统一活动 ID：指向 L3 流程下面的 L4 活动；NULL = 尚未关联
     process_arch_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("process_arch.id", ondelete="SET NULL", name="fk_process_node_activity"),
@@ -236,6 +237,10 @@ class ProcessEdge(Base):
     label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     condition: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     probability: Mapped[float] = mapped_column(Float, default=1.0)  # 分支发生概率 0–1
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )  # 网关的默认分支
 
     process: Mapped["ProcessArch"] = relationship("ProcessArch", back_populates="edges")
 

@@ -39,6 +39,7 @@ NODE_FIELDS = (
     "node_type",
     "lane",
     "owner_role",
+    "description",
     "process_arch_id",
     "owner_position_id",
     "duration_minutes",
@@ -51,7 +52,15 @@ NODE_FIELDS = (
     "position_x",
     "position_y",
 )
-EDGE_FIELDS = ("source_key", "target_key", "label", "condition", "probability")
+EDGE_FIELDS = (
+    "source_key",
+    "target_key",
+    "label",
+    "condition",
+    "probability",
+    "description",
+    "is_default",
+)
 
 
 def _node_row(node: ProcessNode) -> dict:
@@ -113,7 +122,9 @@ def rows_from_snapshot(
         nodes.append(node)
     edges: List[ProcessEdge] = []
     for index, raw in enumerate(snapshot.get("edges") or [], start=1):
-        edge = ProcessEdge(process_id=process_id, **raw)
+        data = dict(raw)
+        data.setdefault("is_default", False)
+        edge = ProcessEdge(process_id=process_id, **data)
         edge.id = index
         edges.append(edge)
     return nodes, edges

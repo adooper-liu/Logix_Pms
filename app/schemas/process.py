@@ -157,6 +157,7 @@ class ProcessNodeIn(BaseModel):
     node_type: NodeType = NodeType.TASK
     lane: str = Field(default="主流程", max_length=64, description="泳道 = 部门/角色")
     owner_role: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = None
     process_arch_id: Optional[int] = Field(default=None, description="统一活动 ID（L4 活动）")
     owner_position_id: Optional[int] = Field(default=None, description="负责人岗位")
 
@@ -179,6 +180,7 @@ class ProcessNodeOut(ORMModel):
     node_type: str
     lane: str
     owner_role: Optional[str] = None
+    description: Optional[str] = None
     process_arch_id: Optional[int] = None
     owner_position_id: Optional[int] = None
     duration_minutes: float
@@ -198,6 +200,8 @@ class ProcessEdgeIn(BaseModel):
     label: Optional[str] = Field(default=None, max_length=64)
     condition: Optional[str] = Field(default=None, max_length=128)
     probability: float = Field(default=1.0, ge=0, le=1)
+    description: Optional[str] = None
+    is_default: bool = False
 
 
 class ProcessEdgeOut(ORMModel):
@@ -207,6 +211,8 @@ class ProcessEdgeOut(ORMModel):
     label: Optional[str] = None
     condition: Optional[str] = None
     probability: float
+    description: Optional[str] = None
+    is_default: bool = False
 
 
 class ProcessModelIn(BaseModel):
@@ -294,6 +300,7 @@ class ProcessNodeMetricsUpdate(BaseModel):
     approval_levels: Optional[int] = Field(default=None, ge=0, le=10)
     is_value_added: Optional[bool] = None
     owner_role: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = None
     process_arch_id: Optional[int] = None
     owner_position_id: Optional[int] = None
     expected_version: Optional[int] = Field(
