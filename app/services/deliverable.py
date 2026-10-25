@@ -20,6 +20,7 @@ from app.models.deliverable import (
     StepContract,
 )
 from app.models.enums import DeliverableStatus, DeliverableType, ToolLevel
+from app.models.process import ProcessModelVersion
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.tool import Tool
@@ -52,6 +53,19 @@ STATUS_LABELS: Dict[str, str] = {
     DeliverableStatus.EFFECTIVE.value: "已生效",
     DeliverableStatus.SUPERSEDED.value: "已被替代",
     DeliverableStatus.RETIRED.value: "已作废",
+}
+
+# 只有这两步的产出天然就是流程模型；其他交付物（地图/风险图/清单）不接受模型来源。
+MODEL_LINKABLE_STEPS = {"2.1", "3.2"}
+MODEL_STATUS_LABELS: Dict[str, str] = {
+    "DRAFT": "草稿",
+    "IN_REVIEW": "待评审",
+    "PUBLISHED": "已发布",
+}
+MODEL_TO_DELIVERABLE_STATUS: Dict[str, str] = {
+    "DRAFT": DeliverableStatus.DRAFT.value,
+    "IN_REVIEW": DeliverableStatus.IN_REVIEW.value,
+    "PUBLISHED": DeliverableStatus.EFFECTIVE.value,
 }
 
 TOOL_CATEGORY_LABELS: Dict[str, str] = {
@@ -379,6 +393,73 @@ def create_version(
     return version
 
 
+def link_model_version(
+    db: Session,
+    instance: DeliverableInstance,
+    model_version_id: int,
+    user: User,
+    note: Optional[str] = None,
+) -> DeliverableVersion:
+    """把流程模型版本登记为交付物版本；只引用模型，不复制文件。
+
+    模型版本状态直接映射交付物状态：草稿→草稿、待评审→评审中、已发布→已生效。
+    同一个模型版本重复关联时保持幂等，不重复生成 R#。
+    """
+    definition = instance.definition
+    if definition.step_no not in MODEL_LINKABLE_STEPS:
+        raise DeliverableError("该交付物不接受流程模型作为来源")
+    project = instance.project
+    if project is None or project.process_id is None:
+        raise DeliverableError("项目没有关联流程，无法关联模型")
+    model = db.get(ProcessModelVersion, model_version_id)
+    if model is None or model.process_id != project.process_id:
+        raise DeliverableError("模型版本不属于项目关联的流程")
+
+    current = (
+        db.get(DeliverableVersion, instance.current_version_id)
+        if instance.current_version_id
+        else None
+    )
+    if current is not None and current.source_model_version_id == model.id:
+        return current
+
+    last_no = (
+        db.scalar(
+            select(func.max(DeliverableVersion.version_no)).where(
+                DeliverableVersion.instance_id == instance.id
+            )
+        )
+        or 0
+    )
+    status = MODEL_TO_DELIVERABLE_STATUS.get(model.status, DeliverableStatus.DRAFT.value)
+    version = DeliverableVersion(
+        instance_id=instance.id,
+        version_no=last_no + 1,
+        status=status,
+        title=f"{definition.name} · 模型 v{model.version}",
+        note=note,
+        source_kind="MODEL",
+        source_model_version_id=model.id,
+        author=user.display_name,
+        author_id=user.id,
+        base_version_id=instance.current_version_id,
+    )
+    if status == DeliverableStatus.EFFECTIVE.value:
+        today = date.today()
+        version.valid_from = today
+        version.approver = user.display_name
+        version.approver_id = user.id
+        version.approved_at = utcnow()
+    db.add(version)
+    db.flush()
+    if status == DeliverableStatus.EFFECTIVE.value:
+        _supersede_others(db, instance, version, date.today())
+    instance.current_version_id = version.id
+    _sync_instance_status(db, instance)
+    db.flush()
+    return version
+
+
 def transition_version(
     db: Session,
     instance: DeliverableInstance,
@@ -557,6 +638,26 @@ def version_out(version: DeliverableVersion) -> DeliverableVersionOut:
             if version.source_document_version and version.source_document_version.document
             else None
         ),
+        source_kind=version.source_kind or "FILE",
+        source_model_version_id=version.source_model_version_id,
+        source_model_label=(
+            f"{version.source_model_version.process.code} · "
+            f"模型 v{version.source_model_version.version} · "
+            f"{MODEL_STATUS_LABELS.get(version.source_model_version.status, version.source_model_version.status)}"
+            if version.source_model_version
+            else None
+        ),
+        source_model_status=(
+            version.source_model_version.status if version.source_model_version else None
+        ),
+        source_model_status_label=(
+            MODEL_STATUS_LABELS.get(
+                version.source_model_version.status, version.source_model_version.status
+            )
+            if version.source_model_version
+            else None
+        ),
+        has_model=bool(version.source_model_version_id),
         created_at=version.created_at,
     )
 

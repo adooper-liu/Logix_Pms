@@ -178,7 +178,22 @@ class DeliverableVersionOut(ORMModel):
     source_document_label: Optional[str] = Field(
         default=None, description="如「PD-L3-032-01 v2.0」"
     )
+    source_kind: str = Field(default="FILE", description="FILE=上传文件；MODEL=流程模型")
+    source_model_version_id: Optional[int] = Field(default=None, description="关联的流程模型版本")
+    source_model_label: Optional[str] = Field(
+        default=None, description="如「L3-032 · 模型 v3 · 已发布」"
+    )
+    source_model_status: Optional[str] = Field(default=None, description="模型版本状态")
+    source_model_status_label: Optional[str] = Field(default=None, description="模型状态中文")
+    has_model: bool = Field(default=False, description="是否由流程模型版本作为证据")
     created_at: Optional[UtcDateTime] = None
+
+
+class DeliverableVersionFromModel(BaseModel):
+    """把已发布的流程模型版本登记为交付物版本；不复制文件。"""
+
+    model_version_id: int
+    note: Optional[str] = Field(default=None, max_length=500)
 
 
 class DeliverableVersionTransition(BaseModel):

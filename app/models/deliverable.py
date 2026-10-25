@@ -194,6 +194,18 @@ class DeliverableVersion(Base):
         nullable=True,
         index=True,
     )
+    # 来源类型：FILE=上传文件；MODEL=流程模型版本（只引用，不复制文件）
+    source_kind: Mapped[str] = mapped_column(String(16), default="FILE", server_default="FILE")
+    # 流程模型来源；与文件二选一。模型版本升级不覆盖历史交付物版本。
+    source_model_version_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "process_model_version.id",
+            ondelete="SET NULL",
+            name="fk_deliverable_version_source_model",
+        ),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     instance: Mapped["DeliverableInstance"] = relationship(
@@ -201,6 +213,9 @@ class DeliverableVersion(Base):
     )
     source_document_version: Mapped[Optional["ProcessDocumentVersion"]] = relationship(  # noqa: F821
         "ProcessDocumentVersion", foreign_keys=[source_document_version_id]
+    )
+    source_model_version: Mapped[Optional["ProcessModelVersion"]] = relationship(  # noqa: F821
+        "ProcessModelVersion", foreign_keys=[source_model_version_id]
     )
 
     __table_args__ = (

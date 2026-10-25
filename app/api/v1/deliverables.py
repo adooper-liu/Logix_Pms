@@ -46,6 +46,7 @@ from app.schemas.deliverable import (
     DeliverableSummary,
     DeliverableSyncResult,
     DeliverableVersionCreate,
+    DeliverableVersionFromModel,
     DeliverableVersionOut,
     DeliverableVersionTransition,
     StepContractOut,
@@ -427,6 +428,41 @@ def create_version(
     db.commit()
     db.refresh(version)
     return deliverable_service.version_out(version)
+
+
+@router.post(
+    "/{instance_id}/versions/from-model",
+    response_model=DeliverableInstanceDetail,
+    status_code=status.HTTP_201_CREATED,
+    summary="关联流程模型版本作为交付物版本（不复制文件）",
+)
+def link_model_version(
+    instance_id: int,
+    payload: DeliverableVersionFromModel,
+    db: DbSession,
+    user: WriteUser,
+):
+    instance = _get_instance(db, instance_id)
+    project = _project_of(db, instance)
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    try:
+        version = deliverable_service.link_model_version(
+            db, instance, payload.model_version_id, user, payload.note
+        )
+    except deliverable_service.DeliverableError as exc:
+        raise _fail(exc) from exc
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "deliverable_version",
+        version.id,
+        f"{project.code} 交付物 {instance.definition.code} 关联模型版本 "
+        f"{payload.model_version_id}（R{version.version_no}）",
+    )
+    db.commit()
+    db.refresh(instance)
+    return deliverable_service.instance_detail(db, instance)
 
 
 @router.post(
