@@ -607,6 +607,41 @@ def main() -> int:
             page.wait_for_timeout(1200)
             assert not page.is_visible("#mask.show"), "关闭后弹窗又自己弹回来了"
 
+        # 工作流推进：从步骤直达工作现场、记录进度、按步骤看交付物
+        def project_step_actions() -> None:
+            goto("projects")
+            page.click("#view .project-open >> nth=0")
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(900)
+            page.click('#mBody .tabs button:has-text("工作流推进")')
+            page.wait_for_selector("#pd-wk", timeout=8000)
+            page.wait_for_timeout(300)
+            assert page.locator('#pd-wk button[data-act="projects.openStepWork"]').count(), (
+                "步骤缺少「去工作」入口"
+            )
+            assert page.locator('#pd-wk button[data-act="projects.openStepTool"]').count(), (
+                "步骤缺少「工具」入口"
+            )
+            assert page.locator('#pd-wk button[data-act="projects.logStep"]').count(), (
+                "步骤缺少「记录进度」入口"
+            )
+            btn = page.locator('#pd-wk button[data-act="projects.openStepDeliverables"]').first
+            assert btn.count(), "步骤没有交付物入口"
+            step_no = btn.get_attribute("data-step")
+            btn.click()
+            page.wait_for_selector('#view button[data-act="dlv.clearStep"]', timeout=8000)
+            assert page.inner_text("#pageTitle") == "交付物与模板库"
+            assert f"step={step_no}" in page.url, f"URL 没有记录步骤筛选：{page.url}"
+            assert "只显示步骤" in page.inner_text("#view"), "交付物页没有进入步骤筛选"
+            rows = page.locator("#dlvList tbody tr").count()
+            assert rows > 0, "步骤筛选后没有交付物"
+            page.click('#view button[data-act="dlv.clearStep"]')
+            page.wait_for_function(
+                """(before) => document.querySelectorAll('#dlvList tbody tr').length > before""",
+                arg=rows,
+                timeout=8000,
+            )
+
         # 立项向导：匹配 → 立项 → 列表出现
         def project_wizard() -> None:
             goto("projects")
@@ -625,6 +660,27 @@ def main() -> int:
             assert not page.is_visible("#mask.show"), "提交后弹窗未关闭，可能是接口报错"
             listing = page.inner_text("#view")
             assert "自检用临时项目" in listing, "新建的项目没有出现在列表里"
+
+        # 立项向导里打开工具详情，关闭工具后必须回到原向导，不能丢失已填内容
+        def wizard_tool_modal() -> None:
+            goto("projects")
+            page.click("text=+ 新建流程项目")
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            page.fill("#npName", "向导保留测试")
+            page.click("#npRecBtn")
+            page.wait_for_selector('#npResult button[data-act="toolbox.open"]', timeout=8000)
+            page.click('#npResult button[data-act="toolbox.open"] >> nth=0')
+            page.wait_for_selector('#mFoot button[data-act="toolbox.close"]', timeout=8000)
+            page.wait_for_timeout(300)
+            page.click('#mFoot button[data-act="toolbox.close"]')
+            page.wait_for_timeout(400)
+            assert page.is_visible("#mask.show"), "关闭工具详情后立项向导被一起关闭"
+            assert "立项向导" in page.inner_text("#mTitle"), "关闭工具详情后没有回到立项向导"
+            assert page.input_value("#npName") == "向导保留测试", "回到向导后已填内容丢失"
+            page.click('#mFoot button[data-act="projects.close"]')
+            page.wait_for_timeout(300)
+            assert not page.is_visible("#mask.show"), "取消后向导没有关闭"
 
         # 工具箱：详情 + 按问题找工具（预设问题 + 自由输入各测一次）
         def toolbox() -> None:
@@ -678,6 +734,68 @@ def main() -> int:
             page.wait_for_timeout(1200)
             assert "方法论工具箱" in page.inner_text("#view")
             assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
+
+        # 项目交付物：把已发布流程模型登记为 2.1 的证据，不复制文件
+        def deliverable_model_link() -> None:
+            setup = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const h = {Authorization: 'Bearer ' + t, 'Content-Type': 'application/json'};
+                  const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
+                  const proc = await fetch('/api/v1/process-map', {
+                    method: 'POST', headers: h,
+                    body: JSON.stringify({code: 'L3-MDL-' + suffix, name: 'E2E 模型来源流程', level: 3}),
+                  }).then((r) => r.json());
+                  await fetch('/api/v1/processes/' + proc.id + '/design', {
+                    method: 'PUT', headers: h,
+                    body: JSON.stringify({nodes: [{node_key: 'a', name: 'E2E活动',
+                      node_type: 'TASK', lane: 'L', duration_minutes: 10}], edges: []}),
+                  });
+                  const pub = await fetch('/api/v1/processes/' + proc.id + '/design/publish', {
+                    method: 'POST', headers: h, body: JSON.stringify({}),
+                  }).then((r) => r.json());
+                  const proj = await fetch('/api/v1/projects', {
+                    method: 'POST', headers: h,
+                    body: JSON.stringify({name: 'E2E 模型来源项目 ' + suffix,
+                      methodology: 'BPI', owner: '流程管理科', process_id: proc.id}),
+                  }).then((r) => r.json());
+                  return {processId: proc.id, projectId: proj.id, versionId: pub.version_id};
+                }"""
+            )
+            try:
+                goto("deliverables")
+                page.click('#view .tabs button:has-text("项目交付物")')
+                page.wait_for_timeout(600)
+                page.select_option(
+                    '#view select[data-act="dlv.project"]', value=str(setup["projectId"])
+                )
+                page.wait_for_selector("#dlvList table", timeout=8000)
+                page.wait_for_timeout(600)
+                row = page.locator('#dlvList tr:has-text("2.1")').first
+                row.locator('button[data-act="dlv.linkModel"]').click()
+                page.wait_for_selector("#lmVersion", timeout=8000)
+                page.select_option("#lmVersion", value=str(setup["versionId"]))
+                page.click('#mFoot button[data-act="dlv.submitLinkModel"]')
+                page.wait_for_function(
+                    """() => {
+                      const row = [...document.querySelectorAll('#dlvList tr')]
+                        .find((r) => r.textContent.includes('2.1'));
+                      return !!row && row.textContent.includes('已生效');
+                    }""",
+                    timeout=8000,
+                )
+                text = page.locator('#dlvList tr:has-text("2.1")').first.inner_text()
+                assert "已生效" in text, f"已发布模型应直接计为已生效：{text[:200]}"
+            finally:
+                page.evaluate(
+                    """async ({projectId, processId}) => {
+                      const t = localStorage.getItem('psm_token');
+                      const h = {Authorization: 'Bearer ' + t};
+                      await fetch('/api/v1/projects/' + projectId, {method: 'DELETE', headers: h});
+                      await fetch('/api/v1/process-map/' + processId, {method: 'DELETE', headers: h});
+                    }""",
+                    setup,
+                )
 
         # 交付物与模板库：项目交付物列表 → 详情弹窗 → 模板库空态/新建入口
         def deliverables_view() -> None:
@@ -2155,8 +2273,16 @@ def main() -> int:
             for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
                 assert marker in view, f"开始页缺少「{marker}」"
             assert "全局证据进度" in view, "Q7 没有标明全局证据进度"
-            assert "不限定某一条试点路径" in view, "Q7 没有解释全局口径"
-            assert "这里不是项目当前层" in view, "Q7 没有区分项目当前层"
+            q7_tip = page.locator("#q7 .start-q-answer .metric-help.has-tip")
+            assert q7_tip.count() == 1, "Q7 没有把全局口径收进 toptip"
+            q7_tip_text = q7_tip.first.get_attribute("data-tip") or ""
+            assert "不限定某一条试点路径" in q7_tip_text, "Q7 toptip 缺少全局口径"
+            assert "这里不是项目当前层" in q7_tip_text, "Q7 toptip 没有区分项目当前层"
+            q8_tip = page.locator("#q8 .start-q-answer .metric-help.has-tip")
+            if q8_tip.count():
+                assert "全局证据阶段退出门" in (q8_tip.first.get_attribute("data-tip") or ""), (
+                    "Q8 没有把退出门口径收进 toptip"
+                )
             assert "前置" in view and "下一步" in view, "Q 卡缺少依赖关系提示"
             gate = page.evaluate(
                 """async () => {
@@ -2623,17 +2749,23 @@ def main() -> int:
             assert "L3-032" in selected, selected
             close_modal()
 
-        def strategy_to_map() -> None:
+        def strategy_open_process() -> None:
             goto("strategy")
             page.wait_for_timeout(900)
-            btn = page.locator('#view button[data-act="strategy.openProcess"]')
+            btn = page.locator('#view button[data-act="strategy.openProcess"]').first
             assert btn.count(), "战略目标没有「看流程」入口"
-            btn.first.click()
+            level = int(btn.get_attribute("data-level") or 0)
+            btn.click()
             page.wait_for_timeout(1400)
-            assert page.inner_text("#pageTitle") == "企业流程地图"
-            page.wait_for_selector("#mask.show", timeout=8000)
-            assert "流程" in page.inner_text("#mask"), "没有按目标承接的流程打开详情"
-            close_modal()
+            if level >= 3:
+                # L3/L4：进入单流程 360，而不是让用户在地图里再找一次。
+                assert page.inner_text("#pageTitle") == "流程卡"
+                assert "战略承接" in page.inner_text("#view"), "流程卡没有渲染战略承接区块"
+            else:
+                assert page.inner_text("#pageTitle") == "企业流程地图"
+                page.wait_for_selector("#mask.show", timeout=8000)
+                assert "流程" in page.inner_text("#mask"), "没有按目标承接的流程打开详情"
+                close_modal()
 
         def designer_to_execution() -> None:
             goto("designer")
@@ -2661,7 +2793,7 @@ def main() -> int:
             assert page.inner_text("#pageTitle") == "流程执行"
             assert "任务时限" in page.inner_text("#view"), "执行页没有落到当前流程的配置页签"
 
-        check("战略目标→流程地图", strategy_to_map)
+        check("战略目标→看流程", strategy_open_process)
         check("设计器→流程执行", designer_to_execution)
         check("项目详情→流程执行", project_to_execution)
         check("地图下钻", map_drill)
@@ -2689,8 +2821,11 @@ def main() -> int:
         check("步骤页过滤工具箱", step_to_filtered_toolbox)
         check("方法论匹配引擎", workflow_recommend)
         check("项目详情四页签 + 步骤改状态", project_detail_tabs)
+        check("工作流推进动作闭环", project_step_actions)
+        check("立项向导内嵌工具详情", wizard_tool_modal)
         check("立项向导（真实入库）", project_wizard)
         check("工具箱详情 + 按问题找工具", toolbox)
+        check("交付物关联流程模型", deliverable_model_link)
         check("交付物与模板库", deliverables_view)
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
