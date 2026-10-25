@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.deliverable import StepContract
 from app.models.enums import KnowledgeStatus, ToolStatus
 from app.models.knowledge import (
     KnowledgeItem,
@@ -36,6 +37,16 @@ SCENARIO_WEIGHT = 3.0
 EVIDENCE_WEIGHT = 2.0
 VERIFIED_WEIGHT = 0.3
 OVERDUE_PENALTY = 0.5
+STEP_WEIGHT = 1.0
+
+# 各分项上限之和，用于把原始分归一化到 0–99（与查询集无关）
+MAX_RAW = (
+    MAX_TEXT_SCORE  # 同义词 + 文本 + 阶段
+    + SCENARIO_WEIGHT * 2  # 最多两个场景计入
+    + EVIDENCE_WEIGHT
+    + VERIFIED_WEIGHT
+    + STEP_WEIGHT
+)
 
 HINT = (
     "适配度按「问题匹配 + 场景 + 使用证据」计算，四象限只用于辅助筛选。"
@@ -114,6 +125,13 @@ def _stage_for_step(db: Session, step_no: Optional[str]) -> Optional[int]:
     return db.scalar(select(WorkflowTemplate.stage_no).where(WorkflowTemplate.step_no == step_no))
 
 
+def _step_tool_codes(db: Session, step_no: Optional[str]) -> set:
+    if not step_no:
+        return set()
+    contract = db.scalar(select(StepContract).where(StepContract.step_no == step_no))
+    return set(contract.tool_codes or []) if contract else set()
+
+
 def _duration_days(text: Optional[str]) -> int:
     """把「3 天 / 2–3 周 / 持续」粗排成天数，仅用于排序。"""
     if not text:
@@ -163,6 +181,7 @@ def match_tools(
 
     usage = tool_usage(db, [tool.code for tool in tools])
     knowledge_counts = knowledge_match.knowledge_counts_by_tool(db, [tool.code for tool in tools])
+    step_codes = _step_tool_codes(db, step_no)
     # 只选了场景、没有自由文本时，用场景名称/说明作为「伪问题」，
     # 让工具自身的 purpose/when_to_use 也参与匹配，避免同一场景下全部同分。
     scenario_text = ""
@@ -195,6 +214,9 @@ def match_tools(
 
         used, effective, rate = usage.get(tool.code, (0, 0, None))
         raw = relevance
+        if step_no and tool.code in step_codes:
+            raw += STEP_WEIGHT
+            matched_on.append(f"步骤 {step_no}")
         raw += EVIDENCE_WEIGHT * wilson_lower_bound(effective, used)
         if tool.last_verified_at is not None:
             raw += VERIFIED_WEIGHT
@@ -233,13 +255,18 @@ def match_tools(
             )
         )
 
-    top = scored[0]["raw"] or 1.0
     hits: List[ToolMatchHit] = []
     for row in scored[:limit]:
         tool = row["tool"]
         used, effective, rate = row["usage"]
-        ratio = max(0.0, min(99.0, round(row["raw"] / top * 99, 1)))
-        level = "high" if ratio >= 85 else "mid" if ratio >= 65 else "low"
+        ratio = max(0.0, min(99.0, round(row["raw"] / MAX_RAW * 100, 1)))
+        level = "high" if ratio >= 70 else "mid" if ratio >= 45 else "low"
+        scenario_names = [
+            row.scenario.name for row in tool.scenario_rows if row.scenario is not None
+        ]
+        why = tool.purpose
+        if scenario_names:
+            why = f"{why}（适用场景：{'、'.join(scenario_names[:2])}）"
         hits.append(
             ToolMatchHit(
                 tool=ToolOut.model_validate(tool).model_copy(
@@ -248,7 +275,7 @@ def match_tools(
                 score=ratio,
                 match_level=level,
                 matched_on=sorted(set(row["matched_on"])),
-                why=tool.purpose,
+                why=why,
                 verification_standard=tool.verification_standard,
                 usage=ToolUsageSummary(used=used, effective=effective, rate=rate),
             )

@@ -178,3 +178,38 @@ def test_tool_submission_review_and_direct_usage(client, manager_client, viewer_
     assert archived.status_code == 200
     assert archived.json()["status"] == "ARCHIVED"
     assert code not in [row["code"] for row in client.get(f"{API}/tools").json()]
+
+
+def test_step_context_boosts_contract_tool(client):
+    with_step = client.post(
+        f"{API}/tools/match",
+        json={"scenario_codes": ["CYCLE"], "step_no": "2.1", "limit": 10},
+    ).json()["hits"]
+    sipoc = next(row for row in with_step if row["tool"]["code"] == "SIPOC")
+    assert "步骤 2.1" in sipoc["matched_on"]
+    assert 0 <= sipoc["score"] <= 99
+
+
+def test_tool_usage_plan_flow(client, viewer_client):
+    created = client.post(
+        f"{API}/tools/VSM/plans",
+        json={"step_no": "2.1", "target": "找到至少 3 个等待环节", "note": "计划测试"},
+    )
+    assert created.status_code == 201, created.text
+    plan = created.json()
+    assert plan["status"] == "PLANNED"
+    assert plan["done_at"] is None
+
+    detail = client.get(f"{API}/tools/VSM").json()
+    assert any(row["id"] == plan["id"] for row in detail["plans"])
+
+    assert viewer_client.post(f"{API}/tools/VSM/plans", json={"step_no": "2.1"}).status_code == 403
+    assert (
+        viewer_client.patch(f"{API}/tools/plans/{plan['id']}", json={"status": "DONE"}).status_code
+        == 403
+    )
+
+    done = client.patch(f"{API}/tools/plans/{plan['id']}", json={"status": "DONE"})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "DONE"
+    assert done.json()["done_at"]

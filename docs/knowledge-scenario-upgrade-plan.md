@@ -437,6 +437,10 @@ PUBLISHED --复核通过--> VERIFIED
 > `knowledge_recommend_log` 推荐解释日志；场景字典支持 Manager CRUD（停用不删关联）；
 > 已归档 STANDARD 可一键迁移为流程标准文件（生成 v1.0 草稿，仍需审批生效）。
 > 审核历史与推荐日志可在知识库页面查看。
+>
+> **2026-10-25 契约补全**：`/knowledge/recommend` 统一返回 `kind=knowledge|tool`，
+> 响应补 `code`/`links`；`is_primary` 可写入并作为步骤首选知识加权；
+> 顶栏搜索统一写 `q`；列表 `sort=match` 的推荐也写入解释日志（`result_refs` 区分知识/工具）。
 
 总计约 23–31 人日。若只做最小可用版，P0 + P1 的核心（不做审核历史、不做自动归档）
 约 12–15 人日。

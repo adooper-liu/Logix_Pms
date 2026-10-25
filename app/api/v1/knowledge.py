@@ -38,6 +38,7 @@ from app.models.knowledge import (
     KnowledgeUsage,
     KnowledgeWorkflowLink,
 )
+from app.models.tool import Tool
 from app.models.user import User
 from app.schemas.common import DeleteResult, Page, as_columns
 from app.schemas.knowledge import (
@@ -88,6 +89,14 @@ def _reject_standard(type_: Optional[KnowledgeType]) -> None:
         raise HTTPException(status_code=400, detail="标准制度请到「交付物与模板库 → 流程标准文件」")
 
 
+def _validate_tool_code(db: DbSession, type_: str, tool_code: Optional[str]) -> None:
+    """工具指南必须引用真实工具，避免知识库出现指向不存在工具的条目。"""
+    if type_ == KnowledgeType.TOOL.value and not (tool_code or "").strip():
+        raise HTTPException(status_code=400, detail="工具指南必须填写关联工具编码")
+    if tool_code and db.scalar(select(Tool.id).where(Tool.code == tool_code)) is None:
+        raise HTTPException(status_code=400, detail=f"工具编码 {tool_code} 不存在")
+
+
 def _replace_tags(db: DbSession, item: KnowledgeItem, tags: List[str]) -> None:
     """标签整体替换：先清后建，保持与提交内容一致。"""
     for row in list(item.tag_rows):
@@ -126,6 +135,7 @@ def _replace_workflow_link(
     item: KnowledgeItem,
     stage_no: Optional[int],
     step_no: Optional[str],
+    is_primary: bool = False,
 ) -> None:
     for row in list(item.workflow_links):
         db.delete(row)
@@ -139,6 +149,7 @@ def _replace_workflow_link(
             knowledge_id=item.id,
             stage_no=stage_no,
             step_no=(step_no or "").strip(),
+            is_primary=is_primary and bool(step_no),
         )
     )
 
@@ -190,6 +201,7 @@ def _recommend_log_out(row: KnowledgeRecommendLog) -> KnowledgeRecommendLogOut:
         stage_no=row.stage_no,
         step_no=row.step_no,
         result_ids=list(row.result_ids or []),
+        result_refs=list(row.result_refs or []),
         created_at=row.created_at,
     )
 
@@ -477,8 +489,9 @@ def recommend_knowledge(payload: KnowledgeRecommendRequest, db: DbSession, user:
         stage_no=payload.stage_no,
         step_no=payload.step_no,
         limit=payload.limit,
+        include_tools=True,
     )
-    # 推荐解释留痕：问题、上下文与返回的条目 id，便于事后审计“为什么推了这条”
+    # 推荐解释留痕：问题、上下文与返回的条目，便于事后审计“为什么推了这条”
     db.add(
         KnowledgeRecommendLog(
             user_id=user.id,
@@ -486,7 +499,8 @@ def recommend_knowledge(payload: KnowledgeRecommendRequest, db: DbSession, user:
             scenario_codes=payload.scenario_codes,
             stage_no=payload.stage_no,
             step_no=payload.step_no,
-            result_ids=[item.id for item in items],
+            result_ids=[item.id for item in items if item.kind == "knowledge"],
+            result_refs=[{"kind": item.kind, "id": item.id, "code": item.code} for item in items],
         )
     )
     db.commit()
@@ -547,6 +561,20 @@ def list_knowledge(
             rank = {row.id: index for index, row in enumerate(recommended) if row.id in allowed}
             candidates = [item for item in candidates if item.id in rank]
             candidates.sort(key=lambda item: rank[item.id])
+            db.add(
+                KnowledgeRecommendLog(
+                    user_id=user.id,
+                    problem=keyword,
+                    scenario_codes=[scenario] if scenario else [],
+                    stage_no=stage_no,
+                    step_no=step_no,
+                    result_ids=[row.id for row in recommended],
+                    result_refs=[
+                        {"kind": "knowledge", "id": row.id, "code": None} for row in recommended
+                    ],
+                )
+            )
+            db.commit()
         else:
             stats = knowledge_match.effectiveness_stats(db, [item.id for item in candidates])
             candidates.sort(
@@ -581,7 +609,10 @@ def list_knowledge(
 )
 def create_knowledge(payload: KnowledgeCreate, db: DbSession, user: WriteUser):
     _reject_standard(payload.type)
-    data = as_columns(payload.model_dump(exclude={"tags", "scenario_codes", "stage_no", "step_no"}))
+    _validate_tool_code(db, payload.type.value, payload.tool_code)
+    data = as_columns(
+        payload.model_dump(exclude={"tags", "scenario_codes", "stage_no", "step_no", "is_primary"})
+    )
     data["status"] = KnowledgeStatus.DRAFT.value
     data["owner_user_id"] = payload.owner_user_id or user.id
     data["author"] = payload.author or user.display_name
@@ -590,7 +621,7 @@ def create_knowledge(payload: KnowledgeCreate, db: DbSession, user: WriteUser):
     db.flush()
     _replace_tags(db, obj, payload.tags)
     _replace_scenarios(db, obj, payload.scenario_codes)
-    _replace_workflow_link(db, obj, payload.stage_no, payload.step_no)
+    _replace_workflow_link(db, obj, payload.stage_no, payload.step_no, payload.is_primary)
     audit_service.record(db, user, "CREATE", "knowledge", obj.id, f"新增知识草稿《{obj.title}》")
     db.commit()
     obj = _load_item(db, obj.id)
@@ -636,6 +667,7 @@ def update_knowledge(item_id: int, payload: KnowledgeUpdate, db: DbSession, user
     scenario_codes = data.pop("scenario_codes", None)
     stage_no = data.pop("stage_no", None)
     step_no = data.pop("step_no", None)
+    is_primary = data.pop("is_primary", None)
     for field, value in as_columns(data).items():
         setattr(obj, field, value)
     if tags is not None:
@@ -643,7 +675,12 @@ def update_knowledge(item_id: int, payload: KnowledgeUpdate, db: DbSession, user
     if scenario_codes is not None:
         _replace_scenarios(db, obj, scenario_codes)
     if "stage_no" in payload.model_fields_set or "step_no" in payload.model_fields_set:
-        _replace_workflow_link(db, obj, stage_no, step_no)
+        _replace_workflow_link(db, obj, stage_no, step_no, bool(is_primary))
+    elif "is_primary" in payload.model_fields_set:
+        # 只切换首选标记时保留现有阶段/步骤关联
+        for row in obj.workflow_links:
+            row.is_primary = bool(is_primary) and bool(row.step_no)
+    _validate_tool_code(db, obj.type, obj.tool_code)
 
     # 内容变更后旧验证结论不再成立，退回「待复核」
     if obj.status == KnowledgeStatus.VERIFIED.value:

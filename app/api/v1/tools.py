@@ -21,7 +21,7 @@ from app.models.deliverable import StepContract
 from app.models.enums import KnowledgeStatus, Role, ToolCategory, ToolLevel, ToolStatus
 from app.models.knowledge import KnowledgeItem, KnowledgeScenario, KnowledgeScenarioLink
 from app.models.project import WorkflowTemplate
-from app.models.tool import Tool, ToolScenarioLink, ToolUsage
+from app.models.tool import Tool, ToolScenarioLink, ToolUsage, ToolUsagePlan
 from app.schemas.common import as_columns
 from app.schemas.knowledge import KnowledgeBrief
 from app.schemas.tool import (
@@ -33,6 +33,9 @@ from app.schemas.tool import (
     ToolMatchResponse,
     ToolMetaOut,
     ToolOut,
+    ToolPlanCreate,
+    ToolPlanOut,
+    ToolPlanUpdate,
     ToolReviewRequest,
     ToolUpdate,
     ToolUsageCreate,
@@ -117,6 +120,46 @@ def _usage_events(db: DbSession, code: str, limit: int = 20) -> List[ToolUsageOu
         .limit(limit)
     ).all()
     return [_usage_out(row) for row in rows]
+
+
+PLAN_STATUS_LABELS = {
+    "PLANNED": "已计划",
+    "IN_PROGRESS": "进行中",
+    "DONE": "已完成",
+    "CANCELLED": "已取消",
+}
+
+
+def _plan_out(row: ToolUsagePlan) -> ToolPlanOut:
+    return ToolPlanOut(
+        id=row.id,
+        tool_code=row.tool_code,
+        tool_name=row.tool.name if row.tool else None,
+        project_id=row.project_id,
+        step_no=row.step_no,
+        planned_by_user_id=row.planned_by_user_id,
+        planned_by=row.planned_by.display_name if row.planned_by else None,
+        planned_at=row.planned_at,
+        status=row.status,
+        status_label=PLAN_STATUS_LABELS.get(row.status, row.status),
+        target=row.target,
+        note=row.note,
+        done_at=row.done_at,
+    )
+
+
+def _plans_for_tool(db: DbSession, code: str, limit: int = 20) -> List[ToolPlanOut]:
+    rows = db.scalars(
+        select(ToolUsagePlan)
+        .options(
+            selectinload(ToolUsagePlan.tool),
+            selectinload(ToolUsagePlan.planned_by),
+        )
+        .where(ToolUsagePlan.tool_code == code)
+        .order_by(ToolUsagePlan.planned_at.desc(), ToolUsagePlan.id.desc())
+        .limit(limit)
+    ).all()
+    return [_plan_out(row) for row in rows]
 
 
 def _require_tool(db: DbSession, code: str, user, *, allow_hidden: bool = False) -> Tool:
@@ -302,6 +345,7 @@ def get_tool(code: str, db: DbSession, user: CurrentUser):
         knowledge=_visible_knowledge(db, code),
         workflow_steps=_workflow_steps(db, code),
         usage_events=_usage_events(db, code),
+        plans=_plans_for_tool(db, code),
     )
 
 
@@ -500,3 +544,88 @@ def list_tool_usage(
 ):
     _require_tool(db, code, user, allow_hidden=True)
     return _usage_events(db, code, limit=limit)
+
+
+@router.get(
+    "/{code}/plans",
+    response_model=List[ToolPlanOut],
+    summary="工具的使用计划",
+)
+def list_tool_plans(
+    code: str,
+    db: DbSession,
+    user: CurrentUser,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    _require_tool(db, code, user, allow_hidden=True)
+    return _plans_for_tool(db, code, limit=limit)
+
+
+@router.post(
+    "/{code}/plans",
+    response_model=ToolPlanOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="在项目/步骤上下文中计划使用工具",
+)
+def create_tool_plan(code: str, payload: ToolPlanCreate, db: DbSession, user: WriteUser):
+    _require_tool(db, code, user)
+    if payload.project_id is not None:
+        from app.models.project import Project
+
+        if db.get(Project, payload.project_id) is None:
+            raise HTTPException(status_code=400, detail="关联项目不存在")
+    row = ToolUsagePlan(
+        tool_code=code,
+        project_id=payload.project_id,
+        step_no=(payload.step_no or "").strip() or None,
+        planned_by_user_id=user.id,
+        planned_at=utcnow(),
+        status="PLANNED",
+        target=payload.target,
+        note=payload.note,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "tool_usage_plan", row.id, f"计划使用工具 {code}")
+    db.commit()
+    row = db.scalar(
+        select(ToolUsagePlan)
+        .options(
+            selectinload(ToolUsagePlan.tool),
+            selectinload(ToolUsagePlan.planned_by),
+        )
+        .where(ToolUsagePlan.id == row.id)
+    )
+    return _plan_out(row)
+
+
+@router.patch(
+    "/plans/{plan_id}",
+    response_model=ToolPlanOut,
+    summary="更新工具使用计划状态",
+)
+def update_tool_plan(plan_id: int, payload: ToolPlanUpdate, db: DbSession, user: WriteUser):
+    row = db.scalar(
+        select(ToolUsagePlan)
+        .options(
+            selectinload(ToolUsagePlan.tool),
+            selectinload(ToolUsagePlan.planned_by),
+        )
+        .where(ToolUsagePlan.id == plan_id)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="使用计划不存在")
+    if not _is_manager(user) and row.planned_by_user_id != user.id:
+        raise HTTPException(status_code=403, detail="只能修改自己创建的使用计划")
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(row, field, value)
+    if data.get("status") == "DONE":
+        row.done_at = utcnow()
+    elif "status" in data:
+        row.done_at = None
+    audit_service.record(
+        db, user, "UPDATE", "tool_usage_plan", row.id, f"更新工具计划 {row.tool_code}"
+    )
+    db.commit()
+    return _plan_out(row)

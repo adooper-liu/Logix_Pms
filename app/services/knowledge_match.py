@@ -180,6 +180,9 @@ def _score(
     elif stage_no and stage_no in linked_stages:
         score += 1.0
         matched_on.append(f"阶段 {stage_no}")
+    if step_no and any(row.step_no == step_no and row.is_primary for row in item.workflow_links):
+        score += 1.0
+        matched_on.append("本步骤首选知识")
 
     if item.status == KnowledgeStatus.VERIFIED.value:
         score += 0.8
@@ -212,6 +215,7 @@ def _to_recommendation(
     return KnowledgeRecommendationOut(
         kind="knowledge",
         id=item.id,
+        code=None,
         title=item.title,
         type=item.type,
         type_label=TYPE_LABELS.get(item.type, item.type),
@@ -233,6 +237,10 @@ def _to_recommendation(
         used_count=used,
         effective_count=effective,
         effectiveness_rate=rate,
+        links={
+            "detail": f"/knowledge/{item.id}",
+            **({"tool": f"/toolbox?open={item.tool_code}"} if item.tool_code else {}),
+        },
     )
 
 
@@ -250,6 +258,47 @@ def _visible_query():
     )
 
 
+def _tool_hit_recommendation(hit) -> KnowledgeRecommendationOut:
+    """把工具匹配结果映射成统一推荐项，前端无需维护第二套卡片结构。"""
+    tool = hit.tool
+    usage = hit.usage
+    scenarios = [
+        KnowledgeScenarioOut(id=0, code=code, name=name)
+        for code, name in zip(tool.scenario_codes, tool.scenario_names, strict=False)
+        if code
+    ]
+    return KnowledgeRecommendationOut(
+        kind="tool",
+        id=tool.id,
+        code=tool.code,
+        title=tool.name,
+        type="TOOL",
+        type_label="工具",
+        status=tool.status,
+        status_label=tool.status_label,
+        summary=tool.purpose,
+        score=hit.score,
+        match_level=hit.match_level,
+        matched_on=list(hit.matched_on),
+        scenarios=scenarios,
+        claim=tool.purpose,
+        applicable_when=tool.when_to_use,
+        not_applicable_when=tool.not_applicable_when,
+        owner=tool.owner,
+        tool_code=tool.code,
+        is_best_practice=False,
+        last_verified_at=tool.last_verified_at,
+        review_overdue=tool.review_overdue,
+        used_count=usage.used,
+        effective_count=usage.effective,
+        effectiveness_rate=usage.rate,
+        links={
+            "detail": f"/toolbox?open={tool.code}",
+            "tool": f"/toolbox?open={tool.code}",
+        },
+    )
+
+
 def recommend(
     db: Session,
     problem: Optional[str] = None,
@@ -257,11 +306,12 @@ def recommend(
     stage_no: Optional[int] = None,
     step_no: Optional[str] = None,
     limit: int = 6,
+    include_tools: bool = False,
 ) -> List[KnowledgeRecommendationOut]:
     problem = (problem or "").strip()
     scenario_codes = [code for code in (scenario_codes or []) if code]
     items = list(db.scalars(_visible_query().limit(500)).all())
-    if not items:
+    if not items and not include_tools:
         return []
     stats = effectiveness_stats(db, [item.id for item in items])
     scored = []
@@ -287,10 +337,27 @@ def recommend(
             row[1].title,
         )
     )
-    return [
+    result = [
         _to_recommendation(item, score, matched_on, hit_scenarios, stats.get(item.id, (0, 0, None)))
         for score, item, matched_on, hit_scenarios in scored[:limit]
     ]
+
+    if include_tools:
+        # 延迟导入，避免 knowledge_match ↔ tool_match 在模块加载期成环
+        from app.services import tool_match
+
+        hits = tool_match.match_tools(
+            db,
+            problem=problem or None,
+            scenario_codes=scenario_codes,
+            stage_no=stage_no,
+            step_no=step_no,
+            limit=max(2, limit // 2),
+        )
+        result.extend(_tool_hit_recommendation(hit) for hit in hits)
+        result.sort(key=lambda row: (-row.score, row.kind != "knowledge", row.title))
+        result = result[:limit]
+    return result
 
 
 def recommend_for_step(
@@ -578,6 +645,7 @@ def to_out(item: KnowledgeItem, stats: Tuple[int, int, Optional[float]]):
         scenario_names=item.scenario_names,
         stage_nos=item.stage_nos,
         step_nos=item.step_nos,
+        primary_step_nos=item.primary_step_nos,
         summary=item.summary,
         content=item.content,
         claim=item.claim,

@@ -48,6 +48,7 @@ TYPE_LABELS: Dict[str, str] = {
     "KNOWLEDGE_REVIEW_OVERDUE": "知识待复核",
     "KNOWLEDGE_ARCHIVE_CANDIDATE": "知识归档候选",
     "TOOL_REVIEW_OVERDUE": "工具待复核",
+    "TOOL_DECISION_INCOMPLETE": "工具决策信息待补充",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -375,17 +376,33 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
 
     # 工具复核：超过 review_due_at 的工具需要重新确认验证标准与适用边界
     for tool in db.scalars(select(Tool).where(Tool.is_active.is_(True))).all():
-        if not tool.review_overdue:
-            continue
-        add(
-            "TOOL_REVIEW_OVERDUE",
-            "MEDIUM",
-            "tool",
-            tool.id,
-            f"工具待复核：{tool.name}",
-            f"复核日期 {tool.review_due_at}；重新确认验证标准、前置条件与常见误用",
-            owner_user_id=tool.owner_user_id,
-        )
+        if tool.review_overdue:
+            add(
+                "TOOL_REVIEW_OVERDUE",
+                "MEDIUM",
+                "tool",
+                tool.id,
+                f"工具待复核：{tool.name}",
+                f"复核日期 {tool.review_due_at}；重新确认验证标准、前置条件与常见误用",
+                owner_user_id=tool.owner_user_id,
+            )
+        missing = []
+        if not (tool.verification_standard or "").strip():
+            missing.append("验证标准")
+        if not (tool.not_applicable_when or "").strip():
+            missing.append("不适用条件")
+        if not (tool.prerequisites or "").strip():
+            missing.append("前置条件")
+        if missing:
+            add(
+                "TOOL_DECISION_INCOMPLETE",
+                "LOW",
+                "tool",
+                tool.id,
+                f"工具决策信息待补充：{tool.name}",
+                "缺少：" + "、".join(missing) + "；补齐后匹配结果才能真正回答「怎么验证」",
+                owner_user_id=tool.owner_user_id,
+            )
 
     return findings
 

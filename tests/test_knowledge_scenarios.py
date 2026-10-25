@@ -61,7 +61,7 @@ def test_scenarios_and_meta(client):
 
 def test_recommend_by_scenario_returns_explainable_items(client):
     result = client.post(
-        f"{API}/knowledge/recommend", json={"scenario_codes": ["RACI"], "limit": 5}
+        f"{API}/knowledge/recommend", json={"scenario_codes": ["RACI"], "limit": 8}
     )
     assert result.status_code == 200, result.text
     items = result.json()["items"]
@@ -69,6 +69,49 @@ def test_recommend_by_scenario_returns_explainable_items(client):
     top_titles = [item["title"] for item in items]
     assert any("RACI" in title for title in top_titles), top_titles
     assert any("场景" in reason for reason in items[0]["matched_on"]), items[0]
+
+    knowledge = next(row for row in items if row["kind"] == "knowledge")
+    assert knowledge["links"]["detail"].startswith("/knowledge/")
+    tool = next((row for row in items if row["kind"] == "tool"), None)
+    assert tool is not None, "统一推荐没有返回工具"
+    assert tool["code"]
+    assert tool["links"]["detail"].startswith("/toolbox?open=")
+
+
+def test_primary_step_link(client):
+    item = _create_draft(client, stage_no=1, step_no="1.1", is_primary=True)
+    try:
+        detail = client.get(f"{API}/knowledge/{item['id']}").json()
+        assert detail["primary_step_nos"] == ["1.1"]
+        updated = client.patch(f"{API}/knowledge/{item['id']}", json={"is_primary": False})
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["primary_step_nos"] == []
+    finally:
+        assert client.delete(f"{API}/knowledge/{item['id']}").status_code == 200
+
+
+def test_tool_guide_requires_existing_tool(client):
+    base = {
+        "title": "工具指南测试",
+        "type": "TOOL",
+        "summary": "测试工具指南",
+        "content": "正文",
+        "claim": "验证工具引用",
+        "applicable_when": "测试",
+        "not_applicable_when": "测试",
+        "scenario_codes": ["FLOW"],
+    }
+    missing = client.post(f"{API}/knowledge", json=base)
+    assert missing.status_code == 400, missing.text
+    assert "工具编码" in missing.json()["detail"]
+
+    unknown = client.post(f"{API}/knowledge", json={**base, "tool_code": "NO-SUCH-TOOL"})
+    assert unknown.status_code == 400, unknown.text
+    assert "不存在" in unknown.json()["detail"]
+
+    valid = client.post(f"{API}/knowledge", json={**base, "tool_code": "VSM"})
+    assert valid.status_code == 201, valid.text
+    assert client.delete(f"{API}/knowledge/{valid.json()['id']}").status_code == 200
 
 
 def test_usage_evidence_changes_score(client):
@@ -295,15 +338,18 @@ def test_recommend_log_is_auditable(client, viewer_client):
     problem = "推荐日志测试 " + uuid.uuid4().hex[:6]
     result = client.post(
         f"{API}/knowledge/recommend",
-        json={"problem": problem, "scenario_codes": ["RACI"], "limit": 3},
+        json={"problem": problem, "scenario_codes": ["RACI"], "limit": 10},
     )
     assert result.status_code == 200, result.text
-    expected_ids = [row["id"] for row in result.json()["items"]]
+    items = result.json()["items"]
+    knowledge_ids = [row["id"] for row in items if row["kind"] == "knowledge"]
 
     logs = client.get(f"{API}/knowledge/recommend-logs").json()
     row = next((row for row in logs if row["problem"] == problem), None)
     assert row is not None, "推荐请求没有留下解释日志"
-    assert row["result_ids"] == expected_ids
+    assert row["result_ids"] == knowledge_ids
+    assert row["result_refs"], "推荐日志缺少统一引用"
+    assert any(ref["kind"] == "tool" for ref in row["result_refs"])
     assert row["user"]
     assert viewer_client.get(f"{API}/knowledge/recommend-logs").status_code == 403
 
