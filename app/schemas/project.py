@@ -173,6 +173,7 @@ class ProjectUpdate(BaseModel):
     transfer_cost: Optional[float] = None
     replication_status: Optional[ReplicationStatus] = None
     replication_note: Optional[str] = None
+    gate_required: Optional[bool] = None
 
 
 class ProjectOut(ORMModel):
@@ -226,6 +227,7 @@ class ProjectOut(ORMModel):
     replication_status: str = "NOT_EVALUATED"
     replication_status_label: Optional[str] = None
     replication_note: Optional[str] = None
+    gate_required: bool = False
     created_at: Optional[UtcDateTime] = None
     updated_at: Optional[UtcDateTime] = None
 

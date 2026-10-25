@@ -397,6 +397,25 @@ class DocumentLevel(str, Enum):
     PROCESS = "PROCESS"  # 流程级 SOP/表单
 
 
+class MaturityDimension(str, Enum):
+    """流程管理成熟度评估维度。"""
+
+    GOVERNANCE = "GOVERNANCE"  # 治理与责任
+    PROCESS = "PROCESS"  # 流程资产
+    DATA = "DATA"  # 数据与指标
+    EXECUTION = "EXECUTION"  # 执行与系统
+    MEASUREMENT = "MEASUREMENT"  # 度量与改善
+
+
+class GateConclusion(str, Enum):
+    """阶段门禁结论；只有 PASS 允许进入下一阶段。"""
+
+    PASS = "PASS"
+    PATCH = "PATCH"  # 修补后通过
+    NARROW = "NARROW"  # 缩小范围
+    STOP = "STOP"
+
+
 class OrgUnitType(str, Enum):
     """组织单元类型。编码由系统内维护，后续可接 ERP/HR 同步。"""
 

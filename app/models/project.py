@@ -78,6 +78,10 @@ class Project(Base):
         String(20), default="NOT_EVALUATED", server_default="NOT_EVALUATED", index=True
     )
     replication_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # 启用后，进入下一阶段必须有一张 PASS 的阶段门禁签收
+    gate_required: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", index=True
+    )
 
     budget: Mapped[float] = mapped_column(Float, default=0.0)
     actual_cost: Mapped[float] = mapped_column(Float, default=0.0)

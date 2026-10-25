@@ -97,6 +97,7 @@ from app.models.knowledge import (
     KnowledgeUsage,
     KnowledgeWorkflowLink,
 )
+from app.models.maturity import GateAttestation, MaturityAssessment
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit, Position
@@ -152,6 +153,8 @@ __all__ = [
     "KnowledgeUsage",
     "KnowledgeReview",
     "KnowledgeRecommendLog",
+    "MaturityAssessment",
+    "GateAttestation",
     "User",
     "AuditLog",
     "BenchmarkFramework",
