@@ -2190,6 +2190,7 @@ def main() -> int:
                 "改善",
                 "治理待办",
                 "成熟度",
+                "L5 任务",
             ):
                 assert marker in view, f"流程卡缺少「{marker}」区块"
             options = page.eval_on_selector_all(

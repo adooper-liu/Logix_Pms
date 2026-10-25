@@ -38,6 +38,8 @@ on('process_card.workload', () => {
 });
 on('process_card.newMaturity', () => openMaturityModal());
 on('process_card.submitMaturity', () => submitMaturity());
+on('process_card.newTask', () => openTaskModal());
+on('process_card.submitTask', () => submitTask());
 
 const STATUS_TONE = { RED: 't-red', YELLOW: 't-yel', GREEN: 't-grn', GRAY: 't-gry' };
 const READY_LABELS = {
@@ -75,7 +77,13 @@ const renderProcessCard = () => {
         GET('/maturity/assessments?process_id=' + processId),
         canManage() ? GET('/maturity/coverage').catch(() => null) : Promise.resolve(null),
       ]);
-      return { processes, card, assessments, coverage };
+      const tasks = await GET(
+        card.process.level === 4
+          ? '/process-tasks?activity_id=' + processId
+          : '/process-tasks?process_id=' + processId,
+      ).catch(() => []);
+      state.processCard.level = card.process.level;
+      return { processes, card, assessments, coverage, tasks };
     },
     (d) => {
       const options = d.processes.map((row) =>
@@ -164,6 +172,14 @@ const renderProcessCard = () => {
           num(covRow.document_coverage_pct, 0)}% · KPI ${
           num(covRow.kpi_coverage_pct, 0)}%</div>`
         : '';
+      const taskRows = (d2.tasks || []).slice(0, 12).map((row) => `
+        <div class="between bpmn-node-row">
+          <span><b>${esc(row.code)} ${esc(row.name)}</b>
+            <div class="tiny">${esc(row.activity_code || '')} ${esc(row.position_name || '未绑岗位')}
+              ${row.frequency ? ' · ' + esc(row.frequency) : ''}</div></span>
+          <span class="tag ${row.standard_minutes ? 't-grn' : 't-gry'}">${
+            row.standard_minutes ? num(row.standard_minutes, 1) + ' 分' : '待补工时'}</span>
+        </div>`).join('') || '<div class="tiny muted">还没有 L5 任务</div>';
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between">
@@ -237,6 +253,12 @@ const renderProcessCard = () => {
             ${maturityRows}
           </div>
           <div class="card">
+            <div class="between mb"><h3>L5 任务（${(d2.tasks || []).length}）</h3>
+              ${canManage() ? `<button class="btn-sm" data-act="process_card.newTask">+ 任务</button>` : ''}</div>
+            <div class="tiny muted">L4 汇总可下钻到任务；标准工时绑定任务后进入产能口径</div>
+            ${taskRows}
+          </div>
+          <div class="card">
             <h3>治理待办（${c.findings.length}）</h3>
             ${findingRows}
           </div>
@@ -290,6 +312,54 @@ async function submitMaturity() {
       note: val('maNote') || null,
     });
     toast('成熟度评估已保存');
+    closeModal();
+    RENDERERS.process_card();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openTaskModal() {
+  const processId = state.processCard.processId;
+  const level = state.processCard.level;
+  if (!processId || level !== 4) {
+    return toast('请在 L4 活动下新增 L5 任务', true);
+  }
+  openModal('新增 L5 任务', `
+    <div class="note mb">L5 是 L4 下的可执行任务；标准工时可以后续挂到任务上。</div>
+    <div class="row2">
+      <div class="field"><label>任务编码 *</label><input id="ptCode" placeholder="如 T-01"></div>
+      <div class="field"><label>任务名称 *</label><input id="ptName" placeholder="如 汇总采购需求"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>标准工时（分）</label>
+        <input id="ptMinutes" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>频次</label><input id="ptFrequency" placeholder="如 2 次/周"></div>
+      <div class="field"><label>排序</label><input id="ptSort" type="number" value="0"></div>
+    </div>
+    <div class="field"><label>说明</label><textarea id="ptDesc" rows="2"></textarea></div>`,
+  `<button class="btn btn-g" data-act="ui.close">取消</button>
+   <button class="btn btn-p" data-act="process_card.submitTask">创建任务</button>`);
+}
+
+async function submitTask() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  if (!val('ptCode') || !val('ptName')) return toast('任务编码与名称不能为空', true);
+  const minutes = val('ptMinutes');
+  try {
+    await POST('/process-tasks', {
+      activity_id: state.processCard.processId,
+      code: val('ptCode'),
+      name: val('ptName'),
+      description: val('ptDesc') || null,
+      standard_minutes: minutes ? Number(minutes) : null,
+      frequency: val('ptFrequency') || null,
+      sort_order: Number(val('ptSort') || 0),
+    });
+    toast('L5 任务已创建');
     closeModal();
     RENDERERS.process_card();
   } catch (e) {

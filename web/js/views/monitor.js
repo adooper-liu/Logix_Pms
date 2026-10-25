@@ -1114,6 +1114,8 @@ function newWorkloadStandardModal() {
       <div class="field"><label>岗位 *</label>
         <select id="wsPosition"><option value="">请选择</option></select></div>
     </div>
+    <div class="field"><label>L5 任务（可选）</label>
+      <select id="wsTask"><option value="">不绑定任务</option></select></div>
     <div class="field"><label>方法说明 *</label>
       <input id="wsMethod" placeholder="动作序列、设备、物料、检验"></div>
     <div class="row3">
@@ -1162,6 +1164,27 @@ function newWorkloadStandardModal() {
           posSel.appendChild(o);
         });
       }
+      const taskSel = document.getElementById('wsTask');
+      const loadTasks = async (activityId) => {
+        if (!taskSel) return;
+        taskSel.innerHTML = '<option value="">不绑定任务</option>';
+        if (!activityId) return;
+        try {
+          const rows = await GET('/process-tasks?activity_id=' + activityId);
+          rows.forEach((row) => {
+            const o = document.createElement('option');
+            o.value = String(row.id);
+            o.textContent = row.code + ' ' + row.name;
+            taskSel.appendChild(o);
+          });
+        } catch (e) {
+          /* 任务目录不可用时保持不绑定 */
+        }
+      };
+      if (actSel) {
+        actSel.addEventListener('change', () => loadTasks(actSel.value));
+        if (actSel.value) loadTasks(actSel.value);
+      }
       const orgSel = document.getElementById('wsOrg');
       if (orgSel) {
         orgs.forEach((row) => {
@@ -1191,6 +1214,7 @@ async function submitWorkloadStandard() {
     await POST('/workload/standards', {
       name,
       activity_id: Number(val('wsActivity')),
+      task_id: val('wsTask') ? Number(val('wsTask')) : null,
       position_id: Number(val('wsPosition')),
       org_unit_id: val('wsOrg') ? Number(val('wsOrg')) : null,
       method_description: textOrNull('wsMethod'),
