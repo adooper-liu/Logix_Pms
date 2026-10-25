@@ -24,6 +24,13 @@ on('workflow.goDeliverables', () => {
   closeModal();
   go('deliverables');
 });
+on('workflow.goKnowledge', ({ step, scenario }) => {
+  closeModal();
+  go('knowledge', {
+    params: { step: step || '', scenario: scenario || '', sort: 'match' },
+    push: true,
+  });
+});
 on('workflow.copyTemplate', ({ id }) => {
   closeModal();
   openTemplateCopy(Number(id));
@@ -51,7 +58,7 @@ const renderWorkflow = () => renderAsync('workflow',
       <button class="stage-pill${s.stage_no === current.stage_no ? ' on' : ''}"
               style="--pill:${STAGE_COLORS[i]}" data-act="workflow.stage" data-stage="${s.stage_no}">
         <b>阶段${s.stage_no}</b><span>${esc(s.stage_name)}</span>
-        <em>${s.steps.length} 步</em>
+        <em>${s.steps.length} 步${s.knowledge_count ? ' · ' + s.knowledge_count + ' 条知识' : ''}</em>
       </button>`).join('');
 
     const steps = current.steps.map((st) => `
@@ -64,6 +71,8 @@ const renderWorkflow = () => renderAsync('workflow',
         </div>
         <span>${esc(st.deliverables)}</span>
         ${st.tools ? `<div class="wf-step-tools">推荐工具：${esc(st.tools)}</div>` : ''}
+        ${st.knowledge_count
+          ? `<div class="wf-step-tools">推荐知识：${st.knowledge_count} 条</div>` : ''}
       </button>`).join('');
 
     const stepsPane = `
@@ -200,7 +209,13 @@ function openToolboxForStep() {
     codes: rec.tools.map((t) => t.code),
     meta: Object.fromEntries(rec.tools.map((t) => [t.code, t])),
   };
-  go('toolbox');
+  state.toolbox.step = rec.step_no;
+  state.toolbox.stage = rec.stage_no;
+  state.toolbox.sort = 'fit';
+  go('toolbox', {
+    params: { step: rec.step_no, stage: rec.stage_no },
+    push: true,
+  });
 }
 
 async function paintStepRecommendations(stepNo) {
@@ -245,6 +260,13 @@ function renderStepRecommendations(rec) {
       <td><a class="link" data-act="workflow.openTool" data-code="${esc(t.code)}"><b>${esc(t.name)}</b></a>
         <div class="tiny">${esc(t.code)} · ${esc(t.category_label || '')}</div></td>
       <td><span class="tag ${TOOL_LEVEL_TONE[t.level] || 't-gry'}">${esc(t.level_label)}</span></td>
+      <td>
+        <div class="tiny">${esc(t.why || t.verification_standard || '—')}</div>
+        ${t.verification_standard
+          ? `<div class="tiny"><b>验证：</b>${esc(t.verification_standard)}</div>` : ''}
+        <div class="tiny">难度 ${esc(t.difficulty_label || '—')}
+          ${t.typical_duration ? ' · 周期 ' + esc(t.typical_duration) : ''}</div>
+      </td>
       <td>${renderTemplateChips(t.templates)}</td>
     </tr>`).join('');
 
@@ -252,16 +274,42 @@ function renderStepRecommendations(rec) {
     ? `<h3 class="mt">本步骤交付物可用模板</h3>${renderTemplateChips(rec.deliverable_templates)}`
     : '';
 
+  const knowledge = rec.knowledge || [];
+  const knowledgeHtml = knowledge.length
+    ? `<h3 class="mt">本步骤推荐知识</h3>
+      <div class="kb-step-list">${knowledge.map((item) => {
+        const rate = item.effectiveness_rate === null || item.effectiveness_rate === undefined
+          ? '暂无使用记录'
+          : `有效率 ${item.effectiveness_rate}%（${item.effective_count}/${item.used_count}）`;
+        const scenario = item.scenarios && item.scenarios.length
+          ? item.scenarios[0].code : '';
+        return `<div class="kb-step-item">
+          <div>
+            <b>${esc(item.title)}</b>
+            <span class="tag t-blu">${esc(item.type_label || item.type)}</span>
+            ${item.is_best_practice ? '<span class="tag t-grn">最佳实践</span>' : ''}
+            <div class="tiny">${esc(item.applicable_when || item.summary)} · ${esc(rate)}</div>
+          </div>
+          <div class="gap">
+            <button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>
+            <button class="btn-sm" data-act="workflow.goKnowledge"
+              data-step="${esc(rec.step_no)}" data-scenario="${esc(scenario)}">在知识库查看</button>
+          </div>
+        </div>`;
+      }).join('')}</div>`
+    : '<h3 class="mt">本步骤推荐知识</h3><div class="note">本步骤还没有挂知识，流程管理科可以在知识条目里关联步骤。</div>';
+
   return `
     <h3 class="mt">推荐工具与预制模板</h3>
     <div class="desc">使用要求来自步骤契约；模板由流程管理科维护，复制到项目后会固定来源版本</div>
     ${rec.tools.length
       ? `<table class="tbl">
-          <thead><tr><th>工具</th><th>使用要求</th><th>预制模板</th></tr></thead>
+          <thead><tr><th>工具</th><th>使用要求</th><th>为什么用 / 验证标准</th><th>预制模板</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>`
       : '<div class="note">该步骤还没有配置工具。流程管理科可以在步骤契约里补充工具与使用要求。</div>'}
-    ${extras}`;
+    ${extras}
+    ${knowledgeHtml}`;
 }
 
 /** 方法论匹配试算：复用后端引擎，前端只负责收集参数与呈现 */
