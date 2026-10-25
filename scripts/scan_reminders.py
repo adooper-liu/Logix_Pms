@@ -5,6 +5,10 @@
 
     python scripts/scan_reminders.py
 
+crontab 示例（每天 08:07，避免整点集中）：
+
+    7 8 * * * cd /app && python scripts/scan_reminders.py >> /var/log/logix-pms-scan.log 2>&1
+
 它会：
 1. 扫描资产、知识、工具的复核/归档问题，生成或关闭治理待办；
 2. 扫描逾期异常、里程碑与流程任务，生成站内通知。

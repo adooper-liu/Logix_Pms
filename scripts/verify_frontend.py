@@ -626,6 +626,12 @@ def main() -> int:
             assert "验证标准" in body and "不适用" in body, "工具详情缺少决策字段"
             assert "相关案例" in body, "工具详情缺少关联知识区"
             assert "已发布" in body or "已验证" in body, "工具详情缺少维护状态"
+            assert "加入使用计划" in page.inner_text("#mFoot"), "工具详情缺少使用计划入口"
+            page.click('#mFoot button:has-text("加入使用计划")')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(400)
+            plan_body = page.inner_text("#mask")
+            assert "关联步骤" in plan_body and "验证标准" in plan_body, "使用计划弹窗缺字段"
             close_modal()
             page.wait_for_timeout(600)
 
@@ -1820,6 +1826,7 @@ def main() -> int:
             page.wait_for_timeout(1500)
             assert "为你推荐" in page.inner_text("#view"), "场景匹配没有推荐结果"
             assert "RACI" in page.inner_text("#view"), "责任不清场景没有推荐 RACI"
+            assert "查看工具" in page.inner_text("#view"), "统一推荐没有返回工具卡"
 
             page.click('#view .kb-reco-item button[data-act="knowledge.open"] >> nth=0')
             page.wait_for_selector("#mask.show")
