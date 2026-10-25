@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,7 @@ class KnowledgeCreate(BaseModel):
     scenario_codes: List[str] = []
     stage_no: Optional[int] = Field(default=None, ge=1, le=5)
     step_no: Optional[str] = Field(default=None, max_length=8)
+    is_primary: bool = False
 
     process_id: Optional[int] = None
     project_id: Optional[int] = None
@@ -58,6 +59,7 @@ class KnowledgeUpdate(BaseModel):
     scenario_codes: Optional[List[str]] = None
     stage_no: Optional[int] = Field(default=None, ge=1, le=5)
     step_no: Optional[str] = Field(default=None, max_length=8)
+    is_primary: Optional[bool] = None
 
     tool_code: Optional[str] = None
     author: Optional[str] = None
@@ -83,6 +85,7 @@ class KnowledgeOut(ORMModel):
     scenario_names: List[str] = []
     stage_nos: List[int] = []
     step_nos: List[str] = []
+    primary_step_nos: List[str] = []
 
     summary: str
     content: str
@@ -229,6 +232,7 @@ class KnowledgeRecommendLogOut(ORMModel):
     stage_no: Optional[int] = None
     step_no: Optional[str] = None
     result_ids: List[int] = []
+    result_refs: List[Any] = []
     created_at: Optional[UtcDateTime] = None
 
 
@@ -261,6 +265,7 @@ class KnowledgeRecommendRequest(BaseModel):
 class KnowledgeRecommendationOut(BaseModel):
     kind: str = "knowledge"
     id: int
+    code: Optional[str] = None
     title: str
     type: str
     type_label: Optional[str] = None
@@ -282,6 +287,7 @@ class KnowledgeRecommendationOut(BaseModel):
     used_count: int = 0
     effective_count: int = 0
     effectiveness_rate: Optional[float] = None
+    links: Dict[str, str] = {}
 
 
 class KnowledgeRecommendResponse(BaseModel):

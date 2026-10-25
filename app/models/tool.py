@@ -95,6 +95,12 @@ class Tool(Base):
         cascade="all, delete-orphan",
         order_by="ToolUsage.id",
     )
+    plan_rows: Mapped[List["ToolUsagePlan"]] = relationship(
+        "ToolUsagePlan",
+        back_populates="tool",
+        cascade="all, delete-orphan",
+        order_by="ToolUsagePlan.id",
+    )
 
     @property
     def scenario_codes(self) -> List[str]:
@@ -190,3 +196,33 @@ class ToolUsage(Base):
     )
 
     __table_args__ = (Index("ix_tool_usage_code_time", "tool_code", "used_at"),)
+
+
+class ToolUsagePlan(Base):
+    """工具使用计划：在项目/步骤上下文中计划使用某个工具，执行后再回填状态。"""
+
+    __tablename__ = "tool_usage_plan"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tool_code: Mapped[str] = mapped_column(ForeignKey("tool.code", ondelete="CASCADE"), index=True)
+    project_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    step_no: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    planned_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    planned_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    status: Mapped[str] = mapped_column(
+        String(16), default="PLANNED", server_default="PLANNED", index=True
+    )  # PLANNED / IN_PROGRESS / DONE / CANCELLED
+    target: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    tool: Mapped["Tool"] = relationship("Tool", back_populates="plan_rows")
+    planned_by: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[planned_by_user_id]
+    )
+
+    __table_args__ = (Index("ix_tool_usage_plan_tool_time", "tool_code", "planned_at"),)

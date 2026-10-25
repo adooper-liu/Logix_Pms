@@ -106,11 +106,41 @@ class ToolUsageOut(ORMModel):
     evidence_url: Optional[str] = None
 
 
+class ToolPlanCreate(BaseModel):
+    project_id: Optional[int] = None
+    step_no: Optional[str] = Field(default=None, max_length=8)
+    target: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ToolPlanUpdate(BaseModel):
+    status: Optional[str] = Field(default=None, pattern="^(PLANNED|IN_PROGRESS|DONE|CANCELLED)$")
+    target: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ToolPlanOut(ORMModel):
+    id: int
+    tool_code: str
+    tool_name: Optional[str] = None
+    project_id: Optional[int] = None
+    step_no: Optional[str] = None
+    planned_by_user_id: Optional[int] = None
+    planned_by: Optional[str] = None
+    planned_at: UtcDateTime
+    status: str
+    status_label: Optional[str] = None
+    target: Optional[str] = None
+    note: Optional[str] = None
+    done_at: Optional[UtcDateTime] = None
+
+
 class ToolDetailOut(ToolOut):
     usage: ToolUsageSummary = ToolUsageSummary()
     knowledge: List[KnowledgeBrief] = []
     workflow_steps: List[ToolWorkflowStepOut] = []
     usage_events: List[ToolUsageOut] = []
+    plans: List[ToolPlanOut] = []
 
 
 class ToolCreate(BaseModel):

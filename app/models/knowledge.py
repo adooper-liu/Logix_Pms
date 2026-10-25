@@ -153,6 +153,12 @@ class KnowledgeItem(Base):
     def step_nos(self) -> List[str]:
         return sorted({row.step_no for row in self.workflow_links if row.step_no})
 
+    @property
+    def primary_step_nos(self) -> List[str]:
+        return sorted(
+            {row.step_no for row in self.workflow_links if row.step_no and row.is_primary}
+        )
+
     __table_args__ = (
         Index(
             "ix_knowledge_item_search_text_trgm",
@@ -312,6 +318,7 @@ class KnowledgeRecommendLog(Base):
     stage_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     step_no: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     result_ids: Mapped[Any] = mapped_column(JSON, default=list)
+    result_refs: Mapped[Any] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     user: Mapped[Optional["User"]] = relationship("User", foreign_keys=[user_id])  # noqa: F821
