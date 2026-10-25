@@ -81,6 +81,8 @@ on('knowledge.submit', () => submitKnowledge());
 on('knowledge.saveUsage', ({ id }) => saveUsage(Number(id)));
 on('knowledge.applyStep', ({ id }) => openApplyStep(Number(id)));
 on('knowledge.applyStepSubmit', ({ id }) => submitApplyStep(Number(id)));
+on('knowledge.applyToolStep', ({ code }) => openApplyToolStep(code));
+on('knowledge.applyToolStepSubmit', ({ code }) => submitApplyToolStep(code));
 on('knowledge.submitReview', ({ id }) => submitForReview(Number(id)));
 on('knowledge.review', ({ id, decision }) => reviewKnowledge(Number(id), decision));
 on('knowledge.archive', ({ id }) => archiveKnowledge(Number(id)));
@@ -390,9 +392,22 @@ function paint(d) {
 }
 
 function recoCard(item, labels, statusLabels, scenarioNames) {
+  const isTool = item.kind === 'tool';
   const rate = item.effectiveness_rate === null || item.effectiveness_rate === undefined
     ? '暂无使用记录'
     : `有效率 ${num(item.effectiveness_rate, 0)}%（${item.effective_count}/${item.used_count}）`;
+  const step = state.knowledge.step;
+  const openAction = isTool
+    ? `<button class="btn-sm" data-act="knowledge.openTool"
+        data-code="${esc(item.code)}">查看工具</button>`
+    : `<button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>`;
+  const applyAction = step
+    ? (isTool
+      ? `<button class="btn-sm" data-act="knowledge.applyToolStep"
+          data-code="${esc(item.code)}">用到 ${esc(step)}</button>`
+      : `<button class="btn-sm" data-act="knowledge.applyStep"
+          data-id="${item.id}">用到 ${esc(step)}</button>`)
+    : '';
   return `
     <div class="kb-reco-item">
       <div class="kb-score ${item.match_level}">${num(item.score, 0)}</div>
@@ -400,7 +415,9 @@ function recoCard(item, labels, statusLabels, scenarioNames) {
         <div class="between">
           <b>${esc(item.title)}</b>
           <span>
-            <span class="tag ${TYPE_TONE[item.type] || 't-blu'}">${esc(labels[item.type] || item.type)}</span>
+            <span class="tag ${TYPE_TONE[item.type] || 't-blu'}">${
+              esc(isTool ? '工具' : (labels[item.type] || item.type))}</span>
+            ${item.code ? `<span class="tiny">${esc(item.code)}</span>` : ''}
             ${item.is_best_practice ? '<span class="tag t-grn">最佳实践</span>' : ''}
           </span>
         </div>
@@ -416,10 +433,9 @@ function recoCard(item, labels, statusLabels, scenarioNames) {
           ? `<div class="tiny">命中：${item.matched_on.map(esc).join(' · ')}</div>` : ''}
       </div>
       <div class="kb-reco-act">
-        <button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>
-        ${state.knowledge.step ? `<button class="btn-sm" data-act="knowledge.applyStep"
-          data-id="${item.id}">用到 ${esc(state.knowledge.step)}</button>` : ''}
-        ${item.tool_code ? `<button class="btn-sm" data-act="knowledge.openTool"
+        ${openAction}
+        ${applyAction}
+        ${!isTool && item.tool_code ? `<button class="btn-sm" data-act="knowledge.openTool"
           data-code="${esc(item.tool_code)}">关联工具</button>` : ''}
       </div>
     </div>`;
@@ -673,6 +689,43 @@ async function submitApplyStep(id) {
   const note = document.getElementById('kaNote')?.value.trim() || null;
   try {
     await POST('/knowledge/' + id + '/usage', {
+      step_no: step,
+      outcome,
+      note,
+    });
+    toast('已记录到步骤 ' + step);
+    closeModal();
+    if (state.view === 'knowledge') RENDERERS.knowledge();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openApplyToolStep(code) {
+  const step = state.knowledge.step;
+  if (!step) return toast('请先从工作流步骤进入知识库', true);
+  openModal('用到当前步骤 · 工具', `
+    <div class="note mb">记录一次工具使用证据，关联工作流步骤 <b>${esc(step)}</b>。</div>
+    <div class="field"><label>本次效果</label>
+      <select id="ktaOutcome">
+        <option value="EFFECTIVE">有效</option>
+        <option value="PARTIAL">部分有效</option>
+        <option value="INEFFECTIVE">无效</option>
+      </select></div>
+    <div class="field"><label>说明</label>
+      <input id="ktaNote" value="在步骤 ${esc(step)} 使用工具 ${esc(code)}"></div>`,
+  `<button class="btn btn-g" data-act="knowledge.close">取消</button>
+   <button class="btn btn-p" data-act="knowledge.applyToolStepSubmit"
+     data-code="${esc(code)}">记录</button>`);
+}
+
+async function submitApplyToolStep(code) {
+  const step = state.knowledge.step;
+  if (!step) return toast('步骤上下文已丢失，请重新从工作流进入', true);
+  const outcome = document.getElementById('ktaOutcome')?.value || 'EFFECTIVE';
+  const note = document.getElementById('ktaNote')?.value.trim() || null;
+  try {
+    await POST('/tools/' + encodeURIComponent(code) + '/usage', {
       step_no: step,
       outcome,
       note,

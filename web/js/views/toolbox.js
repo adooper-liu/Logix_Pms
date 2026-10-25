@@ -65,6 +65,9 @@ on('toolbox.saveTool', ({ code }) => submitToolForm(code || ''));
 on('toolbox.submitTool', ({ code }) => submitToolReviewFlow(code, 'submit'));
 on('toolbox.reviewTool', ({ code, decision }) => submitToolReviewFlow(code, decision));
 on('toolbox.archiveTool', ({ code }) => archiveTool(code));
+on('toolbox.planTool', ({ code }) => openToolPlan(code));
+on('toolbox.savePlan', ({ code }) => submitToolPlan(code));
+on('toolbox.planStatus', ({ id, status }) => updateToolPlan(Number(id), status));
 on('toolbox.goKnowledge', ({ code }) => {
   closeModal();
   go('knowledge', { params: { tool: code, sort: 'match' }, push: true });
@@ -435,6 +438,27 @@ function paintTool(t) {
        <table class="tbl"><thead><tr><th>时间</th><th>效果</th><th>步骤</th>
          <th>使用人</th><th>说明</th></tr></thead><tbody>${usageRows}</tbody></table>`
     : '';
+  const planRows = (t.plans || []).map((plan) => `
+    <tr><td class="tiny">${fmtDate(plan.planned_at)}</td>
+      <td>${esc(plan.step_no || '—')}</td>
+      <td><span class="tag ${plan.status === 'DONE' ? 't-grn'
+        : plan.status === 'CANCELLED' ? 't-gry' : 't-blu'}">${esc(plan.status_label || plan.status)}</span></td>
+      <td class="tiny">${esc(plan.target || plan.note || '—')}</td>
+      <td>${esc(plan.planned_by || '—')}</td>
+      <td class="gap">
+        ${plan.status === 'PLANNED' ? `<button class="btn-sm"
+          data-act="toolbox.planStatus" data-id="${plan.id}" data-status="IN_PROGRESS">开始</button>` : ''}
+        ${plan.status === 'IN_PROGRESS' ? `<button class="btn-sm"
+          data-act="toolbox.planStatus" data-id="${plan.id}" data-status="DONE">完成</button>` : ''}
+        ${['PLANNED', 'IN_PROGRESS'].includes(plan.status) ? `<button class="btn-sm"
+          data-act="toolbox.planStatus" data-id="${plan.id}" data-status="CANCELLED">取消</button>` : ''}
+      </td></tr>`).join('');
+  const plansTable = planRows
+    ? `<h3 class="mt">使用计划</h3>
+       <table class="tbl"><thead><tr><th>计划时间</th><th>步骤</th><th>状态</th>
+         <th>目标 / 说明</th><th>创建人</th><th>操作</th></tr></thead>
+         <tbody>${planRows}</tbody></table>`
+    : '';
 
   openModal(t.name + (t.alias ? ' · ' + t.alias : ''), `
     <div class="gap mb" style="flex-wrap:wrap">
@@ -470,9 +494,12 @@ function paintTool(t) {
 
     <h3 class="mt">相关案例 / 模板 / 知识</h3>
     ${knowledgeHtml}
-    ${usageTable}`,
+    ${usageTable}
+    ${plansTable}`,
     `<button class="btn btn-g" data-act="toolbox.close">关闭</button>
      ${applyButton}
+     ${canWrite() ? `<button class="btn btn-g" data-act="toolbox.planTool"
+       data-code="${esc(t.code)}">加入使用计划</button>` : ''}
      ${canEdit ? `<button class="btn btn-g" data-act="toolbox.editTool"
        data-code="${esc(t.code)}">编辑</button>` : ''}
      ${canEdit && t.status === 'DRAFT' ? `<button class="btn btn-g"
@@ -682,6 +709,51 @@ async function archiveTool(code) {
     toast('已归档');
     closeModal();
     RENDERERS.toolbox();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openToolPlan(code) {
+  const tool = state.toolboxCurrent;
+  if (!tool || tool.code !== code) return toast('请先打开工具详情', true);
+  openModal('加入使用计划 · ' + tool.name, `
+    <div class="note mb">计划用于在项目/步骤上下文中提前约定使用工具，执行后再把状态改为完成。</div>
+    <div class="field"><label>关联步骤</label>
+      <input id="tpStep" value="${esc(state.toolbox.step || '')}" placeholder="如 2.1"></div>
+    <div class="field"><label>目标 / 验证标准</label>
+      <textarea id="tpTarget" rows="2"
+        placeholder="如：找到 3 个以上非增值等待环节">${esc(tool.verification_standard || '')}</textarea></div>
+    <div class="field"><label>说明</label><textarea id="tpNote" rows="2"></textarea></div>`,
+  `<button class="btn btn-g" data-act="toolbox.close">取消</button>
+   <button class="btn btn-p" data-act="toolbox.savePlan" data-code="${esc(code)}">保存计划</button>`);
+}
+
+async function submitToolPlan(code) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  try {
+    await POST('/tools/' + encodeURIComponent(code) + '/plans', {
+      step_no: val('tpStep') || null,
+      target: val('tpTarget') || null,
+      note: val('tpNote') || null,
+    });
+    toast('使用计划已创建');
+    closeModal();
+    RENDERERS.toolbox();
+    openToolByCode(code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function updateToolPlan(planId, status) {
+  try {
+    await PATCH('/tools/plans/' + planId, { status });
+    toast('计划状态已更新');
+    if (state.toolboxCurrent) openToolByCode(state.toolboxCurrent.code);
   } catch (e) {
     toast(e.message, true);
   }

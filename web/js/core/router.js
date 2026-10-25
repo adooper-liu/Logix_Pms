@@ -165,7 +165,7 @@ export function onSearch(value) {
       setUrlState('knowledge', {
         type: state.knowledge.type,
         tag: state.knowledge.tag,
-        keyword: value,
+        q: value,
         sort: state.knowledge.sort,
         scenario: state.knowledge.scenario,
         stage: state.knowledge.stage || '',
