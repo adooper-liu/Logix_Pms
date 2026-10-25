@@ -10,6 +10,16 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 可选：Office 转 PDF 预览。默认不装 LibreOffice，镜像更小；
+# 需要 P1 转换预览时用 docker build --build-arg INSTALL_PREVIEW_CONVERTER=true。
+ARG INSTALL_PREVIEW_CONVERTER=false
+RUN if [ "$INSTALL_PREVIEW_CONVERTER" = "true" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends \
+            libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-cjk \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 COPY app ./app
 COPY web ./web
 COPY scripts ./scripts

@@ -532,20 +532,32 @@ def preview_version(template_id: int, version_id: int, db: DbSession, user: Curr
         raise HTTPException(status_code=415, detail="该格式暂不支持在线预览，请下载后查看")
 
     storage = storage_service.get_storage()
-    try:
-        handle = storage.open(version.storage_key)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="文件不存在或已被清理") from exc
-    except storage_service.StorageError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    converted = preview_service.is_convertible(version.file_name, version.mime_type)
+    if converted:
+        try:
+            handle = preview_service.ensure_pdf_preview(
+                storage, version.storage_key, version.checksum, version.file_name
+            )
+        except preview_service.PreviewConversionError as exc:
+            raise HTTPException(status_code=502, detail=f"转换预览失败：{exc}") from exc
+        filename = preview_service.preview_filename(version.file_name, preview_service.PREVIEW_PDF)
+        media_type = "application/pdf"
+    else:
+        try:
+            handle = storage.open(version.storage_key)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="文件不存在或已被清理") from exc
+        except storage_service.StorageError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        filename = version.file_name or f"{template.code}-{version.version_label}"
+        media_type = preview_service.preview_media_type(kind, version.mime_type, version.file_name)
 
-    filename = version.file_name or f"{template.code}-{version.version_label}"
     headers = preview_service.inline_headers(filename)
-    if version.size_bytes is not None:
+    if not converted and version.size_bytes is not None:
         headers["Content-Length"] = str(version.size_bytes)
     return StreamingResponse(
         handle,
-        media_type=preview_service.preview_media_type(kind, version.mime_type, version.file_name),
+        media_type=media_type,
         headers=headers,
         background=BackgroundTask(handle.close),
     )

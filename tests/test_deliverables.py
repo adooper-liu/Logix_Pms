@@ -418,6 +418,64 @@ def test_pdf_preview_is_inline_and_office_requires_download(client):
     assert "不支持在线预览" in blocked.json()["detail"]
 
 
+def test_office_preview_converts_to_pdf_and_caches(client, monkeypatch):
+    from app.services import preview as preview_service
+
+    converted = b"%PDF-1.4\nconverted by fake office\n%%EOF"
+    calls = {"count": 0}
+
+    def fake_convert(source, filename):
+        calls["count"] += 1
+        assert source.read(2) == b"PK"
+        return converted
+
+    monkeypatch.setattr(preview_service, "converter_available", lambda: True)
+    monkeypatch.setattr(preview_service, "convert_to_pdf", fake_convert)
+
+    project = _create_project(client)
+    instance = _instance(client, project["id"], "2.2")
+    uploaded = _upload(client, instance["id"], "方案.docx", XLSX_BYTES + b"-docx")
+    assert uploaded.status_code == 201, uploaded.text
+    version = uploaded.json()
+    assert version["preview_kind"] == "PDF"
+    assert version["preview_url"].endswith(
+        f"/deliverables/{instance['id']}/versions/{version['id']}/preview"
+    )
+
+    preview = client.get(f"{API}/deliverables/{instance['id']}/versions/{version['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    assert preview.content == converted
+    assert preview.headers["content-type"].startswith("application/pdf")
+    assert preview.headers["content-disposition"].startswith("inline;")
+    assert calls["count"] == 1
+
+    # 同一版本再次预览走缓存，不重复调用转换器。
+    again = client.get(f"{API}/deliverables/{instance['id']}/versions/{version['id']}/preview")
+    assert again.status_code == 200
+    assert again.content == converted
+    assert calls["count"] == 1
+
+
+def test_office_preview_conversion_failure_returns_502(client, monkeypatch):
+    from app.services import preview as preview_service
+
+    monkeypatch.setattr(preview_service, "converter_available", lambda: True)
+
+    def broken_convert(source, filename):
+        raise preview_service.PreviewConversionError("soffice 未生成 PDF")
+
+    monkeypatch.setattr(preview_service, "convert_to_pdf", broken_convert)
+
+    project = _create_project(client)
+    instance = _instance(client, project["id"], "2.2")
+    uploaded = _upload(client, instance["id"], "坏文件.docx", XLSX_BYTES + b"-bad")
+    assert uploaded.status_code == 201, uploaded.text
+    version = uploaded.json()
+    failed = client.get(f"{API}/deliverables/{instance['id']}/versions/{version['id']}/preview")
+    assert failed.status_code == 502
+    assert "转换预览失败" in failed.json()["detail"]
+
+
 def test_upload_rejects_extension_and_magic_mismatch(client):
     project = _create_project(client)
     instance = _instance(client, project["id"], "2.2")

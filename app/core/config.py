@@ -82,12 +82,22 @@ class Settings:
         default_factory=lambda: _env("ATTACHMENT_DIR", str(PROJECT_ROOT / "var" / "attachments"))
     )
     attachment_max_mb: int = field(default_factory=lambda: int(_env("ATTACHMENT_MAX_MB", "50")))
+    # 预览转换：none=只做原生内联；libreoffice=用 soffice 把 Office 转成 PDF 后内联
+    preview_converter: str = field(
+        default_factory=lambda: _env("PREVIEW_CONVERTER", "none").strip().lower()
+    )
+    preview_convert_timeout_seconds: int = field(
+        default_factory=lambda: int(_env("PREVIEW_CONVERT_TIMEOUT_SECONDS", "120"))
+    )
+    preview_convert_max_mb: int = field(
+        default_factory=lambda: int(_env("PREVIEW_CONVERT_MAX_MB", "200"))
+    )
     attachment_allowed_extensions: Tuple[str, ...] = field(
         default_factory=lambda: tuple(
             ext.strip().lower()
             for ext in _env(
                 "ATTACHMENT_ALLOWED_EXTENSIONS",
-                ".xlsx,.xlsm,.docx,.pptx,.pdf,.bpmn,.xml,.csv,.txt,.png,.jpg,.jpeg,.vsdx,.zip",
+                ".xlsx,.xlsm,.docx,.pptx,.pdf,.bpmn,.xml,.csv,.txt,.md,.png,.jpg,.jpeg,.vsdx,.zip",
             ).split(",")
             if ext.strip()
         )
