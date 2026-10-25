@@ -466,6 +466,7 @@ def main() -> int:
         # 标准工作流：步骤详情
         def workflow_step_modal() -> None:
             goto("workflow")
+            assert "推荐知识" in page.inner_text("#view"), "步骤清单没有显示推荐知识数"
             page.click("#view .step >> nth=0")
             page.wait_for_selector("#mask.show")
             page.wait_for_selector("#wfRec h3", timeout=8000)
@@ -473,6 +474,8 @@ def main() -> int:
             assert "标准动作" in body and "关键要点" in body, body[:120]
             assert "推荐工具与预制模板" in body, "步骤弹窗缺少推荐工具区域"
             assert "该步骤还没有配置工具" in body, "1.1 没有配置工具，应给出提示"
+            assert "本步骤推荐知识" in body, "步骤弹窗缺少推荐知识区域"
+            assert "RACI" in body or "BPR" in body, "阶段 1 没有推送知识"
             close_modal()
             page.wait_for_timeout(300)
 
@@ -486,6 +489,7 @@ def main() -> int:
             body = page.inner_text("#wfRec")
             assert "SIPOC" in body and "必用" in body, f"推荐工具未渲染：{body[:200]!r}"
             assert "SWIMLANE" in body and "推荐" in body
+            assert "验证" in body, "步骤推荐工具缺少验证标准"
             assert "暂无预制模板" in body, "未上传模板时应显示空态"
             close_modal()
 
@@ -503,17 +507,28 @@ def main() -> int:
             assert "只显示" in text and "现状流程绘制" in text, text[:200]
             assert "必用" in text and "推荐" in text, "工具使用要求标签未渲染"
             names = page.eval_on_selector_all(
-                "#view .tool h4", "els => els.map(e => e.textContent.trim())"
+                "#view .tb-card .tb-card-title b", "els => els.map(e => e.textContent.trim())"
             )
             assert len(names) == 2, f"过滤后应只有 2 个工具：{names}"
             assert any("SIPOC" in n for n in names) and any(
                 "Swimlane" in n or "泳道" in n for n in names
             )
 
+            # 工具详情应显示场景/验证标准，并在有步骤上下文时提供「用到步骤」
+            page.click('#view .tb-card button:has-text("查看详情") >> nth=0')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(600)
+            body = page.inner_text("#mBody")
+            assert "适用场景" in body, "工具详情缺少适用场景"
+            assert "验证标准" in body and "不适用" in body, "工具详情缺少决策字段"
+            assert "用到步骤 2.1" in page.inner_text("#mFoot"), "工具详情缺少用到当前步骤入口"
+            close_modal()
+            page.wait_for_timeout(400)
+
             page.click('#view button:has-text("显示全部工具")')
             page.wait_for_timeout(900)
             names_all = page.eval_on_selector_all(
-                "#view .tool h4", "els => els.map(e => e.textContent.trim())"
+                "#view .tb-card .tb-card-title b", "els => els.map(e => e.textContent.trim())"
             )
             assert len(names_all) > 2, f"清除过滤后应显示更多工具：{names_all}"
 
@@ -582,25 +597,39 @@ def main() -> int:
         # 工具箱：详情 + 按问题找工具（预设问题 + 自由输入各测一次）
         def toolbox() -> None:
             goto("toolbox")
-            page.click("#view .tool >> nth=0")
-            page.wait_for_selector("#mask.show")
-            page.wait_for_timeout(1000)  # 弹窗先显示骨架屏，等内容回填
-            body = page.inner_text("#mBody")
-            assert "标准操作步骤" in body, f"工具详情缺少步骤：{body[:120]!r}"
-            assert "常见误用" in body, "工具详情缺少常见误用"
-            close_modal()
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(900)
+            view = page.inner_text("#view")
+            assert "我遇到了什么问题" in view, "工具箱首屏没有问题入口"
+            assert "快捷痛点" in view and "全部工具" in view, "工具箱缺少快捷痛点或全部工具区"
 
-            page.click("#toolChips button >> nth=0")
-            page.wait_for_timeout(1500)
-            res = page.inner_text("#toolMatchResult")
-            assert "匹配分" in res, f"预设问题未匹配到工具：{res[:160]!r}"
+            page.click("#view .tb-qchip >> nth=0")
+            page.wait_for_timeout(1600)
+            res = page.inner_text("#view")
+            assert "匹配结果" in res and "验证标准" in res, f"快捷痛点未出结果：{res[:200]!r}"
+            assert "适配" in res, "匹配结果缺少适配度"
+
+            page.click('#view .tb-card button[data-act="toolbox.open"] >> nth=0')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(900)
+            body = page.inner_text("#mBody")
+            assert "标准操作步骤" in body, f"工具详情缺少步骤：{body[:160]!r}"
+            assert "常见误用" in body, "工具详情缺少常见误用"
+            assert "验证标准" in body and "不适用" in body, "工具详情缺少决策字段"
+            assert "相关案例" in body, "工具详情缺少关联知识区"
+            close_modal()
+            page.wait_for_timeout(600)
 
             page.fill("#toolQ", "跨部门互相推诿")
-            page.click("#toolQBtn")
-            page.wait_for_timeout(1500)
-            res2 = page.inner_text("#toolMatchResult")
-            assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:200]!r}"
+            page.click('#view button[data-act="toolbox.match"]')
+            page.wait_for_timeout(1600)
+            res2 = page.inner_text("#view")
+            assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:240]!r}"
+
+            # 四象限是辅助筛选，不是主入口
+            page.click('#view button[data-act="toolbox.toggleCategory"][data-category="DIAGNOSE"]')
+            page.wait_for_timeout(1200)
+            assert "方法论工具箱" in page.inner_text("#view")
+            assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
 
         # 交付物与模板库：项目交付物列表 → 详情弹窗 → 模板库空态/新建入口
         def deliverables_view() -> None:
@@ -1190,6 +1219,7 @@ def main() -> int:
         def designer_bpmn_properties() -> None:
             goto("designer")
             pick_editable_design()
+            page.wait_for_timeout(1000)
             page.wait_for_selector("#bpmnCanvas .djs-palette", state="visible", timeout=8000)
             pid = page.evaluate("() => window.state.designer.processId")
 
@@ -1406,7 +1436,7 @@ def main() -> int:
             page.fill("#bpFlowCondition", "E2E条件")
             page.fill("#bpFlowProb", "0.55")
             page.click('#bpmnSidebar button:has-text("保存连线")')
-            page.wait_for_timeout(1600)
+            page.wait_for_timeout(2500)
             edge = next(
                 item
                 for item in design_model()["edges"]
@@ -1502,11 +1532,26 @@ def main() -> int:
                 page.wait_for_selector("#uiDialogOk", timeout=5000)
                 page.click("#uiDialogOk")
                 page.wait_for_timeout(1600)
-                view_text = page.inner_text("#view")
-                assert "已发布" in view_text and "运行时版本 v" in view_text, view_text[:200]
+                assert page.inner_text("#pageTitle") == "流程执行", "发布后没有进入执行页"
+                page.wait_for_selector("#mask.show", timeout=8000)
+                assert "启动流程实例" in page.inner_text("#mTitle"), "发布后没有拉起启动弹窗"
+                selected = page.eval_on_selector("#exProcess", "el => Number(el.value)")
+                assert selected == pid, f"启动弹窗没有选中刚发布的流程：{selected} != {pid}"
+                assert "start=1" not in page.url, "start 参数应在拉起弹窗后被消费"
+                assert "process=" in page.url, f"执行页 URL 没有记录流程：{page.url}"
                 page.screenshot(
                     path=str(out_dir / "interaction-designer-version.png"), full_page=True
                 )
+                close_modal()
+                model = page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      return await fetch('/api/v1/processes/' + pid + '/design',
+                        { headers: { Authorization: 'Bearer ' + t } }).then(r => r.json());
+                    }""",
+                    pid,
+                )
+                assert model["status"] == "PUBLISHED", model
             finally:
                 page.evaluate(
                     """async (pid) => {
@@ -1516,7 +1561,9 @@ def main() -> int:
                     }""",
                     pid,
                 )
-                page.evaluate("(pid) => actions['designer.switch'](pid)", fallback)
+                page.evaluate(
+                    "(pid) => go('designer', {params: {process: pid}, push: true})", fallback
+                )
                 page.wait_for_timeout(700)
 
         # 设计器「变更」页签：变更单 + 影响分析
@@ -1733,18 +1780,93 @@ def main() -> int:
         # 知识库：打开条目（会写入查阅次数）+ 快速找工具
         def knowledge() -> None:
             goto("knowledge")
-            page.click("#view .tool >> nth=0")
+            page.wait_for_timeout(900)
+            view = page.inner_text("#view")
+            assert "我先想解决什么" in view, "知识库首屏没有场景入口"
+            assert "按痛点匹配" in view, "知识库缺少匹配按钮"
+            assert "标准制度：已独立为制度中心" in view, "知识库没有制度中心说明"
+            assert "归档候选" in view, "管理员知识库缺少归档候选区"
+            assert "使用效果" in view, "管理员知识库缺少使用效果统计"
+
+            # 场景 → 推荐：点「责任不清」应出现按证据排序的推荐
+            page.click('#view button[data-act="knowledge.scenario"][data-code="RACI"]')
+            page.wait_for_timeout(1500)
+            assert "为你推荐" in page.inner_text("#view"), "场景匹配没有推荐结果"
+            assert "RACI" in page.inner_text("#view"), "责任不清场景没有推荐 RACI"
+
+            page.click('#view .kb-reco-item button[data-act="knowledge.open"] >> nth=0')
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(900)
-            assert "查阅" in page.inner_text("#mBody"), "知识条目详情未渲染"
+            body = page.inner_text("#mBody")
+            assert "使用证据" in body, f"知识详情缺少证据区：{body[:160]!r}"
+            assert "适用条件" in body and "不适用" in body, "知识详情缺少适用/反证条件"
             close_modal()
-            page.wait_for_timeout(1400)
+            page.wait_for_timeout(900)
 
             page.fill("#kbQ", "跨部门互相推诿、权责不清")
-            page.click("#kbQBtn")
+            page.click('#view button[data-act="knowledge.match"]')
             page.wait_for_timeout(1500)
-            res = page.inner_text("#kbMatch")
-            assert "推荐工具" in res, f"快速找工具未出结果：{res[:160]!r}"
+            assert "为你推荐" in page.inner_text("#view"), "快速匹配没有推荐结果"
+
+            page.click('#view button[data-act="knowledge.new"]')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(600)
+            modal = page.inner_text("#mask")
+            assert "入库前自检" in modal and "提交审核" in modal, "新建知识缺少求真审核门槛"
+            assert "适用场景" in modal and "反证" in modal, "新建知识缺少场景/反证字段"
+            close_modal()
+            page.wait_for_timeout(600)
+
+            # 制度中心深链：知识库 → deliverables?tab=document，刷新后仍停在标准文件页签
+            page.click('#view button[data-act="knowledge.goDocuments"] >> nth=0')
+            page.wait_for_timeout(1000)
+            assert page.inner_text("#pageTitle") == "交付物与模板库", "制度中心跳转失败"
+            assert "tab=document" in page.url, f"制度中心没有写入 tab URL：{page.url}"
+            assert "流程标准文件" in page.inner_text("#view .tabs button.on"), "未落在标准文件页签"
+            page.reload(wait_until="networkidle")
+            page.wait_for_timeout(1000)
+            assert "流程标准文件" in page.inner_text("#view .tabs button.on"), "刷新后页签丢失"
+
+        # 知识库 → 工具箱：详情里的「查看关联工具」应真正跳转并打开工具详情
+        def knowledge_tool_jump() -> None:
+            goto("knowledge")
+            page.wait_for_timeout(900)
+            page.click('#view button[data-act="knowledge.scenario"][data-code="RACI"]')
+            page.wait_for_timeout(1500)
+            page.click('#view .kb-reco-item button[data-act="knowledge.open"] >> nth=0')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(900)
+            btn = page.locator('#mFoot button:has-text("查看关联工具")')
+            assert btn.count(), "知识详情缺少「查看关联工具」入口"
+            btn.click()
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "方法论工具箱", "知识库→工具箱没有跳转"
+            assert "open=" in page.url, f"工具详情没有写入 URL：{page.url}"
+            page.wait_for_selector("#mask.show")
+            body = page.inner_text("#mBody")
+            assert "验证标准" in body, "工具详情缺少验证标准"
+            assert "不适用" in body, "工具详情缺少反证条件"
+            close_modal()
+            page.wait_for_timeout(400)
+
+        # 工作流步骤 → 知识库：保留 step 上下文并可直接记录使用证据
+        def knowledge_step_context() -> None:
+            goto("workflow")
+            page.click("#view .step >> nth=0")
+            page.wait_for_selector("#wfRec h3", timeout=8000)
+            link = page.locator('#wfRec .kb-step-item button:has-text("在知识库查看")')
+            assert link.count(), "步骤推荐知识缺少「在知识库查看」入口"
+            link.first.click()
+            page.wait_for_timeout(1600)
+            assert page.inner_text("#pageTitle") == "流程知识库", "没有跳转到知识库"
+            view = page.inner_text("#view")
+            assert "用到 1.1" in view, f"知识库没有步骤上下文按钮：{view[:200]}"
+            page.click('#view .kb-reco-item button[data-act="knowledge.applyStep"] >> nth=0')
+            page.wait_for_selector("#mask.show")
+            body = page.inner_text("#mBody")
+            assert "关联工作流步骤" in body and "1.1" in body, body[:200]
+            close_modal()
+            page.wait_for_timeout(400)
 
         # 甘特图与里程碑
         def project_gantt() -> None:
@@ -1789,6 +1911,16 @@ def main() -> int:
             page.wait_for_timeout(1600)
             assert "已登记" in page.inner_text("#toast"), page.inner_text("#toast")
             assert "自检用临时异常" in page.inner_text("#view")
+
+            # 异常台账 → 改善项目：服务端生成草稿后直接打开项目详情
+            row = page.locator('#view tr:has-text("自检用临时异常")').first
+            row.locator('button:has-text("转改善")').click()
+            page.wait_for_timeout(1800)
+            assert page.inner_text("#pageTitle") == "流程项目组合", "异常转改善没有进入项目组合"
+            assert "project=" in page.url, f"URL 没有记录改善项目：{page.url}"
+            page.wait_for_selector("#mask.show", timeout=8000)
+            assert "改善项目卡" in page.inner_text("#mBody"), "改善项目详情缺少改善项目卡"
+            close_modal()
 
         # 直接打开视图路径：服务端返回前端入口，启动后按路径进入对应视图
         def direct_view_url() -> None:
@@ -1911,6 +2043,24 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
+            # 战略目标 → 选流程 / 立项：流程与目标值一起带进立项向导
+            btn = page.locator('#view button[data-act="strategy.initiate"]')
+            assert btn.count(), "战略目标没有「选流程 / 立项」入口"
+            btn.first.click()
+            page.wait_for_selector("#siProcess", timeout=8000)
+            assert page.locator("#siProcess option").count() >= 1, "没有可选的 L3/L4 流程"
+            page.click('#mFoot button[data-act="strategy.submitInitiate"]')
+            page.wait_for_timeout(1400)
+            assert page.inner_text("#pageTitle") == "流程项目组合", "没有进入立项向导"
+            page.wait_for_selector("#npName", timeout=8000)
+            assert "new_process=" in page.url and "new_objective=" in page.url, page.url
+            wizard = page.inner_text("#mBody")
+            assert "承接战略目标" in wizard, "立项向导没有带入战略目标"
+            assert page.locator("#npMetric").input_value(), "立项向导没有预填指标名称"
+            assert page.locator("#npTarget").input_value(), "立项向导没有预填目标值"
+            close_modal()
+            page.wait_for_timeout(300)
+
         def start_view() -> None:
             goto("start")
             page.wait_for_timeout(900)
@@ -2010,6 +2160,14 @@ def main() -> int:
             if len(options) > 1:
                 page.select_option("#view select.sel", value=options[1])
                 page.wait_for_timeout(1200)
+                assert "流程卡" in page.inner_text("#view")
+                assert "process=" in page.url, f"URL 没有记录流程卡流程：{page.url}"
+                selected = page.eval_on_selector("#view select.sel", "el => el.value")
+                page.reload(wait_until="networkidle")
+                page.wait_for_timeout(1200)
+                assert page.eval_on_selector("#view select.sel", "el => el.value") == selected, (
+                    "刷新后没有恢复同一条流程"
+                )
                 assert "流程卡" in page.inner_text("#view")
 
         def select_click_stable() -> None:
@@ -2464,6 +2622,8 @@ def main() -> int:
         check("标准工时观测与评审", time_study_workflow)
         check("数据治理数据域与数据流", data_governance_view)
         check("知识库详情 + 快速找工具", knowledge)
+        check("知识库 → 工具箱双向跳转", knowledge_tool_jump)
+        check("工作流 → 知识库步骤上下文", knowledge_step_context)
         check("项目甘特图与里程碑", project_gantt)
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)
