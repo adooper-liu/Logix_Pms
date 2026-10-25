@@ -5,10 +5,11 @@
  */
 
 import { esc, num, emptyRow } from '../core/format.js';
-import { viewEl, on } from '../core/ui.js';
+import { toast, openModal, closeModal, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
-import { GET } from '../core/api.js';
+import { GET, POST } from '../core/api.js';
+import { canManage } from '../core/auth.js';
 import { actions as appActions } from '../core/actions.js';
 
 on('process_card.select', (_data, el) => {
@@ -35,6 +36,8 @@ on('process_card.workload', () => {
   state.monitor.tab = 'workload';
   go('monitor');
 });
+on('process_card.newMaturity', () => openMaturityModal());
+on('process_card.submitMaturity', () => submitMaturity());
 
 const STATUS_TONE = { RED: 't-red', YELLOW: 't-yel', GREEN: 't-grn', GRAY: 't-gry' };
 const READY_LABELS = {
@@ -67,8 +70,12 @@ const renderProcessCard = () => {
       if (!processId) {
         return { processes, card: null };
       }
-      const card = await GET('/process-card/' + processId);
-      return { processes, card };
+      const [card, assessments, coverage] = await Promise.all([
+        GET('/process-card/' + processId),
+        GET('/maturity/assessments?process_id=' + processId),
+        canManage() ? GET('/maturity/coverage').catch(() => null) : Promise.resolve(null),
+      ]);
+      return { processes, card, assessments, coverage };
     },
     (d) => {
       const options = d.processes.map((row) =>
@@ -140,6 +147,23 @@ const renderProcessCard = () => {
         </div>`).join('') || '<div class="tiny muted">没有未闭环治理待办</div>';
 
       const w = c.workload;
+      const d2 = d;
+      const maturityRows = (d2.assessments || []).slice(0, 8).map((row) => `
+        <div class="between bpmn-node-row">
+          <span><b>${esc(row.dimension_label || row.dimension)}</b>
+            <div class="tiny">${esc(row.assessed_by || '—')} · ${esc(row.assessed_at || '')}</div></span>
+          <span><span class="tag ${row.level >= 4 ? 't-grn' : row.level >= 2 ? 't-yel' : 't-red'}">
+            L${row.level}</span></span>
+        </div>`).join('') || '<div class="tiny muted">还没有成熟度评估</div>';
+      const covRow = d2.coverage
+        ? (d2.coverage.rows || []).find((row) => row.process_id === state.processCard.processId)
+        : null;
+      const coverageHtml = covRow
+        ? `<div class="tiny">L4 ${covRow.l4_total} 个 · Owner ${
+          num(covRow.owner_coverage_pct, 0)}% · 制度 ${
+          num(covRow.document_coverage_pct, 0)}% · KPI ${
+          num(covRow.kpi_coverage_pct, 0)}%</div>`
+        : '';
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between">
@@ -207,6 +231,12 @@ const renderProcessCard = () => {
             ${improvementRows}
           </div>
           <div class="card">
+            <div class="between mb"><h3>成熟度（${(d2.assessments || []).length}）</h3>
+              ${canManage() ? `<button class="btn-sm" data-act="process_card.newMaturity">+ 评估</button>` : ''}</div>
+            ${coverageHtml}
+            ${maturityRows}
+          </div>
+          <div class="card">
             <h3>治理待办（${c.findings.length}）</h3>
             ${findingRows}
           </div>
@@ -214,5 +244,57 @@ const renderProcessCard = () => {
     },
   );
 };
+
+async function openMaturityModal() {
+  const processId = state.processCard.processId;
+  if (!processId) return toast('请先选择流程', true);
+  let meta;
+  try {
+    meta = await GET('/maturity/meta');
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const dimensions = meta.dimension_labels || {};
+  openModal('新增成熟度评估', `
+    <div class="note mb">评分必须附证据链接；同一维度以最新一次评估为准。</div>
+    <div class="row2">
+      <div class="field"><label>维度 *</label><select id="maDimension">
+        ${Object.entries(dimensions).map(([code, label]) =>
+          `<option value="${code}">${esc(label)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>等级（0–5）*</label><select id="maLevel">
+        ${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}">L${n}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="field"><label>证据链接 *</label>
+      <input id="maEvidence" placeholder="评估报告 / 现场照片 / 系统截图链接"></div>
+    <div class="field"><label>有效期至</label><input id="maValid" type="date"></div>
+    <div class="field"><label>说明</label><textarea id="maNote" rows="2"></textarea></div>`,
+  `<button class="btn btn-g" data-act="ui.close">取消</button>
+   <button class="btn btn-p" data-act="process_card.submitMaturity">保存评估</button>`);
+}
+
+async function submitMaturity() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  if (!val('maEvidence')) return toast('成熟度评分必须附证据链接', true);
+  try {
+    await POST('/maturity/assessments', {
+      process_id: state.processCard.processId,
+      dimension: val('maDimension'),
+      level: Number(val('maLevel')),
+      evidence_url: val('maEvidence'),
+      valid_until: val('maValid') || null,
+      note: val('maNote') || null,
+    });
+    toast('成熟度评估已保存');
+    closeModal();
+    RENDERERS.process_card();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 export { renderProcessCard };

@@ -38,6 +38,8 @@ on('projects.openExecution', ({ process }) => {
   });
 });
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
+on('projects.gate', ({ id }) => openGateModal(Number(id)));
+on('projects.submitGate', ({ id }) => submitGate(Number(id)));
 on('projects.wizardRecommend', () => wizardRecommend());
 on('projects.submit', () => submitProject());
 
@@ -417,6 +419,7 @@ async function openProject(id, options = {}) {
     <button class="btn btn-g" data-act="ui.copyLink">复制链接</button>
     <button class="btn btn-g" data-act="projects.close">关闭</button>
     ${canEditThis ? `<button class="btn btn-g" data-act="projects.edit" data-id="${p.id}">编辑</button>` : ''}
+    ${canManage() ? `<button class="btn btn-g" data-act="projects.gate" data-id="${p.id}">门禁签收</button>` : ''}
     ${p.process_id ? `<button class="btn btn-g" data-act="projects.openExecution"
       data-process="${p.process_id}">去流程执行</button>` : ''}
     ${p.process_id ? `<button class="btn btn-p" data-act="projects.closeOpenDesigner"
@@ -628,9 +631,84 @@ async function editProjectModal(projectId) {
       <div class="field"><label>已投入（万元）</label><input id="epActual" type="number" step="0.1" value="${p.actual_cost}"></div>
       <div class="field"><label>计划结束</label>
         <input id="epEnd" type="date" value="${p.end_date || ''}"></div>
-    </div>`,
+    </div>
+    <label class="gap" style="margin-top:8px">
+      <input id="epGate" type="checkbox" ${p.gate_required ? 'checked' : ''}>
+      启用阶段门禁（进入下一阶段前必须有 PASS 签收）
+    </label>`,
     `<button class="btn btn-g" data-act="projects.close">取消</button>
      <button class="btn btn-p" data-act="projects.saveEdit" data-id="${p.id}">保存</button>`, true);
+}
+
+async function openGateModal(projectId) {
+  let detail;
+  let gates;
+  let meta;
+  try {
+    [detail, gates, meta] = await Promise.all([
+      GET('/projects/' + projectId),
+      GET('/maturity/gates?project_id=' + projectId),
+      GET('/maturity/meta'),
+    ]);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const p = detail.project;
+  const rows = (gates || []).map((row) => `
+    <tr><td>阶段${row.stage_no}</td>
+      <td><span class="tag ${row.conclusion === 'PASS' ? 't-grn' : 't-yel'}">${
+        esc(row.conclusion_label || row.conclusion)}</span></td>
+      <td class="tiny">${esc(row.exit_criteria || '—')}</td>
+      <td class="tiny">${esc(row.evidence_url)}</td>
+      <td>${esc(row.signed_by || '—')}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">还没有门禁记录</td></tr>';
+  const conclusions = (meta && meta.conclusion_labels) || {};
+  openModal('阶段门禁 · ' + p.code, `
+    <div class="note mb">启用门禁后，进入下一阶段必须有 PASS 签收；
+      PATCH/NARROW/STOP 不视为通过。</div>
+    <table class="tbl"><thead><tr><th>阶段</th><th>结论</th><th>退出条件</th>
+      <th>证据</th><th>签收人</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3 class="mt">新增签收</h3>
+    <div class="row3">
+      <div class="field"><label>阶段</label><select id="gtStage">
+        ${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${
+          n === p.current_stage ? ' selected' : ''}>阶段${n}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>结论</label><select id="gtConclusion">
+        ${Object.entries(conclusions).map(([code, label]) =>
+          `<option value="${code}">${esc(label)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>证据链接 *</label>
+        <input id="gtEvidence" placeholder="报告 / 会议纪要 / 验收单链接"></div>
+    </div>
+    <div class="field"><label>退出条件</label>
+      <input id="gtCriteria" placeholder="本阶段离开前必须满足什么"></div>
+    <div class="field"><label>说明</label><input id="gtNote"></div>`,
+  `<button class="btn btn-g" data-act="projects.close">取消</button>
+   <button class="btn btn-p" data-act="projects.submitGate" data-id="${projectId}">签收</button>`);
+}
+
+async function submitGate(projectId) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  if (!val('gtEvidence')) return toast('门禁签收必须填写证据链接', true);
+  try {
+    await POST('/maturity/gates', {
+      project_id: projectId,
+      stage_no: Number(val('gtStage')),
+      conclusion: val('gtConclusion'),
+      evidence_url: val('gtEvidence'),
+      exit_criteria: val('gtCriteria') || null,
+      note: val('gtNote') || null,
+    });
+    toast('门禁已签收');
+    closeModal();
+    openProject(projectId, { fromUrl: true });
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function saveProjectEdit(projectId) {
@@ -670,6 +748,7 @@ async function saveProjectEdit(projectId) {
     transfer_cost: Number(val('epTransfer') || 0),
     replication_status: val('epReplication'),
     replication_note: val('epReplicationNote').trim() || null,
+    gate_required: document.getElementById('epGate')?.checked || false,
   };
   // OWNER 不能改归属，后端也会拦；这里干脆不发这个字段
   if (canManage()) payload.owner = val('epOwner').trim();

@@ -556,6 +556,7 @@ def main() -> int:
             page.wait_for_timeout(900)
             assert "概览" in page.inner_text("#mBody"), "详情弹窗未渲染"
             assert "改善项目卡" in page.inner_text("#mBody"), "项目概览缺少改善项目卡"
+            assert "门禁签收" in page.inner_text("#mFoot"), "项目详情缺少门禁签收入口"
             for label, marker in [
                 ("KPI 追踪", "指标"),
                 ("工作流推进", "阶段1"),
@@ -680,7 +681,9 @@ def main() -> int:
             close_modal()
 
             # 选择组织后应出现有效版本解析（当前无标准文件 → 空态）
-            page.locator("#view select.sel").nth(2).select_option(label="华东分公司（公司/分公司）")
+            page.locator('#view select[data-act="dlv.docOrg"]').select_option(
+                label="华东分公司（公司/分公司）"
+            )
             page.wait_for_timeout(1200)
             assert "该组织在所选范围内没有可用标准文件" in page.inner_text("#view")
 
@@ -2186,6 +2189,7 @@ def main() -> int:
                 "变更",
                 "改善",
                 "治理待办",
+                "成熟度",
             ):
                 assert marker in view, f"流程卡缺少「{marker}」区块"
             options = page.eval_on_selector_all(
@@ -2245,6 +2249,7 @@ def main() -> int:
             page.wait_for_selector("#mask.show")
             page.fill("#aeTitle", "自检用例外")
             page.fill("#aeReason", "自检原因")
+            page.fill("#aeExpires", "2027-12-31")
             page.click('#mFoot button:has-text("提交申请")')
             page.wait_for_timeout(1200)
             page.click('#view .seg button:has-text("例外台账")')
