@@ -44,11 +44,13 @@ from app.schemas.process import (
     ReviewModelRequest,
     RollbackModelRequest,
 )
+from app.schemas.simulation import SimulationOut, SimulationRequest
 from app.services import audit as audit_service
 from app.services import bpmn as bpmn_service
 from app.services import change as change_service
 from app.services import designer
 from app.services import process_model as model_service
+from app.services import simulation as simulation_service
 
 router = APIRouter(tags=["流程设计器"])
 
@@ -574,6 +576,25 @@ def diff_model_versions(
         to_version=after.version,
         **result,
     )
+
+
+@router.post(
+    "/processes/{process_id}/design/simulate",
+    response_model=SimulationOut,
+    summary="按当前模型枚举路径并汇总概率/周期/成本",
+)
+def simulate_design(process_id: int, payload: SimulationRequest, db: DbSession):
+    if db.get(ProcessArch, process_id) is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    nodes, edges = model_service.rows_from_snapshot(
+        process_id, model_service.current_snapshot(db, process_id)
+    )
+    try:
+        return simulation_service.simulate(
+            nodes, edges, start_node_key=payload.start_node_key, max_paths=payload.max_paths
+        )
+    except simulation_service.SimulationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post(

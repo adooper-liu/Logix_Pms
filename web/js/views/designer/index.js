@@ -21,6 +21,8 @@ import { createVersions } from './versions.js';
 import { createTransfer } from './transfer.js';
 import { createChanges } from './changes.js';
 import { createRaci } from './raci.js';
+import { createComments } from './comments.js';
+import { createSimulation } from './simulation.js';
 
 /** 深拷贝模型，用作「服务端已确认」的回滚基准。 */
 function cloneModel(model) {
@@ -53,6 +55,8 @@ const versions = createVersions(ctx);
 const transfer = createTransfer(ctx);
 const changes = createChanges(ctx);
 const raci = createRaci(ctx);
+const comments = createComments(ctx);
+const simulation = createSimulation(ctx);
 
 Object.assign(ctx, {
   renderSelection: panels.renderSelection,
@@ -164,6 +168,8 @@ function paintDesigner() {
           <button class="btn-sm" data-act="designer.autoLayout">自动布局</button>
           <button class="btn-sm" data-act="designer.fullscreen">全屏</button>
           <button class="btn-sm" data-act="designer.shortcuts">快捷键</button>
+          <button class="btn-sm" data-act="designer.comments">评论</button>
+          <button class="btn-sm" data-act="designer.simulate">路径模拟</button>
           ${editable ? '<button class="btn-sm" data-act="designer.addLane">+ 泳道</button>' : ''}
           <button class="btn-sm" id="bpmnPropsToggle"
             data-act="designer.sidebar" data-tab="props">属性</button>
@@ -436,8 +442,11 @@ on('designer.publishFromChange', () => {
 });
 on('designer.saveName', ({ id }) => panels.saveName(id));
 on('designer.saveDescription', ({ id }) => panels.saveDescription(id));
-on('designer.shortcuts', () => {
-  openModal('画布快捷键', `
+on('designer.comments', () => comments.open());
+on('designer.simulate', () => simulation.open());
+on('designer.addComment', ({ element, name, type }) => comments.add(element, name, type));
+on('designer.resolveComment', ({ id }) => comments.resolve(Number(id)));
+on('designer.shortcuts', () => {  openModal('画布快捷键', `
     <table class="tbl">
       <thead><tr><th>操作</th><th>快捷键 / 方式</th></tr></thead>
       <tbody>

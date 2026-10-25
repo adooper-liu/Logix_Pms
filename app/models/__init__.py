@@ -12,6 +12,7 @@ from app.models.benchmark import (
     ProcessBenchmarkMap,
 )
 from app.models.change import ProcessChangeRequest
+from app.models.collaboration import ProcessComment
 from app.models.data_governance import DataDomain, DataFlow
 from app.models.deliverable import (
     DeliverableDefinition,
@@ -196,6 +197,7 @@ __all__ = [
     "StrategyObjective",
     "ObjectiveProcessLink",
     "ProcessChangeRequest",
+    "ProcessComment",
     "GovernanceRole",
     "GovernanceRoleMember",
     "RaciAssignment",
