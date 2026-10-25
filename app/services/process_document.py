@@ -18,6 +18,7 @@ from app.models.deliverable import DeliverableDefinition, DeliverableInstance, D
 from app.models.enums import (
     AssetVariationPolicy,
     DeliverableStatus,
+    DocumentLevel,
     ProcessDocumentCategory,
 )
 from app.models.process import ProcessArch
@@ -56,6 +57,14 @@ POLICY_LABELS: Dict[str, str] = {
     AssetVariationPolicy.EXTENDABLE.value: "可扩展",
     AssetVariationPolicy.OPTIONAL.value: "可选",
     AssetVariationPolicy.LOCAL_ONLY.value: "仅本地",
+}
+
+LEVEL_LABELS: Dict[str, str] = {
+    DocumentLevel.GROUP.value: "集团制度",
+    DocumentLevel.COMPANY.value: "公司制度",
+    DocumentLevel.PLANT.value: "工厂制度",
+    DocumentLevel.LINE.value: "产线规定",
+    DocumentLevel.PROCESS.value: "流程文件",
 }
 
 _VERSION_RE = re.compile(r"^\d+\.\d+$")
@@ -889,6 +898,14 @@ def document_out(db: Session, document: ProcessDocument) -> ProcessDocumentOut:
         category=document.category,
         category_label=CATEGORY_LABELS.get(document.category, document.category),
         description=document.description,
+        level=document.level,
+        level_label=LEVEL_LABELS.get(document.level, document.level),
+        legal_entity=document.legal_entity,
+        plant=document.plant,
+        product_family=document.product_family,
+        language=document.language,
+        control_points=document.control_points,
+        exception_terms=document.exception_terms,
         owner=document.owner,
         owner_user_id=document.owner_user_id,
         **org_service.resolve_scope(document.org_unit),
@@ -924,4 +941,5 @@ def meta() -> ProcessDocumentMeta:
         status_labels=deliverable_service.STATUS_LABELS,
         transitions=deliverable_service.ALLOWED_TRANSITIONS,
         variation_policy_labels=POLICY_LABELS,
+        level_labels=LEVEL_LABELS,
     )

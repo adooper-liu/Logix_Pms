@@ -29,6 +29,7 @@ from app.models.tool import Tool
 from app.models.tool_template import ToolTemplate
 from app.models.user import User
 from app.schemas.baseline import AuditScanResult, FindingOut
+from app.services import authorization as authz_service
 from app.services import data_governance as data_service
 from app.services import knowledge_match
 from app.services import notifications as notification_service
@@ -49,6 +50,7 @@ TYPE_LABELS: Dict[str, str] = {
     "KNOWLEDGE_ARCHIVE_CANDIDATE": "知识归档候选",
     "TOOL_REVIEW_OVERDUE": "工具待复核",
     "TOOL_DECISION_INCOMPLETE": "工具决策信息待补充",
+    "AUTHORIZATION_EXCEPTION_DUE_REVIEW": "授权例外待复盘",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -403,6 +405,18 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
                 "缺少：" + "、".join(missing) + "；补齐后匹配结果才能真正回答「怎么验证」",
                 owner_user_id=tool.owner_user_id,
             )
+
+    # 授权例外：到期后必须复盘，否则例外会变成永久授权
+    for exception in authz_service.exceptions_due_for_review(db):
+        add(
+            "AUTHORIZATION_EXCEPTION_DUE_REVIEW",
+            "MEDIUM",
+            "authorization_exception",
+            exception.id,
+            f"授权例外待复盘：{exception.code} {exception.title}",
+            f"失效时间 {exception.expires_at:%Y-%m-%d}，需记录复盘结论后才能清除待办",
+            owner_user_id=exception.decided_by_id or exception.requested_by_id,
+        )
 
     return findings
 

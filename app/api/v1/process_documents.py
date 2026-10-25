@@ -31,7 +31,7 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.models.deliverable import DeliverableInstance, DeliverableVersion
-from app.models.enums import AssetVariationPolicy, ProcessDocumentCategory
+from app.models.enums import AssetVariationPolicy, DocumentLevel, ProcessDocumentCategory
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project
 from app.schemas.common import DeleteResult, as_columns
@@ -98,6 +98,11 @@ def list_documents(
         default=None, description="按组织范围过滤：集团通用 + 本级 + 上级继承"
     ),
     category: Optional[ProcessDocumentCategory] = None,
+    level: Optional[DocumentLevel] = None,
+    legal_entity: Optional[str] = None,
+    plant: Optional[str] = None,
+    product_family: Optional[str] = None,
+    language: Optional[str] = None,
     keyword: Optional[str] = None,
     include_ancestors: bool = Query(
         default=False, description="process_id 时是否包含上级流程继承的标准文件"
@@ -135,6 +140,16 @@ def list_documents(
             )
     if category is not None:
         stmt = stmt.where(ProcessDocument.category == category.value)
+    if level is not None:
+        stmt = stmt.where(ProcessDocument.level == level.value)
+    if legal_entity:
+        stmt = stmt.where(ProcessDocument.legal_entity == legal_entity)
+    if plant:
+        stmt = stmt.where(ProcessDocument.plant == plant)
+    if product_family:
+        stmt = stmt.where(ProcessDocument.product_family == product_family)
+    if language:
+        stmt = stmt.where(ProcessDocument.language == language)
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(

@@ -298,7 +298,7 @@ PDCA/DMAIC 工具、异常闭环、知识库、流程模型回滚。
 | # | 交付物 | 具体改动 | 验收标准 |
 |---|---|---|---|
 | P1-1 ✅ | 治理角色与 RACI | 新增 `governance_role` / `governance_role_member`（委员会/集团所有者/单元所有者/流程管家/BPM 办公室/数据所有者/风险法务）与 `raci_assignment`（事项 × 角色 × A/R/C/I）；同一事项唯一 A；治理扫描新增 `RACI_INVALID` | 每个 L3/L4 关键事项能查到唯一 A；RACI 冲突能被治理扫描发现 |
-| P1-2 | 制度层级与授权矩阵 | `process_document` 增加制度层级、适用法人/工厂/产品族/语言、控制点与例外；新增 `authorization_matrix`（事项、五维阈值、A/B/C/D、审批人、例外时限） | 制度能按层级路由审批；例外必须有时限/审批人/复盘；越权写入被拒绝 |
+| P1-2 ✅ | 制度层级与授权矩阵 | `process_document` 增加制度层级、适用法人/工厂/产品族/语言、控制点与例外；授权矩阵复用既有 A/B/C/D 规则 + 例外台账 | 制度能按层级筛选；例外必须有时限/审批人/复盘；越权写入被拒绝 |
 | P1-3 ✅ | 数据治理最小集 | 新增 `data_domain`（类型/所有者/管家）与 `data_flow`（来源系统、主键、频率、字段定义、允许值、质量规则、保留期、跨法人可见性、数据主体权利）；与流程/KPI 关联；治理扫描新增 `DATA_DOMAIN_NO_OWNER` / `DATA_FLOW_INCOMPLETE` | 每个关键数据流有责任人与质量规则；缺口能被治理扫描发现 |
 | P1-4 | 成熟度与门禁证据 | 新增 `maturity_assessment`（0–5 级、证据链接、评审人、周期）与 `gate_attestation`（门禁、退出条件、证据、签收人、结论：通过/修补/缩窄/停止）；扩展治理扫描到“L4 节点/Owner/制度/表单/工具/KPI 覆盖率” | 成熟度评分必须有证据链接；门禁未通过不能进入下一阶段；治理概览能显示跨层覆盖率 |
 | P1-5 | L5 任务目录 | 在 `ProcessArch` 支持 L5（或独立 `process_task_definition`），与 L4 活动、标准工时、岗位绑定 | 标准工时能挂到 L5；L4 汇总能下钻到 L5 |
@@ -464,6 +464,18 @@ L5 任务级标准工时、任务级等待/缺料原因码、实体级主数据�
 - 前端「组织与人员 → 治理角色」与设计器「权责」页签；
 - `tests/test_raci.py`（5 个用例，含唯一 A、成员、删除保护、扫描联动）；
 - `python scripts/check.py` → 358 passed；`scripts/verify_frontend.py` → 全绿。
+
+**P1-2 制度层级与例外复盘落地证据**（2026-10-25）：
+
+- `process_document` 增加 `level`（集团/公司/工厂/产线/流程）、`legal_entity`、`plant`、
+  `product_family`、`language`、`control_points`、`exception_terms`，迁移 `a4b5c6d7e8f9`；
+- 标准文件清单支持 `level/legal_entity/plant/product_family/language` 筛选；
+- 授权矩阵继续复用既有 A/B/C/D 规则；例外增加 `review_due_at` / `reviewed_at` /
+  `reviewed_by_user_id` / `review_note`；
+- 批准例外必须设置失效时间；到期未复盘的例外由治理扫描生成
+  `AUTHORIZATION_EXCEPTION_DUE_REVIEW`；
+- 前端标准文件新建/详情展示层级与适用范围；例外台账支持「复盘」；
+- `tests/test_document_hierarchy.py`、`tests/test_authorization.py`。
 
 **P1-3 数据治理最小集落地证据**（2026-10-24）：
 

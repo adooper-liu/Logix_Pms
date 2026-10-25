@@ -208,6 +208,13 @@ def exception_out(db: Session, row: AuthorizationException) -> AuthorizationExce
         decided_at=row.decided_at,
         decision_note=row.decision_note,
         expires_at=row.expires_at,
+        review_due_at=row.review_due_at,
+        reviewed_at=row.reviewed_at,
+        reviewed_by_user_id=row.reviewed_by_user_id,
+        reviewed_by_name=(
+            db.get(User, row.reviewed_by_user_id).display_name if row.reviewed_by_user_id else None
+        ),
+        review_note=row.review_note,
         created_at=row.created_at,
     )
 
@@ -321,6 +328,8 @@ def decide_exception(
 ) -> AuthorizationException:
     if row.status != AuthorizationExceptionStatus.REQUESTED.value:
         raise AuthorizationError("只有待审批的例外可以处理")
+    if approved and row.expires_at is None:
+        raise AuthorizationError("批准例外必须设置失效时间，否则无法触发复盘")
     if not approved and not (note or "").strip():
         raise AuthorizationError("驳回例外时必须填写原因")
     row.status = (
@@ -332,6 +341,8 @@ def decide_exception(
     row.decided_by_name = user.display_name
     row.decided_at = utcnow()
     row.decision_note = (note or "").strip() or None
+    if approved:
+        row.review_due_at = row.expires_at.date() if row.expires_at else None
     db.flush()
     return row
 
@@ -349,6 +360,39 @@ def close_exception(
         row.decision_note = note.strip()
     db.flush()
     return row
+
+
+def review_exception(
+    db: Session, row: AuthorizationException, user: User, note: str
+) -> AuthorizationException:
+    """到期后复盘：记录结论并清除复盘待办。"""
+    if row.status not in (
+        AuthorizationExceptionStatus.APPROVED.value,
+        AuthorizationExceptionStatus.CLOSED.value,
+    ):
+        raise AuthorizationError("只有已批准或已关闭的例外可以复盘")
+    if not (note or "").strip():
+        raise AuthorizationError("复盘必须填写结论")
+    row.reviewed_at = utcnow()
+    row.reviewed_by_user_id = user.id
+    row.review_note = note.strip()
+    row.review_due_at = None
+    db.flush()
+    return row
+
+
+def exceptions_due_for_review(db: Session) -> List[AuthorizationException]:
+    today = date.today()
+    return list(
+        db.scalars(
+            select(AuthorizationException).where(
+                AuthorizationException.status == AuthorizationExceptionStatus.APPROVED.value,
+                AuthorizationException.review_due_at.is_not(None),
+                AuthorizationException.review_due_at <= today,
+                AuthorizationException.reviewed_at.is_(None),
+            )
+        ).all()
+    )
 
 
 def effective_rule_count(db: Session) -> int:

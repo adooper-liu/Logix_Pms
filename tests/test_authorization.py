@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 API = "/api/v1"
 
 
@@ -127,7 +129,55 @@ def test_exception_flow(client):
     )
 
 
-def test_reject_requires_note(client):
+def test_exception_requires_expiry_and_review(client):
+    rule = _first_effective_rule(client)
+    requested = client.post(
+        f"{API}/authorization/exceptions",
+        json={"rule_id": rule["id"], "title": "无期限例外", "reason": "测试"},
+    ).json()
+    blocked = client.post(
+        f"{API}/authorization/exceptions/{requested['id']}/approve", json={"note": "同意"}
+    )
+    assert blocked.status_code == 400
+    assert "失效时间" in blocked.json()["detail"]
+
+    expired_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    to_review = client.post(
+        f"{API}/authorization/exceptions",
+        json={
+            "rule_id": rule["id"],
+            "title": "到期未复盘例外",
+            "reason": "验证复盘闭环",
+            "expires_at": expired_at,
+        },
+    )
+    assert to_review.status_code == 201, to_review.text
+    exception_id = to_review.json()["id"]
+    approved = client.post(
+        f"{API}/authorization/exceptions/{exception_id}/approve", json={"note": "同意"}
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["review_due_at"]
+
+    scan = client.post(f"{API}/baselines/audit-scan")
+    assert scan.status_code == 200
+    findings = client.get(
+        f"{API}/baselines/findings", params={"status": "OPEN", "limit": 200}
+    ).json()
+    assert any(
+        row["type"] == "AUTHORIZATION_EXCEPTION_DUE_REVIEW" and row["entity_id"] == exception_id
+        for row in findings
+    ), "到期例外没有进入治理待办"
+
+    reviewed = client.post(
+        f"{API}/authorization/exceptions/{exception_id}/review",
+        json={"note": "复盘结论：例外已失效，恢复标准审批"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["review_due_at"] is None
+    assert reviewed.json()["review_note"].startswith("复盘结论")
+    assert reviewed.json()["reviewed_by_name"] == "系统管理员"
+
     rule = _first_effective_rule(client)
     requested = client.post(
         f"{API}/authorization/exceptions",

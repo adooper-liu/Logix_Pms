@@ -12,6 +12,7 @@ from app.schemas.authorization import (
     AuthorizationExceptionCreate,
     AuthorizationExceptionOut,
     AuthorizationMetaOut,
+    AuthorizationReviewIn,
     AuthorizationRuleCreate,
     AuthorizationRuleOut,
     AuthorizationRuleUpdate,
@@ -242,6 +243,27 @@ def close_exception(
         _raise(exc)
     audit_service.record(
         db, user, "UPDATE", "authorization_exception", row.id, f"关闭例外 {row.code}"
+    )
+    db.commit()
+    db.refresh(row)
+    return authz_service.exception_out(db, row)
+
+
+@router.post(
+    "/exceptions/{exception_id}/review",
+    response_model=AuthorizationExceptionOut,
+    summary="复盘到期例外（MANAGER+）",
+)
+def review_exception(
+    exception_id: int, payload: AuthorizationReviewIn, db: DbSession, user: ManagerUser
+):
+    try:
+        row = authz_service.require_exception(db, exception_id)
+        authz_service.review_exception(db, row, user, payload.note)
+    except authz_service.AuthorizationError as exc:
+        _raise(exc)
+    audit_service.record(
+        db, user, "UPDATE", "authorization_exception", row.id, f"复盘例外 {row.code}"
     )
     db.commit()
     db.refresh(row)
