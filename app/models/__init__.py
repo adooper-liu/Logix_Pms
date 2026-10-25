@@ -89,6 +89,8 @@ from app.models.integration import (
 )
 from app.models.knowledge import (
     KnowledgeItem,
+    KnowledgeRecommendLog,
+    KnowledgeReview,
     KnowledgeScenario,
     KnowledgeScenarioLink,
     KnowledgeTag,
@@ -106,7 +108,7 @@ from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.startup import StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
-from app.models.tool import Tool, ToolScenarioLink
+from app.models.tool import Tool, ToolScenarioLink, ToolUsage
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.models.workload import (
@@ -130,6 +132,7 @@ __all__ = [
     "Sketch",
     "Tool",
     "ToolScenarioLink",
+    "ToolUsage",
     "ToolTemplate",
     "ToolTemplateVersion",
     "TemplateUsage",
@@ -146,6 +149,8 @@ __all__ = [
     "KnowledgeScenarioLink",
     "KnowledgeWorkflowLink",
     "KnowledgeUsage",
+    "KnowledgeReview",
+    "KnowledgeRecommendLog",
     "User",
     "AuditLog",
     "BenchmarkFramework",

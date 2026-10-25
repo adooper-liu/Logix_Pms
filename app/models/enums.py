@@ -226,6 +226,16 @@ class ToolDifficulty(str, Enum):
     HIGH = "HIGH"
 
 
+class ToolStatus(str, Enum):
+    """工具条目的维护状态；只有 PUBLISHED / VERIFIED 对外可用。"""
+
+    DRAFT = "DRAFT"
+    IN_REVIEW = "IN_REVIEW"
+    PUBLISHED = "PUBLISHED"
+    VERIFIED = "VERIFIED"
+    ARCHIVED = "ARCHIVED"
+
+
 class WorkMeasurementSource(str, Enum):
     """标准工时的取得方法；不同方法证据强度不同。"""
 

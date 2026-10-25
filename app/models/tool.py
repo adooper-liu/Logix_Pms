@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -20,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.timeutil import utcnow
 
 
 class Tool(Base):
@@ -57,6 +59,16 @@ class Tool(Base):
         index=True,
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    status: Mapped[str] = mapped_column(
+        String(16), default="PUBLISHED", server_default="PUBLISHED", index=True
+    )  # DRAFT / IN_REVIEW / PUBLISHED / VERIFIED / ARCHIVED
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL", name="fk_tool_reviewed_by_user"),
+        nullable=True,
+        index=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     review_due_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(
@@ -73,6 +85,15 @@ class Tool(Base):
     )
     owner_user: Mapped[Optional["User"]] = relationship(  # noqa: F821
         "User", foreign_keys=[owner_user_id]
+    )
+    reviewed_by: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[reviewed_by_user_id]
+    )
+    usage_rows: Mapped[List["ToolUsage"]] = relationship(
+        "ToolUsage",
+        back_populates="tool",
+        cascade="all, delete-orphan",
+        order_by="ToolUsage.id",
     )
 
     @property
@@ -101,6 +122,16 @@ class Tool(Base):
         return self.owner_user.display_name if self.owner_user else None
 
     @property
+    def status_label(self) -> str:
+        return {
+            "DRAFT": "草稿",
+            "IN_REVIEW": "待审核",
+            "PUBLISHED": "已发布",
+            "VERIFIED": "已验证",
+            "ARCHIVED": "已归档",
+        }.get(self.status, self.status)
+
+    @property
     def review_overdue(self) -> bool:
         """启用中的工具过了复核日期；停用工具不再提醒。"""
         return bool(
@@ -126,3 +157,36 @@ class ToolScenarioLink(Base):
     )
 
     __table_args__ = (UniqueConstraint("tool_id", "scenario_id", name="uq_tool_scenario_link"),)
+
+
+class ToolUsage(Base):
+    """工具的现场使用证据。
+
+    与知识条目的 `knowledge_usage` 分开：知识证据回答「这条参考有没有用」，
+    工具证据回答「这个工具在某个步骤有没有用」；工具详情把两者聚合展示。
+    """
+
+    __tablename__ = "tool_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tool_code: Mapped[str] = mapped_column(ForeignKey("tool.code", ondelete="CASCADE"), index=True)
+    project_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    step_no: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    used_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    used_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    outcome: Mapped[str] = mapped_column(
+        String(16), default="EFFECTIVE", server_default="EFFECTIVE", index=True
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    tool: Mapped["Tool"] = relationship("Tool", back_populates="usage_rows")
+    used_by: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[used_by_user_id]
+    )
+
+    __table_args__ = (Index("ix_tool_usage_code_time", "tool_code", "used_at"),)

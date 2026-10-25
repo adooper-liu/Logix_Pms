@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,6 +84,9 @@ class KnowledgeItem(Base):
 
     author: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 全文检索用投影：title/summary/content/claim/适用条件拼接，写时同步。
+    # PostgreSQL 上用 pg_trgm GIN 索引加速 ILIKE；SQLite 退化为普通索引/LIKE。
+    search_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow, nullable=True
@@ -108,6 +113,12 @@ class KnowledgeItem(Base):
         "KnowledgeUsage",
         back_populates="item",
         cascade="all, delete-orphan",
+    )
+    review_rows: Mapped[List["KnowledgeReview"]] = relationship(
+        "KnowledgeReview",
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="KnowledgeReview.id",
     )
 
     owner_user: Mapped[Optional["User"]] = relationship(  # noqa: F821
@@ -141,6 +152,15 @@ class KnowledgeItem(Base):
     @property
     def step_nos(self) -> List[str]:
         return sorted({row.step_no for row in self.workflow_links if row.step_no})
+
+    __table_args__ = (
+        Index(
+            "ix_knowledge_item_search_text_trgm",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+    )
 
 
 class KnowledgeTag(Base):
@@ -252,3 +272,67 @@ class KnowledgeUsage(Base):
     )
 
     __table_args__ = (Index("ix_knowledge_usage_item_time", "knowledge_id", "used_at"),)
+
+
+class KnowledgeReview(Base):
+    """求真审核记录：保留每次通过/驳回的裁决与说明。"""
+
+    __tablename__ = "knowledge_review"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    knowledge_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_item.id", ondelete="CASCADE"), index=True
+    )
+    reviewer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    decision: Mapped[str] = mapped_column(String(16))  # APPROVE / REJECT
+    from_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    item: Mapped["KnowledgeItem"] = relationship("KnowledgeItem", back_populates="review_rows")
+    reviewer: Mapped[Optional["User"]] = relationship(  # noqa: F821
+        "User", foreign_keys=[reviewer_user_id]
+    )
+
+
+class KnowledgeRecommendLog(Base):
+    """推荐解释留痕：谁在什么上下文问了什么，系统返回了哪些条目。"""
+
+    __tablename__ = "knowledge_recommend_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    problem: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scenario_codes: Mapped[Any] = mapped_column(JSON, default=list)
+    stage_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    step_no: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    result_ids: Mapped[Any] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    user: Mapped[Optional["User"]] = relationship("User", foreign_keys=[user_id])  # noqa: F821
+
+
+def _sync_search_text(_mapper, _connection, target: KnowledgeItem) -> None:
+    """写时同步全文检索投影，避免每个写入点各自拼一遍。"""
+    target.search_text = " ".join(
+        filter(
+            None,
+            [
+                target.title,
+                target.summary,
+                target.content,
+                target.claim,
+                target.applicable_when,
+                target.not_applicable_when,
+            ],
+        )
+    )
+
+
+event.listen(KnowledgeItem, "before_insert", _sync_search_text)
+event.listen(KnowledgeItem, "before_update", _sync_search_text)

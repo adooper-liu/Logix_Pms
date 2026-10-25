@@ -28,7 +28,7 @@ from app.models.deliverable import (
     DeliverableVersion,
     StepContract,
 )
-from app.models.enums import KnowledgeStatus, Role, TaskStatus
+from app.models.enums import KnowledgeStatus, Role, TaskStatus, ToolStatus
 from app.models.execution import (
     FormDefinition,
     IdempotencyRecord,
@@ -236,6 +236,7 @@ def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
             verification_standard=extra.get("verification_standard"),
             owner_user_id=_owner_user_id(extra.get("owner"), user_ids),
             version=1,
+            status=ToolStatus.VERIFIED.value if extra else ToolStatus.PUBLISHED.value,
             last_verified_at=verified_at if extra else None,
             review_due_at=(verified_at.date() + timedelta(days=365)) if extra else None,
             is_active=True,
