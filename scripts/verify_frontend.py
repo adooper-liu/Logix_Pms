@@ -601,6 +601,15 @@ def main() -> int:
             view = page.inner_text("#view")
             assert "我遇到了什么问题" in view, "工具箱首屏没有问题入口"
             assert "快捷痛点" in view and "全部工具" in view, "工具箱缺少快捷痛点或全部工具区"
+            assert "新建工具" in view, "管理员工具箱缺少新建工具入口"
+
+            page.click('#view button[data-act="toolbox.newTool"]')
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(500)
+            modal = page.inner_text("#mBody")
+            assert "工具编码" in modal and "适用场景" in modal, "新建工具表单缺少字段"
+            close_modal()
+            page.wait_for_timeout(400)
 
             page.click("#view .tb-qchip >> nth=0")
             page.wait_for_timeout(1600)
@@ -616,6 +625,7 @@ def main() -> int:
             assert "常见误用" in body, "工具详情缺少常见误用"
             assert "验证标准" in body and "不适用" in body, "工具详情缺少决策字段"
             assert "相关案例" in body, "工具详情缺少关联知识区"
+            assert "已发布" in body or "已验证" in body, "工具详情缺少维护状态"
             close_modal()
             page.wait_for_timeout(600)
 
@@ -1787,6 +1797,23 @@ def main() -> int:
             assert "标准制度：已独立为制度中心" in view, "知识库没有制度中心说明"
             assert "归档候选" in view, "管理员知识库缺少归档候选区"
             assert "使用效果" in view, "管理员知识库缺少使用效果统计"
+            assert "场景管理" in view and "推荐日志" in view, "管理员知识库缺少运营入口"
+
+            page.click('#view button[data-act="knowledge.manageScenarios"]')
+            page.wait_for_selector("#mask.show", timeout=5000)
+            page.wait_for_timeout(1200)
+            scenario_body = page.inner_text("#mask")
+            assert "场景字典管理" in scenario_body, f"场景管理弹窗未渲染：{scenario_body[:200]!r}"
+            close_modal()
+            page.wait_for_timeout(400)
+
+            page.click('#view button[data-act="knowledge.showRecommendLogs"]')
+            page.wait_for_selector("#mask.show", timeout=5000)
+            page.wait_for_timeout(1000)
+            log_body = page.inner_text("#mask")
+            assert "推荐解释日志" in log_body, f"推荐日志弹窗未渲染：{log_body[:200]!r}"
+            close_modal()
+            page.wait_for_timeout(400)
 
             # 场景 → 推荐：点「责任不清」应出现按证据排序的推荐
             page.click('#view button[data-act="knowledge.scenario"][data-code="RACI"]')
