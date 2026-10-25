@@ -14,6 +14,7 @@ from app.api.v1 import (
     benchmark,
     changes,
     collaboration,
+    compensation,
     dashboard,
     data_governance,
     deliverables,
@@ -72,6 +73,7 @@ protected.include_router(tools.router)
 protected.include_router(tool_templates.router)
 protected.include_router(designer.router)
 protected.include_router(collaboration.router)
+protected.include_router(compensation.router)
 protected.include_router(changes.router)
 protected.include_router(monitor.router)
 protected.include_router(notifications.router)

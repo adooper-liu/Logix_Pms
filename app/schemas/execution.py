@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime
 from app.models.enums import Role
+from app.schemas.compensation import CompensationRecordOut
 
 
 class ExecutableProcessOut(BaseModel):
@@ -161,6 +162,7 @@ class InstanceOut(BaseModel):
     suspended_at: Optional[UtcDateTime] = None
     suspend_reason: Optional[str] = None
     completed_at: Optional[UtcDateTime] = None
+    archived_at: Optional[UtcDateTime] = None
     task_count: int = 0
     open_task_count: int = 0
 
@@ -172,6 +174,7 @@ class InstanceSuspendRequest(BaseModel):
 class InstanceDetail(BaseModel):
     instance: InstanceOut
     tasks: List[TaskOut] = []
+    compensations: List[CompensationRecordOut] = []
     variables: Optional[Dict] = None
 
 

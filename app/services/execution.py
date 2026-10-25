@@ -45,6 +45,7 @@ from app.schemas.execution import (
     WorklogCreate,
     WorklogOut,
 )
+from app.services import compensation as compensation_service
 from app.services import forms as forms_service
 from app.services import org_scope
 
@@ -840,6 +841,7 @@ def cancel_instance(
                 actor,
                 {"reason": "instance_cancelled"},
             )
+    compensation_service.create_records_on_cancel(db, instance)
     db.flush()
     return instance
 
@@ -1078,15 +1080,20 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
         suspended_at=instance.suspended_at,
         suspend_reason=instance.suspend_reason,
         completed_at=instance.completed_at,
+        archived_at=instance.archived_at,
         task_count=len(tasks),
         open_task_count=sum(1 for t in tasks if t.status in OPEN_STATUSES),
     )
 
 
-def instance_detail(instance: ProcessInstance) -> InstanceDetail:
+def instance_detail(db: Session, instance: ProcessInstance) -> InstanceDetail:
     return InstanceDetail(
         instance=instance_out(instance),
         tasks=[task_out(t) for t in instance.tasks],
+        compensations=[
+            compensation_service.record_out(row)
+            for row in compensation_service.records_for_instance(db, instance.id)
+        ],
         variables=instance.variables,
     )
 
@@ -1122,12 +1129,15 @@ def list_instances(
     status: Optional[str] = None,
     process_id: Optional[int] = None,
     limit: int = 100,
+    include_archived: bool = False,
 ) -> List[InstanceOut]:
     stmt = select(ProcessInstance)
     if status:
         stmt = stmt.where(ProcessInstance.status == status)
     if process_id is not None:
         stmt = stmt.where(ProcessInstance.process_id == process_id)
+    if not include_archived:
+        stmt = stmt.where(ProcessInstance.archived_at.is_(None))
     rows = db.scalars(
         stmt.order_by(ProcessInstance.started_at.desc(), ProcessInstance.id.desc()).limit(limit)
     ).all()

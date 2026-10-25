@@ -555,6 +555,36 @@ def rollback_model(
     return _load_model(db, process_id)
 
 
+@router.post(
+    "/processes/{process_id}/design/versions/{version_id}/publish-rollback",
+    response_model=ProcessModelOut,
+    summary="回滚到历史版本并立即发布（Manager）",
+)
+def publish_rollback(
+    process_id: int,
+    version_id: int,
+    payload: RollbackModelRequest,
+    db: DbSession,
+    user: ManagerUser,
+):
+    process = _require_process(db, process_id)
+    source = _require_version(db, process_id, version_id)
+    row = model_service.rollback(
+        db, process, source, user, payload.note or f"回滚并发布自 v{source.version}"
+    )
+    model_service.publish(db, process, user, row.id, note=row.change_note)
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_design",
+        process_id,
+        f"回滚并发布流程模型 {process.code}：v{source.version} → v{row.version}",
+    )
+    db.commit()
+    return _load_model(db, process_id)
+
+
 @router.get(
     "/processes/{process_id}/design/diff",
     response_model=ProcessModelDiffOut,

@@ -13,6 +13,7 @@ from app.models.benchmark import (
 )
 from app.models.change import ProcessChangeRequest
 from app.models.collaboration import ProcessComment
+from app.models.compensation import CompensationAction, CompensationRecord
 from app.models.data_governance import DataDomain, DataFlow
 from app.models.deliverable import (
     DeliverableDefinition,
@@ -198,6 +199,8 @@ __all__ = [
     "ObjectiveProcessLink",
     "ProcessChangeRequest",
     "ProcessComment",
+    "CompensationAction",
+    "CompensationRecord",
     "GovernanceRole",
     "GovernanceRoleMember",
     "RaciAssignment",

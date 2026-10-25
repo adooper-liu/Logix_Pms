@@ -171,6 +171,9 @@ export function createVersions(ctx) {
             ? `<button class="btn-sm" data-act="designer.diffVersion" data-id="${v.id}">对比当前</button>` : ''}
           ${v.version !== current.version
             ? `<button class="btn-sm" data-act="designer.rollbackVersion" data-id="${v.id}">回滚到此版</button>` : ''}
+          ${['PUBLISHED', 'SUPERSEDED'].includes(v.status) && v.id !== current.version_id
+            ? `<button class="btn-sm" data-act="designer.publishRollback"
+                data-id="${v.id}">回滚并发布</button>` : ''}
         </td>
       </tr>`).join('') || emptyRow(6, '还没有模型版本');
     openModal('模型版本历史', `
@@ -180,6 +183,25 @@ export function createVersions(ctx) {
         <tbody>${body}</tbody>
       </table>`,
       '<button class="btn btn-g" data-act="designer.close">关闭</button>');
+  }
+
+  async function publishRollback(versionId) {
+    const ok = await confirmDialog(
+      '会以历史版本生成一个新的已发布版本；运行中的实例不受影响。确定回滚并发布？',
+      { title: '回滚并发布', okText: '回滚并发布' },
+    );
+    if (!ok) return;
+    try {
+      await POST(
+        `/processes/${state.designer.processId}/design/versions/${versionId}/publish-rollback`,
+        { note: null },
+      );
+      toast('已回滚并发布');
+      closeModal();
+      await ctx.reload();
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   async function diffVersion(versionId) {
@@ -236,5 +258,6 @@ export function createVersions(ctx) {
     openVersionHistory,
     diffVersion,
     rollbackVersion,
+    publishRollback,
   };
 }

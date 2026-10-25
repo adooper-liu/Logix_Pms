@@ -43,6 +43,8 @@ on('execution.submitWorklog', ({ id }) => submitWorklog(Number(id)));
 on('execution.suspend', ({ id }) => suspendInstance(Number(id)));
 on('execution.resume', ({ id }) => resumeInstance(Number(id)));
 on('execution.cancel', ({ id }) => cancelInstance(Number(id)));
+on('execution.completeCompensation', ({ id }) => completeCompensation(Number(id)));
+on('execution.archiveInstances', () => archiveInstances());
 on('execution.goProjects', () => go('projects'));
 
 let manualBranchTask = null;
@@ -221,6 +223,8 @@ const renderExecution = () => {
         <div class="between mb">
           <div><h3 style="margin:0">流程实例</h3>
             <div class="desc" style="margin:2px 0 0">共 ${d.instances.length} 个实例；点击查看任务时间线</div></div>
+          ${canManage() ? `<button class="btn-sm" data-act="execution.archiveInstances">
+            归档旧实例</button>` : ''}
         </div>
         <table class="tbl">
           <thead><tr><th>实例</th><th>状态</th><th>当前节点</th><th>待办</th>
@@ -1367,6 +1371,18 @@ async function openInstance(instanceId) {
       <td class="tiny">${t.completed_at ? dtShort(t.completed_at) : '—'}
         ${t.comment ? '<div>' + esc(t.comment) + '</div>' : ''}</td>
     </tr>`).join('') || emptyRow(4, '还没有任务');
+  const compensations = detail.compensations || [];
+  const compensationRows = compensations.map((row) => `
+    <tr>
+      <td><b>${esc(row.action_name)}</b><div class="tiny">${esc(row.node_key)}</div></td>
+      <td><span class="tag ${row.status === 'DONE' ? 't-grn' : 't-yel'}">${esc(row.status_label)}</span></td>
+      <td class="tiny">${esc(row.description || '—')}</td>
+      <td>${esc(row.completed_by || '—')}<div class="tiny">${
+        row.completed_at ? dtShort(row.completed_at) : '待处理'}</div></td>
+      <td>${canManage() && row.status === 'PENDING'
+        ? `<button class="btn-sm" data-act="execution.completeCompensation"
+            data-id="${row.id}">标记完成</button>` : '—'}</td>
+    </tr>`).join('') || emptyRow(5, '没有补偿待办');
 
   openModal(i.code + ' · ' + i.process_name, `
     ${i.suspended_at
@@ -1387,6 +1403,11 @@ async function openInstance(instanceId) {
     <table class="tbl">
       <thead><tr><th>节点</th><th>状态</th><th>处理人</th><th>完成时间 / 备注</th></tr></thead>
       <tbody>${rows}</tbody>
+    </table>
+    <h3 class="mt">取消补偿（${compensations.length}）</h3>
+    <table class="tbl">
+      <thead><tr><th>动作</th><th>状态</th><th>说明</th><th>完成人</th><th></th></tr></thead>
+      <tbody>${compensationRows}</tbody>
     </table>`,
     `${canManage() && i.status === 'RUNNING'
       ? '<button class="btn btn-g" style="margin-right:auto"'
@@ -1400,8 +1421,36 @@ async function openInstance(instanceId) {
      <button class="btn btn-g" data-act="execution.close">关闭</button>`);
 }
 
-async function suspendInstance(instanceId) {
-  const reason = await promptDialog('挂起原因（可选；取消则不挂起）', {
+async function completeCompensation(recordId) {
+  try {
+    await POST(`/execution/compensations/${recordId}/complete`, { note: null });
+    toast('补偿已标记完成');
+    closeModal();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function archiveInstances() {
+  const days = await promptDialog('归档多少天前完成/取消的实例？（默认 365）', {
+    title: '归档旧实例',
+    okText: '归档',
+    value: '365',
+  });
+  if (days === null) return;
+  try {
+    const result = await POST(
+      '/execution/instances/archive?older_than_days=' + (Number(days) || 365),
+      {},
+    );
+    toast(`已归档 ${result.archived} 个实例`);
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function suspendInstance(instanceId) {  const reason = await promptDialog('挂起原因（可选；取消则不挂起）', {
     title: '挂起流程实例', okText: '挂起', placeholder: '如：等待客户确认',
   });
   if (reason === null) return;

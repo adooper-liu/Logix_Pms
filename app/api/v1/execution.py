@@ -529,12 +529,14 @@ def list_instances(
     db: DbSession,
     status_: Optional[InstanceStatus] = Query(default=None, alias="status"),
     process_id: Optional[int] = None,
+    include_archived: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
 ):
     return execution_service.list_instances(
         db,
         status=status_.value if status_ else None,
         process_id=process_id,
+        include_archived=include_archived,
         limit=limit,
     )
 
@@ -580,7 +582,7 @@ def start_instance(
 )
 def get_instance(instance_id: int, db: DbSession):
     instance = execution_service.get_instance(db, instance_id)
-    return execution_service.instance_detail(instance)
+    return execution_service.instance_detail(db, instance)
 
 
 @router.post(
