@@ -187,6 +187,12 @@ def main() -> int:
                 pass
             page.wait_for_timeout(600)
 
+        def goto_workflow_tab(label: str) -> None:
+            """workflow 默认落在项目工作台，方法手册相关检查要先切页签。"""
+            goto("workflow")
+            page.click(f'#view .wb-tabs button:has-text("{label}")')
+            page.wait_for_timeout(600)
+
         def pick_editable_design() -> None:
             """选一条可编辑、节点足够且含 n3 的流程，避免本地数据进入评审后自检失效。"""
             picked = None
@@ -463,9 +469,33 @@ def main() -> int:
             assert "指标 ID" in body and "公式" in body, body[:160]
             close_modal()
 
+        # 项目工作台：阶段骨架、步骤闭环与退出门槛
+        def workflow_workbench() -> None:
+            goto("workflow")
+            view = page.inner_text("#view")
+            assert "项目工作台" in view, "工作台不是默认页签"
+            nodes = page.eval_on_selector_all("#view .wb-stage-node", "els => els.length")
+            assert nodes == 5, f"阶段骨架应为 5 个节点：{nodes}"
+            assert "阶段退出门槛" in view, "工作台缺少退出门槛"
+            assert page.locator("#view .wb-step").count() >= 1, "当前阶段没有步骤卡"
+
+            advance = page.locator("#view .wb-advance")
+            assert advance.count() == 1, "工作台缺少推进按钮"
+            if advance.first.is_disabled():
+                assert "当前不能推进" in view or "仍有未关闭条件" in view, (
+                    "推进被阻断时没有给出原因"
+                )
+
+            page.click('#view .wb-step button:has-text("更新状态 / 证据") >> nth=0')
+            page.wait_for_selector("#mask.show")
+            body = page.inner_text("#mBody")
+            for marker in ("状态", "验收证据", "处理要点", "下一步"):
+                assert marker in body, f"步骤闭环弹窗缺少「{marker}」"
+            close_modal()
+
         # 标准工作流：步骤详情
         def workflow_step_modal() -> None:
-            goto("workflow")
+            goto_workflow_tab("五阶段步骤")
             assert "推荐知识" in page.inner_text("#view"), "步骤清单没有显示推荐知识数"
             page.click("#view .step >> nth=0")
             page.wait_for_selector("#mask.show")
@@ -481,7 +511,7 @@ def main() -> int:
 
         # 步骤页推荐工具与模板：阶段 2 的 2.1 应有 SIPOC（必用）
         def workflow_step_recommendations() -> None:
-            goto("workflow")
+            goto_workflow_tab("五阶段步骤")
             page.click('#view .stage-pill:has-text("阶段2")')
             page.wait_for_timeout(500)
             page.click('#view .wf-step:has-text("现状流程绘制")')
@@ -495,12 +525,12 @@ def main() -> int:
 
         # 步骤页 → 工具箱：只展示本步骤推荐工具，并标注使用要求
         def step_to_filtered_toolbox() -> None:
-            goto("workflow")
+            goto_workflow_tab("五阶段步骤")
             page.click('#view .stage-pill:has-text("阶段2")')
             page.wait_for_timeout(500)
             page.click('#view .wf-step:has-text("现状流程绘制")')
             page.wait_for_selector("#wfRec table", timeout=8000)
-            page.click('#mFoot button:has-text("只看本步骤")')
+            page.click('#mFoot button:has-text("去工具箱看推荐工具")')
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "方法论工具箱"
             text = page.inner_text("#view")
@@ -534,7 +564,7 @@ def main() -> int:
 
         # 方法论匹配引擎（真实调用后端）
         def workflow_recommend() -> None:
-            goto("workflow")
+            goto_workflow_tab("方法论匹配")
             page.click('#view .seg button:has-text("方法论匹配")')
             page.wait_for_timeout(500)
             page.select_option("#rcState", "SEVERE_OUTDATED")
@@ -1901,7 +1931,7 @@ def main() -> int:
 
         # 工作流步骤 → 知识库：保留 step 上下文并可直接记录使用证据
         def knowledge_step_context() -> None:
-            goto("workflow")
+            goto_workflow_tab("五阶段步骤")
             page.click("#view .step >> nth=0")
             page.wait_for_selector("#wfRec h3", timeout=8000)
             link = page.locator('#wfRec .kb-step-item button:has-text("在知识库查看")')
@@ -2653,6 +2683,7 @@ def main() -> int:
         check("十层单页与第4层工作区", pilot_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
+        check("工作流项目工作台", workflow_workbench)
         check("工作流步骤详情", workflow_step_modal)
         check("步骤推荐工具与模板", workflow_step_recommendations)
         check("步骤页过滤工具箱", step_to_filtered_toolbox)
