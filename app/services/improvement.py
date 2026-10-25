@@ -8,12 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.enums import (
+    ExceptionSeverity,
+    ExceptionStatus,
     ImprovementSource,
     Methodology,
     ProjectStatus,
     ReplicationStatus,
 )
-from app.models.monitor import KpiDefinition
+from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch
 from app.models.project import Project
 from app.models.user import User
@@ -25,6 +27,7 @@ from app.services.workflow import seed_project_steps
 SOURCE_LABELS = {
     ImprovementSource.MANUAL.value: "手工立项",
     ImprovementSource.KPI_THRESHOLD.value: "KPI 越线",
+    ImprovementSource.EXCEPTION.value: "流程异常",
     ImprovementSource.AUDIT_FINDING.value: "审计发现",
     ImprovementSource.CUSTOMER_COMPLAINT.value: "客户投诉",
     ImprovementSource.EMPLOYEE_SUGGESTION.value: "员工建议",
@@ -40,6 +43,21 @@ REPLICATION_LABELS = {
 }
 
 KPI_STATUS_LABELS = {"RED": "红", "YELLOW": "黄", "GREEN": "绿"}
+
+EXCEPTION_SEVERITY_LABELS = {
+    ExceptionSeverity.CRITICAL.value: "紧急",
+    ExceptionSeverity.HIGH.value: "高",
+    ExceptionSeverity.MEDIUM.value: "中",
+    ExceptionSeverity.LOW.value: "低",
+}
+
+# 严重度 → 项目优先级：紧急/高先做，低优先级放后
+EXCEPTION_PRIORITY = {
+    ExceptionSeverity.CRITICAL.value: 1,
+    ExceptionSeverity.HIGH.value: 1,
+    ExceptionSeverity.MEDIUM.value: 2,
+    ExceptionSeverity.LOW.value: 3,
+}
 
 PROJECT_STATUS_LABELS = {
     ProjectStatus.PLANNING.value: "立项中",
@@ -203,4 +221,51 @@ def draft_from_kpi(db: Session, kpi: KpiDefinition, user: User) -> Project:
     seed_project_steps(db, project)
     db.flush()
     deliverable_service.sync_project_instances(db, project)
+    return project
+
+
+def draft_from_exception(db: Session, exception: ExceptionEvent, user: User) -> Project:
+    """把未闭环异常转成一张改善项目草稿；同一条异常只允许一张进行中的项目。"""
+    if exception.status not in (
+        ExceptionStatus.OPEN.value,
+        ExceptionStatus.IN_PROGRESS.value,
+    ):
+        raise ImprovementError("该异常已解决或已闭环，不需要再转改善项目")
+
+    existing = db.get(Project, exception.project_id) if exception.project_id else None
+    if existing is not None and existing.status in ACTIVE_PROJECT_STATUSES:
+        raise ImprovementError(f"该异常已有进行中的改善项目 {existing.code}")
+
+    severity_label = EXCEPTION_SEVERITY_LABELS.get(exception.severity, exception.severity)
+    project = Project(
+        code=next_project_code(db),
+        name=f"改善：{exception.title}",
+        methodology=Methodology.BPI.value,
+        status=ProjectStatus.PLANNING.value,
+        current_stage=1,
+        priority=EXCEPTION_PRIORITY.get(exception.severity, 3),
+        process_id=exception.process_id,
+        owner=exception.owner or user.display_name,
+        owner_user_id=exception.owner_user_id or user.id,
+        objective=f"闭环异常 {exception.code}：{exception.title}",
+        scope=(
+            f"异常事件 {exception.code}（{severity_label}，"
+            f"发现于 {exception.detected_at:%Y-%m-%d}）"
+        ),
+        source=ImprovementSource.EXCEPTION.value,
+        problem_statement=exception.description or exception.title,
+        root_cause=exception.root_cause,
+        countermeasure=exception.action_taken,
+    )
+    db.add(project)
+    db.flush()
+    seed_project_steps(db, project)
+    db.flush()
+    deliverable_service.sync_project_instances(db, project)
+
+    # 关联指针只保留在异常侧，避免项目和异常各存一份关系
+    exception.project_id = project.id
+    if exception.status == ExceptionStatus.OPEN.value:
+        exception.status = ExceptionStatus.IN_PROGRESS.value
+    db.flush()
     return project

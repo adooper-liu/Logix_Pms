@@ -7,7 +7,6 @@ import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
-import { actions as appActions } from '../core/actions.js';
 
 /* ============================================================ 7. 运营监控与KPI */
 
@@ -36,6 +35,11 @@ on('monitor.saveException', ({ id }) => saveException(Number(id)));
 on('monitor.submitException', () => submitException());
 on('monitor.submitKpi', ({ kpi }) => submitKpi(kpi ? Number(kpi) : null));
 on('monitor.improveKpi', ({ id }) => createImprovement(Number(id)));
+on('monitor.improveException', ({ id }) => createExceptionImprovement(Number(id)));
+on('monitor.openProject', ({ id }) => {
+  closeModal();
+  go('projects', { params: { project: Number(id) }, push: true });
+});
 on('monitor.addRecord', ({ kpi, name }) => addKpiRecordModal(Number(kpi), name));
 on('monitor.submitRecord', ({ kpi }) => submitKpiRecord(Number(kpi)));
 on('monitor.goExecution', () => go('execution'));
@@ -147,6 +151,9 @@ const renderMonitor = () => {
       const excRows = d.exceptions.map((e) => {
         const canEdit = canManage()
           || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
+        const canImprove = canEdit
+          && !e.project_id
+          && (e.status === 'OPEN' || e.status === 'IN_PROGRESS');
         return `
         <tr>
           <td class="tiny">${dtShort(e.detected_at)}</td>
@@ -154,9 +161,15 @@ const renderMonitor = () => {
             e.is_overdue ? ' · <span style="color:var(--bad)">已超期</span>' : ''}</div></td>
           <td><span class="tag ${SEV_COLOR[e.severity]}">${SEV_LABEL[e.severity]}</span></td>
           <td>${e.owner ? esc(e.owner) : '<span class="muted">未指派</span>'}</td>
-          <td><span class="tag ${EXC_COLOR[e.status]}">${EXC_LABEL[e.status]}</span></td>
-          <td><button class="btn-sm" data-act="monitor.openException"
-            data-id="${e.id}">${canEdit ? '处理' : '查看'}</button></td>
+          <td><span class="tag ${EXC_COLOR[e.status]}">${EXC_LABEL[e.status]}</span>
+            ${e.project_id ? '<span class="tag t-blu">已转改善</span>' : ''}</td>
+          <td><div class="gap">
+            ${canImprove
+              ? `<button class="btn-sm btn-p" data-act="monitor.improveException"
+                  data-id="${e.id}">转改善</button>` : ''}
+            <button class="btn-sm" data-act="monitor.openException"
+              data-id="${e.id}">${canEdit ? '处理' : '查看'}</button>
+          </div></td>
         </tr>`;
       }).join('') || emptyRow(6, '没有符合条件的异常事件');
 
@@ -679,6 +692,9 @@ async function openException(id) {
     state.currentException = e;
     const canEdit = canManage()
       || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
+    const canImprove = canEdit
+      && !e.project_id
+      && (e.status === 'OPEN' || e.status === 'IN_PROGRESS');
     const manager = canManage();
     const statusOpts = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((v) =>
       '<option value="' + v + '"' + (e.status === v ? ' selected' : '') + '>' + EXC_LABEL[v] + '</option>').join('');
@@ -705,8 +721,14 @@ async function openException(id) {
         <textarea id="exAction" placeholder="做了什么、效果如何"${canEdit ? '' : ' readonly'}>${esc(e.action_taken || '')}</textarea></div>
       ${e.resolved_at ? '<div class="note">解决时间：' + esc(dtShort(e.resolved_at)) +
         (e.closed_at ? ' · 关闭时间：' + esc(dtShort(e.closed_at)) : '') + '</div>' : ''}
-      ${canEdit ? '' : '<div class="note">只读：仅流程管理科、系统管理员或该异常的责任人可以处理。</div>'}`,
-      `<button class="btn btn-g" data-act="monitor.close">${canEdit ? '取消' : '关闭'}</button>
+      ${canEdit ? '' : '<div class="note">只读：仅流程管理科、系统管理员或该异常的责任人可以处理。</div>'}
+      ${e.project_id ? '<div class="note">已关联改善项目。</div>' : ''}`,
+      `${e.project_id
+        ? `<button class="btn btn-g" data-act="monitor.openProject"
+            data-id="${e.project_id}">查看改善项目</button>` : ''}
+       <button class="btn btn-g" data-act="monitor.close">${canEdit ? '取消' : '关闭'}</button>
+       ${canImprove ? `<button class="btn btn-g" data-act="monitor.improveException"
+         data-id="${e.id}">转改善</button>` : ''}
        ${canEdit ? `<button class="btn btn-p" data-act="monitor.saveException" data-id="${e.id}">保存</button>` : ''}`);
   } catch (err) {
     if (modalAlive(gen)) openModal('加载失败', '<div class="errbar"><div>' + esc(err.message) + '</div></div>');
@@ -1057,7 +1079,18 @@ async function createImprovement(kpiId) {
   try {
     const draft = await POST('/monitor/kpis/' + kpiId + '/improvement-draft');
     toast('已生成改善项目 ' + draft.code);
-    appActions['projects.open'](draft.id);
+    go('projects', { params: { project: draft.id }, push: true });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function createExceptionImprovement(exceptionId) {
+  try {
+    const draft = await POST('/monitor/exceptions/' + exceptionId + '/improvement-draft');
+    toast('已生成改善项目 ' + draft.code);
+    closeModal();
+    go('projects', { params: { project: draft.id }, push: true });
   } catch (e) {
     toast(e.message, true);
   }

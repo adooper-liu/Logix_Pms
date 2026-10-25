@@ -147,8 +147,81 @@ def test_kpi_without_data_or_target_is_rejected(client):
 def test_meta_labels_and_permissions(client, viewer_client):
     meta = client.get(f"{API}/projects/meta").json()
     assert meta["source_labels"]["KPI_THRESHOLD"] == "KPI 越线"
+    assert meta["source_labels"]["EXCEPTION"] == "流程异常"
     assert meta["replication_status_labels"]["PILOT"] == "试点中"
 
     kpi = _kpi(client, "EFF-05")
     r = viewer_client.post(f"{API}/monitor/kpis/{kpi['id']}/improvement-draft")
     assert r.status_code == 403
+
+
+def _process_id(client, code: str = "L3-032") -> int:
+    rows = client.get(f"{API}/process-map/flat").json()
+    return next(row for row in rows if row["code"] == code)["id"]
+
+
+def test_exception_creates_improvement_project(client, viewer_client):
+    process_id = _process_id(client)
+    created = client.post(
+        f"{API}/monitor/exceptions",
+        json={
+            "title": "异常转改善测试",
+            "description": "来料检验连续一周积压",
+            "severity": "HIGH",
+            "process_id": process_id,
+            "root_cause": "检验人力未按到货波峰排班",
+        },
+    )
+    assert created.status_code == 201, created.text
+    eid = created.json()["id"]
+    # 根因是处理阶段填写的，登记后再补，转换时应一并带到项目卡
+    assert (
+        client.patch(
+            f"{API}/monitor/exceptions/{eid}",
+            json={"root_cause": "检验人力未按到货波峰排班"},
+        ).status_code
+        == 200
+    )
+
+    draft = client.post(f"{API}/monitor/exceptions/{eid}/improvement-draft")
+    assert draft.status_code == 201, draft.text
+    pid = draft.json()["id"]
+
+    exception = client.get(f"{API}/monitor/exceptions/{eid}").json()
+    assert exception["project_id"] == pid
+    assert exception["status"] == "IN_PROGRESS", "转改善后异常应进入处理中"
+
+    detail = client.get(f"{API}/projects/{pid}").json()["project"]
+    assert detail["source"] == "EXCEPTION"
+    assert detail["source_label"] == "流程异常"
+    assert detail["process_id"] == process_id
+    assert detail["priority"] == 1
+    assert detail["root_cause"] == "检验人力未按到货波峰排班"
+    assert "来料检验连续一周积压" in detail["problem_statement"]
+    assert len(client.get(f"{API}/projects/{pid}/steps").json()) == 24
+
+    duplicate = client.post(f"{API}/monitor/exceptions/{eid}/improvement-draft")
+    assert duplicate.status_code == 409
+    assert "已有进行中" in duplicate.json()["detail"]
+
+    denied = viewer_client.post(f"{API}/monitor/exceptions/{eid}/improvement-draft")
+    assert denied.status_code == 403
+
+    assert client.delete(f"{API}/projects/{pid}").status_code == 200
+    assert client.delete(f"{API}/monitor/exceptions/{eid}").status_code == 200
+
+
+def test_closed_exception_cannot_create_improvement(client):
+    created = client.post(
+        f"{API}/monitor/exceptions",
+        json={"title": "已闭环异常测试", "severity": "LOW"},
+    ).json()
+    eid = created["id"]
+    assert (
+        client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"}).status_code
+        == 200
+    )
+    rejected = client.post(f"{API}/monitor/exceptions/{eid}/improvement-draft")
+    assert rejected.status_code == 400
+    assert "已解决或已闭环" in rejected.json()["detail"]
+    assert client.delete(f"{API}/monitor/exceptions/{eid}").status_code == 200

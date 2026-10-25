@@ -642,6 +642,43 @@ def get_exception(exception_id: int, db: DbSession):
     return _to_exception_out(obj)
 
 
+@router.post(
+    "/exceptions/{exception_id}/improvement-draft",
+    response_model=ProjectDraftOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="把未闭环异常转成改善项目草稿",
+)
+def create_exception_improvement_draft(exception_id: int, db: DbSession, user: WriteUser):
+    obj = db.get(ExceptionEvent, exception_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="异常事件不存在")
+    ensure_can_edit_owned(user, obj.owner_user_id, obj.owner)
+    try:
+        project = improvement_service.draft_from_exception(db, obj, user)
+    except improvement_service.ImprovementError as exc:
+        code = 409 if "已有进行中" in str(exc) else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "project",
+        project.id,
+        f"从异常 {obj.code} 生成改善项目 {project.code}",
+    )
+    db.commit()
+    db.refresh(project)
+    return ProjectDraftOut(
+        id=project.id,
+        code=project.code,
+        name=project.name,
+        process_id=project.process_id,
+        source_kpi_id=project.source_kpi_id,
+        status=project.status,
+        status_label=improvement_service.PROJECT_STATUS_LABELS.get(project.status, project.status),
+    )
+
+
 @router.patch(
     "/exceptions/{exception_id}", response_model=ExceptionOut, summary="处理 / 关闭异常事件"
 )
