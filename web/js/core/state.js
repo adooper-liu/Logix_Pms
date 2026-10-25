@@ -35,7 +35,7 @@ export const state = {
     framework: 'APQC_PCF', frameworks: null, tree: null, treeFramework: null,
     expanded: new Set(), selectedId: null, keyword: '',
   },
-  monitor: { status: '', tab: 'overview', kind: '', period: '' },
+  monitor: { status: '', tab: 'overview', kind: '', period: '', miningProcess: null },
   strategy: { year: new Date().getFullYear() },
   dataGov: null,
   processCard: { processId: null },

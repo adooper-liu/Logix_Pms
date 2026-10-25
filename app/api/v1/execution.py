@@ -41,6 +41,7 @@ from app.schemas.execution import (
     WorklogCreate,
     WorklogOut,
 )
+from app.schemas.mining import MiningOut
 from app.services import audit as audit_service
 from app.services import escalation as escalation_service
 from app.services import execution as execution_service
@@ -50,6 +51,7 @@ from app.services import idempotency as idempotency_service
 from app.services import integrations as integration_service
 from app.services import notifications as notification_service
 from app.services import org_unit as org_service
+from app.services import process_mining as mining_service
 from app.services import process_model as model_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
@@ -507,6 +509,19 @@ def delete_rule(rule_id: int, db: DbSession, user: ManagerUser):
 
 
 # ------------------------------------------------------------------ 实例
+
+
+@router.get("/mining", response_model=MiningOut, summary="过程挖掘：路径变体与耗时")
+def mining(
+    db: DbSession,
+    user: CurrentUser,
+    process_id: int = Query(ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    try:
+        return mining_service.variants(db, process_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/instances", response_model=List[InstanceOut], summary="流程实例列表")

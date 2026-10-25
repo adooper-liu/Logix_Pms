@@ -18,6 +18,10 @@ on('monitor.newKpi', () => newKpiModal());
 on('monitor.editKpi', ({ id }) => editKpiModal(Number(id)));
 on('monitor.kind', (_data, el) => setMonitorKind(el.value));
 on('monitor.period', (_data, el) => setMonitorPeriod(el.value));
+on('monitor.miningProcess', (_data, el) => {
+  state.monitor.miningProcess = Number(el.value) || null;
+  RENDERERS.monitor();
+});
 on('monitor.newStandard', () => newWorkloadStandardModal());
 on('monitor.submitStandard', () => submitWorkloadStandard());
 on('monitor.verifyStandard', ({ id }) => verifyWorkloadStandard(Number(id)));
@@ -57,8 +61,21 @@ const renderMonitor = () => {
       GET('/workload/summary' + (state.monitor.period ? '?period=' + state.monitor.period + '-01' : '')),
       GET('/workload/meta'),
       GET('/monitor/improvement-candidates'),
-    ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates]) => ({
-      radar, exceptions, summary, meta, workload, workloadMeta, candidates,
+      GET('/workforce/forecast?months=3').catch(() => null),
+      canManage() ? GET('/workforce/balance').catch(() => null) : Promise.resolve(null),
+      GET('/execution/processes')
+        .then(async (processes) => {
+          const pid = state.monitor.miningProcess || (processes[0] ? processes[0].id : null);
+          state.monitor.miningProcess = pid;
+          const mining = pid
+            ? await GET('/execution/mining?process_id=' + pid).catch(() => null)
+            : null;
+          return { processes, mining };
+        })
+        .catch(() => ({ processes: [], mining: null })),
+    ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates, forecast, balance, miningData]) => ({
+      radar, exceptions, summary, meta, workload, workloadMeta, candidates, forecast, balance,
+      processes: miningData.processes, mining: miningData.mining,
     })),
     (d) => {
       state.monitorRadar = d.radar;
@@ -316,6 +333,41 @@ const renderMonitor = () => {
           <td>${row.utilization === null ? '—' : num(row.utilization * 100, 1) + '%'}</td>
         </tr>`).join('') || emptyRow(4, '没有超出可用工时的岗位');
 
+      const forecast = d.forecast;
+      const forecastRows = (forecast ? forecast.rows : [])
+        .filter((row) => row.gap_minutes < 0)
+        .slice(0, 8)
+        .map((row) => `
+          <tr>
+            <td class="tiny">${esc(row.period)}</td>
+            <td>${esc(row.org_unit_name || '—')}</td>
+            <td>${esc(row.position_name || '—')}</td>
+            <td>${hours(row.demand_minutes)}</td>
+            <td>${hours(row.available_minutes)}</td>
+            <td><span class="tag t-red">${hours(row.gap_minutes)}</span></td>
+            <td>${row.utilization === null ? '—' : num(row.utilization * 100, 1) + '%'}</td>
+          </tr>`).join('') || '<tr><td colspan="7" class="muted">未来 3 个月没有缺口</td></tr>';
+      const balance = d.balance;
+      const balanceRows = (balance ? balance.suggestions : []).slice(0, 8).map((row) => `
+        <tr>
+          <td>${esc(row.from_org_unit_name || '—')} · ${esc(row.from_position_name || '—')}</td>
+          <td>${esc(row.to_org_unit_name || '—')} · ${esc(row.to_position_name || '—')}</td>
+          <td>${num(row.hours, 1)} h</td>
+        </tr>`).join('') || '<tr><td colspan="3" class="muted">当前没有可调拨的余量</td></tr>';
+
+      const mining = d.mining;
+      const miningOptions = (d.processes || []).map((row) =>
+        `<option value="${row.id}"${row.id === state.monitor.miningProcess ? ' selected' : ''}>
+          ${esc(row.code)} ${esc(row.name)}</option>`).join('');
+      const miningRows = (mining ? mining.variants : []).slice(0, 8).map((row) => `
+        <tr>
+          <td class="tiny">${row.node_names.map(esc).join(' → ')}</td>
+          <td>${row.instance_count}</td>
+          <td>${num(row.share_pct, 1)}%</td>
+          <td>${row.avg_cycle_minutes === null ? '—' : num(row.avg_cycle_minutes, 1)} 分</td>
+          <td>${row.avg_actual_minutes === null ? '—' : num(row.avg_actual_minutes, 1)} 分</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">还没有已完成的任务路径</td></tr>';
+
       const boundaryNote = (state.workloadMeta && state.workloadMeta.boundary_note) || '';
       const workloadPane = `
         ${boundaryNote ? `<div class="note mb">${esc(boundaryNote)}</div>` : ''}
@@ -386,6 +438,50 @@ const renderMonitor = () => {
               <tbody>${bottleneckRows}</tbody>
             </table>
           </div>
+        </div>
+        <div class="grid g2">
+          <div class="card">
+            <div class="between mb">
+              <h3 style="margin:0">未来 3 个月缺口</h3>
+              <span class="tag ${forecast && forecast.rows.some((row) => row.gap_minutes < 0)
+                ? 't-red' : 't-grn'}">
+                ${forecast ? '按已验证标准预测' : '暂无预测'}</span>
+            </div>
+            <div class="desc">需求按已验证标准工时 × 月频次，产能沿用当前已登记日历；不会凭空放大需求</div>
+            <table class="tbl">
+              <thead><tr><th>月份</th><th>组织</th><th>岗位</th><th>需求（h）</th>
+                <th>可用（h）</th><th>缺口（h）</th><th>负荷率</th></tr></thead>
+              <tbody>${forecastRows}</tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="between mb">
+              <h3 style="margin:0">派工均衡建议</h3>
+              <span class="tag ${balance && balance.suggestions.length ? 't-yel' : 't-grn'}">
+                ${balance ? balance.suggestions.length + ' 条' : '仅管理科可见'}</span>
+            </div>
+            <div class="desc">把余量岗位的可用工时调到缺口岗位；这里只给建议，不自动改派</div>
+            <table class="tbl">
+              <thead><tr><th>从</th><th>到</th><th>可调拨</th></tr></thead>
+              <tbody>${balanceRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="between mb">
+            <div><h3 style="margin:0">流程挖掘</h3>
+              <div class="desc">按已完成任务还原路径变体；只呈现事实，不推断因果</div></div>
+            <select class="sel sel-sm" data-act="monitor.miningProcess">
+              <option value="">选择流程</option>${miningOptions}
+            </select>
+          </div>
+          <div class="tiny">实例 ${mining ? mining.instance_total : 0} 个 ·
+            变体 ${mining ? mining.variant_count : 0} 种</div>
+          <table class="tbl">
+            <thead><tr><th>路径变体</th><th>实例数</th><th>占比</th>
+              <th>平均周期</th><th>平均实际工时</th></tr></thead>
+            <tbody>${miningRows}</tbody>
+          </table>
         </div>`;
 
       const tabs = `

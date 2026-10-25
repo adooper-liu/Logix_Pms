@@ -1779,6 +1779,8 @@ def main() -> int:
             workload_view = page.inner_text("#view")
             assert "标准 vs 实际" in workload_view, "工作量看板缺少标准 vs 实际"
             assert "瓶颈岗位" in workload_view, "工作量看板缺少瓶颈岗位"
+            assert "未来 3 个月缺口" in workload_view, "工作量看板缺少预测"
+            assert "流程挖掘" in workload_view, "工作量看板缺少过程挖掘"
 
         # 数据治理：数据域/数据流登记与缺口概览
         def data_governance_view() -> None:

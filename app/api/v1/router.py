@@ -40,6 +40,7 @@ from app.api.v1 import (
     tool_templates,
     tools,
     workflow,
+    workforce,
     workload,
 )
 
@@ -77,6 +78,7 @@ protected.include_router(notifications.router)
 protected.include_router(orgs.router)
 protected.include_router(positions.router)
 protected.include_router(workload.router)
+protected.include_router(workforce.router)
 protected.include_router(strategy.router)
 protected.include_router(raci.router)
 protected.include_router(replication.router)
