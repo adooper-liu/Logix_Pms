@@ -65,6 +65,37 @@ export function tab(btn, id) {
   btn.classList.add('on');
 }
 
+/* -------------------------------------------------- 分享链接
+ *
+ * 复制当前页面地址。优先用异步剪贴板；非 HTTPS 或权限被拒时退回
+ * 隐藏 textarea + execCommand，保证内网 HTTP 部署也能用。
+ */
+export function copyShareLink() {
+  const url = location.href;
+  const fallback = () => {
+    const area = document.createElement('textarea');
+    area.value = url;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(area);
+    toast(ok ? '链接已复制' : '复制失败，请从地址栏复制', !ok);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(() => toast('链接已复制')).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
 /* -------------------------------------------------- 事件委托根
  *
  * 行为写在 JS 里，模板只写 data-act。注意：
@@ -89,6 +120,7 @@ export function delegateCount() {
 }
 
 on('ui.close', () => closeModal());
+on('ui.copyLink', () => copyShareLink());
 
 if (typeof document !== 'undefined') {
   for (const type of EVENT_TYPES) {

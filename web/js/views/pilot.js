@@ -600,6 +600,8 @@ function paint(payload) {
     || detail.layers.find((row) => row.layer_no === detail.current_layer)
     || detail.layers[0];
   state.pilot.layerNo = layer.layer_no;
+  // 默认路径/当前层也写进 URL，复制出去的链接能直接落到同一条路径的同一层
+  setUrlState('pilot', { path: detail.id, layer: layer.layer_no }, { push: false });
   const options = paths.map((path) =>
     `<option value="${path.id}"${path.id === detail.id ? ' selected' : ''}>${
       esc(path.name)} · 第${path.current_layer}层</option>`).join('');
@@ -613,6 +615,7 @@ function paint(payload) {
         </div>
         <div class="gap">
           <select class="sel sel-sm" data-act="pilot.selectPath">${options}</select>
+          <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
           <button class="btn btn-p" data-act="pilot.newPath">+ 新建试点路径</button>
         </div>
       </div>

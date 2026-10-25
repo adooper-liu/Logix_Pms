@@ -45,7 +45,7 @@ function applyProjectParams() {
   const params = urlParams();
   const filterKeys = ['methodology', 'status', 'stage', 'type', 'keyword'];
   const hasFilters = filterKeys.some((key) => key in params);
-  if (!hasFilters && !params.project && !params.new_process) {
+  if (!hasFilters && !params.project && !params.new_process && !params.new_objective) {
     state.projects.filter = { methodology: '', status: '', stage: '', projectType: '' };
     state.projects.keyword = '';
   }
@@ -66,6 +66,7 @@ function projectUrlParams(extra = {}) {
     project: state.projects.openId || '',
     new_process: state.projects.newProcess || '',
     new_name: state.projects.newName || '',
+    new_objective: state.projects.newObjective || '',
     ...extra,
   };
 }
@@ -86,17 +87,26 @@ const renderProjects = () => {
   qs.push('page_size=100');
 
   renderAsync('projects',
-    () => Promise.all([GET('/projects?' + qs.join('&')), GET('/projects/meta')])
-      .then(([page, meta]) => {
-        const params = urlParams();
-        return {
-          page,
-          meta,
-          openId: Number(params.project) || null,
-          newProcess: Number(params.new_process) || null,
-          newName: params.new_name || '',
-        };
-      }),
+    async () => {
+      const params = urlParams();
+      const newObjectiveId = Number(params.new_objective) || null;
+      const [page, meta] = await Promise.all([
+        GET('/projects?' + qs.join('&')),
+        GET('/projects/meta'),
+      ]);
+      // 战略目标立项时把目标一并带进来，用于预填改善目标/基线/目标值
+      const objective = newObjectiveId
+        ? await GET('/strategy/objectives/' + newObjectiveId).catch(() => null)
+        : null;
+      return {
+        page,
+        meta,
+        openId: Number(params.project) || null,
+        newProcess: Number(params.new_process) || null,
+        newName: params.new_name || '',
+        newObjective: objective,
+      };
+    },
     (d) => {
       const page = d.page;
       state.projectMeta = d.meta;
@@ -197,13 +207,21 @@ const renderProjects = () => {
         state.projects.openId = null;
         closeModal();
       }
-      if (d.newProcess && state.projects.newProcess !== d.newProcess) {
+      if (d.newProcess
+        && (state.projects.newProcess !== d.newProcess
+          || (d.newObjective && state.projects.newObjective !== d.newObjective.id))) {
         state.projects.newProcess = d.newProcess;
         state.projects.newName = d.newName;
-        newProjectWizard({ processId: d.newProcess, name: d.newName });
+        state.projects.newObjective = d.newObjective ? d.newObjective.id : null;
+        newProjectWizard({
+          processId: d.newProcess,
+          name: d.newName,
+          objective: d.newObjective,
+        });
       } else if (!d.newProcess && state.projects.newProcess) {
         state.projects.newProcess = null;
         state.projects.newName = '';
+        state.projects.newObjective = null;
         closeModal();
       }
     });
@@ -217,6 +235,7 @@ if (typeof window !== 'undefined') {
     state.projects.openId = null;
     state.projects.newProcess = null;
     state.projects.newName = '';
+    state.projects.newObjective = null;
     syncProjectUrl();
   });
 }
@@ -240,6 +259,7 @@ async function openProject(id, options = {}) {
   state.projects.openId = id;
   state.projects.newProcess = null;
   state.projects.newName = '';
+  state.projects.newObjective = null;
   if (!options.fromUrl) syncProjectUrl({ push: true });
   const gen = openModal('加载中…', skeleton(5), '', true);
   let d;
@@ -394,6 +414,7 @@ async function openProject(id, options = {}) {
       ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
         + ` data-act="projects.delete" data-id="${p.id}" data-code="${esc(p.code)}">删除项目</button>`
       : ''}
+    <button class="btn btn-g" data-act="ui.copyLink">复制链接</button>
     <button class="btn btn-g" data-act="projects.close">关闭</button>
     ${canEditThis ? `<button class="btn btn-g" data-act="projects.edit" data-id="${p.id}">编辑</button>` : ''}
     ${p.process_id ? `<button class="btn btn-g" data-act="projects.openExecution"
@@ -792,7 +813,21 @@ async function patchStep(stepId, status, projectId) {
 
 function newProjectWizard(prefill) {
   const pre = prefill || {};
+  const goal = pre.objective || null;
+  const goalTarget = goal && (goal.baseline_value !== null || goal.target_value !== null)
+    ? ` · 目标 ${goal.baseline_value === null ? '—' : num(goal.baseline_value, 2)}
+      → ${goal.target_value === null ? '—' : num(goal.target_value, 2)}
+      ${esc(goal.unit || '')}`
+    : '';
+  const nameValue = pre.name
+    ? pre.name + '流程优化'
+    : (goal ? goal.name + '承接项目' : '');
+  const objectiveValue = goal
+    ? (goal.description || `承接战略目标「${goal.name}」`)
+    : '';
   openModal('新建流程项目 · 立项向导', `
+    ${goal ? `<div class="note mb">承接战略目标：<b>${esc(goal.code)} ${esc(goal.name)}</b>${
+      goalTarget}。目标值已预填，可在下方调整。</div>` : ''}
     ${pre.name ? `<div class="note mb">从流程地图带入：<b>${esc(pre.name)}</b>。
       请补充 Owner、改善目标与基线数据后立项。</div>` : ''}
     <div class="note mb">
@@ -832,7 +867,7 @@ function newProjectWizard(prefill) {
     <h3 class="mt">② 基本信息</h3>
     <div class="row2">
       <div class="field"><label>项目名称 *</label>
-        <input id="npName" value="${esc(pre.name ? pre.name + '流程优化' : '')}" placeholder="如：采购需求提报流程重组"></div>
+        <input id="npName" value="${esc(nameValue)}" placeholder="如：采购需求提报流程重组"></div>
       <div class="field"><label>方法论 *</label>
         <select id="npMethod">
           <option value="BPR">BPR 阶跃式重组</option>
@@ -842,7 +877,9 @@ function newProjectWizard(prefill) {
         </select></div>
     </div>
     <div class="row2">
-      <div class="field"><label>流程 Owner *</label><input id="npOwner" placeholder="如：陈经理"></div>
+      <div class="field"><label>流程 Owner *</label>
+        <input id="npOwner" value="${esc(goal && goal.owner ? goal.owner : '')}"
+          placeholder="如：陈经理"></div>
       <div class="field"><label>发起人</label><input id="npSponsor" placeholder="如：采购总监-刘总"></div>
     </div>
     <div class="row2">
@@ -852,14 +889,20 @@ function newProjectWizard(prefill) {
         <div class="hint">关联后可到「流程设计器」做泳道建模与测算</div></div>
     </div>
     <div class="field"><label>改善目标</label>
-      <textarea id="npObjective" placeholder="如：端到端周期从 14 天压到 5 天，取消 3 层冗余审批"></textarea></div>
+      <textarea id="npObjective" placeholder="如：端到端周期从 14 天压到 5 天，取消 3 层冗余审批">${esc(objectiveValue)}</textarea></div>
     <div class="row3">
-      <div class="field"><label>指标名称</label><input id="npMetric" placeholder="如：端到端周期"></div>
-      <div class="field"><label>基线值</label><input id="npBase" type="number" step="0.1" placeholder="14"></div>
-      <div class="field"><label>目标值</label><input id="npTarget" type="number" step="0.1" placeholder="5"></div>
+      <div class="field"><label>指标名称</label>
+        <input id="npMetric" value="${esc(goal ? goal.name : '')}" placeholder="如：端到端周期"></div>
+      <div class="field"><label>基线值</label>
+        <input id="npBase" type="number" step="0.1" value="${
+          goal && goal.baseline_value !== null ? goal.baseline_value : ''}" placeholder="14"></div>
+      <div class="field"><label>目标值</label>
+        <input id="npTarget" type="number" step="0.1" value="${
+          goal && goal.target_value !== null ? goal.target_value : ''}" placeholder="5"></div>
     </div>
     <div class="row3">
-      <div class="field"><label>单位</label><input id="npUnit" placeholder="天"></div>
+      <div class="field"><label>单位</label>
+        <input id="npUnit" value="${esc(goal && goal.unit ? goal.unit : '')}" placeholder="天"></div>
       <div class="field"><label>预算（万元）</label><input id="npBudget" type="number" step="0.1" value="0"></div>
       <div class="field"><label>优先级</label>
         <select id="npPriority">

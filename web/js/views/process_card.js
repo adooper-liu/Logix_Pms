@@ -7,12 +7,15 @@
 import { esc, num, emptyRow } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, go, RENDERERS } from '../core/router.js';
+import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { GET } from '../core/api.js';
 import { actions as appActions } from '../core/actions.js';
 
 on('process_card.select', (_data, el) => {
-  state.processCard.processId = Number(el.value);
+  state.processCard.processId = Number(el.value) || null;
+  setUrlState('process_card', {
+    process: state.processCard.processId || '',
+  }, { push: true });
   RENDERERS.process_card();
 });
 on('process_card.go', ({ view }) => go(view));
@@ -49,15 +52,18 @@ const renderProcessCard = () => {
   renderAsync(
     'process_card',
     async () => {
+      const params = urlParams();
       const processes = (await GET('/process-map/flat')).filter(
         (row) => row.level === 3 || row.level === 4,
       );
-      let processId = state.processCard.processId;
+      let processId = Number(params.process) || state.processCard.processId;
       if (!processId || !processes.some((row) => row.id === processId)) {
         const preferred = processes.find((row) => row.level === 3) || processes[0];
         processId = preferred ? preferred.id : null;
       }
       state.processCard.processId = processId;
+      // 把默认选中的流程也写进 URL，分享/刷新后落到同一条流程
+      setUrlState('process_card', { process: processId || '' }, { push: false });
       if (!processId) {
         return { processes, card: null };
       }
@@ -141,6 +147,7 @@ const renderProcessCard = () => {
               <div class="desc">${chain || '—'}</div></div>
             <select class="sel sel-sm" data-act="process_card.select">
               <option value="">切换流程</option>${options}</select>
+            <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
           </div>
           <div class="between mt">
             <div><b>${esc(c.process.code)} ${esc(c.process.name)}</b>

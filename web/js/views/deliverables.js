@@ -13,7 +13,7 @@ import {
 } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, go } from '../core/router.js';
+import { renderAsync, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, PATCH, POST, POST_FORM, download } from '../core/api.js';
 import { openDocumentCopy, openTemplateCopy } from '../core/template-copy.js';
@@ -114,7 +114,10 @@ const statusTag = (status, label) =>
 
 /* ============================================================ 壳与页签 */
 
-const renderDeliverables = () => renderAsync('deliverables',
+const renderDeliverables = () => {
+  const params = urlParams();
+  if (params.tab) state.deliverables.tab = params.tab;
+  return renderAsync('deliverables',
   () => Promise.all([
     GET('/projects?page_size=200'),
     GET('/deliverables/meta'),
@@ -140,6 +143,7 @@ const renderDeliverables = () => renderAsync('deliverables',
     state.baselines = baselines || [];
     paintShell();
   });
+};
 
 function paintShell() {
   const tab = state.deliverables.tab;
@@ -166,6 +170,7 @@ function paintShell() {
 
 function setDlvTab(tab) {
   state.deliverables.tab = tab;
+  setUrlState('deliverables', { tab }, { push: false });
   paintShell();
 }
 

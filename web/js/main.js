@@ -117,7 +117,11 @@ function wireChrome() {
     if (label) a.title = label.textContent.trim();
     a.onclick = () => {
       // 侧栏进入工具箱应看全部工具；步骤页的「只看推荐」是临时状态
-      if (a.dataset.view === 'toolbox') state.toolboxFilter = null;
+      if (a.dataset.view === 'toolbox') {
+        state.toolboxFilter = null;
+        state.toolbox.step = '';
+        state.toolbox.stage = null;
+      }
       closeModal();
       go(a.dataset.view);
     };

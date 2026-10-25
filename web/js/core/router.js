@@ -156,6 +156,7 @@ export function onSearch(value) {
         project: state.projects.openId || '',
         new_process: state.projects.newProcess || '',
         new_name: state.projects.newName || '',
+        new_objective: state.projects.newObjective || '',
       }, { push: false });
       RENDERERS.projects();
     } else if (v === 'knowledge') {
@@ -166,9 +167,15 @@ export function onSearch(value) {
         tag: state.knowledge.tag,
         keyword: value,
         sort: state.knowledge.sort,
+        scenario: state.knowledge.scenario,
+        stage: state.knowledge.stage || '',
+        step: state.knowledge.step,
+        status: state.knowledge.status,
+        tool: state.knowledge.tool,
       }, { push: false });
       RENDERERS.knowledge();
     } else if (v === 'toolbox') {
+      state.toolbox.q = value;
       state.toolboxKeyword = value;
       RENDERERS.toolbox();
     } else if (v === 'map') {

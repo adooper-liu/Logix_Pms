@@ -56,6 +56,13 @@ const renderExecution = () => {
   } else if (params.tab) {
     ex.tab = params.tab;
   }
+  // 从模型发布跳过来时带 start=1：先落到配置页，再自动拉起启动流程弹窗
+  if (params.start) {
+    ex.tab = 'config';
+    ex.startProcess = Number(params.process) || 0;
+  } else {
+    ex.startProcess = null;
+  }
   return renderAsync('execution',
     () => Promise.all([
       GET('/execution/tasks?only_open=true&limit=500'),
@@ -420,6 +427,17 @@ const renderExecution = () => {
         <div class="mt">${tabs}</div>
       </div>
       ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : ex.tab === 'integrations' ? integrationsPane : taskPane}`;
+
+    // 发布后自动拉起启动弹窗；消费一次后把 start 参数从 URL 去掉，避免重渲染再弹一次
+    if (ex.startProcess !== undefined && ex.startProcess !== null) {
+      const startPid = ex.startProcess;
+      ex.startProcess = null;
+      setUrlState('execution', {
+        process: startPid || '',
+        tab: ex.tab,
+      }, { push: false });
+      startInstanceModal(startPid || null);
+    }
     });
 };
 
@@ -969,7 +987,7 @@ async function claimTask(taskId) {
   }
 }
 
-async function startInstanceModal() {
+async function startInstanceModal(initialProcessId = null) {
   openModal('启动流程实例', skeleton(5));
   let processes = state.executionProcesses;
   let projects = [];
@@ -985,8 +1003,12 @@ async function startInstanceModal() {
     return;
   }
   state.executionAssignees = assignees;
+  const wanted = Number(initialProcessId) || null;
+  const selectedId = wanted && processes.some((p) => p.id === wanted)
+    ? wanted
+    : (processes[0] ? processes[0].id : null);
   const processOpts = processes.map((p) =>
-    `<option value="${p.id}">L${p.level} ${esc(p.code)} ${esc(p.name)}（${p.node_count} 节点）</option>`
+    `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>L${p.level} ${esc(p.code)} ${esc(p.name)}（${p.node_count} 节点）</option>`
   ).join('');
   const projectOpts = projects.items.map((p) =>
     `<option value="${p.id}">${esc(p.code)} ${esc(p.name)}</option>`
@@ -1002,7 +1024,7 @@ async function startInstanceModal() {
       <textarea id="exVars" placeholder='{"申请人":"张三","金额":10000}'>{"source":"manual"}</textarea></div>`,
     `<button class="btn btn-g" data-act="execution.close">取消</button>
      <button class="btn btn-p" data-act="execution.submitStart">启动</button>`);
-  if (processes.length) loadStartNodes(processes[0].id);
+  if (selectedId) loadStartNodes(selectedId);
 }
 
 async function loadStartNodes(processId) {
@@ -1065,6 +1087,7 @@ async function submitStartInstance() {
     closeModal();
     toast('流程已启动：' + instance.code);
     state.execution.tab = 'tasks';
+    setUrlState('execution', { tab: 'tasks' }, { push: false });
     RENDERERS.execution();
   } catch (e) {
     toast(e.message, true);

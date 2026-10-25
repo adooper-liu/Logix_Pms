@@ -14,15 +14,23 @@ export const state = {
     frameworks: null, benchmarkFramework: '', benchmark: null, openCode: null,
   },
   projects: { filter: { methodology: '', status: '', stage: '', projectType: '' },
-    keyword: '', openId: null },
+    keyword: '', openId: null, newProcess: null, newName: '', newObjective: null },
   workflow: { tab: 'steps', stage: 1 },
   /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
   toolboxFilter: null,
+  toolboxCat: null,
+  toolboxKeyword: '',
+  toolbox: {
+    q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '',
+  },
   designer: {
     processId: null, processCode: null, model: null, analysis: null, tab: 'model',
     changes: null, changeMeta: null, raci: null, raciMeta: null, governanceRoles: null,
   },
-  knowledge: { type: '', sort: 'recent', keyword: '', tag: '', page: 1 },
+  knowledge: {
+    type: '', sort: 'recent', keyword: '', tag: '', page: 1,
+    scenario: '', stage: null, step: '', status: '', tool: '',
+  },
   pcf: {
     framework: 'APQC_PCF', frameworks: null, tree: null, treeFramework: null,
     expanded: new Set(), selectedId: null, keyword: '',

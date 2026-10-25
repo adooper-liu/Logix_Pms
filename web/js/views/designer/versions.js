@@ -8,7 +8,7 @@ import { esc, dtShort, emptyRow } from '../../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, promptDialog } from '../../core/ui.js';
 import { state } from '../../core/state.js';
 import { GET, POST } from '../../core/api.js';
-import { RENDERERS } from '../../core/router.js';
+import { RENDERERS, go } from '../../core/router.js';
 
 function validateModel(model) {
   const errors = [];
@@ -117,8 +117,13 @@ export function createVersions(ctx) {
         change_note: null,
         change_request_id: changeRequestId,
       });
-      toast('模型已发布到运行时');
-      await ctx.reload();
+      const pid = state.designer.processId;
+      toast('模型已发布，正在打开执行启动页');
+      // 发布后的下一步就是启动一个新实例，直接把上下文带进执行页并拉起启动弹窗
+      go('execution', {
+        params: { process: pid, tab: 'config', start: 1 },
+        push: true,
+      });
     } catch (e) {
       toast(e.message, true);
     }

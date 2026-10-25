@@ -5,10 +5,10 @@
  */
 
 import { esc, num } from '../core/format.js';
-import { toast, openModal, closeModal, confirmDialog, viewEl, on } from '../core/ui.js';
+import { toast, openModal, closeModal, confirmDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go } from '../core/router.js';
-import { canManage } from '../core/auth.js';
+import { canManage, canWrite } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 
 on('strategy.year', (_data, el) => setStrategyYear(Number(el.value)));
@@ -18,6 +18,8 @@ on('strategy.submit', ({ id }) => submitObjective(id ? Number(id) : null));
 on('strategy.close', () => closeModal());
 on('strategy.link', ({ id }) => linkModal(Number(id)));
 on('strategy.submitLink', ({ id }) => submitLink(Number(id)));
+on('strategy.initiate', ({ id }) => initiateProject(Number(id)));
+on('strategy.submitInitiate', ({ id }) => submitInitiate(Number(id)));
 on('strategy.unlink', ({ id, link }) => unlinkObjective(Number(id), Number(link)));
 on('strategy.archive', ({ id }) => archiveObjective(Number(id)));
 on('strategy.openProcess', ({ code }) => {
@@ -42,6 +44,7 @@ const renderStrategy = () => {
     (d) => {
       state.strategyYear = year;
       state.strategyMeta = d.meta;
+      state.strategyObjectives = d.objectives;
       const s = d.summary;
       const yearOptions = [year - 1, year, year + 1].map((value) =>
         `<option value="${value}"${value === year ? ' selected' : ''}>${value} 年</option>`).join('');
@@ -74,6 +77,9 @@ const renderStrategy = () => {
                   ${obj.source_document ? ' · 来源 ' + esc(obj.source_document) : ''}</div>
               </div>
               <div class="gap">
+                ${canWrite() ? `
+                  <button class="btn-sm btn-p" data-act="strategy.initiate"
+                    data-id="${obj.id}">选流程 / 立项</button>` : ''}
                 ${canManage() ? `
                   <button class="btn-sm" data-act="strategy.link" data-id="${obj.id}">承接</button>
                   <button class="btn-sm" data-act="strategy.edit" data-id="${obj.id}">编辑</button>
@@ -220,6 +226,65 @@ async function submitObjective(objectiveId) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+/* -------------------------------------------------- 选流程 / 立项 */
+
+function initiateProject(objectiveId) {
+  const objective = (state.strategyObjectives || []).find((row) => row.id === objectiveId);
+  if (!objective) return;
+  const gen = openModal('从战略目标立项', '<div class="empty">加载流程…</div>');
+  GET('/process-map/flat')
+    .then((rows) => {
+      if (!modalAlive(gen)) return;
+      const linked = new Set((objective.links || []).map((link) => link.process_id));
+      const candidates = rows
+        .filter((row) => row.level >= 3)
+        .sort((a, b) => {
+          const linkedOrder = (linked.has(b.id) ? 1 : 0) - (linked.has(a.id) ? 1 : 0);
+          return linkedOrder || a.level - b.level || a.code.localeCompare(b.code);
+        });
+      const options = candidates.map((row) =>
+        `<option value="${row.id}" data-name="${esc(row.name)}">L${row.level} ${esc(row.code)} ${
+          esc(row.name)}${linked.has(row.id) ? ' · 已承接' : ''}</option>`).join('');
+      const target = objective.baseline_value === null && objective.target_value === null
+        ? ''
+        : ` · 目标 ${objective.baseline_value === null ? '—' : num(objective.baseline_value, 2)}
+          → ${objective.target_value === null ? '—' : num(objective.target_value, 2)}
+          ${esc(objective.unit || '')}`;
+      openModal('从战略目标选流程 / 立项', `
+        <div class="note mb">承接目标：<b>${esc(objective.code)} ${esc(objective.name)}</b>${target}</div>
+        ${options ? `
+          <div class="field"><label>要改善的流程（L3/L4）*</label>
+            <select id="siProcess">${options}</select>
+            <div class="hint">已承接的流程排在前面；选定后进入立项向导，目标值会自动预填</div></div>`
+          : '<div class="empty">还没有可立项的 L3/L4 流程，请先到流程地图建立架构。</div>'}`,
+        `${options
+          ? `<button class="btn btn-g" data-act="strategy.close">取消</button>
+             <button class="btn btn-p" data-act="strategy.submitInitiate"
+               data-id="${objective.id}">进入立项</button>`
+          : '<button class="btn btn-g" data-act="strategy.close">关闭</button>'}`);
+    })
+    .catch((e) => {
+      if (!modalAlive(gen)) return;
+      openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>');
+    });
+}
+
+function submitInitiate(objectiveId) {
+  const sel = document.getElementById('siProcess');
+  if (!sel || !sel.value) return toast('请选择流程', true);
+  const option = sel.selectedOptions[0];
+  const processName = option ? option.dataset.name || '' : '';
+  closeModal();
+  go('projects', {
+    params: {
+      new_process: Number(sel.value),
+      new_name: processName,
+      new_objective: objectiveId,
+    },
+    push: true,
+  });
 }
 
 function linkModal(objectiveId) {
