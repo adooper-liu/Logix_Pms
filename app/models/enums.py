@@ -129,8 +129,20 @@ class ExceptionStatus(str, Enum):
 class KnowledgeType(str, Enum):
     CASE = "CASE"  # 案例
     TEMPLATE = "TEMPLATE"  # 模板
-    BEST_PRACTICE = "BEST_PRACTICE"  # 最佳实践
-    STANDARD = "STANDARD"  # 标准/制度
+    METHOD = "METHOD"  # 方法
+    TOOL = "TOOL"  # 工具使用指南（引用 tool_code）
+    BEST_PRACTICE = "BEST_PRACTICE"  # 兼容旧数据；新数据用 is_best_practice 标志
+    STANDARD = "STANDARD"  # 兼容旧数据；知识库不再展示，制度走 process_document
+
+
+class KnowledgeStatus(str, Enum):
+    """知识条目的求真审核状态。"""
+
+    DRAFT = "DRAFT"  # 草稿，仅作者/管理员可见
+    IN_REVIEW = "IN_REVIEW"  # 待审核
+    PUBLISHED = "PUBLISHED"  # 已发布，但还没有可核验的使用证据
+    VERIFIED = "VERIFIED"  # 已审核通过，有验证人和验证日期
+    ARCHIVED = "ARCHIVED"  # 已归档
 
 
 class Role(str, Enum):
@@ -206,6 +218,14 @@ class ToolLevel(str, Enum):
     OPTIONAL = "OPTIONAL"
 
 
+class ToolDifficulty(str, Enum):
+    """工具上手/实施难度，用于问题匹配后的决策信息。"""
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
 class WorkMeasurementSource(str, Enum):
     """标准工时的取得方法；不同方法证据强度不同。"""
 
@@ -265,6 +285,7 @@ class ChangeStatus(str, Enum):
 class ImprovementSource(str, Enum):
     MANUAL = "MANUAL"
     KPI_THRESHOLD = "KPI_THRESHOLD"
+    EXCEPTION = "EXCEPTION"
     AUDIT_FINDING = "AUDIT_FINDING"
     CUSTOMER_COMPLAINT = "CUSTOMER_COMPLAINT"
     EMPLOYEE_SUGGESTION = "EMPLOYEE_SUGGESTION"

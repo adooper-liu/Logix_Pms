@@ -87,7 +87,14 @@ from app.models.integration import (
     IntegrationDelivery,
     IntegrationEndpoint,
 )
-from app.models.knowledge import KnowledgeItem, KnowledgeTag
+from app.models.knowledge import (
+    KnowledgeItem,
+    KnowledgeScenario,
+    KnowledgeScenarioLink,
+    KnowledgeTag,
+    KnowledgeUsage,
+    KnowledgeWorkflowLink,
+)
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit, Position
@@ -99,7 +106,7 @@ from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.startup import StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
-from app.models.tool import Tool
+from app.models.tool import Tool, ToolScenarioLink
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.models.workload import (
@@ -122,6 +129,7 @@ __all__ = [
     "WorkflowTemplate",
     "Sketch",
     "Tool",
+    "ToolScenarioLink",
     "ToolTemplate",
     "ToolTemplateVersion",
     "TemplateUsage",
@@ -134,6 +142,10 @@ __all__ = [
     "ExceptionEvent",
     "KnowledgeItem",
     "KnowledgeTag",
+    "KnowledgeScenario",
+    "KnowledgeScenarioLink",
+    "KnowledgeWorkflowLink",
+    "KnowledgeUsage",
     "User",
     "AuditLog",
     "BenchmarkFramework",

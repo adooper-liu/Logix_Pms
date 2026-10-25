@@ -28,7 +28,7 @@ from app.models.deliverable import (
     DeliverableVersion,
     StepContract,
 )
-from app.models.enums import Role, TaskStatus
+from app.models.enums import KnowledgeStatus, Role, TaskStatus
 from app.models.execution import (
     FormDefinition,
     IdempotencyRecord,
@@ -47,7 +47,14 @@ from app.models.integration import (
     IntegrationDelivery,
     IntegrationEndpoint,
 )
-from app.models.knowledge import KnowledgeItem, KnowledgeTag
+from app.models.knowledge import (
+    KnowledgeItem,
+    KnowledgeScenario,
+    KnowledgeScenarioLink,
+    KnowledgeTag,
+    KnowledgeUsage,
+    KnowledgeWorkflowLink,
+)
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit, Position
@@ -63,7 +70,7 @@ from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
-from app.models.tool import Tool
+from app.models.tool import Tool, ToolScenarioLink
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.models.workload import CapacityCalendar, WorkMeasurementStandard
@@ -79,6 +86,7 @@ from app.seed import (
     pcf_data,
     raci_data,
     strategy_data,
+    tool_decision_data,
     workload_data,
 )
 from app.services import deliverable as deliverable_service
@@ -185,23 +193,60 @@ def _seed_workflow(db: Session) -> None:
         )
 
 
-def _seed_tools(db: Session) -> None:
-    for order, row in enumerate(corpus.TOOLS, start=1):
-        db.add(
-            Tool(
-                code=row["code"],
-                name=row["name"],
-                alias=row.get("alias"),
-                category=row["category"],
-                stage_no=row["stage_no"],
-                purpose=row["purpose"],
-                when_to_use=row["when_to_use"],
-                steps=list(row["steps"]),
-                template_ref=row.get("template_ref"),
-                pitfalls=row.get("pitfalls"),
-                sort_order=order,
-            )
+def _seed_knowledge_scenarios(db: Session) -> Dict[str, KnowledgeScenario]:
+    """六个痛点场景是知识库和工具箱共用的字典。"""
+    existing = {row.code: row for row in db.scalars(select(KnowledgeScenario)).all()}
+    for order, (code, name, description) in enumerate(KNOWLEDGE_SCENARIOS, start=1):
+        if code in existing:
+            continue
+        row = KnowledgeScenario(
+            code=code,
+            name=name,
+            description=description,
+            sort_order=order,
+            is_active=True,
         )
+        db.add(row)
+        db.flush()
+        existing[code] = row
+    return existing
+
+
+def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
+    user_ids = user_ids or {}
+    scenarios = {row.code: row for row in db.scalars(select(KnowledgeScenario)).all()}
+    verified_at = _parse_dt("2026-09-20 10:00:00") or utcnow()
+    for order, row in enumerate(corpus.TOOLS, start=1):
+        extra = tool_decision_data.TOOL_DECISION_DATA.get(row["code"], {})
+        tool = Tool(
+            code=row["code"],
+            name=row["name"],
+            alias=row.get("alias"),
+            category=row["category"],
+            stage_no=row["stage_no"],
+            purpose=row["purpose"],
+            when_to_use=row["when_to_use"],
+            steps=list(row["steps"]),
+            template_ref=row.get("template_ref"),
+            pitfalls=row.get("pitfalls"),
+            difficulty=extra.get("difficulty", "MEDIUM"),
+            typical_duration=extra.get("typical_duration"),
+            prerequisites=extra.get("prerequisites"),
+            not_applicable_when=extra.get("not_applicable_when"),
+            verification_standard=extra.get("verification_standard"),
+            owner_user_id=_owner_user_id(extra.get("owner"), user_ids),
+            version=1,
+            last_verified_at=verified_at if extra else None,
+            review_due_at=(verified_at.date() + timedelta(days=365)) if extra else None,
+            is_active=True,
+            sort_order=order,
+        )
+        db.add(tool)
+        db.flush()
+        for code in extra.get("scenarios", ()):
+            scenario = scenarios.get(code)
+            if scenario is not None:
+                db.add(ToolScenarioLink(tool_id=tool.id, scenario_id=scenario.id, weight=1.0))
 
 
 def _seed_step_contracts(db: Session) -> None:
@@ -1062,23 +1107,118 @@ def _seed_notifications(db: Session, user_ids: Dict[str, int]) -> None:
         )
 
 
-def _seed_knowledge(db: Session, project_ids: Dict[str, int]) -> None:
+KNOWLEDGE_SCENARIOS = [
+    ("FLOW", "流程混乱", "环节不清、重复交接、部门墙"),
+    ("CYCLE", "周期太长", "等待多、节拍不稳、交付慢"),
+    ("ERROR", "差错返工多", "反复出错、客诉、质量波动"),
+    ("RACI", "责任不清", "多头负责、互相推诿、权责冲突"),
+    ("COST", "成本过高", "浪费多、投入产出低"),
+    ("STANDARD", "缺少标准", "靠经验、各做各的、无法复制"),
+]
+
+KNOWLEDGE_TOOL_SCENARIOS = {
+    "BPR6": ("FLOW", "STANDARD"),
+    "VSM": ("CYCLE", "COST"),
+    "RACI": ("RACI", "FLOW"),
+    "ADKAR": ("FLOW", "RACI"),
+    "KAIZEN": ("COST", "CYCLE"),
+    "PARETO": ("ERROR", "COST"),
+    "PILOT": ("STANDARD", "FLOW"),
+    "BALANCED-SCORE": ("STANDARD",),
+    "FIVE-WHY": ("ERROR",),
+    "FISHBONE": ("ERROR",),
+    "DMAIC": ("ERROR", "CYCLE"),
+}
+
+# 工具的主阶段之外，知识在五阶段里的其他使用现场
+KNOWLEDGE_TOOL_EXTRA_STAGES = {
+    "BPR6": (1,),
+    "RACI": (1,),
+    "VSM": (3,),
+    "PARETO": (3,),
+    "PILOT": (1,),
+    "KAIZEN": (4,),
+    "BALANCED-SCORE": (5,),
+}
+
+KNOWLEDGE_VERIFIED_TOOLS = {"RACI", "VSM", "PARETO", "ADKAR"}
+KNOWLEDGE_BEST_PRACTICE_TOOLS = {"RACI", "VSM", "ADKAR"}
+
+KNOWLEDGE_USAGE_SEED = {
+    "RACI": [
+        ("EFFECTIVE", "采购流程权责梳理，多头负责问题消除", 18),
+        ("EFFECTIVE", "审批链压缩到 3 层", 12),
+        ("EFFECTIVE", "跨部门争议减少", 8),
+        ("PARTIAL", "首次使用时 A 角色仍有争议", 3),
+    ],
+    "VSM": [
+        ("EFFECTIVE", "轧制工段端到端周期下降 21%", 20),
+        ("EFFECTIVE", "识别出 3 处主要等待", 10),
+        ("PARTIAL", "现场观测样本偏少", 4),
+    ],
+    "PARETO": [
+        ("EFFECTIVE", "定位出 78% 客诉集中在 3 类", 15),
+        ("EFFECTIVE", "优先改善项从 12 个收敛到 3 个", 6),
+    ],
+    "ADKAR": [
+        ("EFFECTIVE", "中层抵触明显下降", 14),
+        ("PARTIAL", "沟通节奏需要按部门调整", 5),
+    ],
+}
+
+
+def _seed_knowledge(db: Session, project_ids: Dict[str, int], user_ids: Dict[str, int]) -> None:
+    scenarios = _seed_knowledge_scenarios(db)
+
+    tool_stages = {
+        code: stage for code, stage in db.execute(select(Tool.code, Tool.stage_no)).all()
+    }
+    admin_id = user_ids.get("系统管理员")
+    verified_at = _parse_dt("2026-09-20 10:00:00") or utcnow()
+
     for row in corpus_data.KNOWLEDGE:
+        tool_code = row.get("tool_code")
+        item_type = "METHOD" if row["type"] == "BEST_PRACTICE" else row["type"]
+        status = (
+            KnowledgeStatus.ARCHIVED.value
+            if item_type == "STANDARD"
+            else KnowledgeStatus.VERIFIED.value
+            if tool_code in KNOWLEDGE_VERIFIED_TOOLS
+            else KnowledgeStatus.PUBLISHED.value
+        )
+        created = _parse_dt(row.get("created")) or _parse_dt("2026-09-01 09:00:00")
         item = KnowledgeItem(
             title=row["title"],
-            type=row["type"],
+            type=item_type,
+            status=status,
             methodology=row.get("methodology"),
             summary=row["summary"],
             content=row["content"],
+            claim=row["summary"],
+            applicable_when="；".join(row.get("tags", [])) or None,
+            not_applicable_when="需要强制执行的制度条款请走制度中心；"
+            "本条目是参考方法，不替代正式标准文件。",
+            evidence_summary="演示数据：由流程管理科整理的历史使用记录。",
+            version=1,
+            owner_user_id=_owner_user_id(row.get("author"), user_ids),
+            verified_by_user_id=admin_id if status == KnowledgeStatus.VERIFIED.value else None,
+            last_verified_at=verified_at if status == KnowledgeStatus.VERIFIED.value else None,
+            review_due_at=(verified_at.date() + timedelta(days=365))
+            if status == KnowledgeStatus.VERIFIED.value
+            else None,
+            is_best_practice=tool_code in KNOWLEDGE_BEST_PRACTICE_TOOLS,
+            promoted_at=verified_at if tool_code in KNOWLEDGE_BEST_PRACTICE_TOOLS else None,
             process_id=None,
-            project_id=project_ids.get("PR-2026-018") if row["type"] == "CASE" else None,
-            tool_code=row.get("tool_code"),
+            project_id=project_ids.get("PR-2026-018") if item_type == "CASE" else None,
+            tool_code=tool_code,
             author=row.get("author"),
             download_count=row.get("download_count", 0),
-            created_at=_parse_dt(row.get("created")) or _parse_dt("2026-09-01 09:00:00"),
+            created_at=created,
+            updated_at=created,
         )
         db.add(item)
         db.flush()
+
         seen = set()
         for tag in row.get("tags", []):
             tag = (tag or "").strip()
@@ -1086,6 +1226,40 @@ def _seed_knowledge(db: Session, project_ids: Dict[str, int]) -> None:
                 continue
             seen.add(tag)
             db.add(KnowledgeTag(knowledge_id=item.id, tag=tag))
+
+        for code in KNOWLEDGE_TOOL_SCENARIOS.get(tool_code or "", ()):
+            db.add(
+                KnowledgeScenarioLink(
+                    knowledge_id=item.id,
+                    scenario_id=scenarios[code].id,
+                    weight=1.0,
+                )
+            )
+        stage_no = tool_stages.get(tool_code or "")
+        wanted_stages = set(KNOWLEDGE_TOOL_EXTRA_STAGES.get(tool_code or "", ()))
+        if stage_no is not None:
+            wanted_stages.add(stage_no)
+        for wanted_stage in sorted(wanted_stages):
+            db.add(
+                KnowledgeWorkflowLink(
+                    knowledge_id=item.id,
+                    stage_no=wanted_stage,
+                    step_no="",
+                    is_primary=wanted_stage == stage_no,
+                )
+            )
+
+        for outcome, note, days_ago in KNOWLEDGE_USAGE_SEED.get(tool_code or "", []):
+            db.add(
+                KnowledgeUsage(
+                    knowledge_id=item.id,
+                    project_id=project_ids.get("PR-2026-018"),
+                    used_by_user_id=admin_id,
+                    used_at=created + timedelta(days=days_ago),
+                    outcome=outcome,
+                    note=note,
+                )
+            )
 
 
 def _seed_design_models(
@@ -1326,7 +1500,8 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_authorization(db, code_to_id, role_ids, user_ids)
     _seed_data_governance(db, code_to_id, user_ids)
     _seed_workflow(db)
-    _seed_tools(db)
+    _seed_knowledge_scenarios(db)
+    _seed_tools(db, user_ids)
     _seed_step_contracts(db)
     _seed_deliverable_definitions(db)
     _seed_benchmarks(db, code_to_id)
@@ -1335,7 +1510,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_workload(db, code_to_id, position_ids, org_ids, user_ids)
     _seed_strategy(db, code_to_id, user_ids, kpi_ids)
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
-    _seed_knowledge(db, project_ids)
+    _seed_knowledge(db, project_ids, user_ids)
     _seed_design_models(db, code_to_id, position_ids)
     _seed_changes(db, code_to_id, user_ids)
     _seed_forms_rules(db, code_to_id)
@@ -1426,6 +1601,7 @@ def seed_reference(db: Session) -> Dict[str, int]:
         _seed_workflow(db)
         created["workflow_steps"] = len(corpus.WORKFLOW)
     if (db.scalar(select(func.count()).select_from(Tool)) or 0) == 0:
+        _seed_knowledge_scenarios(db)
         _seed_tools(db)
         created["tools"] = len(corpus.TOOLS)
     if (db.scalar(select(func.count()).select_from(StepContract)) or 0) == 0:
