@@ -22,6 +22,9 @@ export function toast(msg, isError) {
 let modalGen = 0;
 /** 关闭钩子：confirmDialog / promptDialog 用它把「用户点了关闭」变成取消结果 */
 let modalCloseHandler = null;
+/** 嵌套弹窗栈：例如在立项向导里打开工具详情，关闭工具后应回到向导原状态。 */
+let modalStack = [];
+let closingModal = false;
 
 function resolveModalClose() {
   const handler = modalCloseHandler;
@@ -29,8 +32,63 @@ function resolveModalClose() {
   if (handler) handler();
 }
 
-export function openModal(title, body, foot, wide) {
-  resolveModalClose();
+const MODAL_FIELDS = '#mBody input, #mBody select, #mBody textarea';
+
+/** 打开新弹窗前保存当前弹窗，包含用户已输入但尚未提交的表单值。 */
+function snapshotModal() {
+  const m = document.getElementById('modal');
+  const fields = [];
+  document.querySelectorAll(MODAL_FIELDS).forEach((el, index) => {
+    fields.push({
+      key: el.id || el.name || '',
+      index,
+      value: el.value,
+      checked: el.checked,
+      type: el.type,
+    });
+  });
+  return {
+    title: document.getElementById('mTitle').textContent,
+    body: document.getElementById('mBody').innerHTML,
+    foot: document.getElementById('mFoot').innerHTML,
+    wide: m.classList.contains('wide'),
+    scrollTop: m.scrollTop,
+    fields,
+  };
+}
+
+function restoreModal(saved) {
+  document.getElementById('mTitle').textContent = saved.title;
+  document.getElementById('mBody').innerHTML = saved.body;
+  document.getElementById('mFoot').innerHTML = saved.foot;
+  const m = document.getElementById('modal');
+  m.classList.toggle('wide', saved.wide);
+  const elements = document.querySelectorAll(MODAL_FIELDS);
+  saved.fields.forEach((field) => {
+    const el = (field.key && document.getElementById(field.key)) || elements[field.index];
+    if (!el) return;
+    if (field.type === 'checkbox' || field.type === 'radio') el.checked = field.checked;
+    else el.value = field.value;
+  });
+  m.scrollTop = saved.scrollTop;
+}
+
+/**
+ * 打开模态框。
+ * options.keepPrevious：保留当前弹窗，关闭新弹窗后原样恢复（含输入值）。
+ * options.replace：只替换当前层内容，不改变弹窗栈（用于「加载中 → 内容」）。
+ */
+export function openModal(title, body, foot, wide, options = {}) {
+  const mask = document.getElementById('mask');
+  const isOpen = mask.classList.contains('show');
+  if (options.replace) {
+    // 替换当前层，栈保持不变
+  } else if (options.keepPrevious || modalStack.length) {
+    if (isOpen) modalStack.push(snapshotModal());
+  } else {
+    modalStack = [];
+    resolveModalClose();
+  }
   document.getElementById('mTitle').textContent = title;
   document.getElementById('mBody').innerHTML = body;
   document.getElementById('mFoot').innerHTML = foot ||
@@ -38,15 +96,36 @@ export function openModal(title, body, foot, wide) {
   const m = document.getElementById('modal');
   m.classList.toggle('wide', !!wide);
   m.scrollTop = 0;
-  document.getElementById('mask').classList.add('show');
+  mask.classList.add('show');
   return ++modalGen;
 }
 
 export function closeModal() {
+  if (closingModal) return;
+  closingModal = true;
+  try {
+    if (modalStack.length) {
+      restoreModal(modalStack.pop());
+      modalGen++;
+      resolveModalClose();
+      return;
+    }
+    document.getElementById('mask').classList.remove('show');
+    modalGen++;
+    resolveModalClose();
+    // 让关心 URL 上下文的视图在真正关闭后清理自己的参数
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('pms:modal-closed'));
+  } finally {
+    closingModal = false;
+  }
+}
+
+/** 关闭整个弹窗栈：跨视图导航时使用，避免把底层弹窗又恢复出来。 */
+export function closeAllModals() {
+  modalStack = [];
   document.getElementById('mask').classList.remove('show');
   modalGen++;
   resolveModalClose();
-  // 让关心 URL 上下文的视图在真正关闭后清理自己的参数
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('pms:modal-closed'));
 }
 

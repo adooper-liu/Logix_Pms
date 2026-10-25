@@ -4,7 +4,7 @@
  * readiness 由后端按真实证据计算；人工“跳过”只表示本轮不验证，不计入就绪。
  */
 
-import { esc, dtShort } from '../core/format.js';
+import { esc, dtShort, tipHelp } from '../core/format.js';
 import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
 import { renderAsync, go } from '../core/router.js';
 import { GET, POST, DEL } from '../core/api.js';
@@ -273,9 +273,8 @@ function questionCard({ id, no, title, map, status, answer, chips, extra, action
           <span class="tiny muted">${esc(map)}</span></div>
         <div class="start-q-status">${status || ''}</div>
       </div>
-      <div class="start-q-answer">${answer}</div>
+      <div class="start-q-answer">${chips || answer}</div>
       ${deps ? `<div class="start-deps">${deps}</div>` : ''}
-      ${chips ? `<div class="gap">${chips}</div>` : ''}
       ${extra || ''}
       ${actions ? `<div class="gap mt">${actions}</div>` : ''}
     </div>`;
@@ -444,8 +443,9 @@ function paint(data) {
       'Q8 下一步'),
     status: current ? statusTag(current) : '<span class="tag t-grn">全部完成</span>',
     answer: current
-      ? `全局证据进度：${esc(current.title)}。全局 = 全公司流程/制度/授权/工时/KPI 的证据汇总，`
-        + '不限定某一条试点路径；这里不是项目当前层。'
+      ? `全局证据进度${tipHelp(
+        '全局 = 全公司流程/制度/授权/工时/KPI 的证据汇总，不限定某一条试点路径；'
+        + '这里不是项目当前层。当前阶段和状态见下方「展开当前阶段工作区」。')}`
       : '全局证据进度：九个阶段都已具备或标记为本次不做。',
     extra: current
       ? `<details class="start-subfold" id="pilot-current-stage">
@@ -471,10 +471,11 @@ function paint(data) {
     deps: depsHtml('Q7 证据', '退出门', '下一阶段 / 上线确认',
       '十层单页 / 项目详情'),
     answer: current
-      ? `全局证据阶段退出门：${esc(current.exit_criteria)}`
+      ? (current.next_hint
+        ? `${esc(current.next_hint)}${tipHelp('全局证据阶段退出门：' + current.exit_criteria)}`
+        : `全局证据阶段退出门：${esc(current.exit_criteria)}`)
       : '前 8 个阶段已齐，确认上线后进入日常运营。',
-    extra: `${current && current.next_hint ? `<div class="note mb">${esc(current.next_hint)}</div>` : ''}
-      ${data.skipped_count
+    extra: `${data.skipped_count
         ? `<div class="note mb">${data.skipped_count} 个阶段标了“这次先不做”：不计入完成，也不挡后续。</div>`
         : ''}
       <div class="tiny muted">前 8 个阶段（到“评审与固化”）齐了，第一条流程就能上线；
@@ -545,9 +546,10 @@ function paint(data) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">一条流程的试点路径</span></h2>
-          <div class="desc">先答完 8 个问题，把一条流程从“要什么”走到“下一步”；
-            每个答案都来自系统里已有的证据。</div>
+          <h2>开始使用<span class="module-badge">一条流程的试点路径</span>${tipHelp(
+            '先答完 8 个问题，把一条流程从「要什么」走到「下一步」；每个答案都来自系统里已有的证据。'
+            + '主线：战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本。'
+            + '原则：统一原则、统一基线、分级授权、受控差异。')}</h2>
         </div>
         <div class="gap">
           ${data.pilot_confirmed
@@ -557,8 +559,6 @@ function paint(data) {
             ${data.ready_count}/${data.total} · ${pct}%</span>
         </div>
       </div>
-      <div class="start-chain">战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本</div>
-      <div class="tiny muted" style="margin-top:6px">统一原则 · 统一基线 · 分级授权 · 受控差异</div>
       <div class="pipe" style="margin-top:12px">
         <i class="fill-ok" style="width:${pct}%"></i>
       </div>

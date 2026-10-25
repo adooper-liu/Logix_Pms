@@ -3,9 +3,9 @@
  * 工具箱回答「我该用什么、为什么、怎么验证用对了」；
  * 知识库回答「有没有案例、模板和参考」。两者通过 tool_code 双向连接。
  */
-import { esc, num, CAT_ICON, skeleton, TOOL_LEVEL_TONE, fmtDate, dateShort } from '../core/format.js';
+import { esc, num, CAT_ICON, skeleton, TOOL_LEVEL_TONE, fmtDate, dateShort, tipHelp } from '../core/format.js';
 import {
-  toast, openModal, closeModal, modalAlive, viewEl, on, confirmDialog, promptDialog,
+  toast, openModal, closeModal, closeAllModals, modalAlive, viewEl, on, confirmDialog, promptDialog,
 } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
@@ -51,7 +51,7 @@ on('toolbox.clear', () => {
   RENDERERS.toolbox();
 });
 on('toolbox.clearFilter', () => clearToolboxFilter());
-on('toolbox.open', ({ code }) => openToolByCode(code));
+on('toolbox.open', ({ code, stack }) => openToolByCode(code, stack === '1'));
 on('toolbox.applyStep', ({ code }) => openToolApply(code));
 on('toolbox.applyStepSubmit', ({ code }) => submitToolApply(code));
 on('toolbox.setStatus', (_data, el) => {
@@ -69,13 +69,16 @@ on('toolbox.planTool', ({ code }) => openToolPlan(code));
 on('toolbox.savePlan', ({ code }) => submitToolPlan(code));
 on('toolbox.planStatus', ({ id, status }) => updateToolPlan(Number(id), status));
 on('toolbox.goKnowledge', ({ code }) => {
-  closeModal();
+  closeAllModals();
   go('knowledge', { params: { tool: code, sort: 'match' }, push: true });
 });
-on('toolbox.goWorkflow', () => go('workflow'));
+on('toolbox.goWorkflow', () => {
+  closeAllModals();
+  go('workflow');
+});
 on('toolbox.close', () => closeModal());
 on('toolbox.closeGoWorkflow', () => {
-  closeModal();
+  closeAllModals();
   go('workflow');
 });
 
@@ -166,8 +169,7 @@ function paint(d) {
           level: filter && filter.meta ? filter.meta[hit.tool.code] : null,
         })).join('')
       : '<div class="empty">没有匹配到工具。换一种说法，或清空筛选后浏览全部工具。</div>')
-    : `<div class="note">先描述一个问题，或点选上方快捷痛点。
-        系统会按「问题匹配 + 场景 + 使用证据」排序，而不是让你在 33 张卡片里自己找。</div>`;
+    : `<div class="note">先描述一个问题，或点选上方快捷痛点。</div>`;
 
   const categoryCounts = {};
   (d.groups || []).forEach((group) => {
@@ -243,9 +245,9 @@ function paint(d) {
       <main>
         <section class="card tb-hero">
           <div class="between mb">
-            <div><h3 style="margin:0">① 我遇到了什么问题？</h3>
-              <div class="desc" style="margin:2px 0 0">描述问题或点选痛点，
-                系统按适配度和使用证据推荐，而不是按工具属性分类</div></div>
+            <div><h3 style="margin:0">① 我遇到了什么问题？${
+              tipHelp('描述问题或点选痛点。系统按「问题匹配 + 场景 + 使用证据」排序，'
+                + '而不是按工具属性分类，也不是让你在工具卡里自己找。')}</h3></div>
             <span class="tag t-blu">四象限是辅助筛选</span>
           </div>
           <div class="tb-match">
@@ -257,7 +259,9 @@ function paint(d) {
           </div>
           <div class="tb-chips"><span class="tiny">快捷痛点：</span>${scenarioChips}</div>
           <div class="tb-result-head">
-            <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}</h3>
+            <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}${
+              tipHelp('先描述一个问题，或点选上方快捷痛点。系统会按「问题匹配 + 场景 + 使用证据」'
+                + '排序；没有输入时显示等待状态，不会用默认排序假装已经匹配。')}</h3>
             ${d.match ? `<span class="tiny">已按适配度排序 · ${matchHits.length} 个工具匹配</span>` : ''}
             <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
           </div>
@@ -267,8 +271,9 @@ function paint(d) {
         ${showCatalog ? `
         <section class="card">
           <div class="between mb">
-            <div><h3 style="margin:0">② 全部工具（${catalogHits.length}）</h3>
-              <div class="desc" style="margin:2px 0 0">四象限只用于辅助定位；主排序仍由问题、场景和证据决定</div></div>
+            <div><h3 style="margin:0">② 全部工具（${catalogHits.length}）${
+              tipHelp('四象限是工具天然属性，只用于辅助筛选和缩小范围；'
+                + '主排序仍由问题、场景和使用证据决定。')}</h3></div>
           </div>
           <div class="tb-cards">${catalogCards}</div>
         </section>` : ''}
@@ -381,15 +386,20 @@ function clearToolboxFilter() {
 
 /* -------------------------------------------------- 工具详情 */
 
-async function openToolByCode(code) {
-  const gen = openModal('加载中…', skeleton(4), '', true);
+async function openToolByCode(code, keepPrevious) {
+  // 加载层若嵌套在向导里，关闭后要回到向导；内容返回时只替换加载层，不再压栈。
+  const gen = openModal('加载中…', skeleton(4), '', true, { keepPrevious });
   try {
     const t = await GET('/tools/' + code);
     if (!modalAlive(gen)) return;
     paintTool(t);
   } catch (e) {
     if (modalAlive(gen)) {
-      openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>');
+      openModal(
+        '加载失败',
+        '<div class="errbar"><div>' + esc(e.message) + '</div></div>',
+        '', false, { replace: true },
+      );
     }
   }
 }
@@ -511,7 +521,7 @@ function paintTool(t) {
      ${canArchive ? `<button class="btn btn-g" data-act="toolbox.archiveTool"
        data-code="${esc(t.code)}">归档</button>` : ''}
      <button class="btn btn-g" data-act="toolbox.goKnowledge"
-       data-code="${esc(t.code)}">在知识库查看</button>`, true);
+       data-code="${esc(t.code)}">在知识库查看</button>`, true, { replace: true });
 }
 
 async function openToolApply(code) {

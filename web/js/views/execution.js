@@ -1,5 +1,5 @@
 /* 视图：execution —— 流程实例与任务队列 */
-import { esc, dtShort, emptyRow, skeleton } from '../core/format.js';
+import { esc, dtShort, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, promptDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
@@ -1179,7 +1179,9 @@ async function openTask(taskId, forceManual) {
       : ''}
     <div class="row2">
       <div class="field"><label>流程</label><input value="${esc(task.process_name)}" readonly></div>
-      <div class="field"><label>节点</label>
+      <div class="field"><label>节点${
+        tipHelp('流程设计器发布模型后，实例启动时把节点、表单、规则和分派配置一起快照；'
+          + '之后改设计器不会影响已经启动的实例。')}</label>
         <input value="${esc(task.node_key)} · ${esc(task.task_type_label)}" readonly></div>
     </div>
     <div class="row2">
@@ -1189,7 +1191,9 @@ async function openTask(taskId, forceManual) {
         <input value="${task.actual_minutes} 分钟" readonly></div>
     </div>
     <div class="row2">
-      <div class="field"><label>候选角色 / 泳道</label>
+      <div class="field"><label>候选角色 / 泳道${
+        tipHelp('分派优先级：默认处理人 → 候选角色/限定组织 → 公共队列；'
+          + '节点时限与升级规则覆盖流程默认。')}</label>
         <input value="${esc(task.candidate_role || task.lane || '—')}" readonly></div>
       <div class="field"><label>处理人</label>
         <input value="${esc(task.assignee_name || '公共队列')}" readonly></div>
@@ -1199,7 +1203,9 @@ async function openTask(taskId, forceManual) {
         <textarea readonly>${esc(task.comment || '—')}</textarea></div>` : ''}
     ${canAct && task.status !== 'COMPLETED' ? `
       ${task.next_options.length > 1 ? `
-        <div class="field"><label>分支处理</label>
+        <div class="field"><label>分支处理${
+          tipHelp('自动模式按本节点规则的条件和优先级匹配；显式手动选择下一步时优先于规则。'
+            + '规则目标必须是该节点的出边，否则后端会拒绝。')}</label>
           <select id="exBranchMode" data-act="execution.branchMode">
             <option value="auto" ${manualMode ? '' : 'selected'}>按规则自动</option>
             <option value="manual" ${manualMode ? 'selected' : ''}>手动指定下一步</option>
@@ -1208,7 +1214,9 @@ async function openTask(taskId, forceManual) {
         <div class="field ${manualMode ? '' : 'hide'}" id="exNextWrap"><label>下一步</label>
           <select id="exNext">${options}</select></div>` : ''}
       ${(task.form_schema && task.form_schema.length)
-        ? '<div class="note">表单：' + esc(task.form_name || task.name) + '</div>' +
+        ? '<div class="note">表单：' + esc(task.form_name || task.name) + tipHelp(
+          '表单在「流程执行 → 表单与规则」按流程/节点定义；节点没有专属表单时回退到流程默认表单。'
+          + '实例启动时冻结字段，后续改表单不影响本实例。') + '</div>' +
           renderFormFields(task.form_schema)
         : `<div class="field"><label>表单数据（JSON，可选）</label>
             <textarea id="exForm" placeholder='{"审批意见":"同意","金额":10000}'>{}</textarea></div>`}
@@ -1232,7 +1240,9 @@ async function openTask(taskId, forceManual) {
       <tbody>${eventRows}</tbody>
     </table>
     ${canAct && task.status !== 'COMPLETED'
-      ? '<div class="note">完成后流程会自动推进到下一节点；没有后续节点时实例结束。</div>'
+      ? `<div class="note">完成后流程会自动推进到下一节点；没有后续节点时实例结束。${tipHelp(
+        '表单值会先校验并写入实例变量，再参与后续节点的规则匹配；'
+        + '没有命中规则且存在多个分支时，需要手动指定下一步。')}</div>`
       : suspended
         ? '<div class="note">流程实例已挂起，请先让流程管理科恢复实例。</div>'
         : '<div class="note">只读：任务已指派给其他人，或当前角色没有处理权限。</div>'}`,

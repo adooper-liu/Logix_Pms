@@ -3,7 +3,7 @@
  * 页面首先回答「我现在想解决什么」，而不是展示文件分类。
  * 推荐依据是场景匹配 + 使用证据 + 工作流位置；浏览量只作为阅读统计。
  */
-import { esc, fmtDate, num, skeleton } from '../core/format.js';
+import { esc, fmtDate, num, skeleton, tipHelp } from '../core/format.js';
 import {
   toast, openModal, closeModal, modalAlive, viewEl, on, confirmDialog,
 } from '../core/ui.js';
@@ -307,9 +307,9 @@ function paint(d) {
       <main>
         <section class="card kb-scenario">
           <div class="between mb">
-            <div><h3 style="margin:0">① 我先想解决什么？</h3>
-              <div class="desc" style="margin:2px 0 0">选痛点或描述问题，系统按场景和使用证据推荐，
-                不是让你翻卡片</div></div>
+            <div><h3 style="margin:0">① 我先想解决什么？${
+              tipHelp('选痛点或描述问题。系统按场景匹配 + 使用证据 + 工作流位置推荐，'
+                + '浏览量只作为阅读统计，不是推荐依据。')}</h3></div>
             <span class="tag t-blu">推荐依据：匹配度 + 证据</span>
           </div>
           <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
@@ -325,9 +325,9 @@ function paint(d) {
 
         <section class="card">
           <div class="between mb">
-            <div><h3 style="margin:0">② 全部资源</h3>
-              <div class="desc" style="margin:2px 0 0">知识库只放可参考、可改编的案例、模板、方法与工具指南；
-                强制制度已移到制度中心</div></div>
+            <div><h3 style="margin:0">② 全部资源${
+              tipHelp('知识库只放可参考、可改编的案例、模板、方法与工具指南；'
+                + '强制制度已移到制度中心，避免把「必须遵守」和「可以参考」混在一起。')}</h3></div>
             <div class="gap">
               <select class="sel sel-sm" data-act="knowledge.setStage">
                 <option value="">全部阶段</option>${stageOptions}

@@ -11,6 +11,13 @@ export function esc(s) {
   ));
 }
 
+/** 把长说明收进 ? 提示：悬停或键盘聚焦时显示，减少首屏文字。 */
+export function tipHelp(text, label) {
+  const tip = esc(text);
+  return `<span class="metric-help has-tip tip-inline" data-tip="${tip}"
+    tabindex="0" aria-label="${esc(label || text)}"><i class="q">?</i></span>`;
+}
+
 /** 数值保留 n 位后去掉多余的 0：12.30 → 12.3，12.00 → 12 */
 export function num(v, digits) {
   if (v === null || v === undefined || v === '') return '—';

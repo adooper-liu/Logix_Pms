@@ -222,6 +222,7 @@ button.alert-row:last-child{border-bottom:none}
   border-radius:50%;background:var(--panel-3);color:var(--sub);font-size:9px;font-style:normal;
   line-height:1;flex-shrink:0}
 .metric-help:hover .q,.metric-help:focus .q{background:var(--brand-soft);color:var(--brand)}
+.tip-inline{vertical-align:2px;margin-left:5px}
 
 /* 可点击指标卡（执行页统计等） */
 button.kpi{border:1px solid var(--line);font-family:inherit;text-align:left;

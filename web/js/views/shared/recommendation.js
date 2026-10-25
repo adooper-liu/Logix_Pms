@@ -5,8 +5,9 @@
  */
 import { esc, CAT_ICON } from '../../core/format.js';
 
-export function renderRecommendation(r) {
+export function renderRecommendation(r, nested = false) {
   const conf = Math.round(r.confidence * 100);
+  const stackAttr = nested ? ' data-stack="1"' : '';
   return `
     <div class="note mb">
       <b style="font-size:14px">${esc(r.headline)}</b>
@@ -33,7 +34,7 @@ export function renderRecommendation(r) {
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       ${r.recommended_tools.map((t) => '<button type="button" class="tag ' +
         ({ DIAGNOSE: 't-blu', DESIGN: 't-red', DEPLOY: 't-yel', MONITOR: 't-grn' }[t.category] || 't-blu') +
-        ' tag-button" data-act="toolbox.open" data-code="' + esc(t.code) + '">' +
+        ' tag-button" data-act="toolbox.open" data-code="' + esc(t.code) + '"' + stackAttr + '>' +
         (CAT_ICON[t.category] || '') + ' ' + esc(t.name) + '</button>').join('')}
     </div>
 
