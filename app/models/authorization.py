@@ -116,5 +116,14 @@ class AuthorizationException(Base):
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     decision_note: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 例外到期后的复盘：谁在什么时候复盘、结论是什么
+    review_due_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL", name="fk_auth_exception_reviewed_by"),
+        nullable=True,
+        index=True,
+    )
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

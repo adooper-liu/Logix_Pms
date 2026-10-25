@@ -111,6 +111,10 @@ class AuthorizationDecisionIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=400)
 
 
+class AuthorizationReviewIn(BaseModel):
+    note: str = Field(min_length=1)
+
+
 class AuthorizationExceptionOut(ORMModel):
     id: int
     code: str
@@ -134,6 +138,11 @@ class AuthorizationExceptionOut(ORMModel):
     decided_at: Optional[UtcDateTime] = None
     decision_note: Optional[str] = None
     expires_at: Optional[UtcDateTime] = None
+    review_due_at: Optional[date] = None
+    reviewed_at: Optional[UtcDateTime] = None
+    reviewed_by_user_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    review_note: Optional[str] = None
     created_at: UtcDateTime
 
 

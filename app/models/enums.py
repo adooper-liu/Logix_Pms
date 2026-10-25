@@ -387,6 +387,16 @@ class ProcessDocumentCategory(str, Enum):
     OTHER = "OTHER"
 
 
+class DocumentLevel(str, Enum):
+    """制度层级：从集团制度到流程级文件。"""
+
+    GROUP = "GROUP"  # 集团制度
+    COMPANY = "COMPANY"  # 法人/公司制度
+    PLANT = "PLANT"  # 工厂制度
+    LINE = "LINE"  # 产线/车间规定
+    PROCESS = "PROCESS"  # 流程级 SOP/表单
+
+
 class OrgUnitType(str, Enum):
     """组织单元类型。编码由系统内维护，后续可接 ERP/HR 同步。"""
 

@@ -11,6 +11,7 @@ from app.core.timeutil import UtcDateTime
 from app.models.enums import (
     AssetVariationPolicy,
     DeliverableStatus,
+    DocumentLevel,
     ProcessDocumentCategory,
 )
 from app.schemas.common import ORMModel
@@ -59,6 +60,14 @@ class ProcessDocumentOut(ORMModel):
     category: str
     category_label: Optional[str] = None
     description: Optional[str] = None
+    level: str = DocumentLevel.PROCESS.value
+    level_label: Optional[str] = None
+    legal_entity: Optional[str] = None
+    plant: Optional[str] = None
+    product_family: Optional[str] = None
+    language: str = "zh-CN"
+    control_points: Optional[str] = None
+    exception_terms: Optional[str] = None
     owner: Optional[str] = None
     owner_user_id: Optional[int] = None
     org_unit_id: Optional[int] = Field(default=None, description="NULL 表示集团通用")
@@ -91,6 +100,13 @@ class ProcessDocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     category: ProcessDocumentCategory = ProcessDocumentCategory.SOP
     description: Optional[str] = None
+    level: DocumentLevel = DocumentLevel.PROCESS
+    legal_entity: Optional[str] = Field(default=None, max_length=128)
+    plant: Optional[str] = Field(default=None, max_length=128)
+    product_family: Optional[str] = Field(default=None, max_length=128)
+    language: str = Field(default="zh-CN", max_length=16)
+    control_points: Optional[str] = None
+    exception_terms: Optional[str] = None
     owner: Optional[str] = Field(default=None, max_length=64)
     owner_user_id: Optional[int] = None
     org_unit_id: Optional[int] = Field(default=None, description="NULL 表示集团通用")
@@ -105,6 +121,13 @@ class ProcessDocumentUpdate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=200)
     category: Optional[ProcessDocumentCategory] = None
     description: Optional[str] = None
+    level: Optional[DocumentLevel] = None
+    legal_entity: Optional[str] = Field(default=None, max_length=128)
+    plant: Optional[str] = Field(default=None, max_length=128)
+    product_family: Optional[str] = Field(default=None, max_length=128)
+    language: Optional[str] = Field(default=None, max_length=16)
+    control_points: Optional[str] = None
+    exception_terms: Optional[str] = None
     owner: Optional[str] = Field(default=None, max_length=64)
     owner_user_id: Optional[int] = None
     org_unit_id: Optional[int] = None
@@ -134,6 +157,7 @@ class ProcessDocumentMeta(BaseModel):
     status_labels: Dict[str, str]
     transitions: Dict[str, List[str]]
     variation_policy_labels: Dict[str, str]
+    level_labels: Dict[str, str] = {}
 
 
 class EffectiveDocumentOut(BaseModel):

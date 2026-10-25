@@ -41,6 +41,16 @@ class ProcessDocument(Base):
     title: Mapped[str] = mapped_column(String(200))
     category: Mapped[str] = mapped_column(String(24), index=True)  # ProcessDocumentCategory
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 制度层级与适用范围：org_unit 负责组织范围，这里补充法人/工厂/产品族/语言
+    level: Mapped[str] = mapped_column(
+        String(16), default="PROCESS", server_default="PROCESS", index=True
+    )
+    legal_entity: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    plant: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    product_family: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    language: Mapped[str] = mapped_column(String(16), default="zh-CN", server_default="zh-CN")
+    control_points: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exception_terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 可选的活动级绑定：NULL = 流程级标准；非空 = 仅针对该 BPMN 节点
     node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
