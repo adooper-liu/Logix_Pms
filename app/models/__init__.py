@@ -15,6 +15,7 @@ from app.models.change import ProcessChangeRequest
 from app.models.collaboration import ProcessComment
 from app.models.compensation import CompensationAction, CompensationRecord
 from app.models.data_governance import DataDomain, DataFlow
+from app.models.decision import DecisionTable
 from app.models.deliverable import (
     DeliverableDefinition,
     DeliverableInstance,
@@ -207,6 +208,7 @@ __all__ = [
     "ReplicationPack",
     "DataDomain",
     "DataFlow",
+    "DecisionTable",
     # 枚举
     "Methodology",
     "ProjectStatus",

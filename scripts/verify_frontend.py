@@ -1458,6 +1458,7 @@ def main() -> int:
             assert "评论" in page.inner_text("#view"), "设计器缺少评论入口"
             assert "路径模拟" in page.inner_text("#view"), "设计器缺少路径模拟入口"
             assert "补偿动作" in page.inner_text("#view"), "设计器缺少补偿动作入口"
+            assert "决策表" in page.inner_text("#view"), "设计器缺少决策表入口"
             page.fill("#bpFlowLabel", "E2E标签")
             page.fill("#bpFlowCondition", "E2E条件")
             page.fill("#bpFlowProb", "0.55")

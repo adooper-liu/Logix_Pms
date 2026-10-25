@@ -24,6 +24,7 @@ import { createRaci } from './raci.js';
 import { createComments } from './comments.js';
 import { createSimulation } from './simulation.js';
 import { createCompensation } from './compensation.js';
+import { createDecisions } from './decisions.js';
 
 /** 深拷贝模型，用作「服务端已确认」的回滚基准。 */
 function cloneModel(model) {
@@ -59,6 +60,7 @@ const raci = createRaci(ctx);
 const comments = createComments(ctx);
 const simulation = createSimulation(ctx);
 const compensation = createCompensation();
+const decisions = createDecisions();
 
 Object.assign(ctx, {
   renderSelection: panels.renderSelection,
@@ -173,6 +175,7 @@ function paintDesigner() {
           <button class="btn-sm" data-act="designer.comments">评论</button>
           <button class="btn-sm" data-act="designer.simulate">路径模拟</button>
           <button class="btn-sm" data-act="designer.compensation">补偿动作</button>
+          <button class="btn-sm" data-act="designer.decisions">决策表</button>
           ${editable ? '<button class="btn-sm" data-act="designer.addLane">+ 泳道</button>' : ''}
           <button class="btn-sm" id="bpmnPropsToggle"
             data-act="designer.sidebar" data-tab="props">属性</button>
@@ -449,6 +452,8 @@ on('designer.comments', () => comments.open());
 on('designer.simulate', () => simulation.open());
 on('designer.compensation', () => compensation.open());
 on('designer.saveCompensation', () => compensation.save());
+on('designer.decisions', () => decisions.open());
+on('designer.evaluateDecision', () => decisions.evaluate());
 on('designer.addComment', ({ element, name, type }) => comments.add(element, name, type));
 on('designer.resolveComment', ({ id }) => comments.resolve(Number(id)));
 on('designer.shortcuts', () => {  openModal('画布快捷键', `

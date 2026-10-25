@@ -17,6 +17,7 @@ from app.api.v1 import (
     compensation,
     dashboard,
     data_governance,
+    decisions,
     deliverables,
     designer,
     execution,
@@ -86,6 +87,7 @@ protected.include_router(raci.router)
 protected.include_router(replication.router)
 protected.include_router(authorization.router)
 protected.include_router(data_governance.router)
+protected.include_router(decisions.router)
 protected.include_router(startup.router)
 protected.include_router(pilot.router)
 protected.include_router(knowledge.router)
