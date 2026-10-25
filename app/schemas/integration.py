@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.core.timeutil import UtcDateTime
+from app.core.timeutil import UtcDateTime, UtcDateTimeIn
 
 
 class IntegrationEndpointCreate(BaseModel):
@@ -114,7 +115,9 @@ class InboundWebhookCreatedOut(InboundWebhookOut):
 
 class InboundRequest(BaseModel):
     event_id: str = Field(max_length=128, description="调用方事件 id，用于幂等")
-    action: str = Field(max_length=32, description="start_instance / complete_task")
+    action: str = Field(
+        max_length=32, description="start_instance / complete_task / record_worklog"
+    )
     process_id: Optional[int] = None
     project_id: Optional[int] = None
     variables: Optional[Dict] = None
@@ -123,6 +126,17 @@ class InboundRequest(BaseModel):
     form_data: Optional[Dict] = None
     next_node_key: Optional[str] = Field(default=None, max_length=64)
     comment: Optional[str] = None
+
+    # record_worklog：MES/HR/OA 回传实际工时
+    effort_minutes: Optional[float] = Field(default=None, ge=0, le=10080)
+    work_type: Optional[str] = Field(default=None, max_length=16)
+    started_at: Optional[UtcDateTimeIn] = None
+    ended_at: Optional[UtcDateTimeIn] = None
+
+    # record_kpi：ERP/MES/BI 回传指标数据点
+    kpi_id: Optional[int] = None
+    period: Optional[date] = None
+    value: Optional[float] = None
 
 
 class InboundResult(BaseModel):

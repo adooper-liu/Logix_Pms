@@ -557,6 +557,7 @@ def main() -> int:
             assert "概览" in page.inner_text("#mBody"), "详情弹窗未渲染"
             assert "改善项目卡" in page.inner_text("#mBody"), "项目概览缺少改善项目卡"
             assert "门禁签收" in page.inner_text("#mFoot"), "项目详情缺少门禁签收入口"
+            assert "复制资产包" in page.inner_text("#mFoot"), "项目详情缺少复制资产包入口"
             for label, marker in [
                 ("KPI 追踪", "指标"),
                 ("工作流推进", "阶段1"),
@@ -1770,6 +1771,9 @@ def main() -> int:
             page.wait_for_timeout(1200)
             row = page.locator('#view tr:has-text("自检用标准工时")').first
             assert "已验证" in row.inner_text(), "审核通过后状态不是已验证"
+            workload_view = page.inner_text("#view")
+            assert "标准 vs 实际" in workload_view, "工作量看板缺少标准 vs 实际"
+            assert "瓶颈岗位" in workload_view, "工作量看板缺少瓶颈岗位"
 
         # 数据治理：数据域/数据流登记与缺口概览
         def data_governance_view() -> None:

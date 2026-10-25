@@ -56,7 +56,12 @@ def hook(client, manager_client):
             "code": code,
             "name": "ERP 测试入站",
             "run_as_user_id": manager_id,
-            "actions": ["start_instance", "complete_task"],
+            "actions": [
+                "start_instance",
+                "complete_task",
+                "record_worklog",
+                "record_kpi",
+            ],
         },
     )
     assert response.status_code == 201, response.text
@@ -274,6 +279,66 @@ def test_complete_task_via_inbound(anon_client, manager_client, hook):
         assert still[0]["node_key"] == "n2", "重复完成不应再次推进流程"
     finally:
         manager_client.delete(f"{API}/execution/instances/{iid}")
+
+
+def test_record_worklog_via_inbound(anon_client, manager_client, hook):
+    process_id = _process_id(manager_client)
+    started = _post(
+        anon_client,
+        hook["code"],
+        {"event_id": "evt-start-worklog", "action": "start_instance", "process_id": process_id},
+        hook["secret"],
+    )
+    assert started.status_code == 200, started.text
+    iid = started.json()["instance_id"]
+    try:
+        task = manager_client.get(
+            f"{API}/execution/tasks", params={"instance_id": iid, "only_open": True}
+        ).json()[0]
+        body = {
+            "event_id": "evt-worklog",
+            "action": "record_worklog",
+            "task_id": task["id"],
+            "effort_minutes": 37.5,
+            "work_type": "HANDLE",
+            "comment": "MES 回传实际工时",
+        }
+        recorded = _post(anon_client, hook["code"], body, hook["secret"])
+        assert recorded.status_code == 200, recorded.text
+        assert "37.5" in recorded.json()["message"]
+
+        rows = manager_client.get(f"{API}/execution/tasks/{task['id']}/worklogs").json()
+        assert any(row["effort_minutes"] == 37.5 for row in rows)
+        detail = manager_client.get(f"{API}/execution/tasks/{task['id']}").json()
+        assert detail["actual_minutes"] >= 37.5
+
+        again = _post(anon_client, hook["code"], body, hook["secret"])
+        assert again.json()["duplicate"] is True
+        rows = manager_client.get(f"{API}/execution/tasks/{task['id']}/worklogs").json()
+        assert sum(1 for row in rows if row["effort_minutes"] == 37.5) == 1
+    finally:
+        manager_client.delete(f"{API}/execution/instances/{iid}")
+
+
+def test_record_kpi_via_inbound(anon_client, manager_client, hook):
+    kpi = manager_client.get(f"{API}/monitor/kpis").json()[0]
+    body = {
+        "event_id": "evt-kpi",
+        "action": "record_kpi",
+        "kpi_id": kpi["id"],
+        "period": "2026-10-01",
+        "value": 42.5,
+        "comment": "ERP 回传",
+    }
+    recorded = _post(anon_client, hook["code"], body, hook["secret"])
+    assert recorded.status_code == 200, recorded.text
+    assert "42.5" in recorded.json()["message"]
+
+    rows = manager_client.get(f"{API}/monitor/kpis/{kpi['id']}/records").json()
+    assert any(row["period"] == "2026-10-01" and row["value"] == 42.5 for row in rows)
+
+    again = _post(anon_client, hook["code"], body, hook["secret"])
+    assert again.json()["duplicate"] is True
 
 
 def test_rotate_and_deactivate(anon_client, manager_client, hook):

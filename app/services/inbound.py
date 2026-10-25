@@ -25,9 +25,10 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import utcnow
 from app.models.enums import Role
 from app.models.integration import InboundEvent, InboundWebhook
+from app.models.monitor import KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
 from app.models.user import User
-from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest
+from app.schemas.execution import InstanceStartRequest, TaskCompleteRequest, WorklogCreate
 from app.schemas.integration import (
     InboundRequest,
     InboundResult,
@@ -41,6 +42,8 @@ from app.services import execution_flow as flow_service
 ACTIONS = {
     "start_instance": "启动流程",
     "complete_task": "完成任务",
+    "record_worklog": "回传实际工时",
+    "record_kpi": "回传指标数据点",
 }
 MANAGER_ROLES = {Role.ADMIN.value, Role.MANAGER.value}
 MAX_SKEW_SECONDS = 300
@@ -194,6 +197,81 @@ def _dispatch(
             instance_code=task.instance.code,
             task_id=task.id,
             task_status=task.status,
+        )
+
+    if payload.action == "record_worklog":
+        if payload.task_id is None:
+            raise HTTPException(status_code=400, detail="回传工时需要 task_id")
+        task = execution_service.get_task(db, payload.task_id)
+        if hook.process_id and task.instance.process_id != hook.process_id:
+            raise HTTPException(status_code=403, detail="该入站 Webhook 只能操作指定流程")
+        worklog = execution_service.record_worklog(
+            db,
+            task,
+            run_as,
+            WorklogCreate(
+                work_type=payload.work_type or "HANDLE",
+                effort_minutes=payload.effort_minutes,
+                started_at=payload.started_at,
+                ended_at=payload.ended_at,
+                note=payload.comment,
+            ),
+        )
+        audit_service.record(
+            db,
+            run_as,
+            "CREATE",
+            "task_worklog",
+            worklog.id,
+            f"入站 Webhook {hook.code} 回传任务 {task.name} 工时 {worklog.effort_minutes} 分钟",
+        )
+        return InboundResult(
+            action=payload.action,
+            instance_id=task.instance_id,
+            instance_code=task.instance.code,
+            task_id=task.id,
+            task_status=task.status,
+            message=f"登记工时 {worklog.effort_minutes} 分钟",
+        )
+
+    if payload.action == "record_kpi":
+        if payload.kpi_id is None or payload.period is None or payload.value is None:
+            raise HTTPException(status_code=400, detail="回传指标需要 kpi_id、period 与 value")
+        kpi = db.get(KpiDefinition, payload.kpi_id)
+        if kpi is None:
+            raise HTTPException(status_code=404, detail="KPI 不存在")
+        existing = db.scalar(
+            select(KpiRecord).where(
+                KpiRecord.kpi_id == payload.kpi_id,
+                KpiRecord.period == payload.period,
+                KpiRecord.project_id == payload.project_id,
+            )
+        )
+        if existing is not None:
+            existing.value = payload.value
+            existing.note = payload.comment
+            row = existing
+        else:
+            row = KpiRecord(
+                kpi_id=payload.kpi_id,
+                period=payload.period,
+                value=payload.value,
+                project_id=payload.project_id,
+                note=payload.comment,
+            )
+            db.add(row)
+        db.flush()
+        audit_service.record(
+            db,
+            run_as,
+            "UPDATE" if existing is not None else "CREATE",
+            "kpi_record",
+            row.id,
+            f"入站 Webhook {hook.code} 回传 {kpi.code} {payload.period} 数据点 {payload.value}",
+        )
+        return InboundResult(
+            action=payload.action,
+            message=f"{kpi.code} {payload.period} = {payload.value}",
         )
 
     raise HTTPException(status_code=400, detail=f"不支持的入站动作：{payload.action}")

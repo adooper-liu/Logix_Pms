@@ -267,6 +267,55 @@ const renderMonitor = () => {
           <td>${hours(row.effort_minutes)}</td>
         </tr>`).join('') || emptyRow(4, '本期还没有实际工时记录');
 
+      const stdByActivity = {};
+      wl.standards.filter((row) => row.status === 'VERIFIED').forEach((row) => {
+        const key = row.activity_id || 0;
+        const bucket = stdByActivity[key] || (stdByActivity[key] = {
+          code: row.activity_code || '未关联活动',
+          name: row.activity_name || '',
+          demand: 0,
+        });
+        bucket.demand += row.demand_minutes || 0;
+      });
+      const actualByActivity = {};
+      wl.actual.forEach((row) => {
+        const key = row.activity_id || 0;
+        const bucket = actualByActivity[key] || (actualByActivity[key] = {
+          code: row.activity_code || '未关联活动',
+          name: row.activity_name || '',
+          actual: 0,
+        });
+        bucket.actual += row.effort_minutes || 0;
+      });
+      const compareKeys = [...new Set([
+        ...Object.keys(stdByActivity), ...Object.keys(actualByActivity),
+      ])];
+      const compareRows = compareKeys.map((key) => {
+        const std = stdByActivity[key] || { code: actualByActivity[key].code, name: actualByActivity[key].name, demand: 0 };
+        const act = actualByActivity[key] || { actual: 0 };
+        const variance = act.actual - std.demand;
+        const rate = std.demand ? act.actual / std.demand : null;
+        return { ...std, actual: act.actual, variance, rate };
+      }).sort((a, b) => (b.variance - a.variance));
+      const compareHtml = compareRows.map((row) => `
+        <tr>
+          <td><b>${esc(row.code)}</b> ${esc(row.name)}</td>
+          <td>${hours(row.demand)}</td>
+          <td>${hours(row.actual)}</td>
+          <td><span class="tag ${row.variance > 0 ? 't-red' : 't-grn'}">${
+            row.variance > 0 ? '+' : ''}${hours(row.variance)}</span></td>
+          <td>${row.rate === null ? '—' : num(row.rate * 100, 1) + '%'}</td>
+        </tr>`).join('') || emptyRow(5, '本期没有可比较的工时数据');
+      const bottlenecks = wl.capacity.filter((row) =>
+        (row.utilization !== null && row.utilization > 1) || row.gap_minutes < 0);
+      const bottleneckRows = bottlenecks.map((row) => `
+        <tr class="is-risk">
+          <td>${esc(row.org_unit_name || '—')}</td>
+          <td>${esc(row.position_name || '—')}</td>
+          <td>${hours(row.gap_minutes)}</td>
+          <td>${row.utilization === null ? '—' : num(row.utilization * 100, 1) + '%'}</td>
+        </tr>`).join('') || emptyRow(4, '没有超出可用工时的岗位');
+
       const boundaryNote = (state.workloadMeta && state.workloadMeta.boundary_note) || '';
       const workloadPane = `
         ${boundaryNote ? `<div class="note mb">${esc(boundaryNote)}</div>` : ''}
@@ -308,6 +357,33 @@ const renderMonitor = () => {
             <table class="tbl">
               <thead><tr><th>活动</th><th>岗位</th><th>任务数</th><th>实际（h）</th></tr></thead>
               <tbody>${actualRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="grid g2">
+          <div class="card">
+            <div class="between mb">
+              <h3 style="margin:0">标准 vs 实际（按活动）</h3>
+              <span class="tag ${compareRows.some((row) => row.variance > 0) ? 't-yel' : 't-grn'}">
+                超标准 ${compareRows.filter((row) => row.variance > 0).length} 个活动</span>
+            </div>
+            <div class="desc">按已验证标准工时汇总；实际来自任务工时记录，差值为正表示实际超出标准</div>
+            <table class="tbl">
+              <thead><tr><th>活动</th><th>标准（h）</th><th>实际（h）</th>
+                <th>差异（h）</th><th>实际/标准</th></tr></thead>
+              <tbody>${compareHtml}</tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="between mb">
+              <h3 style="margin:0">瓶颈岗位（${bottlenecks.length}）</h3>
+              <span class="tag ${bottlenecks.length ? 't-red' : 't-grn'}">${
+                bottlenecks.length ? '需关注' : '负荷平衡'}</span>
+            </div>
+            <div class="desc">需求超过可用工时，或缺口为负的岗位；优先做派工均衡或产能补充</div>
+            <table class="tbl">
+              <thead><tr><th>组织</th><th>岗位</th><th>缺口（h）</th><th>负荷率</th></tr></thead>
+              <tbody>${bottleneckRows}</tbody>
             </table>
           </div>
         </div>`;
