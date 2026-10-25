@@ -42,6 +42,12 @@ class WorkMeasurementStandard(Base):
         ForeignKey("process_arch.id", ondelete="CASCADE", name="fk_wms_activity"),
         index=True,
     )
+    # 可选绑定到 L5 任务；绑定后 L4 标准工时可由任务汇总
+    task_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_task_definition.id", ondelete="SET NULL", name="fk_wms_task"),
+        nullable=True,
+        index=True,
+    )
     position_id: Mapped[int] = mapped_column(
         ForeignKey("position.id", ondelete="RESTRICT", name="fk_wms_position"),
         index=True,
@@ -96,6 +102,9 @@ class WorkMeasurementStandard(Base):
 
     activity: Mapped["ProcessArch"] = relationship(  # noqa: F821
         "ProcessArch", foreign_keys=[activity_id]
+    )
+    task: Mapped[Optional["ProcessTaskDefinition"]] = relationship(  # noqa: F821
+        "ProcessTaskDefinition", foreign_keys=[task_id]
     )
     position: Mapped["Position"] = relationship("Position")  # noqa: F821
     org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821

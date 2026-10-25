@@ -16,6 +16,7 @@ class WorkMeasurementStandardCreate(BaseModel):
     code: Optional[str] = Field(default=None, max_length=48)
     name: str = Field(max_length=160)
     activity_id: int
+    task_id: Optional[int] = None
     position_id: int
     org_unit_id: Optional[int] = None
 
@@ -36,6 +37,7 @@ class WorkMeasurementStandardUpdate(BaseModel):
     code: Optional[str] = Field(default=None, max_length=48)
     name: Optional[str] = Field(default=None, max_length=160)
     activity_id: Optional[int] = None
+    task_id: Optional[int] = None
     position_id: Optional[int] = None
     org_unit_id: Optional[int] = None
     method_description: Optional[str] = None
@@ -57,6 +59,9 @@ class WorkMeasurementStandardOut(ORMModel):
     activity_id: int
     activity_code: Optional[str] = None
     activity_name: Optional[str] = None
+    task_id: Optional[int] = None
+    task_code: Optional[str] = None
+    task_name: Optional[str] = None
     position_id: int
     position_name: Optional[str] = None
     org_unit_id: Optional[int] = None

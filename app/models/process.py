@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
     JSON,
@@ -21,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.core.timeutil import utcnow
+
+if TYPE_CHECKING:
+    from app.models.process_task import ProcessTaskDefinition
 
 
 class ProcessArch(Base):
@@ -94,6 +97,13 @@ class ProcessArch(Base):
         cascade="all, delete-orphan",
         order_by="ProcessNode.sequence_order",
         foreign_keys="ProcessNode.process_id",
+    )
+    task_definitions: Mapped[List["ProcessTaskDefinition"]] = relationship(
+        "ProcessTaskDefinition",
+        back_populates="activity",
+        cascade="all, delete-orphan",
+        order_by="ProcessTaskDefinition.sort_order, ProcessTaskDefinition.id",
+        foreign_keys="ProcessTaskDefinition.activity_id",
     )
     edges: Mapped[List["ProcessEdge"]] = relationship(
         "ProcessEdge",
