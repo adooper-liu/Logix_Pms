@@ -162,6 +162,12 @@ class DeliverableVersionOut(ORMModel):
     download_url: Optional[str] = Field(
         default=None, description="已上传文件时的下载地址；外部引用只有 file_ref"
     )
+    preview_url: Optional[str] = Field(
+        default=None, description="浏览器可内联预览时的地址（PDF/图片/文本）"
+    )
+    preview_kind: Optional[str] = Field(
+        default=None, description="PDF / IMAGE / TEXT；为空表示暂不支持预览"
+    )
     author: Optional[str] = None
     reviewer: Optional[str] = None
     approver: Optional[str] = None

@@ -37,7 +37,8 @@ async function request(path, options, raw) {
 
   let res;
   try {
-    res = await fetch(API_BASE + path, opts);
+    const url = path.startsWith(API_BASE + '/') ? path : API_BASE + path;
+    res = await fetch(url, opts);
   } catch (e) {
     throw new Error('无法连接后端服务，请确认 uvicorn 正在运行：' + e.message);
   }
@@ -76,6 +77,12 @@ export const DEL = (p) => api(p, { method: 'DELETE' });
 /** multipart 上传：body 必须是 FormData */
 export const POST_FORM = (p, formData) =>
   request(p, { method: 'POST', body: formData }, false);
+
+/** 带鉴权获取二进制内容，供预览使用（不触发下载） */
+export async function fetchBlob(path) {
+  const res = await request(path, {}, true);
+  return res.blob();
+}
 
 /** 带鉴权下载并触发浏览器保存；文件名优先取响应头，其次用 fallback */
 export async function download(path, fallback) {

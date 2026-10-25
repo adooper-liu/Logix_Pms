@@ -49,6 +49,8 @@ class ToolTemplateVersionOut(ORMModel):
     storage_backend: Optional[str] = None
     has_file: bool = False
     download_url: Optional[str] = None
+    preview_url: Optional[str] = None
+    preview_kind: Optional[str] = None
     placeholders: List[PlaceholderSpec] = []
     base_version_id: Optional[int] = None
     created_by: Optional[str] = None

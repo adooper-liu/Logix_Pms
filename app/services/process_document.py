@@ -39,6 +39,7 @@ from app.schemas.process_document import (
 from app.services import deliverable as deliverable_service
 from app.services import org_scope, process_scope
 from app.services import org_unit as org_service
+from app.services import preview as preview_service
 from app.services import process_model as model_service
 from app.services import storage as storage_service
 
@@ -832,6 +833,9 @@ def _source_label(db: Session, version_id: Optional[int]) -> Optional[str]:
 
 def version_out(db: Session, version: ProcessDocumentVersion) -> ProcessDocumentVersionOut:
     has_file = bool(version.storage_key)
+    preview_kind = (
+        preview_service.preview_kind(version.file_name, version.mime_type) if has_file else None
+    )
     source_base = (
         db.get(ProcessDocumentVersion, version.source_base_version_id)
         if version.source_base_version_id
@@ -857,6 +861,13 @@ def version_out(db: Session, version: ProcessDocumentVersion) -> ProcessDocument
             if has_file
             else None
         ),
+        preview_url=(
+            f"{settings.api_prefix}/process-documents/{version.document_id}"
+            f"/versions/{version.id}/preview"
+            if preview_kind
+            else None
+        ),
+        preview_kind=preview_kind,
         base_version_id=version.base_version_id,
         source_deliverable_version_id=version.source_deliverable_version_id,
         source_label=_source_label(db, version.source_deliverable_version_id),

@@ -32,6 +32,8 @@ class ProcessDocumentVersionOut(ORMModel):
     storage_backend: Optional[str] = None
     has_file: bool = False
     download_url: Optional[str] = None
+    preview_url: Optional[str] = None
+    preview_kind: Optional[str] = None
     base_version_id: Optional[int] = None
     source_deliverable_version_id: Optional[int] = None
     source_label: Optional[str] = Field(

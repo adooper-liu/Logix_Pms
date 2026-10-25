@@ -386,6 +386,38 @@ def test_metadata_only_version_has_no_download(client):
     assert r.status_code == 404
 
 
+def test_pdf_preview_is_inline_and_office_requires_download(client):
+    project = _create_project(client)
+    instance = _instance(client, project["id"], "2.2")
+    pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
+
+    uploaded = _upload(client, instance["id"], "现状说明.pdf", pdf)
+    assert uploaded.status_code == 201, uploaded.text
+    version = uploaded.json()
+    assert version["preview_kind"] == "PDF"
+    assert version["preview_url"].endswith(
+        f"/deliverables/{instance['id']}/versions/{version['id']}/preview"
+    )
+
+    preview = client.get(f"{API}/deliverables/{instance['id']}/versions/{version['id']}/preview")
+    assert preview.status_code == 200
+    assert preview.content == pdf
+    assert preview.headers["content-type"].startswith("application/pdf")
+    assert preview.headers["content-disposition"].startswith("inline;")
+    assert preview.headers["x-content-type-options"] == "nosniff"
+
+    office = _upload(client, instance["id"], "现状说明.docx", XLSX_BYTES)
+    assert office.status_code == 201, office.text
+    office_version = office.json()
+    assert office_version["preview_kind"] is None
+    assert office_version["preview_url"] is None
+    blocked = client.get(
+        f"{API}/deliverables/{instance['id']}/versions/{office_version['id']}/preview"
+    )
+    assert blocked.status_code == 415
+    assert "不支持在线预览" in blocked.json()["detail"]
+
+
 def test_upload_rejects_extension_and_magic_mismatch(client):
     project = _create_project(client)
     instance = _instance(client, project["id"], "2.2")

@@ -40,6 +40,7 @@ from app.schemas.tool_template import (
 from app.services import deliverable as deliverable_service
 from app.services import knowledge_match
 from app.services import org_unit as org_service
+from app.services import preview as preview_service
 from app.services import storage as storage_service
 
 FORMAT_LABELS: Dict[str, str] = {
@@ -480,6 +481,9 @@ def resolve_context(
 
 def version_out(version: ToolTemplateVersion) -> ToolTemplateVersionOut:
     has_file = bool(version.storage_key)
+    preview_kind = (
+        preview_service.preview_kind(version.file_name, version.mime_type) if has_file else None
+    )
     return ToolTemplateVersionOut(
         id=version.id,
         template_id=version.template_id,
@@ -499,6 +503,13 @@ def version_out(version: ToolTemplateVersion) -> ToolTemplateVersionOut:
             if has_file
             else None
         ),
+        preview_url=(
+            f"{settings.api_prefix}/tool-templates/{version.template_id}"
+            f"/versions/{version.id}/preview"
+            if preview_kind
+            else None
+        ),
+        preview_kind=preview_kind,
         placeholders=version.placeholders or [],
         base_version_id=version.base_version_id,
         created_by=version.created_by,

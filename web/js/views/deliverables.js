@@ -17,6 +17,7 @@ import { renderAsync, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, PATCH, POST, POST_FORM, download } from '../core/api.js';
 import { openDocumentCopy, openTemplateCopy } from '../core/template-copy.js';
+import { openPreview } from '../core/preview.js';
 
 // 这两步的产出天然就是流程模型；其他交付物不接受模型来源。
 const MODEL_LINK_STEPS = new Set(['2.1', '3.2']);
@@ -41,6 +42,10 @@ on('dlv.openModel', ({ process }) => {
 });
 on('dlv.download', ({ id, version, label }) =>
   dlDeliverableVersion(Number(id), Number(version), label));
+on('dlv.preview', ({ url, kind, label }) => {
+  openPreview(url, kind, label).catch((e) => toast(e.message, true));
+});
+on('dlv.printList', () => printDeliverables());
 on('dlv.close', () => closeModal());
 on('dlv.submitUpload', ({ instance }) => submitDeliverableUpload(Number(instance)));
 on('dlv.transition', ({ id, version, target }) =>
@@ -215,10 +220,13 @@ function paintProjectTab() {
       <div class="between mb">
         <div><h2>项目交付物</h2>
           <div class="desc" style="margin:0">每个标准步骤要产出什么、谁负责、当前是哪一版，都在这里</div></div>
-        <select class="sel" data-act="dlv.project">
-          ${projects.map((p) => `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>
-            ${esc(p.code)} · ${esc(p.name)}</option>`).join('')}
-        </select>
+        <div class="gap">
+          <select class="sel" data-act="dlv.project">
+            ${projects.map((p) => `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>
+              ${esc(p.code)} · ${esc(p.name)}</option>`).join('')}
+          </select>
+          <button class="btn-sm" data-act="dlv.printList">打印清单</button>
+        </div>
       </div>
       <div id="dlvSummary">${skeleton(1)}</div>
     </div>
@@ -277,6 +285,11 @@ async function loadProjectDeliverables(projectId) {
           ? `<button class="btn-sm" data-act="dlv.download" data-id="${i.id}"
             data-version="${cv.id}" data-label="${esc(cv.version_label)}">下载</button>`
           : '',
+        cv && cv.preview_url
+          ? `<button class="btn-sm" data-act="dlv.preview"
+            data-url="${esc(cv.preview_url)}" data-kind="${esc(cv.preview_kind)}"
+            data-label="${esc(cv.version_label)}">预览</button>`
+          : '',
         cv && cv.has_model
           ? `<button class="btn-sm" data-act="dlv.openModel" data-process="${i.process_id}">查看模型</button>`
           : '',
@@ -307,6 +320,49 @@ async function loadProjectDeliverables(projectId) {
     summaryBox.innerHTML = '';
     listBox.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
   }
+}
+
+function printDeliverables() {
+  const items = state.deliverables.items || [];
+  const stepFilter = state.deliverables.stepFilter;
+  const visible = stepFilter ? items.filter((row) => row.step_no === stepFilter) : items;
+  if (!visible.length) return toast('没有可打印的交付物', true);
+  const project = (state.dlvProjects || []).find(
+    (row) => row.id === Number(state.deliverables.projectId),
+  );
+  const win = window.open('', '_blank');
+  if (!win) return toast('浏览器拦截了打印窗口，请允许弹出窗口后重试', true);
+  const rows = visible.map((row) => `<tr>
+    <td>${esc(row.step_no)}</td>
+    <td>${esc(row.definition_name)}<div class="code">${esc(row.definition_code)}</div></td>
+    <td>${esc(row.type_label || row.type)}</td>
+    <td>${esc(row.status_label || row.status)}</td>
+    <td>${row.current_version ? esc(row.current_version.version_label) : '—'}</td>
+    <td>${esc(row.owner || '—')}</td>
+  </tr>`).join('');
+  win.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+    <title>交付物清单 · ${esc(project ? project.code : '')}</title>
+    <style>
+      body{font:13px/1.6 "Microsoft YaHei",sans-serif;color:#111;margin:24px}
+      h1{font-size:18px;margin:0 0 4px}
+      .meta{color:#555;font-size:12px;margin-bottom:16px}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #999;padding:6px 8px;text-align:left;vertical-align:top}
+      th{background:#eee;font-weight:600}
+      .code{color:#777;font-size:11px}
+      .note{margin-top:14px;color:#555;font-size:11px}
+    </style></head><body>
+    <h1>项目交付物清单</h1>
+    <div class="meta">${esc(project ? project.code + ' · ' + project.name : '')}${
+      stepFilter ? ' · 步骤 ' + esc(stepFilter) : ''} · 打印时间 ${
+      new Date().toLocaleString()}</div>
+    <table><thead><tr><th>步骤</th><th>交付物</th><th>类型</th><th>状态</th>
+      <th>当前版本</th><th>负责人</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note">状态与版本以系统当前数据为准；受控文件请以审批生效版本为准。</div>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 async function openLinkModel(instanceId) {
@@ -404,6 +460,11 @@ function paintDeliverable(d) {
   const labels = state.dlvMeta.status_labels || {};
   const rows = d.versions.map((v) => {
     const actions = [];
+    if (v.preview_url) {
+      actions.push(`<button class="btn-sm" data-act="dlv.preview"
+        data-url="${esc(v.preview_url)}" data-kind="${esc(v.preview_kind)}"
+        data-label="${esc(v.version_label)}">预览</button>`);
+    }
     if (v.has_file) {
       actions.push(`<button class="btn-sm" data-act="dlv.download" data-id="${d.id}"
         data-version="${v.id}" data-label="${esc(v.version_label)}">下载</button>`);
@@ -676,6 +737,11 @@ function paintDocument(doc) {
   const labels = (state.docMeta && state.docMeta.status_labels) || {};
   const rows = doc.versions.map((v) => {
     const actions = [];
+    if (v.preview_url) {
+      actions.push(`<button class="btn-sm" data-act="dlv.preview"
+        data-url="${esc(v.preview_url)}" data-kind="${esc(v.preview_kind)}"
+        data-label="${esc(v.version_display)}">预览</button>`);
+    }
     if (v.has_file) {
       actions.push(`<button class="btn-sm" data-act="dlv.docDownload" data-id="${doc.id}"
         data-version="${v.id}" data-label="${esc(v.version_display)}">下载</button>`);
@@ -1489,6 +1555,11 @@ function paintTemplate(d, usages) {
   const labels = state.tplMeta.status_labels || {};
   const rows = d.versions.map((v) => {
     const actions = [];
+    if (v.preview_url) {
+      actions.push(`<button class="btn-sm" data-act="dlv.preview"
+        data-url="${esc(v.preview_url)}" data-kind="${esc(v.preview_kind)}"
+        data-label="${esc(v.version_label)}">预览</button>`);
+    }
     if (v.has_file) {
       actions.push(`<button class="btn-sm" data-act="dlv.templateDownload" data-id="${d.id}"
         data-version="${v.id}" data-label="${esc(v.version_label)}">下载</button>`);

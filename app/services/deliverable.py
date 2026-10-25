@@ -34,6 +34,7 @@ from app.schemas.deliverable import (
     StepContractOut,
     ToolRefOut,
 )
+from app.services import preview as preview_service
 from app.services import process_scope
 
 TYPE_LABELS: Dict[str, str] = {
@@ -602,6 +603,9 @@ def _move_pointer_if_retired(
 
 def version_out(version: DeliverableVersion) -> DeliverableVersionOut:
     has_file = bool(version.storage_key)
+    preview_kind = (
+        preview_service.preview_kind(version.file_name, version.mime_type) if has_file else None
+    )
     return DeliverableVersionOut(
         id=version.id,
         instance_id=version.instance_id,
@@ -623,6 +627,12 @@ def version_out(version: DeliverableVersion) -> DeliverableVersionOut:
             if has_file
             else None
         ),
+        preview_url=(
+            f"{settings.api_prefix}/deliverables/{version.instance_id}/versions/{version.id}/preview"
+            if preview_kind
+            else None
+        ),
+        preview_kind=preview_kind,
         author=version.author,
         reviewer=version.reviewer,
         approver=version.approver,

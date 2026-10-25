@@ -873,8 +873,8 @@ def main() -> int:
                   return (await r.json()).id;
                 }"""
             )
-            tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
-            tmp.write(b"PK\x03\x04" + b"e2e deliverable upload")
+            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            tmp.write(b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF")
             tmp.close()
             try:
                 goto("deliverables")
@@ -891,6 +891,22 @@ def main() -> int:
                 page.wait_for_timeout(2000)
                 assert "已上传" in page.inner_text("#toast"), page.inner_text("#toast")
                 assert "R1" in page.inner_text("#dlvList"), "上传后列表未显示 R1"
+
+                # PDF 应能内联预览；Office/Visio 仍提示下载
+                page.click('#dlvList button[data-act="dlv.preview"] >> nth=0')
+                page.wait_for_selector("#mask.show")
+                page.wait_for_selector(".preview-frame", timeout=8000)
+                assert "预览" in page.inner_text("#mTitle")
+                close_modal()
+                page.wait_for_timeout(300)
+
+                # 打印清单：新窗口应包含项目与交付物表头
+                with page.expect_popup() as popup_info:
+                    page.click('#view button[data-act="dlv.printList"]')
+                popup = popup_info.value
+                popup.wait_for_timeout(600)
+                assert "项目交付物清单" in popup.content()
+                popup.close()
             finally:
                 page.evaluate(
                     """async (pid) => {

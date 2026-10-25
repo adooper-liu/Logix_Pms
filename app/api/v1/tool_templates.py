@@ -55,6 +55,7 @@ from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import org_scope
 from app.services import org_unit as org_service
+from app.services import preview as preview_service
 from app.services import storage as storage_service
 from app.services import tool_template as template_service
 
@@ -512,6 +513,39 @@ def download_version(template_id: int, version_id: int, db: DbSession, user: Cur
     return StreamingResponse(
         handle,
         media_type=version.mime_type or "application/octet-stream",
+        headers=headers,
+        background=BackgroundTask(handle.close),
+    )
+
+
+@router.get(
+    "/{template_id}/versions/{version_id}/preview",
+    summary="预览模板版本（PDF/图片/文本内联）",
+)
+def preview_version(template_id: int, version_id: int, db: DbSession, user: CurrentUser):
+    template = _get(db, template_id)
+    version = _get_version(db, template, version_id)
+    if not version.storage_key:
+        raise HTTPException(status_code=404, detail="该版本没有上传文件")
+    kind = preview_service.preview_kind(version.file_name, version.mime_type)
+    if not kind:
+        raise HTTPException(status_code=415, detail="该格式暂不支持在线预览，请下载后查看")
+
+    storage = storage_service.get_storage()
+    try:
+        handle = storage.open(version.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="文件不存在或已被清理") from exc
+    except storage_service.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    filename = version.file_name or f"{template.code}-{version.version_label}"
+    headers = preview_service.inline_headers(filename)
+    if version.size_bytes is not None:
+        headers["Content-Length"] = str(version.size_bytes)
+    return StreamingResponse(
+        handle,
+        media_type=preview_service.preview_media_type(kind, version.mime_type, version.file_name),
         headers=headers,
         background=BackgroundTask(handle.close),
     )
