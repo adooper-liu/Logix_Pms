@@ -7,7 +7,7 @@
 import { esc, num } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS } from '../core/router.js';
+import { renderAsync, RENDERERS, go } from '../core/router.js';
 import { canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 
@@ -20,6 +20,10 @@ on('strategy.link', ({ id }) => linkModal(Number(id)));
 on('strategy.submitLink', ({ id }) => submitLink(Number(id)));
 on('strategy.unlink', ({ id, link }) => unlinkObjective(Number(id), Number(link)));
 on('strategy.archive', ({ id }) => archiveObjective(Number(id)));
+on('strategy.openProcess', ({ code }) => {
+  state.map.pendingJump = code;
+  go('map');
+});
 
 function setStrategyYear(year) {
   state.strategy.year = year;
@@ -48,9 +52,14 @@ const renderStrategy = () => {
             <span class="tiny">L${link.process_level || ''} ${esc(link.process_code || '')}
               ${esc(link.process_name || '')}${
                 link.kpi_code ? ` · KPI ${esc(link.kpi_code)} ${esc(link.kpi_name || '')}` : ''}</span>
-            ${canManage()
-              ? `<button class="btn-sm" data-act="strategy.unlink"
-                  data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}
+            <span class="gap">
+              ${link.process_code
+                ? `<button class="btn-sm" data-act="strategy.openProcess"
+                    data-code="${esc(link.process_code)}">看流程</button>` : ''}
+              ${canManage()
+                ? `<button class="btn-sm" data-act="strategy.unlink"
+                    data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}
+            </span>
           </div>`).join('') || '<div class="tiny muted">尚未承接流程或 KPI</div>';
         return `
           <div class="card">

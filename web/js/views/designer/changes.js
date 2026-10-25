@@ -56,6 +56,8 @@ export function createChanges(ctx) {
           );
         } else if (row.status === 'APPROVED') {
           actions.push(
+            `<button class="btn-sm btn-p" data-act="designer.publishFromChange"
+              data-id="${row.id}">发布新版本</button>`,
             `<button class="btn-sm btn-g" data-act="designer.changeCancel" data-id="${row.id}">取消</button>`,
           );
         }

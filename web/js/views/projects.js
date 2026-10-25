@@ -30,6 +30,13 @@ on('projects.closeOpenDesigner', ({ process }) => {
   closeModal();
   appActions['designer.open'](Number(process));
 });
+on('projects.openExecution', ({ process }) => {
+  state.execution = state.execution || { tab: 'tasks', filter: 'open' };
+  state.execution.configProcess = Number(process);
+  state.execution.tab = 'config';
+  closeModal();
+  go('execution');
+});
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.wizardRecommend', () => wizardRecommend());
 on('projects.submit', () => submitProject());
@@ -312,6 +319,8 @@ async function openProject(id) {
       : ''}
     <button class="btn btn-g" data-act="projects.close">关闭</button>
     ${canEditThis ? `<button class="btn btn-g" data-act="projects.edit" data-id="${p.id}">编辑</button>` : ''}
+    ${p.process_id ? `<button class="btn btn-g" data-act="projects.openExecution"
+      data-process="${p.process_id}">去流程执行</button>` : ''}
     ${p.process_id ? `<button class="btn btn-p" data-act="projects.closeOpenDesigner"
       data-process="${p.process_id}">查看流程模型</button>` : ''}`,
     true);

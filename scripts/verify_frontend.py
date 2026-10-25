@@ -2359,6 +2359,41 @@ def main() -> int:
             assert "L3-032" in selected, selected
             close_modal()
 
+        def strategy_to_map() -> None:
+            goto("strategy")
+            page.wait_for_timeout(900)
+            btn = page.locator('#view button[data-act="strategy.openProcess"]')
+            assert btn.count(), "战略目标没有「看流程」入口"
+            btn.first.click()
+            page.wait_for_timeout(1400)
+            assert page.inner_text("#pageTitle") == "企业流程地图"
+            page.wait_for_selector("#mask.show", timeout=8000)
+            assert "流程" in page.inner_text("#mask"), "没有按目标承接的流程打开详情"
+            close_modal()
+
+        def designer_to_execution() -> None:
+            goto("designer")
+            pick_editable_design()
+            page.click('#view a:has-text("去流程执行")')
+            page.wait_for_timeout(1600)
+            assert page.inner_text("#pageTitle") == "流程执行"
+            assert "任务时限" in page.inner_text("#view"), "设计器没有把流程带进执行配置"
+
+        def project_to_execution() -> None:
+            goto("projects")
+            page.click("#view .project-open >> nth=0")
+            page.wait_for_selector("#mask.show")
+            page.wait_for_timeout(1100)
+            btn = page.locator('#mFoot button[data-act="projects.openExecution"]')
+            assert btn.count(), "项目详情没有「去流程执行」入口"
+            btn.first.click()
+            page.wait_for_timeout(1600)
+            assert page.inner_text("#pageTitle") == "流程执行"
+            assert "任务时限" in page.inner_text("#view"), "执行页没有落到当前流程的配置页签"
+
+        check("战略目标→流程地图", strategy_to_map)
+        check("设计器→流程执行", designer_to_execution)
+        check("项目详情→流程执行", project_to_execution)
         check("地图下钻", map_drill)
         check("架构树计数", map_tree_counts)
         check("流程详情配套文件入口", map_documents_entry)

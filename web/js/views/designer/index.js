@@ -417,7 +417,20 @@ on('designer.submitReview', () => versions.submitReview());
 on('designer.rejectReview', () => versions.rejectReview());
 on('designer.export', () => transfer.exportBpmn());
 on('designer.import', () => transfer.importBpmn());
-on('designer.goExecution', () => go('execution'));
+on('designer.goExecution', () => {
+  const pid = state.designer.processId;
+  if (pid) {
+    state.execution = state.execution || { tab: 'tasks', filter: 'open' };
+    state.execution.configProcess = pid;
+    state.execution.tab = 'config';
+  }
+  go('execution');
+});
+on('designer.publishFromChange', () => {
+  state.designer.tab = 'model';
+  RENDERERS.designer();
+  setTimeout(() => versions.publishDesign(), 150);
+});
 on('designer.saveName', ({ id }) => panels.saveName(id));
 on('designer.changeType', ({ id }) => panels.changeNodeType(id));
 on('designer.moveLane', ({ id }) => panels.moveNodeToLane(id));
