@@ -41,6 +41,10 @@ on('dlv.openUploadDeliverable', ({ id }) => {
 on('dlv.newDocument', () => openNewDocument());
 on('dlv.docProcess', (_data, el) => setDocProcess(el.value));
 on('dlv.docCategory', (_data, el) => setDocCategory(el.value));
+on('dlv.docLevel', (_data, el) => {
+  state.deliverables.documentLevel = el.value;
+  loadDocuments();
+});
 on('dlv.docOrg', (_data, el) => setDocOrg(el.value));
 on('dlv.openDocument', ({ id }) => openDocument(Number(id)));
 on('dlv.docDownload', ({ id, version, label }) =>
@@ -437,6 +441,12 @@ function paintDocumentTab() {
           ${Object.entries(cats).map(([code, label]) => `<option value="${code}"
             ${d.documentCategory === code ? 'selected' : ''}>${esc(label)}</option>`).join('')}
         </select>
+        <select class="sel" data-act="dlv.docLevel">
+          <option value="">全部层级</option>
+          ${Object.entries((state.docMeta && state.docMeta.level_labels) || {}).map(([code, label]) =>
+            `<option value="${code}" ${d.documentLevel === code ? 'selected' : ''}>${
+              esc(label)}</option>`).join('')}
+        </select>
         <select class="sel" data-act="dlv.docOrg">
           <option value="">全部组织</option>${orgOptions(d.documentOrgUnitId)}
         </select>
@@ -476,6 +486,7 @@ async function loadDocuments() {
   const qs = [];
   if (d.documentProcessId) qs.push('process_id=' + d.documentProcessId);
   if (d.documentCategory) qs.push('category=' + encodeURIComponent(d.documentCategory));
+  if (d.documentLevel) qs.push('level=' + encodeURIComponent(d.documentLevel));
   if (d.documentOrgUnitId) qs.push('org_unit_id=' + d.documentOrgUnitId);
   try {
     const rows = await GET('/process-documents' + (qs.length ? '?' + qs.join('&') : ''));
@@ -490,7 +501,8 @@ async function loadDocuments() {
         <div class="ico">${DOC_ICON[doc.category] || '📄'}</div>
         <h4>${esc(doc.title)}</h4>
         <p>${esc(doc.process_code || '')} ${esc(doc.process_name || '')}
-          · ${esc(doc.category_label || doc.category)} · ${esc(doc.scope_label || '集团通用')}
+          · ${esc(doc.category_label || doc.category)} · ${esc(doc.level_label || doc.level || '')}
+          · ${esc(doc.scope_label || '集团通用')}
           · ${esc(doc.variation_policy_label || doc.variation_policy)}
           ${doc.node_key ? ' · 活动 ' + esc(doc.node_key) : ''}
           · ${doc.version_count} 个版本</p>
@@ -519,6 +531,7 @@ async function loadEffectiveDocuments() {
   const qs = ['org_unit_id=' + orgId];
   if (d.documentProcessId) qs.push('process_id=' + d.documentProcessId);
   if (d.documentCategory) qs.push('category=' + encodeURIComponent(d.documentCategory));
+  if (d.documentLevel) qs.push('level=' + encodeURIComponent(d.documentLevel));
   box.innerHTML = '<div class="card"><div class="tiny">解析有效版本…</div></div>';
   try {
     const rows = await GET('/process-documents/effective?' + qs.join('&'));
@@ -606,15 +619,22 @@ function paintDocument(doc) {
   openModal(doc.process_code + ' · ' + doc.title, `
     <div class="note mb">
       <b>${esc(doc.code)}</b> · ${esc(doc.category_label || doc.category)}
+      · ${esc(doc.level_label || doc.level || '流程文件')}
       · ${doc.version_count} 个版本
       <div class="mt">${esc(doc.description || '（无说明）')}</div>
       <div class="mt">负责人：${esc(doc.owner || '未指定')}
         · 范围：${esc(doc.scope_label || '集团通用')}
+        ${doc.legal_entity ? ' · 法人：' + esc(doc.legal_entity) : ''}
+        ${doc.plant ? ' · 工厂：' + esc(doc.plant) : ''}
+        ${doc.product_family ? ' · 产品族：' + esc(doc.product_family) : ''}
+        · 语言：${esc(doc.language || 'zh-CN')}
         · 策略：${esc(doc.variation_policy_label || doc.variation_policy)}
         · 现行版本：${doc.effective_version
           ? esc(doc.effective_version.version_display) + ' ' +
             statusTag(doc.effective_version.status, doc.effective_version.status_label)
           : '<span class="tag t-gry">暂无</span>'}</div>
+      ${doc.control_points ? `<div class="mt">控制点：${esc(doc.control_points)}</div>` : ''}
+      ${doc.exception_terms ? `<div class="mt">例外条款：${esc(doc.exception_terms)}</div>` : ''}
       ${doc.variant_of_code
         ? `<div class="mt">变体依据：${esc(doc.variant_of_code)} ${esc(doc.variant_base_version_display || '')}</div>`
         : ''}
@@ -716,6 +736,7 @@ async function submitRebase(variantId, baseVersionId, baseDocId, major) {
 
 function openNewDocument() {
   const processes = state.processes || [];  const cats = (state.docMeta && state.docMeta.category_labels) || {};
+  const levels = (state.docMeta && state.docMeta.level_labels) || {};
   openModal('新建流程标准文件', `
     <div class="field"><label>所属流程</label><select class="sel" id="ndProcess"
       data-act="dlv.refreshVariant">
@@ -745,6 +766,21 @@ function openNewDocument() {
       </select></div>
       <div class="field"><label>负责人（可选）</label><input id="ndOwner" placeholder="流程 Owner / 岗位"></div>
     </div>
+    <div class="row3">
+      <div class="field"><label>制度层级</label><select class="sel" id="ndLevel">
+        ${Object.entries(levels).map(([code, label]) =>
+          `<option value="${code}"${code === 'PROCESS' ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>适用法人（可选）</label><input id="ndLegal" placeholder="如 华东制造有限公司"></div>
+      <div class="field"><label>工厂（可选）</label><input id="ndPlant" placeholder="如 苏州一厂"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>产品族（可选）</label><input id="ndFamily" placeholder="如 动力总成"></div>
+      <div class="field"><label>语言</label><input id="ndLanguage" value="zh-CN"></div>
+      <div class="field"><label>控制点</label><input id="ndControl" placeholder="如 金额阈值、双人复核"></div>
+    </div>
+    <div class="field"><label>例外条款</label>
+      <textarea id="ndException" rows="2" placeholder="什么情况下允许例外、谁批、多久复盘"></textarea></div>
     <div class="field"><label>说明</label><textarea id="ndDesc" placeholder="适用范围、填写要求"></textarea></div>
     <div class="note">选择「依据上级标准」会建立本地变体：要求上级已有生效版本且策略不是锁定；
       变体记录它依据的上游版本。</div>`,
@@ -811,6 +847,13 @@ async function submitNewDocument() {
     process_id: Number(document.getElementById('ndProcess').value),
     title,
     category: document.getElementById('ndCategory').value,
+    level: document.getElementById('ndLevel').value,
+    legal_entity: document.getElementById('ndLegal').value.trim() || null,
+    plant: document.getElementById('ndPlant').value.trim() || null,
+    product_family: document.getElementById('ndFamily').value.trim() || null,
+    language: document.getElementById('ndLanguage').value.trim() || 'zh-CN',
+    control_points: document.getElementById('ndControl').value.trim() || null,
+    exception_terms: document.getElementById('ndException').value.trim() || null,
     variation_policy: document.getElementById('ndPolicy').value,
     description: document.getElementById('ndDesc').value.trim() || null,
     node_key: document.getElementById('ndNode').value || null,

@@ -45,6 +45,7 @@ export const state = {
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
     documentProcessId: null, documentCategory: '', documentOrgUnitId: null,
+    documentLevel: '',
     templateOrgUnitId: null,
   },
 };

@@ -83,6 +83,16 @@ on('authorization.closeException', async ({ id }) => {
     '例外已关闭',
   );
 });
+on('authorization.reviewException', async ({ id }) => {
+  const note = await promptDialog('复盘结论（必填）',
+    { title: '例外复盘', okText: '保存复盘', value: '' });
+  if (note === undefined) return;
+  if (!note.trim()) return toast('复盘必须填写结论', true);
+  await runAction(
+    () => POST(`/authorization/exceptions/${id}/review`, { note: note.trim() }),
+    '例外已复盘',
+  );
+});
 
 async function runAction(action, message) {
   try {
@@ -249,8 +259,9 @@ async function openExceptionModal(ruleId) {
       <textarea id="aeReason" rows="3" placeholder="为什么必须破例、影响范围、为什么不能走标准路径"></textarea></div>
     <div class="field"><label>适用范围</label>
       <textarea id="aeScope" rows="2" placeholder="流程/组织/时间窗口"></textarea></div>
-    <div class="field"><label>失效日期</label><input id="aeExpires" type="date"></div>
-    <div class="note">例外必须绑定一条已生效规则；批准后可关闭，未闭环例外会出现在启动页建议项。</div>`,
+    <div class="field"><label>失效日期（批准前必填）</label><input id="aeExpires" type="date"></div>
+    <div class="note">例外必须绑定一条已生效规则并设置失效日期；批准后到期需复盘，
+      未复盘例外会进入治理待办。</div>`,
   `<button class="btn btn-g" data-act="ui.close">取消</button>
    <button class="btn btn-p" data-act="authorization.submitException">提交申请</button>`);
 }
@@ -323,7 +334,9 @@ function exceptionRows(rows) {
         <div class="tiny">${esc(row.code)} · ${esc(row.rule_code || '')}</div></td>
       <td>${esc(row.reason)}
         ${row.scope ? `<div class="tiny muted">${esc(row.scope)}</div>` : ''}</td>
-      <td><span class="tag ${EXC_TONE[row.status] || 't-gry'}">${esc(row.status_label)}</span></td>
+      <td><span class="tag ${EXC_TONE[row.status] || 't-gry'}">${esc(row.status_label)}</span>
+        ${row.review_due_at ? `<div class="tiny">复盘截止 ${esc(row.review_due_at)}</div>` : ''}
+        ${row.reviewed_at ? `<div class="tiny">已复盘</div>` : ''}</td>
       <td>${esc(row.requested_by_name || '—')}
         <div class="tiny">${esc(row.decided_by_name || '待审批')}</div></td>
       <td class="gap">
@@ -336,6 +349,10 @@ function exceptionRows(rows) {
         ${row.status === 'APPROVED'
           ? `<button class="btn-sm" data-act="authorization.closeException" data-id="${row.id}">
                关闭</button>`
+          : ''}
+        ${row.review_due_at && !row.reviewed_at
+          ? `<button class="btn-sm" data-act="authorization.reviewException" data-id="${row.id}">
+               复盘</button>`
           : ''}
       </td>
     </tr>`).join('') || emptyRow(5, '还没有例外记录');
