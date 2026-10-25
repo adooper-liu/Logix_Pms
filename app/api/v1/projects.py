@@ -22,7 +22,7 @@ from app.models.deliverable import DeliverableInstance, DeliverableVersion
 from app.models.enums import Methodology, ProjectStatus, ProjectType, Role, StepStatus
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
-from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 from app.schemas.common import DeleteResult, Page, as_columns
 from app.schemas.project import (
     MethodologyRecommendation,
@@ -43,11 +43,19 @@ from app.schemas.project import (
     SetupProgramCreate,
     StageProgress,
 )
+from app.schemas.project_workflow import (
+    AdvanceResultOut,
+    GateConditionCreateIn,
+    GateConditionUpdateIn,
+    StepUpdateIn,
+    WorkbenchOut,
+)
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import improvement as improvement_service
 from app.services import maturity as maturity_service
 from app.services import methodology as methodology_service
+from app.services import project_workflow as workbench_service
 from app.services import setup_program as setup_service
 from app.services import storage as storage_service
 from app.services.workflow import STAGE_NAMES, recompute_progress, seed_project_steps
@@ -431,6 +439,155 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
     db.commit()
     db.refresh(project)
     return _to_out(project, _process_names(db).get(project.process_id))
+
+
+@router.get(
+    "/{project_id}/workflow",
+    response_model=WorkbenchOut,
+    summary="五阶段项目工作台（当前阶段、步骤闭环与阶段门）",
+)
+def project_workbench(
+    project_id: int,
+    db: DbSession,
+    user: WriteUser,
+    stage_no: Optional[int] = Query(default=None, ge=1, le=5),
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return workbench_service.workbench(db, project, view_stage=stage_no)
+
+
+@router.patch(
+    "/{project_id}/workflow/steps/{step_id}",
+    response_model=WorkbenchOut,
+    summary="更新项目步骤闭环字段与状态",
+)
+def update_workbench_step(
+    project_id: int,
+    step_id: int,
+    payload: StepUpdateIn,
+    db: DbSession,
+    user: WriteUser,
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    step = db.get(ProjectStep, step_id)
+    if step is None or step.project_id != project_id:
+        raise HTTPException(status_code=404, detail="项目步骤不存在")
+    try:
+        workbench_service.update_step(
+            db, project, step, payload.model_dump(exclude_unset=True), user
+        )
+    except workbench_service.WorkbenchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "project_step",
+        step.id,
+        f"更新项目 {project.code} 步骤 {step.step_no} {step.name}：{step.status}",
+    )
+    db.commit()
+    db.refresh(project)
+    return workbench_service.workbench(db, project)
+
+
+@router.patch(
+    "/{project_id}/workflow/conditions/{condition_id}",
+    response_model=WorkbenchOut,
+    summary="更新阶段退出门槛",
+)
+def update_gate_condition(
+    project_id: int,
+    condition_id: int,
+    payload: GateConditionUpdateIn,
+    db: DbSession,
+    user: WriteUser,
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    condition = db.get(ProjectGateCondition, condition_id)
+    if condition is None or condition.project_id != project_id:
+        raise HTTPException(status_code=404, detail="门槛条件不存在")
+    try:
+        workbench_service.update_condition(
+            db, project, condition, payload.model_dump(exclude_unset=True), user
+        )
+    except workbench_service.WorkbenchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "project_gate_condition",
+        condition.id,
+        f"更新项目 {project.code} 阶段{condition.stage_no}门槛：{condition.text}",
+    )
+    db.commit()
+    db.refresh(project)
+    return workbench_service.workbench(db, project)
+
+
+@router.post(
+    "/{project_id}/workflow/conditions",
+    response_model=WorkbenchOut,
+    summary="新增阶段退出门槛",
+)
+def create_gate_condition(
+    project_id: int,
+    payload: GateConditionCreateIn,
+    db: DbSession,
+    user: WriteUser,
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    condition = workbench_service.add_condition(db, project, payload.model_dump())
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "project_gate_condition",
+        condition.id,
+        f"新增项目 {project.code} 阶段{condition.stage_no}门槛：{condition.text}",
+    )
+    db.commit()
+    db.refresh(project)
+    return workbench_service.workbench(db, project)
+
+
+@router.post(
+    "/{project_id}/workflow/advance",
+    response_model=AdvanceResultOut,
+    summary="通过阶段门并进入下一阶段",
+)
+def advance_project_stage(project_id: int, db: DbSession, user: WriteUser):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    previous = project.current_stage
+    try:
+        result = workbench_service.advance(db, project)
+    except workbench_service.WorkbenchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "project",
+        project.id,
+        f"项目 {project.code} 阶段门通过：阶段{previous} → 阶段{project.current_stage}",
+    )
+    db.commit()
+    return result
 
 
 @router.delete("/{project_id}", response_model=DeleteResult, summary="删除项目（含步骤）")

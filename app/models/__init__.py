@@ -108,7 +108,7 @@ from app.models.pilot import PilotIssue, PilotLayer, PilotPath, PilotTask
 from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.process_task import ProcessTaskDefinition
-from app.models.project import Project, ProjectStep, WorkflowTemplate
+from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.replication import ReplicationPack
 from app.models.sketch import Sketch
@@ -135,6 +135,7 @@ __all__ = [
     "ProcessDocumentVersion",
     "Project",
     "ProjectStep",
+    "ProjectGateCondition",
     "WorkflowTemplate",
     "Sketch",
     "Tool",

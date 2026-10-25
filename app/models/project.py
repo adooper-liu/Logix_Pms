@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -104,6 +115,12 @@ class Project(Base):
         cascade="all, delete-orphan",
         order_by="ProjectStep.stage_no, ProjectStep.step_no",
     )
+    gate_conditions: Mapped[List["ProjectGateCondition"]] = relationship(
+        "ProjectGateCondition",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ProjectGateCondition.stage_no, ProjectGateCondition.sort_order",
+    )
     source_kpi: Mapped[Optional["KpiDefinition"]] = relationship("KpiDefinition")  # noqa: F821
 
     __table_args__ = (Index("ix_project_status_stage", "status", "current_stage"),)
@@ -129,6 +146,26 @@ class ProjectStep(Base):
     deliverable: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 工作台最小闭环字段
+    goal: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    inputs: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    process_steps: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    next_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    receiver: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    verified_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    blocked_owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    blocked_due: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    decision_options: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    decision_maker: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    decision_due: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, nullable=True
+    )
     # 每个阶段的最后一步作为里程碑（决策门），在甘特图上以菱形标记
     is_milestone: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -140,6 +177,37 @@ class ProjectStep(Base):
     )
 
     __table_args__ = (Index("ix_project_step_project", "project_id", "stage_no", "step_no"),)
+
+
+class ProjectGateCondition(Base):
+    """阶段退出门槛：一条可验证条件 + 证据 + 责任人 + 关闭日期。"""
+
+    __tablename__ = "project_gate_condition"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("project.id", ondelete="CASCADE"), index=True
+    )
+    stage_no: Mapped[int] = mapped_column(Integer, index=True)
+    text: Mapped[str] = mapped_column(String(240))
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    is_met: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", index=True)
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    met_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    met_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="gate_conditions")
+
+    __table_args__ = (
+        Index("ix_project_gate_project_stage", "project_id", "stage_no", "sort_order"),
+    )
 
 
 class WorkflowTemplate(Base):

@@ -44,9 +44,12 @@ class ScopeType(str, Enum):
 
 
 class StepStatus(str, Enum):
-    PENDING = "PENDING"
-    IN_PROGRESS = "IN_PROGRESS"
-    DONE = "DONE"
+    PENDING = "PENDING"  # 未开始
+    IN_PROGRESS = "IN_PROGRESS"  # 进行中
+    PENDING_VERIFY = "PENDING_VERIFY"  # 待验证
+    DONE = "DONE"  # 已满足
+    BLOCKED = "BLOCKED"  # 受阻
+    DECISION = "DECISION"  # 需决策
     SKIPPED = "SKIPPED"
 
 
