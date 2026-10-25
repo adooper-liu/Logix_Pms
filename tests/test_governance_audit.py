@@ -123,7 +123,8 @@ def test_audit_scan_creates_dedupes_ignores_and_resolves(client, manager_client,
     assert by_entity[("process_document", no_effective["id"])]["type"] == "NO_EFFECTIVE"
     assert by_entity[("tool_template", overdue["id"])]["type"] in {"NO_EFFECTIVE", "REVIEW_OVERDUE"}
     assert any(
-        row["type"] == "REVIEW_OVERDUE" and row["entity_id"] == overdue["id"] for row in open_rows
+        row["entity_id"] == overdue["id"]
+        for row in _findings(client, status="OPEN", type="REVIEW_OVERDUE")
     )
     assert any(
         row["type"] == "FROZEN_REFERENCE" and row["entity_id"] == copied["id"] for row in open_rows

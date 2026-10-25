@@ -20,6 +20,7 @@ from app.api.v1 import (
     execution,
     integrations,
     knowledge,
+    maturity,
     monitor,
     notifications,
     orgs,
@@ -78,6 +79,7 @@ protected.include_router(data_governance.router)
 protected.include_router(startup.router)
 protected.include_router(pilot.router)
 protected.include_router(knowledge.router)
+protected.include_router(maturity.router)
 api_router.include_router(protected)
 
 __all__ = ["api_router"]

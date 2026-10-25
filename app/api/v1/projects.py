@@ -46,6 +46,7 @@ from app.schemas.project import (
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import improvement as improvement_service
+from app.services import maturity as maturity_service
 from app.services import methodology as methodology_service
 from app.services import setup_program as setup_service
 from app.services import storage as storage_service
@@ -406,6 +407,11 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
         if "owner_user_id" in data and not data.get("owner"):
             raise HTTPException(status_code=400, detail="Owner 姓名不能为空")
     changed = sorted(data.keys())
+    if "current_stage" in data and data["current_stage"] > project.current_stage:
+        try:
+            maturity_service.ensure_advance_allowed(db, project, data["current_stage"])
+        except maturity_service.MaturityError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     for field, value in data.items():
         setattr(project, field, value)
     audit_service.record(

@@ -32,6 +32,7 @@ from app.schemas.baseline import AuditScanResult, FindingOut
 from app.services import authorization as authz_service
 from app.services import data_governance as data_service
 from app.services import knowledge_match
+from app.services import maturity as maturity_service
 from app.services import notifications as notification_service
 from app.services import process_document as document_service
 from app.services import raci as raci_service
@@ -51,6 +52,9 @@ TYPE_LABELS: Dict[str, str] = {
     "TOOL_REVIEW_OVERDUE": "工具待复核",
     "TOOL_DECISION_INCOMPLETE": "工具决策信息待补充",
     "AUTHORIZATION_EXCEPTION_DUE_REVIEW": "授权例外待复盘",
+    "L4_NO_OWNER": "L4 活动无 Owner",
+    "L4_NO_DOCUMENT": "L4 活动无制度文件",
+    "L4_NO_KPI": "L4 活动无 KPI",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -417,6 +421,27 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
             f"失效时间 {exception.expires_at:%Y-%m-%d}，需记录复盘结论后才能清除待办",
             owner_user_id=exception.decided_by_id or exception.requested_by_id,
         )
+
+    # 跨层覆盖度：L4 活动必须有 Owner、制度/KPI 支撑
+    labels = {
+        "owner": ("L4_NO_OWNER", "未指定 Owner"),
+        "document": ("L4_NO_DOCUMENT", "没有有效制度/标准文件"),
+        "kpi": ("L4_NO_KPI", "没有关联 KPI"),
+    }
+    for gap in maturity_service.coverage_gaps(db):
+        node = gap["node"]
+        for missing in gap["missing"]:
+            type_, detail = labels[missing]
+            add(
+                type_,
+                "MEDIUM" if missing == "owner" else "LOW",
+                "process_arch",
+                node.id,
+                f"L4 活动覆盖缺口：{node.code} {node.name}",
+                detail,
+                org_unit_id=node.org_unit_id,
+                owner_user_id=node.owner_user_id,
+            )
 
     return findings
 
