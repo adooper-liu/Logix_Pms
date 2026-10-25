@@ -71,6 +71,8 @@ class AuditOut(ORMModel):
     entity_type: str
     entity_id: Optional[int] = None
     summary: Optional[str] = None
+    prev_hash: Optional[str] = None
+    hash: Optional[str] = None
     created_at: UtcDateTime
 
 

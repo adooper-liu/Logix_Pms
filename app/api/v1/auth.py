@@ -188,6 +188,11 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
     return UserOut.model_validate(obj)
 
 
+@audit_router.get("/verify", summary="校验审计哈希链（流程管理科及以上）")
+def verify_audit(user: ManagerUser, db: DbSession):
+    return audit_service.verify_chain(db)
+
+
 @audit_router.get("", response_model=AuditPage, summary="审计日志（流程管理科及以上）")
 def list_audit(
     user: ManagerUser,

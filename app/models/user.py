@@ -91,6 +91,9 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(32), index=True)
     entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 哈希链：每条记录包含上一条的 hash，篡改中间记录会导致后续校验失败
+    prev_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
