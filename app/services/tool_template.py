@@ -21,7 +21,7 @@ from app.models.deliverable import (
     DeliverableVersion,
     StepContract,
 )
-from app.models.enums import DeliverableStatus, TemplateFormat, TemplateMode, ToolLevel
+from app.models.enums import DeliverableStatus, TemplateFormat, TemplateMode, ToolLevel, ToolStatus
 from app.models.process import ProcessArch
 from app.models.project import Project, WorkflowTemplate
 from app.models.tool import Tool
@@ -597,7 +597,16 @@ def step_recommendations(db: Session, step_no: str) -> StepRecommendationOut:
     )
 
     tools = (
-        {tool.code: tool for tool in db.scalars(select(Tool).where(Tool.code.in_(codes))).all()}
+        {
+            tool.code: tool
+            for tool in db.scalars(
+                select(Tool).where(
+                    Tool.code.in_(codes),
+                    Tool.is_active.is_(True),
+                    Tool.status.in_((ToolStatus.PUBLISHED.value, ToolStatus.VERIFIED.value)),
+                )
+            ).all()
+        }
         if codes
         else {}
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 
 from app.core.database import SessionLocal
@@ -122,3 +123,58 @@ def test_tool_review_overdue_flag_and_governance(client):
         finally:
             db.close()
         client.post(f"{API}/baselines/audit-scan")
+
+
+def test_tool_submission_review_and_direct_usage(client, manager_client, viewer_client):
+    code = "E2E-" + uuid.uuid4().hex[:6].upper()
+    payload = {
+        "code": code,
+        "name": "测试工具",
+        "category": "DIAGNOSE",
+        "stage_no": 1,
+        "purpose": "验证工具提交审核与直接使用证据",
+        "when_to_use": "只在测试中使用",
+        "steps": ["第一步", "第二步"],
+        "verification_standard": "能复现一次完整流程",
+        "scenario_codes": ["FLOW"],
+    }
+    created = client.post(f"{API}/tools", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["status"] == "DRAFT"
+
+    public_codes = [row["code"] for row in client.get(f"{API}/tools").json()]
+    assert code not in public_codes, "草稿工具不应出现在公开清单"
+
+    denied = viewer_client.post(f"{API}/tools", json={**payload, "code": code + "X"})
+    assert denied.status_code == 403
+
+    submitted = client.post(f"{API}/tools/{code}/submit")
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "IN_REVIEW"
+
+    assert (
+        viewer_client.post(f"{API}/tools/{code}/review", json={"decision": "APPROVE"}).status_code
+        == 403
+    )
+    approved = manager_client.post(f"{API}/tools/{code}/review", json={"decision": "APPROVE"})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "VERIFIED"
+    assert approved.json()["last_verified_at"]
+
+    public_codes = [row["code"] for row in client.get(f"{API}/tools").json()]
+    assert code in public_codes, "审核通过的工具应出现在公开清单"
+
+    usage_payload = {"step_no": "1.1", "outcome": "EFFECTIVE", "note": "测试使用"}
+    first = client.post(f"{API}/tools/{code}/usage", json=usage_payload)
+    second = client.post(f"{API}/tools/{code}/usage", json=usage_payload)
+    assert first.status_code == 201, first.text
+    assert second.json()["id"] == first.json()["id"], "工具使用证据没有短期去重"
+
+    detail = client.get(f"{API}/tools/{code}").json()
+    assert detail["usage"]["used"] == 1
+    assert detail["usage_events"][0]["step_no"] == "1.1"
+
+    archived = manager_client.post(f"{API}/tools/{code}/archive")
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "ARCHIVED"
+    assert code not in [row["code"] for row in client.get(f"{API}/tools").json()]

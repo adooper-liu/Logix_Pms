@@ -121,6 +121,7 @@ function wireChrome() {
         state.toolboxFilter = null;
         state.toolbox.step = '';
         state.toolbox.stage = null;
+        state.toolbox.status = '';
       }
       closeModal();
       go(a.dataset.view);

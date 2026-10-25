@@ -21,7 +21,7 @@ export const state = {
   toolboxCat: null,
   toolboxKeyword: '',
   toolbox: {
-    q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '',
+    q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '', status: '',
   },
   designer: {
     processId: null, processCode: null, model: null, analysis: null, tab: 'model',

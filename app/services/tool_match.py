@@ -14,14 +14,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.enums import KnowledgeStatus
+from app.models.enums import KnowledgeStatus, ToolStatus
 from app.models.knowledge import (
     KnowledgeItem,
     KnowledgeScenario,
     KnowledgeUsage,
 )
 from app.models.project import WorkflowTemplate
-from app.models.tool import Tool, ToolScenarioLink
+from app.models.tool import Tool, ToolScenarioLink, ToolUsage
 from app.schemas.tool import (
     ToolMatchHit,
     ToolOut,
@@ -50,7 +50,10 @@ def _tool_query():
             selectinload(Tool.scenario_rows).selectinload(ToolScenarioLink.scenario),
             selectinload(Tool.owner_user),
         )
-        .where(Tool.is_active.is_(True))
+        .where(
+            Tool.is_active.is_(True),
+            Tool.status.in_((ToolStatus.PUBLISHED.value, ToolStatus.VERIFIED.value)),
+        )
         .order_by(Tool.category, Tool.sort_order)
     )
 
@@ -60,10 +63,12 @@ def load_tools(db: Session) -> List[Tool]:
 
 
 def tool_usage(db: Session, codes: Sequence[str]) -> Dict[str, Tuple[int, int, Optional[float]]]:
-    """从关联知识条目的使用证据聚合到工具。"""
+    """工具使用证据 = 关联知识条目的使用记录 + 工具自身的现场使用记录。"""
     if not codes:
         return {}
-    rows = db.execute(
+    totals: Dict[str, List[int]] = {}
+
+    knowledge_rows = db.execute(
         select(
             KnowledgeItem.tool_code,
             func.count(KnowledgeUsage.id),
@@ -78,16 +83,29 @@ def tool_usage(db: Session, codes: Sequence[str]) -> Dict[str, Tuple[int, int, O
         )
         .group_by(KnowledgeItem.tool_code)
     ).all()
-    result: Dict[str, Tuple[int, int, Optional[float]]] = {}
-    for code, used, effective in rows:
-        used = int(used or 0)
-        effective = int(effective or 0)
-        result[code] = (
-            used,
-            effective,
-            round(effective / used * 100, 1) if used else None,
+    for code, used, effective in knowledge_rows:
+        bucket = totals.setdefault(code, [0, 0])
+        bucket[0] += int(used or 0)
+        bucket[1] += int(effective or 0)
+
+    direct_rows = db.execute(
+        select(
+            ToolUsage.tool_code,
+            func.count(ToolUsage.id),
+            func.sum(case((ToolUsage.outcome == "EFFECTIVE", 1), else_=0)),
         )
-    return result
+        .where(ToolUsage.tool_code.in_(list(codes)))
+        .group_by(ToolUsage.tool_code)
+    ).all()
+    for code, used, effective in direct_rows:
+        bucket = totals.setdefault(code, [0, 0])
+        bucket[0] += int(used or 0)
+        bucket[1] += int(effective or 0)
+
+    return {
+        code: (used, effective, round(effective / used * 100, 1) if used else None)
+        for code, (used, effective) in totals.items()
+    }
 
 
 def _stage_for_step(db: Session, step_no: Optional[str]) -> Optional[int]:

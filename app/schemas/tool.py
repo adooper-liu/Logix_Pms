@@ -8,6 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime
+from app.models.enums import ToolCategory, ToolDifficulty
 from app.schemas.common import ORMModel
 from app.schemas.knowledge import KnowledgeBrief, KnowledgeScenarioOut
 
@@ -38,6 +39,8 @@ class ToolOut(ORMModel):
     owner: Optional[str] = None
     owner_user_id: Optional[int] = None
     version: int = 1
+    status: str = "PUBLISHED"
+    status_label: Optional[str] = None
     last_verified_at: Optional[UtcDateTime] = None
     review_due_at: Optional[date] = None
     review_overdue: bool = False
@@ -64,6 +67,8 @@ class ToolBrief(ORMModel):
     owner: Optional[str] = None
     review_due_at: Optional[date] = None
     review_overdue: bool = False
+    status: str = "PUBLISHED"
+    status_label: Optional[str] = None
     is_active: bool = True
 
 
@@ -79,10 +84,78 @@ class ToolUsageSummary(BaseModel):
     rate: Optional[float] = None
 
 
+class ToolUsageCreate(BaseModel):
+    project_id: Optional[int] = None
+    step_no: Optional[str] = Field(default=None, max_length=8)
+    outcome: str = Field(default="EFFECTIVE", pattern="^(EFFECTIVE|PARTIAL|INEFFECTIVE)$")
+    note: Optional[str] = None
+    evidence_url: Optional[str] = Field(default=None, max_length=500)
+
+
+class ToolUsageOut(ORMModel):
+    id: int
+    tool_code: str
+    project_id: Optional[int] = None
+    step_no: Optional[str] = None
+    used_by_user_id: Optional[int] = None
+    used_by: Optional[str] = None
+    used_at: UtcDateTime
+    outcome: str
+    outcome_label: Optional[str] = None
+    note: Optional[str] = None
+    evidence_url: Optional[str] = None
+
+
 class ToolDetailOut(ToolOut):
     usage: ToolUsageSummary = ToolUsageSummary()
     knowledge: List[KnowledgeBrief] = []
     workflow_steps: List[ToolWorkflowStepOut] = []
+    usage_events: List[ToolUsageOut] = []
+
+
+class ToolCreate(BaseModel):
+    code: str = Field(pattern=r"^[A-Z0-9_-]{2,32}$")
+    name: str = Field(min_length=1, max_length=64)
+    alias: Optional[str] = Field(default=None, max_length=96)
+    category: ToolCategory
+    stage_no: int = Field(ge=1, le=5)
+    purpose: str = Field(min_length=1)
+    when_to_use: str = Field(min_length=1)
+    steps: List[str] = []
+    template_ref: Optional[str] = Field(default=None, max_length=200)
+    pitfalls: Optional[str] = None
+    scenario_codes: List[str] = []
+    not_applicable_when: Optional[str] = None
+    prerequisites: Optional[str] = None
+    verification_standard: Optional[str] = None
+    difficulty: ToolDifficulty = ToolDifficulty.MEDIUM
+    typical_duration: Optional[str] = Field(default=None, max_length=32)
+    owner_user_id: Optional[int] = None
+
+
+class ToolUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    alias: Optional[str] = Field(default=None, max_length=96)
+    category: Optional[ToolCategory] = None
+    stage_no: Optional[int] = Field(default=None, ge=1, le=5)
+    purpose: Optional[str] = None
+    when_to_use: Optional[str] = None
+    steps: Optional[List[str]] = None
+    template_ref: Optional[str] = Field(default=None, max_length=200)
+    pitfalls: Optional[str] = None
+    scenario_codes: Optional[List[str]] = None
+    not_applicable_when: Optional[str] = None
+    prerequisites: Optional[str] = None
+    verification_standard: Optional[str] = None
+    difficulty: Optional[ToolDifficulty] = None
+    typical_duration: Optional[str] = Field(default=None, max_length=32)
+    owner_user_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ToolReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    note: Optional[str] = Field(default=None, max_length=500)
 
 
 class ToolCategoryGroup(BaseModel):

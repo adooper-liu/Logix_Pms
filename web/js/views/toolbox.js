@@ -4,10 +4,13 @@
  * 知识库回答「有没有案例、模板和参考」。两者通过 tool_code 双向连接。
  */
 import { esc, num, CAT_ICON, skeleton, TOOL_LEVEL_TONE, fmtDate, dateShort } from '../core/format.js';
-import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
+import {
+  toast, openModal, closeModal, modalAlive, viewEl, on, confirmDialog, promptDialog,
+} from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
-import { GET, POST } from '../core/api.js';
+import { GET, POST, PATCH } from '../core/api.js';
+import { canWrite, canManage } from '../core/auth.js';
 
 /* ============================================================ 5. 方法论工具箱 */
 
@@ -40,7 +43,7 @@ on('toolbox.stageLink', ({ stage }) => {
 });
 on('toolbox.clear', () => {
   state.toolbox = {
-    q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '',
+    q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '', status: '',
   };
   const input = document.getElementById('searchInput');
   if (input) input.value = '';
@@ -50,7 +53,18 @@ on('toolbox.clear', () => {
 on('toolbox.clearFilter', () => clearToolboxFilter());
 on('toolbox.open', ({ code }) => openToolByCode(code));
 on('toolbox.applyStep', ({ code }) => openToolApply(code));
-on('toolbox.applyStepSubmit', ({ id }) => submitToolApply(Number(id)));
+on('toolbox.applyStepSubmit', ({ code }) => submitToolApply(code));
+on('toolbox.setStatus', (_data, el) => {
+  state.toolbox.status = el.value;
+  syncToolboxUrl();
+  RENDERERS.toolbox();
+});
+on('toolbox.newTool', () => openToolForm(null));
+on('toolbox.editTool', () => openToolForm(state.toolboxCurrent));
+on('toolbox.saveTool', ({ code }) => submitToolForm(code || ''));
+on('toolbox.submitTool', ({ code }) => submitToolReviewFlow(code, 'submit'));
+on('toolbox.reviewTool', ({ code, decision }) => submitToolReviewFlow(code, decision));
+on('toolbox.archiveTool', ({ code }) => archiveTool(code));
 on('toolbox.goKnowledge', ({ code }) => {
   closeModal();
   go('knowledge', { params: { tool: code, sort: 'match' }, push: true });
@@ -72,6 +86,7 @@ function syncToolboxUrl() {
     step: tb.step || '',
     sort: tb.sort,
     open: tb.open || '',
+    status: tb.status || '',
   }, { push: false });
 }
 
@@ -87,6 +102,7 @@ const renderToolbox = () => {
   if ('step' in params) tb.step = params.step;
   if ('sort' in params) tb.sort = params.sort;
   if ('open' in params) tb.open = params.open;
+  if ('status' in params) tb.status = params.status;
   // 顶栏搜索写入的是 toolboxKeyword，这里消费一次后转入 toolbox.q
   if (state.toolboxKeyword) {
     tb.q = state.toolboxKeyword;
@@ -106,7 +122,7 @@ const renderToolbox = () => {
   return renderAsync('toolbox',
     () => Promise.all([
       GET('/tools/meta'),
-      GET('/tools/grouped'),
+      GET('/tools/grouped' + (tb.status ? '?status=' + encodeURIComponent(tb.status) : '')),
       POST('/tools/match', { ...payload, limit: 33 }),
       hasQuery ? POST('/tools/match', { ...payload, problem: tb.q || null, limit: 8 })
         : Promise.resolve(null),
@@ -120,6 +136,7 @@ const renderToolbox = () => {
 function paint(d) {
   const tb = state.toolbox;
   const meta = d.meta;
+  state.toolboxMeta = meta;
   const scenarios = meta.scenarios || [];
   const categoryLabels = meta.category_labels || {};
   const difficultyLabels = meta.difficulty_labels || {};
@@ -195,6 +212,15 @@ function paint(d) {
   ].map(([value, label]) =>
     `<option value="${value}"${tb.sort === value ? ' selected' : ''}>${label}</option>`).join('');
 
+  const statusOptions = canManage()
+    ? `<select class="sel sel-sm" data-act="toolbox.setStatus">
+        <option value=""${!tb.status ? ' selected' : ''}>公开工具</option>
+        <option value="DRAFT"${tb.status === 'DRAFT' ? ' selected' : ''}>草稿</option>
+        <option value="IN_REVIEW"${tb.status === 'IN_REVIEW' ? ' selected' : ''}>待审核</option>
+        <option value="VERIFIED"${tb.status === 'VERIFIED' ? ' selected' : ''}>已验证</option>
+        <option value="ARCHIVED"${tb.status === 'ARCHIVED' ? ' selected' : ''}>已归档</option>
+      </select>` : '';
+
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
@@ -202,6 +228,8 @@ function paint(d) {
           <span class="module-badge">问题驱动 · 验证标准</span></h2>
           <div class="desc">工具箱回答「该用什么、为什么、怎么验证」；知识库回答「有没有案例、模板和参考」</div></div>
         <div class="gap">
+          ${statusOptions}
+          ${canWrite() ? '<button class="btn btn-p" data-act="toolbox.newTool">+ 新建工具</button>' : ''}
           <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>
         </div>
       </div>
@@ -385,17 +413,33 @@ function paintTool(t) {
     : '<span class="tiny muted">还没有步骤契约引用这个工具</span>';
   state.toolboxCurrent = t;
   const stepCtx = state.toolbox.step;
-  const related = (t.knowledge || []).find((item) => item.type === 'TOOL') || (t.knowledge || [])[0];
   const applyButton = stepCtx
-    ? `<button class="btn btn-p" data-act="toolbox.applyStep" data-code="${esc(t.code)}"
-         ${related ? '' : 'disabled'}
-         title="${related ? '' : '该工具还没有关联的知识条目，无法记录使用证据'}">
+    ? `<button class="btn btn-p" data-act="toolbox.applyStep" data-code="${esc(t.code)}">
          用到步骤 ${esc(stepCtx)}</button>`
+    : '';
+  const canEdit = canWrite() && ['DRAFT', 'IN_REVIEW'].includes(t.status);
+  const canReview = canManage() && t.status === 'IN_REVIEW';
+  const canArchive = canManage() && t.status !== 'ARCHIVED';
+  const statusTone = {
+    DRAFT: 't-gry', IN_REVIEW: 't-yel', PUBLISHED: 't-blu',
+    VERIFIED: 't-grn', ARCHIVED: 't-gry',
+  }[t.status] || 't-gry';
+  const usageRows = (t.usage_events || []).map((row) => `
+    <tr><td class="tiny">${fmtDate(row.used_at)}</td>
+      <td><span class="tag ${row.outcome === 'EFFECTIVE' ? 't-grn'
+        : row.outcome === 'PARTIAL' ? 't-yel' : 't-red'}">${esc(row.outcome_label || row.outcome)}</span></td>
+      <td>${esc(row.step_no || '—')}</td><td>${esc(row.used_by || '—')}</td>
+      <td class="tiny">${esc(row.note || '—')}</td></tr>`).join('');
+  const usageTable = usageRows
+    ? `<h3 class="mt">直接使用记录</h3>
+       <table class="tbl"><thead><tr><th>时间</th><th>效果</th><th>步骤</th>
+         <th>使用人</th><th>说明</th></tr></thead><tbody>${usageRows}</tbody></table>`
     : '';
 
   openModal(t.name + (t.alias ? ' · ' + t.alias : ''), `
     <div class="gap mb" style="flex-wrap:wrap">
       <span class="tag t-blu">${esc(t.category_label || t.category)}</span>
+      <span class="tag ${statusTone}">${esc(t.status_label || t.status)}</span>
       <span class="tag t-gry">难度 ${esc(t.difficulty_label || t.difficulty || '—')}</span>
       <span class="tag t-gry">周期 ${esc(t.typical_duration || '待补充')}</span>
       <span class="tag t-gry">阶段 ${t.stage_no}</span>
@@ -425,9 +469,20 @@ function paintTool(t) {
     ${t.pitfalls ? '<h3>常见误用</h3><div class="warnbox">' + esc(t.pitfalls) + '</div>' : ''}
 
     <h3 class="mt">相关案例 / 模板 / 知识</h3>
-    ${knowledgeHtml}`,
+    ${knowledgeHtml}
+    ${usageTable}`,
     `<button class="btn btn-g" data-act="toolbox.close">关闭</button>
      ${applyButton}
+     ${canEdit ? `<button class="btn btn-g" data-act="toolbox.editTool"
+       data-code="${esc(t.code)}">编辑</button>` : ''}
+     ${canEdit && t.status === 'DRAFT' ? `<button class="btn btn-g"
+       data-act="toolbox.submitTool" data-code="${esc(t.code)}">提交审核</button>` : ''}
+     ${canReview ? `<button class="btn btn-g" data-act="toolbox.reviewTool"
+       data-code="${esc(t.code)}" data-decision="REJECT">驳回</button>
+       <button class="btn btn-p" data-act="toolbox.reviewTool"
+       data-code="${esc(t.code)}" data-decision="APPROVE">通过审核</button>` : ''}
+     ${canArchive ? `<button class="btn btn-g" data-act="toolbox.archiveTool"
+       data-code="${esc(t.code)}">归档</button>` : ''}
      <button class="btn btn-g" data-act="toolbox.goKnowledge"
        data-code="${esc(t.code)}">在知识库查看</button>`, true);
 }
@@ -446,12 +501,9 @@ async function openToolApply(code) {
   }
   const related = (tool.knowledge || []).find((item) => item.type === 'TOOL')
     || (tool.knowledge || [])[0];
-  if (!related) {
-    return toast('该工具还没有关联知识条目，无法记录使用证据', true);
-  }
   openModal('用到当前步骤 · ' + tool.name, `
-    <div class="note mb">通过关联知识《${esc(related.title)}》记录一次使用证据，
-      关联工作流步骤 <b>${esc(step)}</b>。工具的已用/有效率来自关联知识的使用记录。</div>
+    <div class="note mb">记录一次工具使用证据，关联工作流步骤 <b>${esc(step)}</b>。
+      ${related ? `关联参考：《${esc(related.title)}》` : '该工具暂时没有关联知识，但仍可记录现场使用。'}</div>
     <div class="field"><label>本次效果</label>
       <select id="taOutcome">
         <option value="EFFECTIVE">有效</option>
@@ -461,16 +513,16 @@ async function openToolApply(code) {
     <div class="field"><label>说明</label>
       <input id="taNote" value="在步骤 ${esc(step)} 使用 ${esc(tool.name)}"></div>`,
   `<button class="btn btn-g" data-act="toolbox.close">取消</button>
-   <button class="btn btn-p" data-act="toolbox.applyStepSubmit" data-id="${related.id}">记录</button>`);
+   <button class="btn btn-p" data-act="toolbox.applyStepSubmit" data-code="${esc(tool.code)}">记录</button>`);
 }
 
-async function submitToolApply(knowledgeId) {
+async function submitToolApply(code) {
   const step = state.toolbox.step;
   if (!step) return toast('步骤上下文已丢失，请重新从工作流进入', true);
   const outcome = document.getElementById('taOutcome')?.value || 'EFFECTIVE';
   const note = document.getElementById('taNote')?.value.trim() || null;
   try {
-    await POST('/knowledge/' + knowledgeId + '/usage', {
+    await POST('/tools/' + encodeURIComponent(code) + '/usage', {
       step_no: step,
       outcome,
       note,
@@ -478,6 +530,158 @@ async function submitToolApply(knowledgeId) {
     toast('已记录到步骤 ' + step);
     closeModal();
     if (state.view === 'toolbox') RENDERERS.toolbox();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function toolFormFields(t) {
+  const meta = state.toolboxMeta || {};
+  const categories = meta.category_labels || {};
+  const difficulties = meta.difficulty_labels || {};
+  const scenarios = meta.scenarios || [];
+  const current = t || {};
+  const selected = new Set(current.scenario_codes || []);
+  return `
+    <div class="row2">
+      <div class="field"><label>工具编码 *</label>
+        <input id="tfCode" value="${esc(current.code || '')}" ${t ? 'readonly' : ''}
+          placeholder="如 SIPOC"></div>
+      <div class="field"><label>名称 *</label>
+        <input id="tfName" value="${esc(current.name || '')}" placeholder="如 SIPOC 流程范围图"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>象限 *</label><select id="tfCategory">
+        ${Object.entries(categories).map(([code, label]) =>
+          `<option value="${code}"${current.category === code ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>适用阶段 *</label><select id="tfStage">
+        ${[1, 2, 3, 4, 5].map((n) =>
+          `<option value="${n}"${current.stage_no === n ? ' selected' : ''}>阶段${n}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>难度</label><select id="tfDifficulty">
+        ${Object.entries(difficulties).map(([code, label]) =>
+          `<option value="${code}"${(current.difficulty || 'MEDIUM') === code ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="field"><label>解决什么问题 *</label>
+      <textarea id="tfPurpose" rows="2">${esc(current.purpose || '')}</textarea></div>
+    <div class="field"><label>适用条件 *</label>
+      <textarea id="tfWhen" rows="2">${esc(current.when_to_use || '')}</textarea></div>
+    <div class="row2">
+      <div class="field"><label>不适用 / 反证</label>
+        <textarea id="tfNotApplicable" rows="2">${esc(current.not_applicable_when || '')}</textarea></div>
+      <div class="field"><label>前置条件</label>
+        <textarea id="tfPrereq" rows="2">${esc(current.prerequisites || '')}</textarea></div>
+    </div>
+    <div class="field"><label>验证标准</label>
+      <input id="tfVerify" value="${esc(current.verification_standard || '')}"
+        placeholder="怎么判断用对了"></div>
+    <div class="row2">
+      <div class="field"><label>预计周期</label>
+        <input id="tfDuration" value="${esc(current.typical_duration || '')}" placeholder="如 2–3 周"></div>
+      <div class="field"><label>模板 / 工具指引</label>
+        <input id="tfTemplate" value="${esc(current.template_ref || '')}"></div>
+    </div>
+    <div class="field"><label>标准步骤（每行一条）</label>
+      <textarea id="tfSteps" rows="5">${esc((current.steps || []).join('\n'))}</textarea></div>
+    <div class="field"><label>常见误用</label>
+      <textarea id="tfPitfalls" rows="2">${esc(current.pitfalls || '')}</textarea></div>
+    <div class="field"><label>适用场景</label>
+      <div class="kb-checks">${scenarios.map((scenario) => `
+        <label class="kb-check"><input type="checkbox" name="tfScenario"
+          value="${esc(scenario.code)}"${selected.has(scenario.code) ? ' checked' : ''}>
+          ${esc(scenario.name)}</label>`).join('')}</div></div>`;
+}
+
+function openToolForm(tool) {
+  const meta = state.toolboxMeta;
+  if (!meta) return toast('工具箱元数据未加载，请刷新后重试', true);
+  const t = tool || null;
+  openModal(t ? '编辑工具 · ' + t.name : '新建工具草稿', toolFormFields(t),
+    `<button class="btn btn-g" data-act="toolbox.close">取消</button>
+     <button class="btn btn-p" data-act="toolbox.saveTool"
+       data-code="${esc(t ? t.code : '')}">${t ? '保存' : '创建草稿'}</button>`, true);
+}
+
+async function submitToolForm(code) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const name = val('tfName');
+  const purpose = val('tfPurpose');
+  const when = val('tfWhen');
+  if (!code && !/^[A-Za-z0-9_-]{2,32}$/.test(val('tfCode'))) {
+    return toast('工具编码需为 2–32 位字母、数字、下划线或连字符', true);
+  }
+  if (!name || !purpose || !when) return toast('名称、问题、适用条件不能为空', true);
+  const payload = {
+    name,
+    category: val('tfCategory'),
+    stage_no: Number(val('tfStage')),
+    purpose,
+    when_to_use: when,
+    difficulty: val('tfDifficulty') || 'MEDIUM',
+    not_applicable_when: val('tfNotApplicable') || null,
+    prerequisites: val('tfPrereq') || null,
+    verification_standard: val('tfVerify') || null,
+    typical_duration: val('tfDuration') || null,
+    template_ref: val('tfTemplate') || null,
+    steps: val('tfSteps').split('\n').map((row) => row.trim()).filter(Boolean),
+    pitfalls: val('tfPitfalls') || null,
+    scenario_codes: [...document.querySelectorAll('input[name="tfScenario"]:checked')]
+      .map((el) => el.value),
+  };
+  try {
+    const saved = code
+      ? await PATCH('/tools/' + encodeURIComponent(code), payload)
+      : await POST('/tools', { ...payload, code: val('tfCode') });
+    toast(code ? '已保存' : '已创建草稿');
+    state.toolbox.status = code ? state.toolbox.status : 'DRAFT';
+    closeModal();
+    RENDERERS.toolbox();
+    openToolByCode(saved.code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function submitToolReviewFlow(code, action) {
+  const tool = state.toolboxCurrent;
+  try {
+    if (action === 'submit') {
+      await POST('/tools/' + encodeURIComponent(code) + '/submit', {});
+      toast('已提交审核');
+    } else {
+      const note = await promptDialog(
+        action === 'APPROVE' ? '审核通过说明（可选）' : '驳回原因（可选）',
+        { title: action === 'APPROVE' ? '通过审核' : '驳回工具', okText: '确定' },
+      );
+      if (note === null) return;
+      await POST('/tools/' + encodeURIComponent(code) + '/review', {
+        decision: action,
+        note: note || null,
+      });
+      toast(action === 'APPROVE' ? '已通过审核' : '已驳回，退回草稿');
+    }
+    closeModal();
+    RENDERERS.toolbox();
+    if (tool) openToolByCode(code);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function archiveTool(code) {
+  const ok = await confirmDialog('归档后该工具不再出现在匹配与全部工具中，确定归档？',
+    { title: '归档工具', okText: '归档', danger: true });
+  if (!ok) return;
+  try {
+    await POST('/tools/' + encodeURIComponent(code) + '/archive', {});
+    toast('已归档');
+    closeModal();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
