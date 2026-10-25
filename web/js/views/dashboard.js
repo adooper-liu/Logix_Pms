@@ -310,7 +310,16 @@ function openProjects(filter) {
     { methodology: '', status: '', stage: '', projectType: '' }, filter || {},
   );
   state.projects.keyword = '';
-  go('projects');
+  const f = state.projects.filter;
+  go('projects', {
+    params: {
+      methodology: f.methodology,
+      status: f.status,
+      stage: f.stage,
+      type: f.projectType,
+    },
+    push: true,
+  });
 }
 
 function openStage(stage) {

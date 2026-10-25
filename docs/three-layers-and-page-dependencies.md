@@ -184,9 +184,13 @@ SKIPPED（这次先不做） 人工标记，不计入就绪
 |---|---|---|
 | `pilot` | `path`, `layer` | 打开某条试点路径的某一层 |
 | `projects` | `project` | 打开某个项目详情 |
+| `projects` | `methodology`, `status`, `stage`, `type`, `keyword` | 保留列表筛选 |
+| `projects` | `new_process`, `new_name` | 从流程地图带入立项向导 |
 | `designer` | `process` | 打开某条流程的设计器 |
 | `execution` | `process`, `tab` | 打开某条流程的执行配置 |
 | `map` | `process` | 定位并打开某条流程的详情 |
+| `knowledge` | `type`, `tag`, `keyword`, `sort`, `page` | 保留知识库筛选与分页 |
+| `monitor` | `tab` | 保留运营监控页签 |
 
 实现约定：
 

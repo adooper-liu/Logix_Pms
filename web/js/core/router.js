@@ -147,10 +147,26 @@ export function onSearch(value) {
     const v = state.view;
     if (v === 'projects') {
       state.projects.keyword = value;
+      setUrlState('projects', {
+        methodology: state.projects.filter.methodology,
+        status: state.projects.filter.status,
+        stage: state.projects.filter.stage,
+        type: state.projects.filter.projectType,
+        keyword: value,
+        project: state.projects.openId || '',
+        new_process: state.projects.newProcess || '',
+        new_name: state.projects.newName || '',
+      }, { push: false });
       RENDERERS.projects();
     } else if (v === 'knowledge') {
       state.knowledge.keyword = value;
       state.knowledge.page = 1;
+      setUrlState('knowledge', {
+        type: state.knowledge.type,
+        tag: state.knowledge.tag,
+        keyword: value,
+        sort: state.knowledge.sort,
+      }, { push: false });
       RENDERERS.knowledge();
     } else if (v === 'toolbox') {
       state.toolboxKeyword = value;

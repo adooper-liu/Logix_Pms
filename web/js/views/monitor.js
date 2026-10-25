@@ -2,7 +2,7 @@
 import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, promptDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
@@ -41,6 +41,8 @@ on('monitor.submitRecord', ({ kpi }) => submitKpiRecord(Number(kpi)));
 on('monitor.goExecution', () => go('execution'));
 
 const renderMonitor = () => {
+  const params = urlParams();
+  if (params.tab) state.monitor.tab = params.tab;
   const qs = state.monitor.status ? '?status=' + state.monitor.status : '';
   return renderAsync('monitor',
     () => Promise.all([
@@ -448,6 +450,7 @@ const renderMonitor = () => {
 
 function setMonitorTab(tab) {
   state.monitor.tab = tab;
+  setUrlState('monitor', { tab }, { push: false });
   RENDERERS.monitor();
 }
 

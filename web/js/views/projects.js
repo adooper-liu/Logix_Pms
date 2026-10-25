@@ -41,7 +41,41 @@ on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.wizardRecommend', () => wizardRecommend());
 on('projects.submit', () => submitProject());
 
+function applyProjectParams() {
+  const params = urlParams();
+  const filterKeys = ['methodology', 'status', 'stage', 'type', 'keyword'];
+  const hasFilters = filterKeys.some((key) => key in params);
+  if (!hasFilters && !params.project && !params.new_process) {
+    state.projects.filter = { methodology: '', status: '', stage: '', projectType: '' };
+    state.projects.keyword = '';
+  }
+  if ('methodology' in params) state.projects.filter.methodology = params.methodology;
+  if ('status' in params) state.projects.filter.status = params.status;
+  if ('stage' in params) state.projects.filter.stage = params.stage;
+  if ('type' in params) state.projects.filter.projectType = params.type;
+  if ('keyword' in params) state.projects.keyword = params.keyword;
+}
+
+function projectUrlParams(extra = {}) {
+  const f = state.projects.filter;
+  return {
+    methodology: f.methodology,
+    status: f.status,
+    stage: f.stage,
+    type: f.projectType,
+    project: state.projects.openId || '',
+    new_process: state.projects.newProcess || '',
+    new_name: state.projects.newName || '',
+    ...extra,
+  };
+}
+
+function syncProjectUrl({ push = false } = {}) {
+  setUrlState('projects', projectUrlParams(), { push });
+}
+
 const renderProjects = () => {
+  applyProjectParams();
   const f = state.projects.filter;
   const qs = [];
   if (f.methodology) qs.push('methodology=' + f.methodology);
@@ -53,7 +87,16 @@ const renderProjects = () => {
 
   renderAsync('projects',
     () => Promise.all([GET('/projects?' + qs.join('&')), GET('/projects/meta')])
-      .then(([page, meta]) => ({ page, meta, openId: Number(urlParams().project) || null })),
+      .then(([page, meta]) => {
+        const params = urlParams();
+        return {
+          page,
+          meta,
+          openId: Number(params.project) || null,
+          newProcess: Number(params.new_process) || null,
+          newName: params.new_name || '',
+        };
+      }),
     (d) => {
       const page = d.page;
       state.projectMeta = d.meta;
@@ -154,26 +197,40 @@ const renderProjects = () => {
         state.projects.openId = null;
         closeModal();
       }
+      if (d.newProcess && state.projects.newProcess !== d.newProcess) {
+        state.projects.newProcess = d.newProcess;
+        state.projects.newName = d.newName;
+        newProjectWizard({ processId: d.newProcess, name: d.newName });
+      } else if (!d.newProcess && state.projects.newProcess) {
+        state.projects.newProcess = null;
+        state.projects.newName = '';
+        closeModal();
+      }
     });
 };
 
 if (typeof window !== 'undefined') {
   window.addEventListener('pms:modal-closed', () => {
-    if (state.view !== 'projects' || !state.projects.openId) return;
+    if (state.view !== 'projects') return;
     if (document.getElementById('mask').classList.contains('show')) return;
+    if (!state.projects.openId && !state.projects.newProcess) return;
     state.projects.openId = null;
-    setUrlState('projects', {}, { push: false });
+    state.projects.newProcess = null;
+    state.projects.newName = '';
+    syncProjectUrl();
   });
 }
 
 function setPFilter(key, value) {
   state.projects.filter[key] = value;
+  syncProjectUrl();
   RENDERERS.projects();
 }
 function clearPFilter() {
   state.projects.filter = { methodology: '', status: '', stage: '', projectType: '' };
   state.projects.keyword = '';
   document.getElementById('searchInput').value = '';
+  syncProjectUrl();
   RENDERERS.projects();
 }
 
@@ -181,7 +238,9 @@ function clearPFilter() {
 
 async function openProject(id, options = {}) {
   state.projects.openId = id;
-  if (!options.fromUrl) setUrlState('projects', { project: id }, { push: true });
+  state.projects.newProcess = null;
+  state.projects.newName = '';
+  if (!options.fromUrl) syncProjectUrl({ push: true });
   const gen = openModal('加载中…', skeleton(5), '', true);
   let d;
   let sched = null;

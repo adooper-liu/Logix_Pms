@@ -2,7 +2,7 @@
 import { esc, fmtDate, KN_COLOR, KN_LABEL, methodTag, skeleton } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canManage } from '../core/auth.js';
 import { GET, POST } from '../core/api.js';
 import { metricHelp } from '../core/metrics.js';
@@ -30,6 +30,12 @@ on('knowledge.submit', () => submitKnowledge());
 
 const renderKnowledge = () => {
   const k = state.knowledge;
+  const params = urlParams();
+  if ('type' in params) k.type = params.type;
+  if ('tag' in params) k.tag = params.tag;
+  if ('keyword' in params) k.keyword = params.keyword;
+  if ('sort' in params) k.sort = params.sort;
+  if ('page' in params) k.page = Number(params.page) || 1;
   const qs = [];
   if (k.type) qs.push('type=' + k.type);
   if (k.tag) qs.push('tag=' + encodeURIComponent(k.tag));
@@ -112,18 +118,32 @@ const renderKnowledge = () => {
     });
 };
 
+function syncKnowledgeUrl() {
+  const k = state.knowledge;
+  setUrlState('knowledge', {
+    type: k.type,
+    tag: k.tag,
+    keyword: k.keyword,
+    sort: k.sort,
+    page: k.page > 1 ? k.page : '',
+  }, { push: false });
+}
+
 function setK(key, value) {
   state.knowledge[key] = value;
   state.knowledge.page = 1;
+  syncKnowledgeUrl();
   RENDERERS.knowledge();
 }
 function setKPage(page) {
   state.knowledge.page = Math.max(1, page);
+  syncKnowledgeUrl();
   RENDERERS.knowledge();
 }
 function clearK() {
   state.knowledge = { type: '', sort: state.knowledge.sort, keyword: '', tag: '', page: 1 };
   document.getElementById('searchInput').value = '';
+  syncKnowledgeUrl();
   RENDERERS.knowledge();
 }
 

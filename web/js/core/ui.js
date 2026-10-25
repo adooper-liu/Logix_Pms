@@ -108,6 +108,11 @@ if (typeof document !== 'undefined') {
       // 下拉会“一闪而过”。表单控件的值变化统一交给 change。
       if (type === 'click') {
         const tag = el.tagName;
+        // <a href="#"> 的默认行为会把 hash 清成 #，覆盖刚写入的视图/上下文
+        if (tag === 'A') {
+          const href = el.getAttribute('href');
+          if (href === '#' || href === '') event.preventDefault();
+        }
         if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
       }
       if (type === 'keydown') {

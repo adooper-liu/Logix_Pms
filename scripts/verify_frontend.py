@@ -1602,6 +1602,11 @@ def main() -> int:
             assert "理论负荷率" in workload_view, "工作量页缺少负荷率"
             assert "能力基线" in workload_view, "工作量页缺少能力基线声明"
             assert "不用于个人" in workload_view, "工作量页缺少不用于个人考核声明"
+            assert "tab=workload" in page.url, f"URL 没有记录监控页签：{page.url}"
+            page.reload(wait_until="networkidle")
+            page.wait_for_selector('#view .seg button[data-tab="workload"].on', timeout=8000)
+            page.wait_for_timeout(600)
+            assert "标准工时卡" in page.inner_text("#view"), "刷新没有恢复工作量页签"
 
             page.click('#view button:has-text("+ 标准工时")')
             page.wait_for_selector("#mask.show")
@@ -1867,12 +1872,14 @@ def main() -> int:
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "流程项目组合"
             assert page.locator('#view select[data-key="status"]').input_value() == "ACTIVE"
+            assert "status=ACTIVE" in page.url, f"URL 没有记录筛选：{page.url}"
 
             goto("dashboard")
             page.click("#view a.stage-row >> nth=0")
             page.wait_for_timeout(900)
             assert page.inner_text("#pageTitle") == "流程项目组合"
             assert page.locator('#view select[data-key="stage"]').input_value() == "1"
+            assert "stage=1" in page.url, f"URL 没有记录阶段筛选：{page.url}"
 
             goto("dashboard")
             page.click("#view .card:has(h3:has-text('改善优先级')) .project-open >> nth=0")

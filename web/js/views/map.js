@@ -510,8 +510,10 @@ async function dlMapDocument(documentId, versionId, label) {
 
 /** 地图 → 立项：带着流程进入项目向导 */
 function startProjectFromProcess(processId, processName) {
-  go('projects');
-  actions['projects.newWizard']({ processId, name: processName });
+  go('projects', {
+    params: { new_process: processId, new_name: processName },
+    push: true,
+  });
 }
 
 function mapGo(index) {
