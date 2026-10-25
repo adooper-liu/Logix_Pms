@@ -2087,6 +2087,22 @@ def main() -> int:
             view = page.inner_text("#view")
             assert "制度与授权设计" in view and "退出门" in view, "第4层工作区未展开"
             assert "制度、授权与例外（本流程范围）" in view, "第4层缺少制度/授权工作区"
+            assert "layer=4" in page.url, f"URL 没有记录当前层：{page.url}"
+
+            page.go_back()
+            page.wait_for_selector('#view .pilot-layer.on[data-layer="1"]', timeout=8000)
+            page.wait_for_timeout(500)
+            back_view = page.inner_text("#view")
+            assert "制度、授权与例外（本流程范围）" not in back_view, "后退没有回到上一层"
+
+            page.go_forward()
+            page.wait_for_selector('#view .pilot-layer.on[data-layer="4"]', timeout=8000)
+            page.wait_for_timeout(500)
+            assert "制度、授权与例外（本流程范围）" in page.inner_text("#view"), "前进没有恢复第4层"
+            page.reload(wait_until="networkidle")
+            page.wait_for_selector('#view .pilot-layer.on[data-layer="4"]', timeout=8000)
+            page.wait_for_timeout(500)
+            assert "制度、授权与例外（本流程范围）" in page.inner_text("#view"), "刷新没有恢复第4层"
             page.screenshot(path=str(out_dir / "pilot-layer4.png"), full_page=True)
 
             page.click('#view button:has-text("+ 新增待办")')
@@ -2384,6 +2400,12 @@ def main() -> int:
             page.click("#view .project-open >> nth=0")
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(1100)
+            assert "project=" in page.url, f"URL 没有记录项目：{page.url}"
+            page.reload(wait_until="networkidle")
+            page.wait_for_selector("#mask.show", timeout=8000)
+            page.wait_for_selector("#mBody .tabs", timeout=8000)
+            page.wait_for_timeout(600)
+            assert "概览" in page.inner_text("#mBody"), "刷新没有恢复项目详情"
             btn = page.locator('#mFoot button[data-act="projects.openExecution"]')
             assert btn.count(), "项目详情没有「去流程执行」入口"
             btn.first.click()

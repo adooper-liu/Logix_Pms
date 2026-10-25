@@ -150,7 +150,7 @@ export async function loadMeta() {
 export async function enterDefaultView() {
   const explicit = explicitView();
   if (explicit) {
-    go(explicit);
+    go(explicit, { push: false, skipHash: true });
     return;
   }
   let view = 'start';
@@ -162,7 +162,7 @@ export async function enterDefaultView() {
   } catch (e) {
     // 启动页会自己展示错误与重试，不要把用户挡在空白页
   }
-  go(view);
+  go(view, { push: false });
 }
 
 // 令牌失效由 api 层回调到这里：清身份 + 弹登录页

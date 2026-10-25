@@ -32,7 +32,8 @@ export async function renderAsync(view, loader, painter) {
   painter(data);
 }
 
-export function go(view, skipHash) {
+export function go(view, options = {}) {
+  const opts = typeof options === 'boolean' ? { skipHash: options } : options;
   if (!RENDERERS[view]) view = 'dashboard';
   ensureExpertVisible(view);
   state.view = view;
@@ -40,18 +41,44 @@ export function go(view, skipHash) {
     a.classList.toggle('active', a.dataset.view === view);
   });
   document.getElementById('pageTitle').textContent = TITLES[view] || view;
+  // 先把上下文写进 URL，再渲染：视图的 loader 会同步读取 urlParams()，
+  // 如果顺序反过来，会读到上一次的 layer/process，导致上下文跳转失效。
+  if (!opts.skipHash) {
+    setUrlState(view, opts.params || {}, { push: opts.push !== false });
+  }
   const render = RENDERERS[view];
   if (render) render();
-  // 视图名同步到 hash，方便刷新/分享；用 replaceState 避免触发额外的 hashchange 渲染
-  if (!skipHash && typeof history !== 'undefined') {
-    const target = '#' + view;
-    if (location.hash !== target) history.replaceState(null, '', target);
-  }
+}
+
+/** 读取当前 hash 里的上下文参数：#view?key=value */
+export function urlParams() {
+  const raw = (location.hash || '').replace(/^#/, '');
+  const query = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
+  const params = {};
+  new URLSearchParams(query).forEach((value, key) => {
+    params[key] = value;
+  });
+  return params;
+}
+
+/** 把视图和上下文写进 URL；不触发 hashchange，避免重复渲染。 */
+export function setUrlState(view, params = {}, { push = false } = {}) {
+  if (typeof history === 'undefined') return;
+  const search = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  const target = '#' + view + (query ? '?' + query : '');
+  if (location.hash === target) return;
+  history[push ? 'pushState' : 'replaceState'](null, '', target);
 }
 
 /** URL 明确指定的视图；没有则为 null（用于区分“用户点名”与“默认落地”） */
 export function explicitView() {
-  const hash = (location.hash || '').replace(/^#/, '');
+  const hash = (location.hash || '').replace(/^#/, '').split('?')[0];
   const path = (location.pathname || '').replace(/^\/+|\/+$/g, '');
   if (RENDERERS[hash]) return hash;
   if (RENDERERS[path]) return path;
@@ -105,8 +132,10 @@ function ensureExpertVisible(view) {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('hashchange', () => {
-    const view = (location.hash || '').replace(/^#/, '');
-    if (RENDERERS[view] && state.view !== view) go(view, true);
+    const view = explicitView();
+    if (!view) return;
+    if (state.view !== view) go(view, { skipHash: true, push: false });
+    else RENDERERS[view]();
   });
 }
 

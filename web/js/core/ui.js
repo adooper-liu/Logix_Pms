@@ -46,6 +46,8 @@ export function closeModal() {
   document.getElementById('mask').classList.remove('show');
   modalGen++;
   resolveModalClose();
+  // 让关心 URL 上下文的视图在真正关闭后清理自己的参数
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('pms:modal-closed'));
 }
 
 /** 异步回填前调用；返回 false 说明弹窗已被关闭或被别的弹窗取代，应放弃本次渲染 */

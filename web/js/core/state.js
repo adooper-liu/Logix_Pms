@@ -11,9 +11,10 @@ export const state = {
   map: {
     code: null, name: null, path: [], improvementOnly: false,
     pendingJump: null, navCollapsed: false,
-    frameworks: null, benchmarkFramework: '', benchmark: null,
+    frameworks: null, benchmarkFramework: '', benchmark: null, openCode: null,
   },
-  projects: { filter: { methodology: '', status: '', stage: '', projectType: '' }, keyword: '' },
+  projects: { filter: { methodology: '', status: '', stage: '', projectType: '' },
+    keyword: '', openId: null },
   workflow: { tab: 'steps', stage: 1 },
   /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
   toolboxFilter: null,

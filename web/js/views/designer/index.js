@@ -8,7 +8,7 @@
 import { esc, num, dur } from '../../core/format.js';
 import { toast, closeModal, viewEl, on } from '../../core/ui.js';
 import { state } from '../../core/state.js';
-import { renderAsync, go, RENDERERS } from '../../core/router.js';
+import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../../core/router.js';
 import { AUTH, canWrite, canManage } from '../../core/auth.js';
 import { metricHelp } from '../../core/metrics.js';
 import { GET, POST } from '../../core/api.js';
@@ -74,11 +74,13 @@ Object.assign(ctx, {
 
 export async function openDesigner(processId) {
   state.designer.processId = processId;
-  go('designer');
+  go('designer', { params: { process: processId }, push: true });
 }
 
 export function renderDesigner() {
   const load = async () => {
+    const params = urlParams();
+    if (params.process) state.designer.processId = Number(params.process);
     if (!state.designer.processes) {
       const rows = await GET('/process-map/flat');
       state.designer.processes = rows.filter((r) => r.level >= 3);
@@ -90,6 +92,7 @@ export function renderDesigner() {
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
+      setUrlState('designer', { process: id }, { push: false });
       const [model, analysis, positions, tools, toolMeta, docMeta, changes, changeMeta,
         raciMatrix, governanceRoles, raciMeta] =
         await Promise.all([
@@ -352,6 +355,7 @@ function paintSuggestions(a) {
 function switchProcess(id) {
   state.designer.processId = Number(id);
   state.designer.processCode = (state.designer.processes.find((p) => p.id === Number(id)) || {}).code;
+  setUrlState('designer', { process: Number(id) }, { push: true });
   state.designer.tab = 'model';
   state.designer.assignmentCtx = null;
   state.designer.assignmentPending = null;
@@ -419,12 +423,10 @@ on('designer.export', () => transfer.exportBpmn());
 on('designer.import', () => transfer.importBpmn());
 on('designer.goExecution', () => {
   const pid = state.designer.processId;
-  if (pid) {
-    state.execution = state.execution || { tab: 'tasks', filter: 'open' };
-    state.execution.configProcess = pid;
-    state.execution.tab = 'config';
-  }
-  go('execution');
+  go('execution', {
+    params: pid ? { process: pid, tab: 'config' } : {},
+    push: true,
+  });
 });
 on('designer.publishFromChange', () => {
   state.designer.tab = 'model';

@@ -5,7 +5,7 @@ import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } f
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
-import { go } from '../core/router.js';
+import { go, urlParams, setUrlState } from '../core/router.js';
 import { GET, POST, PATCH, DEL, download } from '../core/api.js';
 import { openDocumentCopy } from '../core/template-copy.js';
 import { actions } from '../core/actions.js';
@@ -26,6 +26,15 @@ on('map.newProcess', () => newProcessModal());
 on('map.toggleImprovement', () => toggleImprovement());
 on('map.toggleNav', () => toggleMapNav());
 on('map.close', () => closeModal());
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pms:modal-closed', () => {
+    if (state.view !== 'map' || !state.map.openCode) return;
+    if (document.getElementById('mask').classList.contains('show')) return;
+    state.map.openCode = null;
+    setUrlState('map', {}, { push: false });
+  });
+}
 on('map.deleteProcess', ({ id, code }) => deleteProcess(Number(id), code));
 on('map.editProcess', ({ id }) => editProcessModal(Number(id)));
 on('map.startProject', ({ id, name }) => startProjectFromProcess(Number(id), name));
@@ -332,6 +341,12 @@ const renderMap = () => {
   };
 
   const start = async () => {
+    const params = urlParams();
+    if (params.process) state.map.pendingJump = params.process;
+    else if (state.map.openCode) {
+      state.map.openCode = null;
+      closeModal();
+    }
     if (!state.map.frameworks) {
       state.map.frameworks = await GET('/benchmark/frameworks');
     }
@@ -388,6 +403,8 @@ function mapClick(code, hasKids) {
       return nodes.find((n) => n.code === code);
     })();
     if (!node) return;
+    state.map.openCode = code;
+    setUrlState('map', { process: code }, { push: true });
     openModal(node.name + ' · ' + node.code, `
       <div class="row2">
         <div class="field"><label>流程层级</label><input value="L${node.level}" readonly></div>

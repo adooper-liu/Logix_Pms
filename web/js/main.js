@@ -84,7 +84,7 @@ window.addEventListener('pms:login', () => { refreshNotifications(); });
 on('shell.notifications', () => openNotifications());
 on('shell.theme', (_data, el) => applyTheme(el.value));
 on('shell.logout', () => logout());
-on('shell.retry', ({ view }) => go(view));
+on('shell.retry', ({ view }) => go(view, { push: false, skipHash: true }));
 
 // 仅保留最小操作面；模板不再依赖这些全局函数。
 Object.assign(window, { go, closeModal, state, actions });

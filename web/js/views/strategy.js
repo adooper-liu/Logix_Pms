@@ -22,7 +22,7 @@ on('strategy.unlink', ({ id, link }) => unlinkObjective(Number(id), Number(link)
 on('strategy.archive', ({ id }) => archiveObjective(Number(id)));
 on('strategy.openProcess', ({ code }) => {
   state.map.pendingJump = code;
-  go('map');
+  go('map', { params: { process: code }, push: true });
 });
 
 function setStrategyYear(year) {

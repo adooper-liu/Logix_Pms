@@ -6,7 +6,7 @@
 
 import { esc, num } from '../core/format.js';
 import { viewEl, on, openModal, closeModal, confirmDialog, toast } from '../core/ui.js';
-import { renderAsync, go, RENDERERS } from '../core/router.js';
+import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { state } from '../core/state.js';
 
@@ -53,14 +53,20 @@ function userOptions(users, selectedId) {
 on('pilot.go', ({ view }) => go(view));
 
 on('pilot.selectPath', (_data, el) => {
-  state.pilot.pathId = Number(el.value) || null;
+  const pathId = Number(el.value) || null;
+  if (!pathId) return;
+  state.pilot.pathId = pathId;
   state.pilot.layerNo = null;
-  RENDERERS.pilot();
+  go('pilot', { params: { path: pathId }, push: true });
 });
 
 on('pilot.selectLayer', ({ layer }) => {
-  state.pilot.layerNo = Number(layer) || null;
-  RENDERERS.pilot();
+  const layerNo = Number(layer) || null;
+  state.pilot.layerNo = layerNo;
+  go('pilot', {
+    params: { path: state.pilot.pathId, layer: layerNo },
+    push: true,
+  });
 });
 
 on('pilot.advance', async () => {
@@ -70,6 +76,7 @@ on('pilot.advance', async () => {
     const updated = await POST(`/pilot/paths/${detail.id}/advance`);
     state.pilot.data = updated;
     state.pilot.layerNo = updated.current_layer;
+    setUrlState('pilot', { path: updated.id, layer: updated.current_layer }, { push: false });
     paint({ detail: updated, paths: state.pilot.paths, meta: state.pilot.meta });
     toast(`已进入第 ${updated.current_layer} 层`);
   } catch (e) {
@@ -93,7 +100,7 @@ on('pilot.deletePath', async () => {
     state.pilot.pathId = null;
     state.pilot.layerNo = null;
     toast('试点路径已删除');
-    RENDERERS.pilot();
+    go('pilot', { params: {}, push: false });
   } catch (e) {
     toast(e.message, true);
   }
@@ -145,7 +152,10 @@ on('pilot.savePath', async () => {
     state.pilot.pathId = detail.id;
     state.pilot.layerNo = detail.current_layer;
     toast('试点路径已创建');
-    RENDERERS.pilot();
+    go('pilot', {
+      params: { path: detail.id, layer: detail.current_layer },
+      push: true,
+    });
   } catch (e) {
     toast(e.message, true);
   }
@@ -586,7 +596,9 @@ function paint(payload) {
   state.pilot.meta = meta;
   state.pilot.data = detail;
   const selectedNo = state.pilot.layerNo || detail.current_layer;
-  const layer = detail.layers.find((row) => row.layer_no === selectedNo) || detail.layers[0];
+  const layer = detail.layers.find((row) => row.layer_no === selectedNo)
+    || detail.layers.find((row) => row.layer_no === detail.current_layer)
+    || detail.layers[0];
   state.pilot.layerNo = layer.layer_no;
   const options = paths.map((path) =>
     `<option value="${path.id}"${path.id === detail.id ? ' selected' : ''}>${
@@ -634,11 +646,17 @@ const renderPilot = () => {
   renderAsync(
     'pilot',
     async () => {
+      const params = urlParams();
       const [paths, meta] = await Promise.all([GET('/pilot/paths'), GET('/pilot/meta')]);
       if (!paths.length) return { paths, meta, detail: null };
-      const pathId = state.pilot.pathId && paths.some((row) => row.id === state.pilot.pathId)
-        ? state.pilot.pathId : paths[0].id;
+      const wantedPath = Number(params.path) || null;
+      const wantedLayer = Number(params.layer) || null;
+      const pathId = wantedPath && paths.some((row) => row.id === wantedPath)
+        ? wantedPath
+        : state.pilot.pathId && paths.some((row) => row.id === state.pilot.pathId)
+          ? state.pilot.pathId : paths[0].id;
       state.pilot.pathId = pathId;
+      if (wantedLayer) state.pilot.layerNo = wantedLayer;
       const detail = await GET(`/pilot/paths/${pathId}`);
       return { paths, meta, detail };
     },

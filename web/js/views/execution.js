@@ -2,7 +2,7 @@
 import { esc, dtShort, emptyRow, skeleton } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, promptDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
 
@@ -49,6 +49,13 @@ let manualBranchTask = null;
 
 const renderExecution = () => {
   const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open' });
+  const params = urlParams();
+  if (params.process) {
+    ex.configProcess = Number(params.process);
+    ex.tab = params.tab || 'config';
+  } else if (params.tab) {
+    ex.tab = params.tab;
+  }
   return renderAsync('execution',
     () => Promise.all([
       GET('/execution/tasks?only_open=true&limit=500'),
@@ -418,18 +425,26 @@ const renderExecution = () => {
 
 function setExecutionTab(tab) {
   state.execution.tab = tab;
+  const params = { tab };
+  if (tab === 'config' && state.execution.configProcess) {
+    params.process = state.execution.configProcess;
+  }
+  setUrlState('execution', params, { push: false });
   RENDERERS.execution();
 }
 
 function setExecutionFilter(filter) {
   state.execution.filter = filter;
   state.execution.tab = 'tasks';
+  setUrlState('execution', { tab: 'tasks' }, { push: false });
   RENDERERS.execution();
 }
 
 function setExecutionConfigProcess(processId) {
-  state.execution.configProcess = Number(processId);
+  const pid = Number(processId);
+  state.execution.configProcess = pid;
   state.execution.tab = 'config';
+  setUrlState('execution', { process: pid, tab: 'config' }, { push: true });
   RENDERERS.execution();
 }
 

@@ -5,7 +5,6 @@ import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go } from '../core/router.js';
 import { GET } from '../core/api.js';
-import { actions } from '../core/actions.js';
 
 /* ============================================================ 1. 管理驾驶舱 */
 
@@ -17,7 +16,9 @@ on('dashboard.kpi', ({ key }) => {
 });
 on('dashboard.stage', ({ stage }) => openStage(Number(stage)));
 on('dashboard.methodology', ({ methodology }) => openMethodology(methodology));
-on('dashboard.openProject', ({ id }) => actions['projects.open'](Number(id)));
+on('dashboard.openProject', ({ id }) => {
+  go('projects', { params: { project: Number(id) }, push: true });
+});
 on('dashboard.openProcess', ({ code }) => openProcessOnMap(code));
 on('dashboard.go', ({ view }) => go(view));
 on('dashboard.setupProjects', () => {

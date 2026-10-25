@@ -3,7 +3,7 @@ import { esc, num, pct, methodTag, statusTag, bar, emptyRow, skeleton } from '..
 import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, tab, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, role, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { actions as appActions } from '../core/actions.js';
@@ -31,11 +31,11 @@ on('projects.closeOpenDesigner', ({ process }) => {
   appActions['designer.open'](Number(process));
 });
 on('projects.openExecution', ({ process }) => {
-  state.execution = state.execution || { tab: 'tasks', filter: 'open' };
-  state.execution.configProcess = Number(process);
-  state.execution.tab = 'config';
   closeModal();
-  go('execution');
+  go('execution', {
+    params: { process: Number(process), tab: 'config' },
+    push: true,
+  });
 });
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.wizardRecommend', () => wizardRecommend());
@@ -53,7 +53,7 @@ const renderProjects = () => {
 
   renderAsync('projects',
     () => Promise.all([GET('/projects?' + qs.join('&')), GET('/projects/meta')])
-      .then(([page, meta]) => ({ page, meta })),
+      .then(([page, meta]) => ({ page, meta, openId: Number(urlParams().project) || null })),
     (d) => {
       const page = d.page;
       state.projectMeta = d.meta;
@@ -147,8 +147,24 @@ const renderProjects = () => {
             <tbody>${rows}</tbody>
           </table>
         </div>`;
+      if (d.openId && state.projects.openId !== d.openId) {
+        state.projects.openId = d.openId;
+        openProject(d.openId, { fromUrl: true });
+      } else if (!d.openId && state.projects.openId) {
+        state.projects.openId = null;
+        closeModal();
+      }
     });
 };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pms:modal-closed', () => {
+    if (state.view !== 'projects' || !state.projects.openId) return;
+    if (document.getElementById('mask').classList.contains('show')) return;
+    state.projects.openId = null;
+    setUrlState('projects', {}, { push: false });
+  });
+}
 
 function setPFilter(key, value) {
   state.projects.filter[key] = value;
@@ -163,7 +179,9 @@ function clearPFilter() {
 
 /* -------------------------------------------------- 项目详情 */
 
-async function openProject(id) {
+async function openProject(id, options = {}) {
+  state.projects.openId = id;
+  if (!options.fromUrl) setUrlState('projects', { project: id }, { push: true });
   const gen = openModal('加载中…', skeleton(5), '', true);
   let d;
   let sched = null;
