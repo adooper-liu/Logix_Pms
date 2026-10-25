@@ -23,6 +23,7 @@ from app.models.knowledge import KnowledgeItem, KnowledgeScenario, KnowledgeScen
 from app.models.project import WorkflowTemplate
 from app.models.tool import Tool, ToolScenarioLink, ToolUsage
 from app.schemas.common import as_columns
+from app.schemas.knowledge import KnowledgeBrief
 from app.schemas.tool import (
     ToolBrief,
     ToolCategoryGroup,
@@ -302,6 +303,16 @@ def get_tool(code: str, db: DbSession, user: CurrentUser):
         workflow_steps=_workflow_steps(db, code),
         usage_events=_usage_events(db, code),
     )
+
+
+@router.get(
+    "/{code}/knowledge",
+    response_model=List[KnowledgeBrief],
+    summary="工具关联的案例/模板/知识",
+)
+def list_tool_knowledge(code: str, db: DbSession, user: CurrentUser):
+    _require_tool(db, code, user, allow_hidden=True)
+    return _visible_knowledge(db, code, limit=50)
 
 
 @router.post(
