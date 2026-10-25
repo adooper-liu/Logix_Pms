@@ -69,16 +69,11 @@ SYNONYMS: Dict[str, Sequence[str]] = {
     "复盘": ["PDCA", "KB"],
 }
 
-HINT = (
-    "匹配结果按得分排序。建议一次只解决问题最突出的那一条，"
-    "选 1–2 个工具深用，而不是把工具清单全上一遍。"
-)
-
 
 def score_text(tool: Tool, problem: str, stage_no: Optional[int] = None) -> Tuple[float, List[str]]:
     """按同义词 + 工具自身文本 + 阶段给单个工具打文本分。
 
-    供 `tool_finder.match()` 和问题驱动的 `tool_match` 共用，避免两套分词/同义词逻辑。
+    供问题驱动的 `tool_match` 复用，避免两套分词/同义词逻辑。
     """
     text = problem.strip()
     score = 0.0
@@ -113,16 +108,3 @@ def score_text(tool: Tool, problem: str, stage_no: Optional[int] = None) -> Tupl
         score += 0.5
 
     return score, sorted(set(matched_on), key=matched_on.index)
-
-
-def match(
-    tools: Sequence[Tool], problem: str, stage_no: Optional[int] = None
-) -> List[Tuple[Tool, float, List[str]]]:
-    hits: List[Tuple[Tool, float, List[str]]] = []
-    for tool in tools:
-        score, matched_on = score_text(tool, problem, stage_no)
-        if score > 0:
-            hits.append((tool, round(score, 2), matched_on))
-
-    hits.sort(key=lambda item: (-item[1], item[0].sort_order))
-    return hits[:8]

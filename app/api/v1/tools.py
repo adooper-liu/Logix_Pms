@@ -122,7 +122,7 @@ def _require_tool(db: DbSession, code: str, user, *, allow_hidden: bool = False)
     tool = db.scalar(_tool_query().where(Tool.code == code))
     if tool is None:
         raise HTTPException(status_code=404, detail=f"工具 {code} 不存在")
-    if tool.status not in VISIBLE_TOOL_STATUSES:
+    if not tool.is_active or tool.status not in VISIBLE_TOOL_STATUSES:
         is_owner = tool.owner_user_id is not None and tool.owner_user_id == user.id
         if not (allow_hidden and (_is_manager(user) or is_owner)):
             raise HTTPException(status_code=404, detail=f"工具 {code} 不存在")
