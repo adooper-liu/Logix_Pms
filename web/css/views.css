@@ -206,6 +206,11 @@ button.bpmn-lint-item:last-child{border-bottom:none}
 .stepitem.done .nm b{color:var(--sub);text-decoration:line-through;text-decoration-color:var(--line-strong)}
 .stepitem select{padding:3px 7px;font-size:11.5px;border:1px solid var(--line);border-radius:6px;
   font-family:inherit;background:var(--panel);cursor:pointer}
+.stepacts{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;
+  max-width:62%}
+.stepacts .btn-sm{padding:3px 8px;font-size:11.5px}
+@media(max-width:900px){.stepacts{max-width:none;width:100%;justify-content:flex-start;
+  padding-left:36px}}
 .stageblock{margin-bottom:14px}
 .stageblock .hd{display:flex;justify-content:space-between;font-size:13px;font-weight:600;
   padding:8px 13px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px 10px 0 0;border-bottom:none}

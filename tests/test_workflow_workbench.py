@@ -20,6 +20,20 @@ def _project(client) -> dict:
     return created.json()
 
 
+def test_project_detail_exposes_step_status_labels(client):
+    """项目详情的步骤下拉必须由后端下发六状态标签，前端不自己维护映射。"""
+    project = _project(client)
+    try:
+        detail = client.get(f"{API}/projects/{project['id']}")
+        assert detail.status_code == 200, detail.text
+        labels = detail.json()["step_status_labels"]
+        assert labels["PENDING_VERIFY"] == "待验证"
+        assert labels["BLOCKED"] == "受阻"
+        assert labels["DECISION"] == "需决策"
+    finally:
+        client.delete(f"{API}/projects/{project['id']}")
+
+
 def test_workbench_seeds_gate_and_blocks_advance(client):
     project = _project(client)
     try:

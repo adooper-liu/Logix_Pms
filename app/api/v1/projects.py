@@ -399,6 +399,7 @@ def get_project(project_id: int, db: DbSession):
         current_steps=[ProjectStepOut.model_validate(s) for s in current_steps],
         next_action=next_action,
         kpi_trend=kpi_trend,
+        step_status_labels=workbench_service.STEP_STATUS_LABELS,
     )
 
 

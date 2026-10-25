@@ -23,6 +23,40 @@ on('projects.tab', ({ pane }, el) => tab(el, pane));
 on('projects.patchStep', ({ id, project }, el) => {
   patchStep(Number(id), el.value, Number(project));
 });
+on('projects.startStep', ({ id, project }) => {
+  patchStep(Number(id), 'IN_PROGRESS', Number(project));
+});
+on('projects.openStepWork', ({ step, stage, process }) => {
+  closeModal();
+  const target = stepWorkspace(step, Number(stage), Number(process) || null);
+  go(target.view, { params: target.params, push: true });
+});
+on('projects.openStepTool', ({ step, stage }) => {
+  closeModal();
+  state.toolbox.step = step;
+  state.toolbox.stage = Number(stage);
+  state.toolbox.sort = 'fit';
+  go('toolbox', {
+    params: { step, stage: Number(stage), sort: 'fit' },
+    push: true,
+  });
+});
+on('projects.openStepDeliverables', ({ project, step }) => {
+  closeModal();
+  go('deliverables', {
+    params: { tab: 'project', project: Number(project), step },
+    push: true,
+  });
+});
+on('projects.logStep', ({ id, project }) => {
+  openStepProgress(Number(id), Number(project));
+});
+on('projects.stepStatusPreview', (_data, el) => {
+  toggleStepStatusFields(el.value);
+});
+on('projects.submitStepProgress', ({ id, project }) => {
+  submitStepProgress(Number(id), Number(project));
+});
 on('projects.delete', ({ id, code }) => deleteProject(Number(id), code));
 on('projects.close', () => closeModal());
 on('projects.edit', ({ id }) => editProjectModal(Number(id)));
@@ -269,10 +303,12 @@ async function openProject(id, options = {}) {
   const gen = openModal('加载中…', skeleton(5), '', true);
   let d;
   let sched = null;
+  let dlv = [];
   try {
-    [d, sched] = await Promise.all([
+    [d, sched, dlv] = await Promise.all([
       GET('/projects/' + id),
       GET('/projects/' + id + '/schedule').catch(() => null),
+      GET('/projects/' + id + '/deliverables').catch(() => []),
     ]);
   } catch (e) {
     if (modalAlive(gen)) openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>');
@@ -282,6 +318,11 @@ async function openProject(id, options = {}) {
   if (!modalAlive(gen)) return;
   const p = d.project;
   state.projectDetail = d;
+  const dlvByStep = {};
+  dlv.forEach((row) => {
+    (dlvByStep[row.step_no] ||= []).push(row);
+  });
+  const stepStatusLabels = d.step_status_labels || {};
 
   const tabs = `
     <div class="tabs">
@@ -360,13 +401,21 @@ async function openProject(id, options = {}) {
         </table>` : '<div class="empty">暂无时序数据</div>'}
     </div>`;
 
-  const stepStatusOpts = (cur) => [
-    ['PENDING', '未开始'], ['IN_PROGRESS', '进行中'], ['DONE', '已完成'], ['SKIPPED', '已跳过'],
-  ].map(([v, l]) => '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + l + '</option>').join('');
+  const quickStatuses = ['PENDING', 'IN_PROGRESS', 'DONE', 'SKIPPED'];
+  const stepStatusOpts = (cur) => {
+    const current = quickStatuses.includes(cur)
+      ? ''
+      : `<option value="${cur}" selected>${esc(stepStatusLabels[cur] || cur)}</option>`;
+    return current + quickStatuses.map(
+      (v) => `<option value="${v}"${cur === v ? ' selected' : ''}>${
+        esc(stepStatusLabels[v] || v)}</option>`,
+    ).join('');
+  };
 
   const wfPane = `
     <div data-pane id="pd-wk" class="hide">
-      <div class="note mb">步骤状态由「标准工作流模板」自动生成。阶段内步骤全部完成后，项目会自动推进到下一阶段。</div>
+      <div class="note mb">每个步骤都可以直接去工作、记录进度，并查看/上传对应交付物；
+        状态是工作结果，不是工作本身。</div>
       ${d.stages.map((s) => {
         const steps = d.steps.filter((x) => x.stage_no === s.stage_no);
         const allDone = s.total > 0 && s.done === s.total;
@@ -377,14 +426,39 @@ async function openProject(id, options = {}) {
             <span>${s.done}/${s.total}${allDone ? ' ✓' : ''}</span>
           </div>
           <div class="steplist">
-            ${steps.map((st) => `
-              <div class="stepitem ${st.status === 'DONE' ? 'done' : ''}">
+            ${steps.map((st) => {
+              const target = stepWorkspace(st.step_no, st.stage_no, p.process_id);
+              const stepDlv = dlvByStep[st.step_no] || [];
+              const effective = stepDlv.filter((row) => row.status === 'EFFECTIVE').length;
+              const done = st.status === 'DONE';
+              return `
+              <div class="stepitem ${done ? 'done' : ''}">
                 <span class="no">${esc(st.step_no)}</span>
                 <span class="nm"><b>${esc(st.name)}</b>
                   <i>${esc(st.deliverable || '')}${st.owner ? ' · ' + esc(st.owner) : ''}</i></span>
-                <select data-act="projects.patchStep" data-id="${st.id}"
-                  data-project="${p.id}">${stepStatusOpts(st.status)}</select>
-              </div>`).join('')}
+                <div class="stepacts">
+                  <button class="btn-sm" data-act="projects.openStepWork"
+                    data-step="${esc(st.step_no)}" data-stage="${st.stage_no}"
+                    data-process="${p.process_id || ''}"
+                    title="打开本步骤的工作现场">去${esc(target.label)}</button>
+                  <button class="btn-sm" data-act="projects.openStepTool"
+                    data-step="${esc(st.step_no)}" data-stage="${st.stage_no}"
+                    title="查看本步骤推荐的工具与方法">工具</button>
+                  ${stepDlv.length ? `<button class="btn-sm"
+                    data-act="projects.openStepDeliverables" data-project="${p.id}"
+                    data-step="${esc(st.step_no)}"
+                    title="查看/上传本步骤交付物，或关联流程模型">交付物 ${effective}/${stepDlv.length}</button>` : ''}
+                  ${st.status === 'PENDING' ? `<button class="btn-sm"
+                    data-act="projects.startStep" data-id="${st.id}"
+                    data-project="${p.id}" title="把状态改为进行中">开始</button>` : ''}
+                  <button class="btn-sm" data-act="projects.logStep"
+                    data-id="${st.id}" data-project="${p.id}"
+                    title="记录进度、受阻或决策">记录进度</button>
+                  <select data-act="projects.patchStep" data-id="${st.id}"
+                    data-project="${p.id}">${stepStatusOpts(st.status)}</select>
+                </div>
+              </div>`;
+            }).join('')}
           </div>
         </div>`;
       }).join('')}
@@ -964,22 +1038,129 @@ function paintGantt(s) {
     </table>`;
 }
 
-/** 切换步骤状态。后端会自动回算项目进度与阶段推进。 */
+/** 步骤 → 工作现场：直接在原模块开工，而不是只改一个状态。 */
+function stepWorkspace(stepNo, stageNo, processId) {
+  if (stepNo === '1.4') {
+    return { label: '方法匹配', view: 'workflow', params: { tab: 'method' } };
+  }
+  if (stepNo.startsWith('1.')) {
+    return { label: '流程地图', view: 'map', params: {} };
+  }
+  if (stepNo === '3.3') {
+    return { label: '授权矩阵', view: 'authorization', params: {} };
+  }
+  if (stepNo.startsWith('2.') || stepNo.startsWith('3.')) {
+    return processId
+      ? { label: '流程设计器', view: 'designer', params: { process: processId } }
+      : { label: '流程地图', view: 'map', params: {} };
+  }
+  if (stepNo.startsWith('4.')) {
+    return { label: '十层单页', view: 'pilot', params: {} };
+  }
+  if (stepNo.startsWith('5.')) {
+    return { label: '运营监控', view: 'monitor', params: {} };
+  }
+  return { label: '交付物', view: 'deliverables', params: { tab: 'project' } };
+}
+
+async function reloadProjectWorkflow(projectId) {
+  const wk = document.getElementById('pd-wk');
+  const onWk = !!wk && !wk.classList.contains('hide');
+  await openProject(projectId);
+  // 后端可能已推进阶段，重开后停留在「工作流推进」页签上。
+  // 若用户在刷新期间关掉了弹窗，这里不能再操作它的 DOM。
+  const maskOpen = document.getElementById('mask').classList.contains('show');
+  const pane = document.getElementById('pd-wk');
+  if (onWk && maskOpen && pane) {
+    const btn = [...document.querySelectorAll('#mBody .tabs button')].find(
+      (b) => b.textContent.includes('工作流'),
+    );
+    if (btn) tab(btn, 'pd-wk');
+  }
+}
+
+/** 切换步骤状态。走工作台接口，保留证据门槛与六状态校验。 */
 async function patchStep(stepId, status, projectId) {
   try {
-    await PATCH('/projects/steps/' + stepId, { status });
+    await PATCH(`/projects/${projectId}/workflow/steps/${stepId}`, { status });
     toast('步骤状态已更新');
-    const wk = document.getElementById('pd-wk');
-    const onWk = !!wk && !wk.classList.contains('hide');
-    await openProject(projectId);
-    // 后端可能已推进阶段，重开后停留在「工作流推进」页签上。
-    // 若用户在刷新期间关掉了弹窗，这里不能再操作它的 DOM。
-    const maskOpen = document.getElementById('mask').classList.contains('show');
-    const pane = document.getElementById('pd-wk');
-    if (onWk && maskOpen && pane) {
-      const btn = [...document.querySelectorAll('#mBody .tabs button')].find((b) => b.textContent.includes('工作流'));
-      if (btn) tab(btn, 'pd-wk');
-    }
+    await reloadProjectWorkflow(projectId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openStepProgress(stepId, projectId) {
+  const detail = state.projectDetail || {};
+  const step = (detail.steps || []).find((row) => row.id === stepId);
+  if (!step) return toast('步骤不存在', true);
+  const labels = detail.step_status_labels || {};
+  const options = Object.entries(labels).map(([code, label]) =>
+    `<option value="${code}"${code === step.status ? ' selected' : ''}>${esc(label)}</option>`,
+  ).join('');
+  openModal(`${step.step_no} ${step.name} · 记录进度`, `
+    <div class="note mb">状态是数据字段：已填写不等于已满足；待验证需要接收方确认。</div>
+    <div class="field"><label>状态</label>
+      <select id="spStatus" data-act="projects.stepStatusPreview">${options}</select></div>
+    <div class="field"><label>进度说明</label>
+      <textarea id="spNote" rows="3" placeholder="这一步做到哪了、下一步是什么">${
+        esc(step.notes || '')}</textarea></div>
+    <div class="field"><label>计划完成</label>
+      <input id="spDue" type="date" value="${esc(step.due_date || '')}"></div>
+    <div class="field hide" data-for="PENDING_VERIFY"><label>接收方（待验证必填）</label>
+      <input id="spReceiver" placeholder="谁负责验收"></div>
+    <div class="row3 hide" data-for="BLOCKED">
+      <div class="field"><label>受阻原因</label><input id="spBlockedReason"></div>
+      <div class="field"><label>受阻责任人</label><input id="spBlockedOwner"></div>
+      <div class="field"><label>预计解除</label><input id="spBlockedDue" type="date"></div>
+    </div>
+    <div class="row3 hide" data-for="DECISION">
+      <div class="field"><label>决策选项（每行一条）</label>
+        <textarea id="spDecisionOptions" rows="2"></textarea></div>
+      <div class="field"><label>决策人</label><input id="spDecisionMaker"></div>
+      <div class="field"><label>决策时限</label><input id="spDecisionDue" type="date"></div>
+    </div>`,
+  `<button class="btn btn-g" data-act="projects.close">取消</button>
+   <button class="btn btn-p" data-act="projects.submitStepProgress"
+     data-id="${step.id}" data-project="${projectId}">保存进度</button>`,
+  false, { keepPrevious: true });
+  toggleStepStatusFields(step.status);
+}
+
+function toggleStepStatusFields(status) {
+  document.querySelectorAll('#mBody [data-for]').forEach((el) => {
+    el.classList.toggle('hide', el.dataset.for !== status);
+  });
+}
+
+async function submitStepProgress(stepId, projectId) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const status = val('spStatus');
+  const payload = {
+    status,
+    note: val('spNote') || null,
+    due_date: val('spDue') || null,
+  };
+  if (status === 'PENDING_VERIFY') payload.receiver = val('spReceiver') || null;
+  if (status === 'BLOCKED') {
+    payload.blocked_reason = val('spBlockedReason') || null;
+    payload.blocked_owner = val('spBlockedOwner') || null;
+    payload.blocked_due = val('spBlockedDue') || null;
+  }
+  if (status === 'DECISION') {
+    payload.decision_options = val('spDecisionOptions')
+      .split('\n').map((row) => row.trim()).filter(Boolean);
+    payload.decision_maker = val('spDecisionMaker') || null;
+    payload.decision_due = val('spDecisionDue') || null;
+  }
+  try {
+    await PATCH(`/projects/${projectId}/workflow/steps/${stepId}`, payload);
+    toast('进度已保存');
+    closeModal();
+    await reloadProjectWorkflow(projectId);
   } catch (e) {
     toast(e.message, true);
   }
@@ -1123,7 +1304,7 @@ async function wizardRecommend() {
     });
     state.wizardRec = r;
     document.getElementById('npMethod').value = r.methodology;
-    box.innerHTML = renderRecommendation(r) +
+    box.innerHTML = renderRecommendation(r, true) +
       '<div class="note mt">已自动把「' + esc(state.meta.methodology[r.methodology] || r.methodology) +
       '」填入下方方法论字段，可手动改。</div>';
   } catch (e) {

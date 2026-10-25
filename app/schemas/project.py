@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -276,6 +276,7 @@ class ProjectDetail(BaseModel):
     current_steps: List[ProjectStepOut] = Field(description="当前阶段未完成的步骤")
     next_action: Optional[NextAction] = None
     kpi_trend: List["ProjectKpiPoint"] = []
+    step_status_labels: Dict[str, str] = {}
 
 
 class ProjectKpiPoint(BaseModel):

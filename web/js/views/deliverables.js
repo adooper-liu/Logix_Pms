@@ -18,11 +18,27 @@ import { canManage, canWrite } from '../core/auth.js';
 import { GET, PATCH, POST, POST_FORM, download } from '../core/api.js';
 import { openDocumentCopy, openTemplateCopy } from '../core/template-copy.js';
 
+// 这两步的产出天然就是流程模型；其他交付物不接受模型来源。
+const MODEL_LINK_STEPS = new Set(['2.1', '3.2']);
+
 on('dlv.goWorkflow', () => go('workflow'));
 on('dlv.tab', ({ tab }) => setDlvTab(tab));
 on('dlv.project', (_data, el) => setDlvProject(el.value));
+on('dlv.clearStep', () => {
+  state.deliverables.stepFilter = '';
+  setUrlState('deliverables', {
+    tab: 'project', project: state.deliverables.projectId || '', step: '',
+  }, { push: true });
+  paintProjectTab();
+});
 on('dlv.openUpload', ({ id }) => openDeliverableUpload(Number(id)));
 on('dlv.openDeliverable', ({ id }) => openDeliverable(Number(id)));
+on('dlv.linkModel', ({ id }) => openLinkModel(Number(id)));
+on('dlv.submitLinkModel', ({ id }) => submitLinkModel(Number(id)));
+on('dlv.openModel', ({ process }) => {
+  closeModal();
+  go('designer', { params: { process: Number(process) }, push: true });
+});
 on('dlv.download', ({ id, version, label }) =>
   dlDeliverableVersion(Number(id), Number(version), label));
 on('dlv.close', () => closeModal());
@@ -121,6 +137,8 @@ const statusTag = (status, label) =>
 const renderDeliverables = () => {
   const params = urlParams();
   if (params.tab) state.deliverables.tab = params.tab;
+  if (params.project) state.deliverables.projectId = Number(params.project);
+  if ('step' in params) state.deliverables.stepFilter = params.step || '';
   return renderAsync('deliverables',
   () => Promise.all([
     GET('/projects?page_size=200'),
@@ -187,7 +205,10 @@ function paintProjectTab() {
     body.innerHTML = '<div class="card"><div class="empty">还没有项目，先去「流程项目组合」立项。</div></div>';
     return;
   }
-  const current = Number(state.deliverables.projectId) || projects[0].id;
+  const current = (() => {
+    const wanted = Number(state.deliverables.projectId);
+    return projects.some((p) => p.id === wanted) ? wanted : projects[0].id;
+  })();
   state.deliverables.projectId = current;
   body.innerHTML = `
     <div class="card">
@@ -207,6 +228,10 @@ function paintProjectTab() {
 
 function setDlvProject(value) {
   state.deliverables.projectId = Number(value);
+  state.deliverables.stepFilter = '';
+  setUrlState('deliverables', {
+    tab: 'project', project: state.deliverables.projectId || '', step: '',
+  }, { push: true });
   paintProjectTab();
 }
 
@@ -220,6 +245,7 @@ async function loadProjectDeliverables(projectId) {
       GET('/projects/' + projectId + '/deliverables'),
     ]);
     if (Number(state.deliverables.projectId) !== Number(projectId)) return;
+    state.deliverables.items = items;
 
     summaryBox.innerHTML = `
       <div class="grid g4 stat-row">
@@ -231,18 +257,28 @@ async function loadProjectDeliverables(projectId) {
           <div class="lab">已生效占比 · 评审中 ${summary.in_review} / 草稿 ${summary.draft}</div></div>
       </div>`;
 
-    const rows = items.map((i) => {
+    const stepFilter = state.deliverables.stepFilter;
+    const visible = stepFilter ? items.filter((i) => i.step_no === stepFilter) : items;
+    const rows = visible.map((i) => {
       const cv = i.current_version;
       const version = cv
         ? `<b>${esc(cv.version_label)}</b> ${statusTag(cv.status, cv.status_label)}
-           <div class="tiny">${esc(cv.file_name || cv.file_ref || '')}</div>`
+           <div class="tiny">${cv.source_kind === 'MODEL'
+             ? '模型：' + esc(cv.source_model_label || '已关联')
+             : esc(cv.file_name || cv.file_ref || '')}</div>`
         : '<span class="tiny">未登记</span>';
+      const canLinkModel = canWrite() && MODEL_LINK_STEPS.has(i.step_no) && i.process_id;
       const actions = [
         canWrite() ? `<button class="btn-sm" data-act="dlv.openUpload" data-id="${i.id}">上传</button>` : '',
+        canLinkModel
+          ? `<button class="btn-sm" data-act="dlv.linkModel" data-id="${i.id}">关联模型</button>` : '',
         `<button class="btn-sm" data-act="dlv.openDeliverable" data-id="${i.id}">详情</button>`,
         cv && cv.has_file
           ? `<button class="btn-sm" data-act="dlv.download" data-id="${i.id}"
             data-version="${cv.id}" data-label="${esc(cv.version_label)}">下载</button>`
+          : '',
+        cv && cv.has_model
+          ? `<button class="btn-sm" data-act="dlv.openModel" data-process="${i.process_id}">查看模型</button>`
           : '',
       ].filter(Boolean).join(' ');
       return `<tr>
@@ -255,9 +291,13 @@ async function loadProjectDeliverables(projectId) {
         <td>${esc(i.owner || '—')}</td>
         <td>${actions}</td>
       </tr>`;
-    }).join('') || emptyRow(7, '该项目还没有交付物实例');
+    }).join('') || emptyRow(7, stepFilter ? `步骤 ${stepFilter} 没有交付物` : '该项目还没有交付物实例');
 
     listBox.innerHTML = `
+      ${stepFilter ? `<div class="note mb between">
+        <div>只显示步骤 <b>${esc(stepFilter)}</b> 的 ${visible.length} 项交付物</div>
+        <button class="btn-sm" data-act="dlv.clearStep">显示全部步骤</button>
+      </div>` : ''}
       <table class="tbl">
         <thead><tr><th>步骤</th><th>交付物</th><th>类型</th><th>状态</th>
           <th>当前版本</th><th>负责人</th><th>操作</th></tr></thead>
@@ -266,6 +306,55 @@ async function loadProjectDeliverables(projectId) {
   } catch (e) {
     summaryBox.innerHTML = '';
     listBox.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
+  }
+}
+
+async function openLinkModel(instanceId) {
+  const item = (state.deliverables.items || []).find((row) => row.id === instanceId);
+  if (!item) return toast('交付物不存在', true);
+  if (!item.process_id) return toast('项目没有关联流程，无法关联模型', true);
+  const gen = openModal('关联流程模型 · ' + item.definition_name, skeleton(3), '', true);
+  try {
+    const versions = await GET('/processes/' + item.process_id + '/design/versions');
+    if (!modalAlive(gen)) return;
+    const published = versions.filter((v) => v.status === 'PUBLISHED');
+    const options = versions.map((v) => `<option value="${v.id}"${
+      v.status === 'PUBLISHED' ? ' selected' : ''}>v${v.version} · ${
+      esc(v.status_label)} · ${dtShort(v.created_at)}</option>`).join('');
+    openModal('关联流程模型 · ' + item.definition_name, `
+      <div class="note mb">模型只作为来源登记，不复制文件：已发布模型直接计为「已生效」，
+        草稿/待评审分别登记为草稿/评审中。模型升版不会覆盖历史交付物版本。</div>
+      ${versions.length ? `
+        <div class="field"><label>模型版本</label><select id="lmVersion">${options}</select></div>
+        <div class="field"><label>版本说明（可选）</label>
+          <input id="lmNote" placeholder="为什么用这一版作为证据"></div>
+        ${published.length ? '' : '<div class="warnbox">该流程还没有已发布模型；关联草稿不会算作已生效证据。</div>'}`
+        : '<div class="empty">该流程还没有模型版本，请先去流程设计器建模并发布。</div>'}`,
+    `<button class="btn btn-g" data-act="dlv.close">取消</button>
+     ${versions.length ? `<button class="btn btn-p" data-act="dlv.submitLinkModel"
+       data-id="${item.id}">关联</button>` : ''}`, true, { replace: true });
+  } catch (e) {
+    if (modalAlive(gen)) {
+      openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>',
+        '', false, { replace: true });
+    }
+  }
+}
+
+async function submitLinkModel(instanceId) {
+  const select = document.getElementById('lmVersion');
+  if (!select) return;
+  const note = document.getElementById('lmNote')?.value.trim() || null;
+  try {
+    await POST('/deliverables/' + instanceId + '/versions/from-model', {
+      model_version_id: Number(select.value),
+      note,
+    });
+    toast('已关联模型版本');
+    closeModal();
+    loadProjectDeliverables(state.deliverables.projectId);
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 
@@ -335,11 +424,18 @@ function paintDeliverable(d) {
       actions.push(`<button class="btn-sm" data-act="dlv.promote"
         data-version="${v.id}">晋升为标准</button>`);
     }
+    if (v.has_model) {
+      actions.push(`<button class="btn-sm" data-act="dlv.openModel"
+        data-process="${d.process_id}">查看模型</button>`);
+    }
     return `<tr>
       <td><b>${esc(v.version_label)}</b> ${v.id === d.current_version_id ? '<span class="tag t-blu">当前</span>' : ''}</td>
       <td>${statusTag(v.status, v.status_label)}</td>
-      <td>${esc(v.file_name || v.file_ref || '—')}
-        <div class="tiny">${v.checksum ? 'sha256 ' + esc(v.checksum.slice(0, 12)) + '…' : '仅登记元数据'}</div>
+      <td>${v.source_kind === 'MODEL'
+          ? esc(v.source_model_label || '流程模型')
+          : esc(v.file_name || v.file_ref || '—')}
+        <div class="tiny">${v.checksum ? 'sha256 ' + esc(v.checksum.slice(0, 12)) + '…'
+          : v.has_model ? '模型来源 · 不复制文件' : '仅登记元数据'}</div>
         ${v.source_document_label
           ? '<div class="tiny">来源标准 ' + esc(v.source_document_label) + '</div>' : ''}</td>
       <td>${esc(v.author || '—')}<div class="tiny">${dtShort(v.created_at)}</div></td>
