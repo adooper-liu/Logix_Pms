@@ -32,6 +32,7 @@ from app.api.v1 import (
     process_tasks,
     projects,
     raci,
+    replication,
     sketches,
     startup,
     strategy,
@@ -76,6 +77,7 @@ protected.include_router(positions.router)
 protected.include_router(workload.router)
 protected.include_router(strategy.router)
 protected.include_router(raci.router)
+protected.include_router(replication.router)
 protected.include_router(authorization.router)
 protected.include_router(data_governance.router)
 protected.include_router(startup.router)

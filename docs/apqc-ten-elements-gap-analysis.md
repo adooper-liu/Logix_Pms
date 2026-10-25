@@ -307,10 +307,10 @@ PDCA/DMAIC 工具、异常闭环、知识库、流程模型回滚。
 
 | # | 交付物 | 具体改动 |
 |---|---|---|
-| P2-1 ◐ | 改善项目卡与 DMAIC | ✅ 已扩展 `Project`：来源与来源 KPI、问题陈述、根因、对策、验证、收益、观察期、一次投入、转移成本、复制状态；✅ 红/黄 KPI 一键生成草稿并去重；◐ DMAIC 阶段跟踪与自动扫描未做 |
-| P2-2 | 复制资产包 | 新增 `replication_pack`（适用条件、资产清单、收益证据、失败经验、拒绝理由），与知识库/标准文件/工具模板关联 |
-| P2-3 | 工作量与产能看板 | 前端新增标准 vs 实际、负荷率、瓶颈、按活动/岗位/组织聚合；复用 `GET /execution/workload` 并扩展维度 |
-| P2-4 | 外部数据接入 | ERP/MES/WMS/HR/OA 的订单、工单、考勤、工位事件接入，替代抽样观测；沿用现有 Outbox/Webhook 集成层 |
+| P2-1 ✅ | 改善项目卡与 DMAIC | ✅ 已扩展 `Project`：来源与来源 KPI、问题陈述、根因、对策、验证、收益、观察期、一次投入、转移成本、复制状态；✅ 红/黄 KPI 一键生成草稿并去重；✅ 增加 `dmaic_stage` 跟踪与 30 天未更新扫描 |
+| P2-2 ✅ | 复制资产包 | 新增 `replication_pack`（适用条件、资产清单、收益证据、失败经验、拒绝理由），与知识库/标准文件/工具模板关联 |
+| P2-3 ✅ | 工作量与产能看板 | 前端新增标准 vs 实际、负荷率、瓶颈、按活动/岗位/组织聚合；复用 `GET /execution/workload` 并扩展维度 |
+| P2-4 ✅ | 外部数据接入 | ERP/MES/WMS/HR/OA 的订单、工单、考勤、工位事件接入，替代抽样观测；沿用现有 Outbox/Webhook 集成层 |
 
 ---
 
@@ -494,6 +494,27 @@ L5 任务级标准工时、任务级等待/缺料原因码、实体级主数据�
 - `/process-tasks` 支持清单、创建、修改、停用；`/process-tasks/rollup` 按 L4 汇总任务与工时；
 - 流程卡展示 L5 任务并支持在 L4 下新增；标准工时弹窗可选择 L5 任务；
 - `tests/test_process_tasks.py`。
+
+**P2-1 / P2-2 落地证据**（2026-10-25）：
+
+- `Project` 增加 `dmaic_stage` / `dmaic_note` / `dmaic_updated_at`，迁移 `d7e8f9a0b1c2`；
+- 项目编辑与改善项目卡展示 DMAIC 阶段；治理扫描新增 `DMAIC_STAGE_STALE`（30 天未更新）；
+- 新增 `replication_pack`（适用条件、收益证据、失败经验、拒绝理由、知识/制度/模板关联），
+  迁移 `e8f9a0b1c2d3`；
+- 复制资产包发布前必须有适用条件与收益证据；拒绝必须填理由；
+- 项目详情提供「复制资产包」入口；
+- `tests/test_dmaic.py`、`tests/test_replication.py`。
+
+**P2-3 / P2-4 落地证据**（2026-10-25）：
+
+- 工作量看板新增「标准 vs 实际（按活动）」与「瓶颈岗位」：差异、实际/标准比、
+  需求超可用工时或缺口为负的岗位；
+- 入站 Webhook 新增 `record_worklog`：MES/HR/OA 可直接回传任务实际工时，
+  写入 `task_worklog` 并同步 `process_task.actual_minutes`；
+- 入站 Webhook 新增 `record_kpi`：ERP/MES/BI 按 `kpi_id + period` 回传指标数据点，
+  同周期同项目自动覆盖；
+- 两类入站事件沿用现有 HMAC 签名、幂等事件表与审计；
+- `tests/test_inbound.py` 覆盖工时与 KPI 回传。
 
 **P1-3 数据治理最小集落地证据**（2026-10-24）：
 

@@ -40,6 +40,9 @@ on('projects.openExecution', ({ process }) => {
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.gate', ({ id }) => openGateModal(Number(id)));
 on('projects.submitGate', ({ id }) => submitGate(Number(id)));
+on('projects.replication', ({ id }) => openReplicationModal(Number(id)));
+on('projects.submitReplication', ({ id }) => submitReplication(Number(id)));
+on('projects.publishPack', ({ id, project }) => publishPack(Number(id), Number(project)));
 on('projects.wizardRecommend', () => wizardRecommend());
 on('projects.submit', () => submitProject());
 
@@ -420,6 +423,8 @@ async function openProject(id, options = {}) {
     <button class="btn btn-g" data-act="projects.close">关闭</button>
     ${canEditThis ? `<button class="btn btn-g" data-act="projects.edit" data-id="${p.id}">编辑</button>` : ''}
     ${canManage() ? `<button class="btn btn-g" data-act="projects.gate" data-id="${p.id}">门禁签收</button>` : ''}
+    ${canEditThis ? `<button class="btn btn-g" data-act="projects.replication"
+      data-id="${p.id}">复制资产包</button>` : ''}
     ${p.process_id ? `<button class="btn btn-g" data-act="projects.openExecution"
       data-process="${p.process_id}">去流程执行</button>` : ''}
     ${p.process_id ? `<button class="btn btn-p" data-act="projects.closeOpenDesigner"
@@ -516,6 +521,9 @@ function improvementCardHtml(p) {
     ['复制状态', p.replication_status_label
       ? p.replication_status_label + (p.replication_note ? ' · ' + p.replication_note : '')
       : null],
+    ['DMAIC', p.dmaic_stage_label
+      ? p.dmaic_stage_label + (p.dmaic_note ? ' · ' + p.dmaic_note : '')
+      : null],
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
   if (!rows.length) {
     return '<div class="note">改善项目卡尚未填写，点「编辑」补充问题、根因、对策与验证。</div>';
@@ -553,6 +561,10 @@ async function editProjectModal(projectId) {
     ? repEntries.map(([v, label]) => opt(v, label, p.replication_status)).join('')
     : `<option value="${esc(p.replication_status)}" selected>${
       esc(p.replication_status_label || p.replication_status)}</option>`;
+  const dmaicLabels = (state.projectMeta && state.projectMeta.dmaic_stage_labels) || {};
+  const dmaicOptions = ['', ...Object.keys(dmaicLabels)].map((code) =>
+    `<option value="${code}"${(p.dmaic_stage || '') === code ? ' selected' : ''}>${
+      code ? esc(dmaicLabels[code]) : '不跟踪 DMAIC'}</option>`).join('');
 
   openModal('编辑项目 · ' + p.code, `
     <div class="row2">
@@ -625,6 +637,11 @@ async function editProjectModal(projectId) {
         <select id="epReplication">${repOptions}</select></div>
       <div class="field"><label>复制说明</label>
         <input id="epReplicationNote" value="${esc(p.replication_note || '')}" placeholder="适用条件 / 拒绝复制理由"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>DMAIC 阶段</label><select id="epDmaic">${dmaicOptions}</select></div>
+      <div class="field"><label>DMAIC 说明</label>
+        <input id="epDmaicNote" value="${esc(p.dmaic_note || '')}"></div>
     </div>
     <div class="row3">
       <div class="field"><label>预算（万元）</label><input id="epBudget" type="number" step="0.1" value="${p.budget}"></div>
@@ -711,6 +728,84 @@ async function submitGate(projectId) {
   }
 }
 
+async function openReplicationModal(projectId) {
+  let packs;
+  try {
+    packs = await GET('/replication-packs?source_project_id=' + projectId);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const rows = (packs || []).map((row) => `
+    <tr><td><b>${esc(row.title)}</b>
+        <div class="tiny">${esc(row.conditions || '—')}</div></td>
+      <td><span class="tag ${row.status === 'PUBLISHED' ? 't-grn'
+        : row.status === 'REJECTED' ? 't-red' : 't-gry'}">${esc(row.status_label)}</span></td>
+      <td class="tiny">知识 ${row.knowledge.length} · 制度 ${row.documents.length}
+        · 模板 ${row.templates.length}</td>
+      <td class="tiny">${esc(row.benefit_evidence || '—')}</td>
+      <td>${row.status === 'DRAFT' ? `<button class="btn-sm"
+        data-act="projects.publishPack" data-id="${row.id}" data-project="${projectId}">发布</button>` : '—'}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">还没有复制资产包</td></tr>';
+  openModal('复制资产包', `
+    <div class="note mb">资产包记录适用条件、收益证据、失败经验与关联资产；
+      发布前必须有适用条件和收益证据。</div>
+    <table class="tbl"><thead><tr><th>标题 / 条件</th><th>状态</th><th>资产</th>
+      <th>收益证据</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3 class="mt">新建资产包</h3>
+    <div class="field"><label>标题 *</label><input id="rpTitle"></div>
+    <div class="field"><label>适用条件 *</label><textarea id="rpConditions" rows="2"></textarea></div>
+    <div class="field"><label>收益证据</label><textarea id="rpBenefit" rows="2"></textarea></div>
+    <div class="field"><label>失败经验</label><textarea id="rpFailure" rows="2"></textarea></div>
+    <div class="row3">
+      <div class="field"><label>知识 ID（逗号分隔）</label><input id="rpKnowledge"></div>
+      <div class="field"><label>标准文件 ID</label><input id="rpDocuments"></div>
+      <div class="field"><label>模板 ID</label><input id="rpTemplates"></div>
+    </div>`,
+  `<button class="btn btn-g" data-act="projects.close">关闭</button>
+   <button class="btn btn-p" data-act="projects.submitReplication"
+     data-id="${projectId}">创建草稿</button>`, true);
+}
+
+function parseIds(value) {
+  return (value || '').split(',').map((row) => Number(row.trim())).filter((row) => row > 0);
+}
+
+async function submitReplication(projectId) {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  if (!val('rpTitle') || !val('rpConditions')) {
+    return toast('标题与适用条件不能为空', true);
+  }
+  try {
+    await POST('/replication-packs', {
+      source_project_id: projectId,
+      title: val('rpTitle'),
+      conditions: val('rpConditions'),
+      benefit_evidence: val('rpBenefit') || null,
+      failure_notes: val('rpFailure') || null,
+      knowledge_ids: parseIds(val('rpKnowledge')),
+      document_ids: parseIds(val('rpDocuments')),
+      template_ids: parseIds(val('rpTemplates')),
+    });
+    toast('复制资产包已创建');
+    openReplicationModal(projectId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function publishPack(packId, projectId) {
+  try {
+    await PATCH('/replication-packs/' + packId, { status: 'PUBLISHED' });
+    toast('资产包已发布');
+    openReplicationModal(projectId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 async function saveProjectEdit(projectId) {
   const val = (id) => {
     const el = document.getElementById(id);
@@ -749,6 +844,8 @@ async function saveProjectEdit(projectId) {
     replication_status: val('epReplication'),
     replication_note: val('epReplicationNote').trim() || null,
     gate_required: document.getElementById('epGate')?.checked || false,
+    dmaic_stage: val('epDmaic') || null,
+    dmaic_note: val('epDmaicNote').trim() || null,
   };
   // OWNER 不能改归属，后端也会拦；这里干脆不发这个字段
   if (canManage()) payload.owner = val('epOwner').trim();

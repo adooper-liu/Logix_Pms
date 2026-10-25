@@ -107,6 +107,7 @@ from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.process_task import ProcessTaskDefinition
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
+from app.models.replication import ReplicationPack
 from app.models.sketch import Sketch
 from app.models.startup import StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
@@ -198,6 +199,7 @@ __all__ = [
     "GovernanceRole",
     "GovernanceRoleMember",
     "RaciAssignment",
+    "ReplicationPack",
     "DataDomain",
     "DataFlow",
     # 枚举
