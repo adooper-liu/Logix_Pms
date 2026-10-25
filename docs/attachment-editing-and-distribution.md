@@ -34,6 +34,20 @@
 缺少用户提到的 `.md` 和 CAD 的 `.dwg`；即使加进白名单，也仍然只能上传/下载，
 不能编辑和预览。
 
+### 已落地（P0）
+
+- **PDF / 图片 / 纯文本在线预览**：新增 `/preview` 接口，以 `inline` 返回；
+  其他格式返回 415，前端提示下载后查看。
+- 预览统一走鉴权：前端用 `fetch` 取回 blob 再嵌入 iframe/图片，
+  不把受保护 URL 直接暴露给浏览器。
+- 预览响应头：`X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、
+  `Content-Security-Policy: frame-ancestors 'self'`。
+- 覆盖三类受控文件：项目交付物、流程标准文件、工具模板。
+- **项目交付物打印清单**：浏览器打印窗口，包含项目、步骤、交付物、类型、
+  状态、当前版本、负责人；可按步骤筛选后打印。
+- 尚未落地：Office/Visio/CAD 的服务端转换预览、服务端 PDF 打印包、
+  标准文件/模板的打印包。
+
 ---
 
 ## 二、能力分层：先分清「预览、编辑、协同」不是一件事
@@ -205,7 +219,8 @@ exam_attempt(id, course_id, user_id, started_at, submitted_at, score, passed)
 
 | 阶段 | 范围 | 验收标准 | 估算 |
 |---|---|---|---|
-| P0 | 预览 + 打印样式 + `.md`/`.dwg` 白名单 | 常见文件不下载可预览；打印包版本正确 | 5–8 人日 |
+| P0 | 预览（PDF/图片/文本）+ 项目交付物打印清单 | 常见文件不下载可预览；打印清单版本正确（已完成） | 5–8 人日 |
+| P1 | 服务端转换预览（Office/Visio/CAD）+ 服务端 PDF 打印包 | Office/Visio/CAD 可预览；标准文件/模板可打印 | 5–8 人日 |
 | P1 | Office 在线编辑（WOPI + OnlyOffice/Collabora） | 编辑保存生成新版本；并发锁生效；审计完整 | 10–15 人日 |
 | P1 | 受控分享 + 分发签收 | 链接可撤销/过期；签收率可查 | 6–10 人日 |
 | P2 | Visio/CAD 检出/检入 + APS/ODA 预览 | 检出锁、检入新版本、超时释放 | 8–12 人日 |
