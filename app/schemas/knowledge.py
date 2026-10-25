@@ -187,6 +187,67 @@ class KnowledgeScenarioOut(BaseModel):
     name: str
     description: Optional[str] = None
     sort_order: int = 0
+    is_active: bool = True
+
+
+class KnowledgeScenarioCreate(BaseModel):
+    code: str = Field(pattern=r"^[A-Z0-9_]{2,32}$", description="大写字母/数字/下划线")
+    name: str = Field(min_length=1, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=200)
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class KnowledgeScenarioUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=200)
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class KnowledgeReviewOut(ORMModel):
+    id: int
+    knowledge_id: int
+    reviewer_user_id: Optional[int] = None
+    reviewer: Optional[str] = None
+    decision: str
+    decision_label: Optional[str] = None
+    from_status: Optional[str] = None
+    from_status_label: Optional[str] = None
+    to_status: Optional[str] = None
+    to_status_label: Optional[str] = None
+    note: Optional[str] = None
+    created_at: Optional[UtcDateTime] = None
+
+
+class KnowledgeRecommendLogOut(ORMModel):
+    id: int
+    user_id: Optional[int] = None
+    user: Optional[str] = None
+    problem: Optional[str] = None
+    scenario_codes: List[str] = []
+    stage_no: Optional[int] = None
+    step_no: Optional[str] = None
+    result_ids: List[int] = []
+    created_at: Optional[UtcDateTime] = None
+
+
+class KnowledgeStandardMigrationRequest(BaseModel):
+    process_id: int
+    title: Optional[str] = Field(default=None, max_length=200)
+    category: str = Field(default="POLICY", max_length=16)
+    description: Optional[str] = None
+    owner: Optional[str] = Field(default=None, max_length=64)
+    org_unit_id: Optional[int] = None
+    node_key: Optional[str] = Field(default=None, max_length=64)
+
+
+class KnowledgeStandardMigrationOut(BaseModel):
+    knowledge_id: int
+    document_id: int
+    document_code: str
+    version_id: int
+    version_label: str
 
 
 class KnowledgeRecommendRequest(BaseModel):

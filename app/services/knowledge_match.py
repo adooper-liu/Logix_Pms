@@ -59,6 +59,8 @@ OUTCOME_LABELS = {
     "INEFFECTIVE": "无效",
 }
 
+REVIEW_DECISION_LABELS = {"APPROVE": "通过", "REJECT": "驳回"}
+
 VISIBLE_STATUSES = (KnowledgeStatus.PUBLISHED.value, KnowledgeStatus.VERIFIED.value)
 
 HINT = (
@@ -70,12 +72,11 @@ HINT = (
 _MAX_RAW = 14.6
 
 
-def scenario_list(db: Session) -> List[KnowledgeScenarioOut]:
-    rows = db.scalars(
-        select(KnowledgeScenario)
-        .where(KnowledgeScenario.is_active.is_(True))
-        .order_by(KnowledgeScenario.sort_order, KnowledgeScenario.id)
-    ).all()
+def scenario_list(db: Session, include_inactive: bool = False) -> List[KnowledgeScenarioOut]:
+    stmt = select(KnowledgeScenario).order_by(KnowledgeScenario.sort_order, KnowledgeScenario.id)
+    if not include_inactive:
+        stmt = stmt.where(KnowledgeScenario.is_active.is_(True))
+    rows = db.scalars(stmt).all()
     return [
         KnowledgeScenarioOut(
             id=row.id,
@@ -83,6 +84,7 @@ def scenario_list(db: Session) -> List[KnowledgeScenarioOut]:
             name=row.name,
             description=row.description,
             sort_order=row.sort_order,
+            is_active=row.is_active,
         )
         for row in rows
     ]

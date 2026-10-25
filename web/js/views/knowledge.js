@@ -10,7 +10,7 @@ import {
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
-import { GET, POST } from '../core/api.js';
+import { GET, PATCH, POST } from '../core/api.js';
 
 /* ============================================================ 8. 流程知识库 */
 
@@ -85,6 +85,12 @@ on('knowledge.submitReview', ({ id }) => submitForReview(Number(id)));
 on('knowledge.review', ({ id, decision }) => reviewKnowledge(Number(id), decision));
 on('knowledge.archive', ({ id }) => archiveKnowledge(Number(id)));
 on('knowledge.promote', ({ id }) => promoteKnowledge(Number(id)));
+on('knowledge.manageScenarios', () => openScenarioManager());
+on('knowledge.saveScenario', ({ id }) => saveScenario(Number(id)));
+on('knowledge.createScenario', () => createScenario());
+on('knowledge.showRecommendLogs', () => openRecommendLogs());
+on('knowledge.migrateStandard', ({ id }) => openStandardMigration(Number(id)));
+on('knowledge.submitMigration', ({ id }) => submitStandardMigration(Number(id)));
 
 const renderKnowledge = () => {
   const k = state.knowledge;
@@ -129,8 +135,9 @@ const renderKnowledge = () => {
         : Promise.resolve(null),
       canManage() ? GET('/knowledge/archive-candidates?limit=8').catch(() => []) : Promise.resolve([]),
       canManage() ? GET('/knowledge/effect-stats').catch(() => null) : Promise.resolve(null),
-    ]).then(([page, meta, stages, recommend, archiveCandidates, effectStats]) =>
-      ({ page, meta, stages, recommend, archiveCandidates, effectStats })),
+      canManage() ? GET('/knowledge/standard-candidates').catch(() => []) : Promise.resolve([]),
+    ]).then(([page, meta, stages, recommend, archiveCandidates, effectStats, standardCandidates]) =>
+      ({ page, meta, stages, recommend, archiveCandidates, effectStats, standardCandidates })),
     (d) => paint(d));
 };
 
@@ -263,6 +270,21 @@ function paint(d) {
             : '<div class="tiny muted">还没有使用记录。用过后回填，统计才会积累。</div>'}
         </div>` : '';
 
+  const standardCandidates = d.standardCandidates || [];
+  const standardHtml = canManage() && standardCandidates.length ? `
+        <div class="card">
+          <h3>旧制度迁移</h3>
+          <div class="desc">这些条目仍是 STANDARD 类型且已归档；确认归属流程后
+            可一键生成制度中心的标准文件草稿。</div>
+          <div class="kb-archive-list">${standardCandidates.map((item) => `
+            <div class="kb-archive-item">
+              <div><b>${esc(item.title)}</b>
+                <div class="tiny">${esc(item.summary || '')}</div></div>
+              <button class="btn-sm" data-act="knowledge.migrateStandard"
+                data-id="${item.id}">迁移</button>
+            </div>`).join('')}</div>
+        </div>` : '';
+
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
@@ -272,6 +294,8 @@ function paint(d) {
         <div class="gap">
           <a class="link-btn" data-act="knowledge.goDocuments">制度中心 →</a>
           <a class="link-btn" data-act="knowledge.goWorkflow">五阶段工作流 →</a>
+          ${canManage() ? `<button class="btn-sm" data-act="knowledge.manageScenarios">场景管理</button>
+            <button class="btn-sm" data-act="knowledge.showRecommendLogs">推荐日志</button>` : ''}
           ${canWrite() ? '<button class="btn btn-p" data-act="knowledge.new">+ 新建条目</button>' : ''}
         </div>
       </div>
@@ -339,6 +363,7 @@ function paint(d) {
         </div>
         ${archiveHtml}
         ${effectHtml}
+        ${standardHtml}
         <div class="card">
           <h3>每条知识的固定字段</h3>
           <ul class="kb-fields">
@@ -472,11 +497,13 @@ async function openKnowledge(id) {
   let item = null;
   let usage = [];
   let projects = { items: [] };
+  let reviews = [];
   try {
-    [item, usage, projects] = await Promise.all([
+    [item, usage, projects, reviews] = await Promise.all([
       GET('/knowledge/' + id),
       GET('/knowledge/' + id + '/usage').catch(() => []),
       canWrite() ? GET('/projects?page_size=200').catch(() => ({ items: [] })) : { items: [] },
+      GET('/knowledge/' + id + '/reviews').catch(() => []),
     ]);
     if (!modalAlive(gen)) return;
     const scenarioNames = (item.scenario_names || []).join('、') || '未标注';
@@ -489,9 +516,21 @@ async function openKnowledge(id) {
           <td><span class="tag ${row.outcome === 'EFFECTIVE' ? 't-grn'
             : row.outcome === 'PARTIAL' ? 't-yel' : 't-red'}">${esc(row.outcome_label || row.outcome)}</span></td>
           <td>${esc(row.used_by || '—')}</td>
+          <td>${esc(row.step_no || '—')}</td>
           <td class="tiny">${esc(row.note || '—')}</td>
         </tr>`).join('')
-      : '<tr><td colspan="4" class="muted">还没有使用记录。用过后回填，知识才会积累证据。</td></tr>';
+      : '<tr><td colspan="5" class="muted">还没有使用记录。用过后回填，知识才会积累证据。</td></tr>';
+    const reviewRows = reviews.length
+      ? reviews.map((row) => `
+        <tr>
+          <td class="tiny">${fmtDate(row.created_at)}</td>
+          <td><span class="tag ${row.decision === 'APPROVE' ? 't-grn' : 't-red'}">${
+            esc(row.decision_label || row.decision)}</span></td>
+          <td>${esc(row.reviewer || '—')}</td>
+          <td class="tiny">${esc(row.from_status_label || '—')} → ${esc(row.to_status_label || '—')}</td>
+          <td class="tiny">${esc(row.note || '—')}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="muted">还没有审核记录。</td></tr>';
 
     const canReview = canManage() && item.status === 'IN_REVIEW';
     const canSubmit = canWrite()
@@ -536,8 +575,14 @@ async function openKnowledge(id) {
 
       <h3 class="mt">使用证据（${usage.length}）</h3>
       <table class="tbl">
-        <thead><tr><th>时间</th><th>效果</th><th>使用人</th><th>说明</th></tr></thead>
+        <thead><tr><th>时间</th><th>效果</th><th>使用人</th><th>步骤</th><th>说明</th></tr></thead>
         <tbody>${usageRows}</tbody>
+      </table>
+
+      <h3 class="mt">求真审核历史（${reviews.length}）</h3>
+      <table class="tbl">
+        <thead><tr><th>时间</th><th>裁决</th><th>审核人</th><th>状态变化</th><th>说明</th></tr></thead>
+        <tbody>${reviewRows}</tbody>
       </table>
 
       ${canWrite() ? `
@@ -687,6 +732,155 @@ async function promoteKnowledge(id) {
   try {
     await POST('/knowledge/' + id + '/promote', {});
     toast('已晋升为最佳实践');
+    closeModal();
+    RENDERERS.knowledge();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* -------------------------------------------------- 场景 / 日志 / 制度迁移 */
+
+async function openScenarioManager() {
+  let rows = [];
+  try {
+    rows = await GET('/knowledge/scenarios?include_inactive=1');
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const tableRows = rows.map((row) => `
+    <tr>
+      <td><b>${esc(row.code)}</b></td>
+      <td><input id="scName-${row.id}" value="${esc(row.name)}"></td>
+      <td><input id="scDesc-${row.id}" value="${esc(row.description || '')}"></td>
+      <td><input id="scSort-${row.id}" type="number" style="width:70px" value="${row.sort_order}"></td>
+      <td><input id="scActive-${row.id}" type="checkbox" ${row.is_active ? 'checked' : ''}></td>
+      <td><button class="btn-sm" data-act="knowledge.saveScenario" data-id="${row.id}">保存</button></td>
+    </tr>`).join('');
+  openModal('场景字典管理', `
+    <div class="note mb">场景是用户带来的痛点，知识标签是文件属性；停用场景不会删除已有知识关联。</div>
+    <table class="tbl">
+      <thead><tr><th>编码</th><th>名称</th><th>说明</th><th>排序</th><th>启用</th><th>操作</th></tr></thead>
+      <tbody>${tableRows || '<tr><td colspan="6" class="muted">还没有场景</td></tr>'}</tbody>
+    </table>
+    <h3 class="mt">新增场景</h3>
+    <div class="row3">
+      <div class="field"><label>编码 *</label><input id="scNewCode" placeholder="如 DELAY"></div>
+      <div class="field"><label>名称 *</label><input id="scNewName" placeholder="如 交期延误"></div>
+      <div class="field"><label>排序</label><input id="scNewSort" type="number" value="99"></div>
+    </div>
+    <div class="field"><label>说明</label><input id="scNewDesc" placeholder="一句话解释这个痛点"></div>`,
+  `<button class="btn btn-g" data-act="knowledge.close">关闭</button>
+   <button class="btn btn-p" data-act="knowledge.createScenario">新增场景</button>`, true);
+}
+
+async function saveScenario(id) {
+  const val = (key) => {
+    const el = document.getElementById(key);
+    return el ? el.value.trim() : '';
+  };
+  try {
+    await PATCH('/knowledge/scenarios/' + id, {
+      name: val('scName-' + id),
+      description: val('scDesc-' + id) || null,
+      sort_order: Number(val('scSort-' + id) || 0),
+      is_active: !!document.getElementById('scActive-' + id)?.checked,
+    });
+    toast('场景已保存');
+    await openScenarioManager();
+    RENDERERS.knowledge();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function createScenario() {
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  try {
+    await POST('/knowledge/scenarios', {
+      code: val('scNewCode').toUpperCase(),
+      name: val('scNewName'),
+      description: val('scNewDesc') || null,
+      sort_order: Number(val('scNewSort') || 99),
+    });
+    toast('场景已新增');
+    await openScenarioManager();
+    RENDERERS.knowledge();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function openRecommendLogs() {
+  try {
+    const rows = await GET('/knowledge/recommend-logs?limit=50');
+    openModal('推荐解释日志', `
+      <div class="note mb">每次按问题/场景推荐都会记录上下文与返回条目，便于复盘“为什么推了这条”。</div>
+      <table class="tbl">
+        <thead><tr><th>时间</th><th>用户</th><th>问题</th><th>场景</th><th>步骤</th><th>返回条目</th></tr></thead>
+        <tbody>${rows.length ? rows.map((row) => `
+          <tr><td class="tiny">${fmtDate(row.created_at)}</td>
+            <td>${esc(row.user || '—')}</td>
+            <td>${esc(row.problem || '—')}</td>
+            <td class="tiny">${esc((row.scenario_codes || []).join('、') || '—')}</td>
+            <td class="tiny">${esc(row.step_no || row.stage_no || '—')}</td>
+            <td class="tiny">${esc((row.result_ids || []).join(', ') || '—')}</td></tr>`).join('')
+          : '<tr><td colspan="6" class="muted">还没有推荐日志</td></tr>'}</tbody>
+      </table>`,
+    '<button class="btn btn-g" data-act="knowledge.close">关闭</button>', true);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function openStandardMigration(id) {
+  try {
+    const [item, processes, meta] = await Promise.all([
+      GET('/knowledge/' + id),
+      GET('/process-map/flat'),
+      GET('/process-documents/meta'),
+    ]);
+    const candidates = (processes || []).filter((row) => row.level >= 2);
+    const categories = meta.category_labels || {};
+    openModal('迁移为流程标准文件', `
+      <div class="note mb">会把知识正文写入标准文件说明，并生成 v1.0 草稿；生效仍需走制度审批。</div>
+      <div class="field"><label>标题</label>
+        <input id="smTitle" value="${esc(item.title)}"></div>
+      <div class="row2">
+        <div class="field"><label>所属流程 *</label><select id="smProcess">
+          ${candidates.map((row) => `<option value="${row.id}">L${row.level} ${esc(row.code)} ${
+            esc(row.name)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>类型 *</label><select id="smCategory">
+          ${Object.entries(categories).map(([code, label]) =>
+            `<option value="${code}"${code === 'POLICY' ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="field"><label>说明</label>
+        <textarea id="smDesc" rows="3">${esc(item.content || '')}</textarea></div>`,
+    `<button class="btn btn-g" data-act="knowledge.close">取消</button>
+     <button class="btn btn-p" data-act="knowledge.submitMigration" data-id="${id}">生成制度草稿</button>`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function submitStandardMigration(id) {
+  const val = (key) => {
+    const el = document.getElementById(key);
+    return el ? el.value.trim() : '';
+  };
+  try {
+    const result = await POST('/knowledge/' + id + '/migrate-to-document', {
+      process_id: Number(val('smProcess')),
+      title: val('smTitle') || null,
+      category: val('smCategory') || 'POLICY',
+      description: val('smDesc') || null,
+    });
+    toast('已生成制度草稿 ' + result.document_code);
     closeModal();
     RENDERERS.knowledge();
   } catch (e) {

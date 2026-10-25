@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
@@ -21,9 +21,17 @@ from app.api.deps import (
     ensure_can_edit_owned,
 )
 from app.core.timeutil import utcnow
-from app.models.enums import KnowledgeStatus, KnowledgeType, Methodology, Role
+from app.models.enums import (
+    KnowledgeStatus,
+    KnowledgeType,
+    Methodology,
+    ProcessDocumentCategory,
+    Role,
+)
 from app.models.knowledge import (
     KnowledgeItem,
+    KnowledgeRecommendLog,
+    KnowledgeReview,
     KnowledgeScenario,
     KnowledgeScenarioLink,
     KnowledgeTag,
@@ -40,10 +48,16 @@ from app.schemas.knowledge import (
     KnowledgeMetaOut,
     KnowledgeOut,
     KnowledgeReadRequest,
+    KnowledgeRecommendLogOut,
     KnowledgeRecommendRequest,
     KnowledgeRecommendResponse,
+    KnowledgeReviewOut,
     KnowledgeReviewRequest,
+    KnowledgeScenarioCreate,
     KnowledgeScenarioOut,
+    KnowledgeScenarioUpdate,
+    KnowledgeStandardMigrationOut,
+    KnowledgeStandardMigrationRequest,
     KnowledgeStatsOut,
     KnowledgeUpdate,
     KnowledgeUsageCreate,
@@ -51,6 +65,7 @@ from app.schemas.knowledge import (
 )
 from app.services import audit as audit_service
 from app.services import knowledge_match
+from app.services import process_document as document_service
 
 router = APIRouter(prefix="/knowledge", tags=["流程知识库"])
 
@@ -148,6 +163,48 @@ def _usage_out(row: KnowledgeUsage) -> KnowledgeUsageOut:
     )
 
 
+def _review_out(row: KnowledgeReview) -> KnowledgeReviewOut:
+    return KnowledgeReviewOut(
+        id=row.id,
+        knowledge_id=row.knowledge_id,
+        reviewer_user_id=row.reviewer_user_id,
+        reviewer=row.reviewer.display_name if row.reviewer else None,
+        decision=row.decision,
+        decision_label=knowledge_match.REVIEW_DECISION_LABELS.get(row.decision, row.decision),
+        from_status=row.from_status,
+        from_status_label=knowledge_match.STATUS_LABELS.get(row.from_status, row.from_status),
+        to_status=row.to_status,
+        to_status_label=knowledge_match.STATUS_LABELS.get(row.to_status, row.to_status),
+        note=row.note,
+        created_at=row.created_at,
+    )
+
+
+def _recommend_log_out(row: KnowledgeRecommendLog) -> KnowledgeRecommendLogOut:
+    return KnowledgeRecommendLogOut(
+        id=row.id,
+        user_id=row.user_id,
+        user=row.user.display_name if row.user else None,
+        problem=row.problem,
+        scenario_codes=list(row.scenario_codes or []),
+        stage_no=row.stage_no,
+        step_no=row.step_no,
+        result_ids=list(row.result_ids or []),
+        created_at=row.created_at,
+    )
+
+
+def _scenario_out(row: KnowledgeScenario) -> KnowledgeScenarioOut:
+    return KnowledgeScenarioOut(
+        id=row.id,
+        code=row.code,
+        name=row.name,
+        description=row.description,
+        sort_order=row.sort_order,
+        is_active=row.is_active,
+    )
+
+
 def _load_item(db: DbSession, item_id: int) -> KnowledgeItem:
     item = db.scalar(
         select(KnowledgeItem)
@@ -217,16 +274,9 @@ def _apply_list_filters(
     if tag:
         stmt = stmt.where(KnowledgeItem.tag_rows.any(KnowledgeTag.tag == tag))
     if keyword:
-        like = f"%{keyword}%"
-        stmt = stmt.where(
-            or_(
-                KnowledgeItem.title.like(like),
-                KnowledgeItem.summary.like(like),
-                KnowledgeItem.content.like(like),
-                KnowledgeItem.claim.like(like),
-                KnowledgeItem.applicable_when.like(like),
-            )
-        )
+        # search_text 在写时同步；PostgreSQL 上由 pg_trgm GIN 索引加速 ILIKE，
+        # SQLite 退化为普通 LIKE，两套环境行为一致。
+        stmt = stmt.where(KnowledgeItem.search_text.ilike(f"%{keyword.strip()}%"))
     return stmt
 
 
@@ -252,8 +302,58 @@ def _page_of_briefs(db: DbSession, items: List[KnowledgeItem], page: int, size: 
     response_model=List[KnowledgeScenarioOut],
     summary="场景字典（按痛点找知识）",
 )
-def list_scenarios(db: DbSession):
-    return knowledge_match.scenario_list(db)
+def list_scenarios(
+    db: DbSession,
+    user: CurrentUser,
+    include_inactive: bool = Query(default=False),
+):
+    if include_inactive and not _is_manager(user):
+        raise HTTPException(status_code=403, detail="只有流程管理科可以查看停用场景")
+    return knowledge_match.scenario_list(db, include_inactive=include_inactive)
+
+
+@router.post(
+    "/scenarios",
+    response_model=KnowledgeScenarioOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新增场景（Manager）",
+)
+def create_scenario(payload: KnowledgeScenarioCreate, db: DbSession, user: ManagerUser):
+    exists = db.scalar(
+        select(KnowledgeScenario).where(KnowledgeScenario.code == payload.code.upper())
+    )
+    if exists is not None:
+        raise HTTPException(status_code=409, detail=f"场景编码 {payload.code} 已存在")
+    row = KnowledgeScenario(**payload.model_dump())
+    row.code = row.code.upper()
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "knowledge_scenario", row.id, f"新增场景 {row.code}")
+    db.commit()
+    db.refresh(row)
+    return _scenario_out(row)
+
+
+@router.patch(
+    "/scenarios/{scenario_id}",
+    response_model=KnowledgeScenarioOut,
+    summary="修改/停用场景（Manager）",
+)
+def update_scenario(
+    scenario_id: int,
+    payload: KnowledgeScenarioUpdate,
+    db: DbSession,
+    user: ManagerUser,
+):
+    row = db.get(KnowledgeScenario, scenario_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
+    audit_service.record(db, user, "UPDATE", "knowledge_scenario", row.id, f"更新场景 {row.code}")
+    db.commit()
+    db.refresh(row)
+    return _scenario_out(row)
 
 
 @router.get("/meta", response_model=KnowledgeMetaOut, summary="知识库标签与统计")
@@ -322,6 +422,48 @@ def list_archive_candidates(
     return knowledge_match.archive_candidates(db, months=months, limit=limit)
 
 
+@router.get(
+    "/recommend-logs",
+    response_model=List[KnowledgeRecommendLogOut],
+    summary="推荐解释日志（Manager）",
+)
+def list_recommend_logs(
+    db: DbSession,
+    user: ManagerUser,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    rows = db.scalars(
+        select(KnowledgeRecommendLog)
+        .options(selectinload(KnowledgeRecommendLog.user))
+        .order_by(KnowledgeRecommendLog.created_at.desc(), KnowledgeRecommendLog.id.desc())
+        .limit(limit)
+    ).all()
+    return [_recommend_log_out(row) for row in rows]
+
+
+@router.get(
+    "/standard-candidates",
+    response_model=List[KnowledgeBrief],
+    summary="待迁移到制度中心的旧制度知识（Manager）",
+)
+def list_standard_candidates(db: DbSession, user: ManagerUser):
+    rows = db.scalars(
+        select(KnowledgeItem)
+        .options(
+            selectinload(KnowledgeItem.tag_rows),
+            selectinload(KnowledgeItem.scenario_rows).selectinload(KnowledgeScenarioLink.scenario),
+            selectinload(KnowledgeItem.workflow_links),
+        )
+        .where(
+            KnowledgeItem.type == KnowledgeType.STANDARD.value,
+            KnowledgeItem.status == KnowledgeStatus.ARCHIVED.value,
+        )
+        .order_by(KnowledgeItem.id)
+    ).all()
+    stats = knowledge_match.effectiveness_stats(db, [row.id for row in rows])
+    return [knowledge_match.to_brief(row, stats.get(row.id, (0, 0, None))) for row in rows]
+
+
 @router.post(
     "/recommend",
     response_model=KnowledgeRecommendResponse,
@@ -336,6 +478,18 @@ def recommend_knowledge(payload: KnowledgeRecommendRequest, db: DbSession, user:
         step_no=payload.step_no,
         limit=payload.limit,
     )
+    # 推荐解释留痕：问题、上下文与返回的条目 id，便于事后审计“为什么推了这条”
+    db.add(
+        KnowledgeRecommendLog(
+            user_id=user.id,
+            problem=payload.problem,
+            scenario_codes=payload.scenario_codes,
+            stage_no=payload.stage_no,
+            step_no=payload.step_no,
+            result_ids=[item.id for item in items],
+        )
+    )
+    db.commit()
     return KnowledgeRecommendResponse(
         problem=payload.problem,
         scenario_codes=payload.scenario_codes,
@@ -633,6 +787,7 @@ def review_knowledge(
     obj = _load_item(db, item_id)
     if obj.status != KnowledgeStatus.IN_REVIEW.value:
         raise HTTPException(status_code=409, detail="只有待审核的条目可以审核")
+    previous_status = obj.status
     if payload.decision == "APPROVE":
         obj.status = KnowledgeStatus.VERIFIED.value
         obj.last_verified_at = utcnow()
@@ -642,6 +797,16 @@ def review_knowledge(
     else:
         obj.status = KnowledgeStatus.DRAFT.value
         action = "驳回"
+    db.add(
+        KnowledgeReview(
+            knowledge_id=obj.id,
+            reviewer_user_id=user.id,
+            decision=payload.decision,
+            from_status=previous_status,
+            to_status=obj.status,
+            note=payload.note,
+        )
+    )
     audit_service.record(
         db,
         user,
@@ -653,6 +818,24 @@ def review_knowledge(
     db.commit()
     obj = _load_item(db, item_id)
     return knowledge_match.to_out(obj, _usage_stats(db, obj))
+
+
+@router.get(
+    "/{item_id}/reviews",
+    response_model=List[KnowledgeReviewOut],
+    summary="知识的求真审核历史",
+)
+def list_reviews(item_id: int, db: DbSession, user: CurrentUser):
+    obj = _load_item(db, item_id)
+    _assert_can_view(obj, user)
+    rows = db.scalars(
+        select(KnowledgeReview)
+        .options(selectinload(KnowledgeReview.reviewer))
+        .where(KnowledgeReview.knowledge_id == item_id)
+        .order_by(KnowledgeReview.created_at.desc(), KnowledgeReview.id.desc())
+        .limit(100)
+    ).all()
+    return [_review_out(row) for row in rows]
 
 
 @router.post("/{item_id}/promote", response_model=KnowledgeOut, summary="晋升为最佳实践（Manager）")
@@ -701,6 +884,74 @@ def archive_knowledge(item_id: int, db: DbSession, user: ManagerUser):
     db.commit()
     obj = _load_item(db, item_id)
     return knowledge_match.to_out(obj, _usage_stats(db, obj))
+
+
+@router.post(
+    "/{item_id}/migrate-to-document",
+    response_model=KnowledgeStandardMigrationOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="把归档的旧制度知识迁移为流程标准文件（Manager）",
+)
+def migrate_standard_to_document(
+    item_id: int,
+    payload: KnowledgeStandardMigrationRequest,
+    db: DbSession,
+    user: ManagerUser,
+):
+    obj = _load_item(db, item_id)
+    if obj.type != KnowledgeType.STANDARD.value or obj.status != KnowledgeStatus.ARCHIVED.value:
+        raise HTTPException(status_code=409, detail="只有已归档的 STANDARD 知识可以迁移到制度中心")
+    try:
+        category = ProcessDocumentCategory(payload.category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"未知制度类型：{payload.category}") from exc
+    try:
+        process = document_service.require_process(db, payload.process_id)
+        document_service.validate_node_key(db, payload.process_id, payload.node_key)
+    except document_service.ProcessDocumentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    code = document_service.next_document_code(db, process.code)
+    document = document_service.create_document(
+        db,
+        {
+            "process_id": payload.process_id,
+            "node_key": payload.node_key,
+            "code": code,
+            "title": payload.title or obj.title,
+            "category": category.value,
+            "description": payload.description or obj.content,
+            "owner": payload.owner or obj.author,
+            "owner_user_id": obj.owner_user_id,
+            "org_unit_id": payload.org_unit_id,
+            "variation_policy": "PARAMETERIZED",
+        },
+    )
+    version = document_service.create_version(
+        db,
+        document,
+        {
+            "version_label": "1.0",
+            "note": f"从知识库条目 #{obj.id}《{obj.title}》迁移",
+        },
+        user,
+    )
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "process_document",
+        document.id,
+        f"从知识条目 {obj.id} 迁移制度 {document.code}",
+    )
+    db.commit()
+    return KnowledgeStandardMigrationOut(
+        knowledge_id=obj.id,
+        document_id=document.id,
+        document_code=document.code,
+        version_id=version.id,
+        version_label=version.version_label,
+    )
 
 
 @router.post("/{item_id}/read", response_model=KnowledgeOut, summary="记录一次查阅/下载")

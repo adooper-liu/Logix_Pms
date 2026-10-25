@@ -8,6 +8,7 @@ from datetime import timedelta
 from app.core.database import SessionLocal
 from app.core.timeutil import utcnow
 from app.models.knowledge import KnowledgeItem
+from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 
 API = "/api/v1"
 
@@ -228,6 +229,115 @@ def test_new_knowledge_can_link_specific_step(client):
         assert detail["step_nos"] == ["1.1"]
     finally:
         assert client.delete(f"{API}/knowledge/{item['id']}").status_code == 200
+
+
+def test_fulltext_search_matches_content(client):
+    item = _create_draft(client)
+    try:
+        _submit_and_approve(client, item["id"])
+        rows = client.get(f"{API}/knowledge", params={"keyword": "场景推荐"}).json()
+        assert any(row["id"] == item["id"] for row in rows["items"]), "全文检索没有命中文档正文"
+    finally:
+        assert client.delete(f"{API}/knowledge/{item['id']}").status_code == 200
+
+
+def test_review_history_records_decisions(client):
+    item = _create_draft(client)
+    try:
+        _submit_and_approve(client, item["id"])
+        reviews = client.get(f"{API}/knowledge/{item['id']}/reviews").json()
+        assert reviews
+        assert reviews[0]["decision"] == "APPROVE"
+        assert reviews[0]["decision_label"] == "通过"
+        assert reviews[0]["from_status"] == "IN_REVIEW"
+        assert reviews[0]["to_status"] == "VERIFIED"
+        assert reviews[0]["reviewer"]
+    finally:
+        assert client.delete(f"{API}/knowledge/{item['id']}").status_code == 200
+
+
+def test_scenario_admin_crud(client, viewer_client):
+    code = "E2E" + uuid.uuid4().hex[:6].upper()
+    created = client.post(
+        f"{API}/knowledge/scenarios",
+        json={"code": code, "name": "测试场景", "description": "临时场景", "sort_order": 99},
+    )
+    assert created.status_code == 201, created.text
+    scenario_id = created.json()["id"]
+    try:
+        updated = client.patch(
+            f"{API}/knowledge/scenarios/{scenario_id}",
+            json={"name": "测试场景改", "is_active": False},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["name"] == "测试场景改"
+        assert updated.json()["is_active"] is False
+
+        all_rows = client.get(
+            f"{API}/knowledge/scenarios", params={"include_inactive": True}
+        ).json()
+        assert any(row["id"] == scenario_id for row in all_rows)
+        active_codes = {row["code"] for row in client.get(f"{API}/knowledge/scenarios").json()}
+        assert code not in active_codes
+
+        assert (
+            viewer_client.post(
+                f"{API}/knowledge/scenarios",
+                json={"code": code + "X", "name": "越权场景"},
+            ).status_code
+            == 403
+        )
+    finally:
+        client.patch(f"{API}/knowledge/scenarios/{scenario_id}", json={"is_active": False})
+
+
+def test_recommend_log_is_auditable(client, viewer_client):
+    problem = "推荐日志测试 " + uuid.uuid4().hex[:6]
+    result = client.post(
+        f"{API}/knowledge/recommend",
+        json={"problem": problem, "scenario_codes": ["RACI"], "limit": 3},
+    )
+    assert result.status_code == 200, result.text
+    expected_ids = [row["id"] for row in result.json()["items"]]
+
+    logs = client.get(f"{API}/knowledge/recommend-logs").json()
+    row = next((row for row in logs if row["problem"] == problem), None)
+    assert row is not None, "推荐请求没有留下解释日志"
+    assert row["result_ids"] == expected_ids
+    assert row["user"]
+    assert viewer_client.get(f"{API}/knowledge/recommend-logs").status_code == 403
+
+
+def test_archived_standard_can_migrate_to_document(client):
+    candidates = client.get(f"{API}/knowledge/standard-candidates").json()
+    assert candidates, "种子数据里应有已归档的 STANDARD 知识"
+    item = candidates[0]
+
+    processes = client.get(f"{API}/process-map/flat").json()
+    process_id = next(row["id"] for row in processes if row["code"] == "L3-032")
+    migrated = client.post(
+        f"{API}/knowledge/{item['id']}/migrate-to-document",
+        json={"process_id": process_id, "category": "POLICY", "title": "迁移测试制度"},
+    )
+    assert migrated.status_code == 201, migrated.text
+    body = migrated.json()
+    assert body["document_code"].startswith("PD-")
+    assert body["version_label"] == "1.0"
+
+    document = client.get(f"{API}/process-documents/{body['document_id']}").json()
+    assert document["title"] == "迁移测试制度"
+    try:
+        db = SessionLocal()
+        try:
+            db.query(ProcessDocumentVersion).filter(
+                ProcessDocumentVersion.document_id == body["document_id"]
+            ).delete()
+            db.query(ProcessDocument).filter(ProcessDocument.id == body["document_id"]).delete()
+            db.commit()
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - 清理失败不影响功能断言
+        pass
 
 
 def _backdate(item_id: int, days: int = 400) -> None:

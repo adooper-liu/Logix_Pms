@@ -431,6 +431,12 @@ PUBLISHED --复核通过--> VERIFIED
 > **同日补全**：推荐卡与详情支持「用到当前步骤」，使用证据写入 `knowledge_usage.step_no`；
 > 详情展示关联阶段/步骤/工具；新建表单可精确关联到具体步骤；知识库侧栏阶段入口显示知识数；
 > 使用证据增加 10 分钟短期去重；提醒任务由 `scripts/scan_reminders.py` 供外部 cron 调用。
+>
+> **2026-10-25 P4（暂缓项落地）**：`knowledge_item` 增加 `search_text` 投影与 PostgreSQL
+> `pg_trgm` GIN 索引（SQLite 退化为 LIKE）；新增 `knowledge_review` 审核历史与
+> `knowledge_recommend_log` 推荐解释日志；场景字典支持 Manager CRUD（停用不删关联）；
+> 已归档 STANDARD 可一键迁移为流程标准文件（生成 v1.0 草稿，仍需审批生效）。
+> 审核历史与推荐日志可在知识库页面查看。
 
 总计约 23–31 人日。若只做最小可用版，P0 + P1 的核心（不做审核历史、不做自动归档）
 约 12–15 人日。
