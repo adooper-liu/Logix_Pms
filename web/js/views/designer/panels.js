@@ -51,6 +51,22 @@ export function createPanels(ctx) {
     </div>`;
   }
 
+  function bpmnDocText(bo) {
+    const docs = bo && bo.documentation;
+    return docs && docs.length ? (docs[0].text || '') : '';
+  }
+
+  function bpmnDocEditor(bo) {
+    const editable = !!state.designer.editable;
+    return `
+      <div class="field"><label>元素说明</label>
+        <textarea id="bpDoc" rows="2" placeholder="补充这个元素的目的、边界或注意事项"
+          ${editable ? '' : ' readonly'}>${esc(bpmnDocText(bo))}</textarea>
+        ${editable ? `<button class="btn-sm" data-act="designer.saveDescription"
+          data-id="${esc(bo.id)}" style="margin-top:6px">保存说明</button>` : ''}
+      </div>`;
+  }
+
   function bpmnNameEditor(bo, hint) {
     const editable = !!state.designer.editable;
     return `
@@ -101,6 +117,7 @@ export function createPanels(ctx) {
     panel.innerHTML = `
       ${bpmnPanelHeader(bo)}
       ${bpmnNameEditor(bo, '双击画布元素也可直接改名')}
+      ${bpmnDocEditor(bo)}
       ${isFlowNode ? `
         <div class="row2">
           <div class="field"><label>节点类型</label>
@@ -189,6 +206,8 @@ export function createPanels(ctx) {
       ? '1' : rawProbability;
     const source = bo.sourceRef ? (bo.sourceRef.name || bo.sourceRef.id) : '?';
     const target = bo.targetRef ? (bo.targetRef.name || bo.targetRef.id) : '?';
+    const isDefault = !!(bo.sourceRef && bo.sourceRef.default === bo);
+    const sourceIsGateway = !!(bo.sourceRef && String(bo.sourceRef.$type || '').includes('Gateway'));
     const disabled = editable ? '' : ' readonly';
     panel.innerHTML = `
       ${bpmnPanelHeader(bo)}
@@ -203,6 +222,12 @@ export function createPanels(ctx) {
           <input id="bpFlowProb" type="number" min="0" max="1" step="0.05"
             value="${esc(probability)}"${disabled}></div>
       </div>
+      ${bpmnDocEditor(bo)}
+      <label class="gap" style="margin-bottom:8px">
+        <input id="bpFlowDefault" type="checkbox" ${isDefault ? 'checked' : ''}
+          ${editable && sourceIsGateway ? '' : 'disabled'}>
+        设为网关的默认分支${sourceIsGateway ? '' : '（只有网关出边可以设置）'}
+      </label>
       <div class="between mt">
         <div class="hint">条件与概率写入 BPMN，发布后参与运行时分支。</div>
         ${editable
@@ -373,6 +398,26 @@ export function createPanels(ctx) {
     }
   }
 
+  async function saveDescription(elementId) {
+    const modeler = ctx.getModeler();
+    const element = ctx.getElement(elementId);
+    if (!modeler || !element) return;
+    const text = (document.getElementById('bpDoc')?.value || '').trim();
+    try {
+      const factory = modeler.get('bpmnFactory');
+      const documentation = text
+        ? [factory.create('bpmn:Documentation', { text })]
+        : [];
+      modeler.get('modeling').updateProperties(element, { documentation });
+      ctx.clearSaveTimer();
+      const saved = await ctx.saveNow();
+      if (saved) toast('元素说明已保存');
+      ctx.renderSelection(state.designer.bpmnSelection || []);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
   async function saveBpmnFlow(flowId) {
     const modeler = ctx.getModeler();
     const element = ctx.getElement(flowId);
@@ -391,6 +436,14 @@ export function createPanels(ctx) {
         ? bpmnFactory.create('bpmn:FormalExpression', { body: condition })
         : undefined;
       modeling.updateProperties(element, { name: label || undefined, conditionExpression });
+      const source = element.source;
+      const asDefault = !!document.getElementById('bpFlowDefault')?.checked;
+      if (source && source.businessObject
+        && String(source.businessObject.$type || '').includes('Gateway')) {
+        modeling.updateProperties(source, {
+          default: asDefault ? element.businessObject : undefined,
+        });
+      }
       // pms:probability 是 PMS 扩展属性，bpmn-moddle 放在只读 getter 返回的
       // $attrs 对象里；直接改对象内容，保存时由序列化器输出为属性。
       // 不能整体赋值 $attrs（会报 getter-only），也不能走 updateProperties
@@ -540,6 +593,7 @@ export function createPanels(ctx) {
     toggleSidebar: toggleBpmnSidebar,
     closeSidebar: closeBpmnSidebar,
     saveName: saveBpmnName,
+    saveDescription: saveDescription,
     saveMetrics: saveBpmnMetrics,
     saveFlow: saveBpmnFlow,
     deleteFlow: deleteBpmnFlow,

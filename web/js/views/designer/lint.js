@@ -7,6 +7,20 @@
 import { esc } from '../../core/format.js';
 import { toast } from '../../core/ui.js';
 import { state } from '../../core/state.js';
+import { POST } from '../../core/api.js';
+
+const PMS_HELP = {
+  'pms-error': {
+    title: '业务规则错误',
+    detail: '后端保存与发布门禁会拒绝这个模型。',
+    action: '按提示修正后再发布。',
+  },
+  'pms-warn': {
+    title: '业务规则提醒',
+    detail: '不阻止发布，但会影响执行、测算或跨层汇总。',
+    action: '条件允许时补齐。',
+  },
+};
 
 const BPMN_LINT_HELP = {
   'start-event-required': {
@@ -193,7 +207,7 @@ export function createLint(ctx) {
         const isProcess = bo && (bo.$type === 'bpmn:Process' || bo.$type === 'bpmn:Collaboration');
         const label = element && !isProcess ? ((bo && (bo.name || bo.id)) || element.id) : '整个流程';
         const category = issue.category === 'error' ? 'error' : 'warn';
-        const help = BPMN_LINT_HELP[issue.rule];
+        const help = BPMN_LINT_HELP[issue.rule] || PMS_HELP[issue.rule];
         const title = help ? help.title : '建模规范提示';
         const detail = help ? help.detail : (issue.message || '');
         const raw = issue.rule + (issue.message ? '：' + issue.message : '');
@@ -237,6 +251,29 @@ export function createLint(ctx) {
       });
       // 错误优先，方便先处理会阻塞发布的问题；同级别保持规则原始顺序
       issues.sort((a, b) => (a.category === 'error' ? 0 : 1) - (b.category === 'error' ? 0 : 1));
+
+      // 后端业务规则（L4 活动绑定、开始/结束节点、概率等）并入同一页签
+      const model = state.designer.model || {};
+      const check = await POST('/design/validate', {
+        nodes: model.nodes || [],
+        edges: model.edges || [],
+      });
+      (check.errors || []).forEach((message) => {
+        issues.unshift({
+          rule: 'pms-error',
+          category: 'error',
+          message,
+          meta: { source: 'pms', element: null },
+        });
+      });
+      (check.warnings || []).forEach((message) => {
+        issues.push({
+          rule: 'pms-warn',
+          category: 'warn',
+          message,
+          meta: { source: 'pms', element: null },
+        });
+      });
       st.bpmnLint = issues;
       render();
     } catch (e) {

@@ -6,7 +6,7 @@
  */
 
 import { esc, num, dur } from '../../core/format.js';
-import { toast, closeModal, viewEl, on } from '../../core/ui.js';
+import { toast, closeModal, openModal, viewEl, on } from '../../core/ui.js';
 import { state } from '../../core/state.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../../core/router.js';
 import { AUTH, canWrite, canManage } from '../../core/auth.js';
@@ -163,6 +163,7 @@ function paintDesigner() {
           <button class="btn-sm" data-act="designer.lint">运行校验</button>
           <button class="btn-sm" data-act="designer.autoLayout">自动布局</button>
           <button class="btn-sm" data-act="designer.fullscreen">全屏</button>
+          <button class="btn-sm" data-act="designer.shortcuts">快捷键</button>
           ${editable ? '<button class="btn-sm" data-act="designer.addLane">+ 泳道</button>' : ''}
           <button class="btn-sm" id="bpmnPropsToggle"
             data-act="designer.sidebar" data-tab="props">属性</button>
@@ -434,6 +435,25 @@ on('designer.publishFromChange', () => {
   setTimeout(() => versions.publishDesign(), 150);
 });
 on('designer.saveName', ({ id }) => panels.saveName(id));
+on('designer.saveDescription', ({ id }) => panels.saveDescription(id));
+on('designer.shortcuts', () => {
+  openModal('画布快捷键', `
+    <table class="tbl">
+      <thead><tr><th>操作</th><th>快捷键 / 方式</th></tr></thead>
+      <tbody>
+        <tr><td>撤销 / 重做</td><td>Ctrl+Z / Ctrl+Shift+Z</td></tr>
+        <tr><td>删除元素</td><td>选中后按 Delete</td></tr>
+        <tr><td>框选多个元素</td><td>Shift + 拖动</td></tr>
+        <tr><td>移动画布</td><td>Space + 拖动，或抓手工具</td></tr>
+        <tr><td>缩放</td><td>Ctrl + 滚轮</td></tr>
+        <tr><td>改名</td><td>双击元素</td></tr>
+        <tr><td>查看 / 编辑属性</td><td>单击元素 → 工具栏「属性」</td></tr>
+        <tr><td>连线</td><td>悬停元素边缘的箭头拖出</td></tr>
+      </tbody>
+    </table>
+    <div class="note mt">快捷键由 bpmn-js 提供；输入框聚焦时不会触发画布快捷键。</div>`,
+  '<button class="btn btn-g" data-act="designer.close">关闭</button>');
+});
 on('designer.changeType', ({ id }) => panels.changeNodeType(id));
 on('designer.moveLane', ({ id }) => panels.moveNodeToLane(id));
 on('designer.saveActivity', ({ node }) => assignment.saveBpmnNodeActivity(node));

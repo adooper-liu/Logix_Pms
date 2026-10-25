@@ -95,6 +95,26 @@ export function createVersions(ctx) {
     const model = state.designer.model || {};
     let changeRequestId = null;
     let gateNote = '';
+    try {
+      const current = state.designer.model || model;
+      const check = await POST('/design/validate', {
+        nodes: current.nodes || [],
+        edges: current.edges || [],
+      });
+      if (check.errors && check.errors.length) {
+        ctx.runLint();
+        ctx.showSidebar('lint');
+        toast('发布被阻止：' + check.errors.join('；'), true);
+        return;
+      }
+      // 待评审的草稿不能再保存（后端会拒绝），发布直接用已评审的版本
+      if (model.status !== 'IN_REVIEW') {
+        const saved = await ctx.saveNow();
+        if (!saved) return;
+      }
+    } catch (e) {
+      return toast('发布前校验失败：' + e.message, true);
+    }
     if (model.requires_change_request) {
       const change = await ctx.approvedChangeRequest();
       if (!change) {

@@ -222,14 +222,23 @@ export function createAssignment(ctx) {
   function renderBpmnNodeMeta(forms, rules) {
     const slot = document.getElementById('bpMetaSlot');
     if (!slot) return;
-    const formText = forms.length ? forms.map((form) => form.name).join('、') : '未配置';
+    const formRows = forms.length
+      ? forms.map((form) => `<div class="tiny">${esc(form.name)}
+          <span class="tag t-blu">${esc(form.status_label || form.status || '')}</span></div>`).join('')
+      : '<div class="tiny muted">未配置表单</div>';
+    const ruleRows = rules.length
+      ? rules.map((rule) => `<div class="tiny">${esc(rule.name || rule.code || rule.id)}
+          <span class="tag t-gry">${esc(rule.status_label || rule.status || '')}</span></div>`).join('')
+      : '<div class="tiny muted">未配置分支规则</div>';
+    const nodeKey = (state.designer.bpmnSelection || [])[0]?.businessObject?.id || '';
     slot.innerHTML = `
       <div class="between mb"><b>表单与分支规则</b>
         ${canManage()
-          ? '<button class="btn-sm" data-act="designer.executionConfig">去执行页配置</button>' : ''}
+          ? `<button class="btn-sm" data-act="designer.executionConfig"
+              data-node="${esc(nodeKey)}">去执行页配置</button>` : ''}
       </div>
-      <div class="tiny">表单：${esc(formText)}</div>
-      <div class="tiny">分支规则：${rules.length} 条</div>`;
+      <div class="tiny muted">表单（${forms.length}）</div>${formRows}
+      <div class="tiny muted mt">分支规则（${rules.length}）</div>${ruleRows}`;
   }
 
   async function hydrateBpmnNodeExtras(nodeKey) {
@@ -338,8 +347,15 @@ export function createAssignment(ctx) {
   }
 
   function openExecutionConfig() {
-    state.execution.tab = 'config';
-    go('execution');
+    const nodeKey = (state.designer.bpmnSelection || [])[0]?.businessObject?.id || '';
+    go('execution', {
+      params: {
+        process: state.designer.processId || '',
+        tab: 'config',
+        node: nodeKey,
+      },
+      push: true,
+    });
   }
 
   async function saveBpmnAssignment(nodeKey) {

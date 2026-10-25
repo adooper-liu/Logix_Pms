@@ -9,6 +9,7 @@ import { confirmDialog, toast } from '../../core/ui.js';
 import { state } from '../../core/state.js';
 import { API_BASE, GET, POST, getToken } from '../../core/api.js';
 import { PMS_BPMN_GUARDS } from './providers.js';
+import { createTranslateModule } from './i18n.js';
 import { ensureFlowRefs, restoreLanes } from './xml.js';
 
 const EMPTY_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -218,7 +219,10 @@ export function createCanvas(ctx) {
       return;
     }
     destroy();
-    const modeler = new window.BpmnJS({ container, additionalModules: [PMS_BPMN_GUARDS] });
+    const modeler = new window.BpmnJS({
+      container,
+      additionalModules: [createTranslateModule(), PMS_BPMN_GUARDS],
+    });
     st.bpmnModeler = modeler;
     window.__bpmnSpike = { modeler, lint: window.BpmnLint };
     st.bpmnSelection = [];

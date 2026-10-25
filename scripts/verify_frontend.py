@@ -1452,6 +1452,9 @@ def main() -> int:
             assert flow, "流程没有连线"
             ensure_sidebar()
             page.wait_for_selector("#bpFlowProb", timeout=5000)
+            assert "元素说明" in page.inner_text("#bpmnSidebar"), "连线属性缺少元素说明"
+            assert "默认分支" in page.inner_text("#bpmnSidebar"), "连线属性缺少默认分支"
+            assert "快捷键" in page.inner_text("#view"), "设计器缺少快捷键帮助入口"
             page.fill("#bpFlowLabel", "E2E标签")
             page.fill("#bpFlowCondition", "E2E条件")
             page.fill("#bpFlowProb", "0.55")
