@@ -124,6 +124,43 @@ def test_cancel_creates_and_completes_compensation(client):
         client.delete(f"{API}/process-map/{pid}")
 
 
+def test_form_version_freezes_on_instance(client):
+    pid = _minimal_process(client)
+    iid = None
+    try:
+        form = client.post(
+            f"{API}/execution/forms",
+            json={
+                "process_id": pid,
+                "node_key": "task",
+                "name": "处理表单 v1",
+                "fields": [{"key": "result", "label": "结果", "type": "text"}],
+            },
+        )
+        assert form.status_code == 201, form.text
+        assert form.json()["version"] == 1
+
+        started = client.post(f"{API}/execution/instances", json={"process_id": pid})
+        assert started.status_code == 201, started.text
+        iid = started.json()["id"]
+        detail = client.get(f"{API}/execution/instances/{iid}").json()
+        assert detail["configuration"]["forms"]["task"]["version"] == 1
+
+        updated = client.patch(
+            f"{API}/execution/forms/{form.json()['id']}", json={"name": "处理表单 v2"}
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["version"] == 2
+
+        still = client.get(f"{API}/execution/instances/{iid}").json()
+        assert still["configuration"]["forms"]["task"]["version"] == 1
+        assert still["configuration"]["forms"]["task"]["name"] == "处理表单 v1"
+    finally:
+        if iid is not None:
+            client.delete(f"{API}/execution/instances/{iid}")
+        client.delete(f"{API}/process-map/{pid}")
+
+
 def test_publish_rollback_to_history(client):
     pid = _minimal_process(client)
     try:

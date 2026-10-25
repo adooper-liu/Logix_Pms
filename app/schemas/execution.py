@@ -175,6 +175,7 @@ class InstanceDetail(BaseModel):
     instance: InstanceOut
     tasks: List[TaskOut] = []
     compensations: List[CompensationRecordOut] = []
+    configuration: Optional[Dict] = None
     variables: Optional[Dict] = None
 
 
@@ -270,6 +271,7 @@ class FormDefinitionOut(BaseModel):
     node_key: str
     name: str
     fields: List[Dict] = []
+    version: int = 1
     is_active: bool = True
     updated_at: Optional[UtcDateTime] = None
 
@@ -312,5 +314,6 @@ class ProcessRuleOut(BaseModel):
     conditions: List[Dict] = []
     target_node_key: str
     priority: int
+    version: int = 1
     is_active: bool = True
     updated_at: Optional[UtcDateTime] = None

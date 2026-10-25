@@ -1094,6 +1094,10 @@ def instance_detail(db: Session, instance: ProcessInstance) -> InstanceDetail:
             compensation_service.record_out(row)
             for row in compensation_service.records_for_instance(db, instance.id)
         ],
+        configuration={
+            "forms": instance.snapshot.get("forms", {}),
+            "rules": instance.snapshot.get("rules", {}),
+        },
         variables=instance.variables,
     )
 

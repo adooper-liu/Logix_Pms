@@ -333,6 +333,7 @@ def _form_out(form: FormDefinition) -> FormDefinitionOut:
         node_key=form.node_key,
         name=form.name,
         fields=form.fields or [],
+        version=form.version,
         is_active=form.is_active,
         updated_at=form.updated_at,
     )
@@ -347,6 +348,7 @@ def _rule_out(rule: ProcessRule) -> ProcessRuleOut:
         conditions=rule.conditions or [],
         target_node_key=rule.target_node_key,
         priority=rule.priority,
+        version=rule.version,
         is_active=rule.is_active,
         updated_at=rule.updated_at,
     )
@@ -412,6 +414,7 @@ def update_form(form_id: int, payload: FormDefinitionUpdate, db: DbSession, user
         form.fields = forms_service.normalize_fields(data.pop("fields"))
     for key, value in data.items():
         setattr(form, key, value)
+    form.version = (form.version or 1) + 1
     audit_service.record(db, user, "UPDATE", "form_definition", form.id, f"修改表单 {form.name}")
     db.commit()
     db.refresh(form)
@@ -491,6 +494,7 @@ def update_rule(rule_id: int, payload: ProcessRuleUpdate, db: DbSession, user: M
         )
     for key, value in data.items():
         setattr(rule, key, value)
+    rule.version = (rule.version or 1) + 1
     audit_service.record(db, user, "UPDATE", "process_rule", rule.id, f"修改规则 {rule.name}")
     db.commit()
     db.refresh(rule)

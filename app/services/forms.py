@@ -121,7 +121,14 @@ def form_snapshot(db: Session, process_id: int) -> Dict[str, Dict]:
             FormDefinition.is_active.is_(True),
         )
     ).all()
-    return {form.node_key: {"name": form.name, "fields": form.fields or []} for form in rows}
+    return {
+        form.node_key: {
+            "name": form.name,
+            "fields": form.fields or [],
+            "version": form.version,
+        }
+        for form in rows
+    }
 
 
 # ------------------------------------------------------------------ 规则
@@ -161,6 +168,7 @@ def rule_snapshot(db: Session, process_id: int) -> Dict[str, List[Dict]]:
                 "conditions": rule.conditions or [],
                 "target": rule.target_node_key,
                 "priority": rule.priority,
+                "version": rule.version,
             }
         )
     return out

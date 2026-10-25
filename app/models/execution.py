@@ -255,6 +255,7 @@ class FormDefinition(Base):
     node_key: Mapped[str] = mapped_column(String(64), default="")
     name: Mapped[str] = mapped_column(String(128))
     fields: Mapped[list] = mapped_column(JSON, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -284,6 +285,7 @@ class ProcessRule(Base):
     conditions: Mapped[list] = mapped_column(JSON, default=list)
     target_node_key: Mapped[str] = mapped_column(String(64))
     priority: Mapped[int] = mapped_column(Integer, default=100)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

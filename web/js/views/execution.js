@@ -1372,6 +1372,16 @@ async function openInstance(instanceId) {
         ${t.comment ? '<div>' + esc(t.comment) + '</div>' : ''}</td>
     </tr>`).join('') || emptyRow(4, '还没有任务');
   const compensations = detail.compensations || [];
+  const configSnapshot = detail.configuration || {};
+  const formSnapshots = configSnapshot.forms || {};
+  const ruleSnapshots = configSnapshot.rules || {};
+  const configTags = [
+    ...Object.entries(formSnapshots).map(([key, row]) =>
+      `<span class="tag t-blu">表单 ${esc(key || '默认')} v${row.version || 1}</span>`),
+    ...Object.entries(ruleSnapshots).flatMap(([key, rows]) =>
+      (rows || []).map((row) =>
+        `<span class="tag t-gry">规则 ${esc(key)} v${row.version || 1}</span>`)),
+  ].join(' ');
   const compensationRows = compensations.map((row) => `
     <tr>
       <td><b>${esc(row.action_name)}</b><div class="tiny">${esc(row.node_key)}</div></td>
@@ -1399,6 +1409,8 @@ async function openInstance(instanceId) {
     </div>
     <div class="field"><label>流程变量</label>
       <textarea readonly>${esc(JSON.stringify(detail.variables || {}, null, 2))}</textarea></div>
+    <div class="field"><label>配置快照（启动时冻结）</label>
+      <div class="gap" style="flex-wrap:wrap">${configTags || '<span class="tiny muted">没有表单/规则配置</span>'}</div></div>
     <h3 class="mt">任务时间线</h3>
     <table class="tbl">
       <thead><tr><th>节点</th><th>状态</th><th>处理人</th><th>完成时间 / 备注</th></tr></thead>
