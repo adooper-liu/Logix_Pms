@@ -416,6 +416,22 @@ class GateConclusion(str, Enum):
     STOP = "STOP"
 
 
+class DmaicStage(str, Enum):
+    """改善项目的 DMAIC 阶段跟踪。"""
+
+    DEFINE = "DEFINE"
+    MEASURE = "MEASURE"
+    ANALYZE = "ANALYZE"
+    IMPROVE = "IMPROVE"
+    CONTROL = "CONTROL"
+
+
+class ReplicationPackStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    REJECTED = "REJECTED"
+
+
 class OrgUnitType(str, Enum):
     """组织单元类型。编码由系统内维护，后续可接 ERP/HR 同步。"""
 

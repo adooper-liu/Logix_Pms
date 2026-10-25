@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
@@ -55,6 +55,7 @@ TYPE_LABELS: Dict[str, str] = {
     "L4_NO_OWNER": "L4 活动无 Owner",
     "L4_NO_DOCUMENT": "L4 活动无制度文件",
     "L4_NO_KPI": "L4 活动无 KPI",
+    "DMAIC_STAGE_STALE": "DMAIC 阶段长期未更新",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -442,6 +443,26 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
                 org_unit_id=node.org_unit_id,
                 owner_user_id=node.owner_user_id,
             )
+
+    # DMAIC：改善项目阶段长期不更新，说明跟踪断了
+    stale_before = utcnow() - timedelta(days=30)
+    for project in db.scalars(
+        select(Project).where(
+            Project.dmaic_stage.is_not(None),
+            Project.status.in_(("PLANNING", "ACTIVE")),
+            Project.dmaic_updated_at.is_not(None),
+            Project.dmaic_updated_at < stale_before,
+        )
+    ).all():
+        add(
+            "DMAIC_STAGE_STALE",
+            "LOW",
+            "project",
+            project.id,
+            f"DMAIC 阶段 30 天未更新：{project.code} {project.name}",
+            f"当前阶段 {project.dmaic_stage}；请更新阶段或补充说明",
+            owner_user_id=project.owner_user_id,
+        )
 
     return findings
 

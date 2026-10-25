@@ -174,6 +174,8 @@ class ProjectUpdate(BaseModel):
     replication_status: Optional[ReplicationStatus] = None
     replication_note: Optional[str] = None
     gate_required: Optional[bool] = None
+    dmaic_stage: Optional[str] = None
+    dmaic_note: Optional[str] = None
 
 
 class ProjectOut(ORMModel):
@@ -228,6 +230,10 @@ class ProjectOut(ORMModel):
     replication_status_label: Optional[str] = None
     replication_note: Optional[str] = None
     gate_required: bool = False
+    dmaic_stage: Optional[str] = None
+    dmaic_stage_label: Optional[str] = None
+    dmaic_note: Optional[str] = None
+    dmaic_updated_at: Optional[UtcDateTime] = None
     created_at: Optional[UtcDateTime] = None
     updated_at: Optional[UtcDateTime] = None
 
@@ -235,6 +241,7 @@ class ProjectOut(ORMModel):
 class ProjectMetaOut(BaseModel):
     source_labels: dict
     replication_status_labels: dict
+    dmaic_stage_labels: dict = {}
 
 
 class ProjectDraftOut(BaseModel):

@@ -44,6 +44,14 @@ REPLICATION_LABELS = {
 
 KPI_STATUS_LABELS = {"RED": "红", "YELLOW": "黄", "GREEN": "绿"}
 
+DMAIC_STAGE_LABELS = {
+    "DEFINE": "定义",
+    "MEASURE": "测量",
+    "ANALYZE": "分析",
+    "IMPROVE": "改进",
+    "CONTROL": "控制",
+}
+
 EXCEPTION_SEVERITY_LABELS = {
     ExceptionSeverity.CRITICAL.value: "紧急",
     ExceptionSeverity.HIGH.value: "高",

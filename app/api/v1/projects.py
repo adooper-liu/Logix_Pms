@@ -101,6 +101,9 @@ def _to_out(p: Project, process_name: Optional[str] = None) -> ProjectOut:
     )
     data["source_kpi_code"] = p.source_kpi.code if p.source_kpi else None
     data["source_kpi_name"] = p.source_kpi.name if p.source_kpi else None
+    data["dmaic_stage_label"] = improvement_service.DMAIC_STAGE_LABELS.get(
+        p.dmaic_stage, p.dmaic_stage
+    )
     return ProjectOut.model_validate(data)
 
 
@@ -159,6 +162,7 @@ def summary(db: DbSession):
         "stage_names": STAGE_NAMES,
         "setup_stage_names": setup_service.SETUP_STAGE_NAMES,
         "project_type_labels": PROJECT_TYPE_LABELS,
+        "dmaic_stage_labels": improvement_service.DMAIC_STAGE_LABELS,
     }
 
 
@@ -407,6 +411,8 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
         if "owner_user_id" in data and not data.get("owner"):
             raise HTTPException(status_code=400, detail="Owner 姓名不能为空")
     changed = sorted(data.keys())
+    if "dmaic_stage" in data:
+        data["dmaic_updated_at"] = utcnow()
     if "current_stage" in data and data["current_stage"] > project.current_stage:
         try:
             maturity_service.ensure_advance_allowed(db, project, data["current_stage"])

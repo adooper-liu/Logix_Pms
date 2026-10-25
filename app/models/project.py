@@ -82,6 +82,10 @@ class Project(Base):
     gate_required: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", index=True
     )
+    # 改善项目可叠加 DMAIC 阶段跟踪，和五阶段工作流并存
+    dmaic_stage: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    dmaic_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dmaic_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     budget: Mapped[float] = mapped_column(Float, default=0.0)
     actual_cost: Mapped[float] = mapped_column(Float, default=0.0)
