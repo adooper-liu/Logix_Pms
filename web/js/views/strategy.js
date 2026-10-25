@@ -22,7 +22,12 @@ on('strategy.initiate', ({ id }) => initiateProject(Number(id)));
 on('strategy.submitInitiate', ({ id }) => submitInitiate(Number(id)));
 on('strategy.unlink', ({ id, link }) => unlinkObjective(Number(id), Number(link)));
 on('strategy.archive', ({ id }) => archiveObjective(Number(id)));
-on('strategy.openProcess', ({ code }) => {
+on('strategy.openProcess', ({ code, id, level }) => {
+  // L3/L4 落到单流程 360 视图；L1/L2 仍回地图看架构上下文。
+  if (Number(level) >= 3 && Number(id)) {
+    go('process_card', { params: { process: id }, push: true });
+    return;
+  }
   state.map.pendingJump = code;
   go('map', { params: { process: code }, push: true });
 });
@@ -58,7 +63,8 @@ const renderStrategy = () => {
             <span class="gap">
               ${link.process_code
                 ? `<button class="btn-sm" data-act="strategy.openProcess"
-                    data-code="${esc(link.process_code)}">看流程</button>` : ''}
+                    data-code="${esc(link.process_code)}" data-id="${link.process_id}"
+                    data-level="${link.process_level || ''}">看流程</button>` : ''}
               ${canManage()
                 ? `<button class="btn-sm" data-act="strategy.unlink"
                     data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}
