@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.timeutil import UtcDateTime
 from app.models.enums import DeliverableStatus, DeliverableType, ToolLevel
 from app.schemas.common import ORMModel
+from app.schemas.knowledge import KnowledgeRecommendationOut
 from app.schemas.tool_template import ToolTemplateOut
 
 # ---------------------------------------------------------------- 步骤契约
@@ -98,6 +99,12 @@ class RecommendedToolOut(BaseModel):
     level_label: str
     templates: List[ToolTemplateOut] = []
 
+    why: Optional[str] = Field(default=None, description="这个工具解决什么问题")
+    verification_standard: Optional[str] = Field(default=None, description="怎么判断用对了")
+    difficulty: str = "MEDIUM"
+    difficulty_label: Optional[str] = None
+    typical_duration: Optional[str] = None
+
 
 class StepRecommendationOut(BaseModel):
     step_no: str
@@ -106,6 +113,9 @@ class StepRecommendationOut(BaseModel):
     tools: List[RecommendedToolOut] = []
     deliverable_templates: List[ToolTemplateOut] = Field(
         default=[], description="绑定到本步骤交付物、但工具不在契约工具清单里的模板"
+    )
+    knowledge: List[KnowledgeRecommendationOut] = Field(
+        default=[], description="挂到本步骤/阶段的知识推荐"
     )
 
 

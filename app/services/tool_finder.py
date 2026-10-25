@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from app.models.tool import Tool
+from app.services.text_match import tokens
 
 # 口语问题 → 工具 code。一个词可以指向多个工具，命中即加分。
 SYNONYMS: Dict[str, Sequence[str]] = {
@@ -74,54 +75,54 @@ HINT = (
 )
 
 
-def match(
-    tools: Sequence[Tool], problem: str, stage_no: Optional[int] = None
-) -> List[Tuple[Tool, float, List[str]]]:
+def score_text(tool: Tool, problem: str, stage_no: Optional[int] = None) -> Tuple[float, List[str]]:
+    """按同义词 + 工具自身文本 + 阶段给单个工具打文本分。
+
+    供 `tool_finder.match()` 和问题驱动的 `tool_match` 共用，避免两套分词/同义词逻辑。
+    """
     text = problem.strip()
-    lower = text.lower()
-    hits: List[Tuple[Tool, float, List[str]]] = []
+    score = 0.0
+    matched_on: List[str] = []
 
-    for tool in tools:
-        score = 0.0
-        matched_on: List[str] = []
-
-        # 1. 同义词表
+    if text:
+        lower = text.lower()
         for word, codes in SYNONYMS.items():
             if word and (word in text or word.lower() in lower):
                 if tool.code in codes:
                     score += 3.0
                     matched_on.append(word)
 
-        # 2. 工具自身文本被直接命中
         haystack = " ".join(
             filter(
                 None,
-                [tool.name, tool.alias or "", tool.purpose, tool.when_to_use, tool.pitfalls or ""],
+                [
+                    tool.name,
+                    tool.alias or "",
+                    tool.purpose,
+                    tool.when_to_use,
+                    tool.pitfalls or "",
+                ],
             )
         )
-        for token in _tokens(text):
+        for token in tokens(text):
             if token and token in haystack:
                 score += 1.0
                 matched_on.append(token)
 
-        # 3. 阶段加权
-        if stage_no is not None and tool.stage_no == stage_no:
-            score += 0.5
+    if stage_no is not None and tool.stage_no == stage_no:
+        score += 0.5
 
+    return score, sorted(set(matched_on), key=matched_on.index)
+
+
+def match(
+    tools: Sequence[Tool], problem: str, stage_no: Optional[int] = None
+) -> List[Tuple[Tool, float, List[str]]]:
+    hits: List[Tuple[Tool, float, List[str]]] = []
+    for tool in tools:
+        score, matched_on = score_text(tool, problem, stage_no)
         if score > 0:
-            hits.append((tool, round(score, 2), sorted(set(matched_on), key=matched_on.index)))
+            hits.append((tool, round(score, 2), matched_on))
 
     hits.sort(key=lambda item: (-item[1], item[0].sort_order))
     return hits[:8]
-
-
-def _tokens(text: str) -> List[str]:
-    """粗分词：中文取 2 字滑窗，英文/数字按空白与符号切分。"""
-    tokens: List[str] = []
-    chinese = "".join(ch for ch in text if "一" <= ch <= "鿿")
-    tokens.extend(chinese[i : i + 2] for i in range(max(0, len(chinese) - 1)))
-    for chunk in text.replace("，", " ").replace("、", " ").replace(",", " ").split():
-        chunk = chunk.strip()
-        if chunk and not all("一" <= ch <= "鿿" for ch in chunk):
-            tokens.append(chunk)
-    return tokens

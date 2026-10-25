@@ -38,6 +38,7 @@ from app.schemas.tool_template import (
     ToolTemplateVersionOut,
 )
 from app.services import deliverable as deliverable_service
+from app.services import knowledge_match
 from app.services import org_unit as org_service
 from app.services import storage as storage_service
 
@@ -634,6 +635,11 @@ def step_recommendations(db: Session, step_no: str) -> StepRecommendationOut:
                 level=level,
                 level_label=deliverable_service.TOOL_LEVEL_LABELS.get(level, level),
                 templates=[template_out(t) for t in by_tool.get(code, [])],
+                why=tool.purpose,
+                verification_standard=tool.verification_standard,
+                difficulty=tool.difficulty,
+                difficulty_label=tool.difficulty_label,
+                typical_duration=tool.typical_duration,
             )
         )
 
@@ -666,4 +672,5 @@ def step_recommendations(db: Session, step_no: str) -> StepRecommendationOut:
         stage_no=step.stage_no,
         tools=recommended,
         deliverable_templates=[template_out(t) for t in extras],
+        knowledge=knowledge_match.recommend_for_step(db, step.stage_no, step.step_no),
     )

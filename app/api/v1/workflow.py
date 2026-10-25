@@ -10,8 +10,20 @@ from sqlalchemy import select
 from app.api.deps import DbSession
 from app.models.project import WorkflowTemplate
 from app.schemas.project import WorkflowStageOut, WorkflowStepOut
+from app.services import knowledge_match
 
 router = APIRouter(prefix="/workflow", tags=["标准工作流"])
+
+
+def _step_out(db: DbSession, rows: List[WorkflowTemplate]) -> List[WorkflowStepOut]:
+    """步骤出参统一补上「推荐知识数」，列表与详情口径一致。"""
+    counts = knowledge_match.step_counts(db, [(row.stage_no, row.step_no) for row in rows])
+    return [
+        WorkflowStepOut.model_validate(row).model_copy(
+            update={"knowledge_count": counts.get((row.stage_no, row.step_no), 0)}
+        )
+        for row in rows
+    ]
 
 
 @router.get("/stages", response_model=List[WorkflowStageOut], summary="五阶段 × 全部步骤")
@@ -19,8 +31,9 @@ def get_stages(db: DbSession):
     rows = db.scalars(
         select(WorkflowTemplate).order_by(WorkflowTemplate.stage_no, WorkflowTemplate.sort_order)
     ).all()
+    steps = _step_out(db, rows)
     grouped: Dict[int, WorkflowStageOut] = {}
-    for row in rows:
+    for row, step in zip(rows, steps, strict=False):
         stage = grouped.get(row.stage_no)
         if stage is None:
             stage = WorkflowStageOut(
@@ -30,7 +43,10 @@ def get_stages(db: DbSession):
                 steps=[],
             )
             grouped[row.stage_no] = stage
-        stage.steps.append(WorkflowStepOut.model_validate(row))
+        stage.steps.append(step)
+    counts = knowledge_match.stage_counts(db, grouped.keys())
+    for stage_no, stage in grouped.items():
+        stage.knowledge_count = counts.get(stage_no, 0)
     return [grouped[k] for k in sorted(grouped)]
 
 
@@ -40,7 +56,7 @@ def get_steps(db: DbSession, stage_no: Optional[int] = None):
     if stage_no is not None:
         stmt = stmt.where(WorkflowTemplate.stage_no == stage_no)
     rows = db.scalars(stmt.order_by(WorkflowTemplate.stage_no, WorkflowTemplate.sort_order)).all()
-    return [WorkflowStepOut.model_validate(r) for r in rows]
+    return _step_out(db, rows)
 
 
 @router.get("/stages/{stage_no}", response_model=WorkflowStageOut, summary="单个阶段的步骤")
@@ -56,5 +72,6 @@ def get_stage(stage_no: int, db: DbSession):
         stage_no=stage_no,
         stage_name=rows[0].stage_name,
         stage_goal=rows[0].stage_goal,
-        steps=[WorkflowStepOut.model_validate(r) for r in rows],
+        knowledge_count=knowledge_match.stage_counts(db, [stage_no]).get(stage_no, 0),
+        steps=_step_out(db, rows),
     )

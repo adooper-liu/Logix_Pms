@@ -17,17 +17,20 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.timeutil import utcnow
 from app.models.deliverable import DeliverableDefinition, DeliverableInstance, DeliverableVersion
-from app.models.enums import DeliverableStatus
+from app.models.enums import DeliverableStatus, KnowledgeStatus
 from app.models.governance import GovernanceFinding
+from app.models.knowledge import KnowledgeItem
 from app.models.monitor import KpiDefinition
 from app.models.org import OrgUnit
 from app.models.process import ProcessArch
 from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project
+from app.models.tool import Tool
 from app.models.tool_template import ToolTemplate
 from app.models.user import User
 from app.schemas.baseline import AuditScanResult, FindingOut
 from app.services import data_governance as data_service
+from app.services import knowledge_match
 from app.services import notifications as notification_service
 from app.services import process_document as document_service
 from app.services import raci as raci_service
@@ -42,6 +45,9 @@ TYPE_LABELS: Dict[str, str] = {
     "RACI_INVALID": "权责矩阵不完整",
     "DATA_DOMAIN_NO_OWNER": "数据域无所有者",
     "DATA_FLOW_INCOMPLETE": "数据流登记不完整",
+    "KNOWLEDGE_REVIEW_OVERDUE": "知识待复核",
+    "KNOWLEDGE_ARCHIVE_CANDIDATE": "知识归档候选",
+    "TOOL_REVIEW_OVERDUE": "工具待复核",
 }
 
 # 每条流程 / 每个责任人建议保留 2–5 个承重指标，超过 5 个进入治理待办
@@ -336,6 +342,51 @@ def _collect(db: Session) -> Dict[Tuple[str, str, int], dict]:
             org_unit_id=flow.domain.org_unit_id if flow.domain else None,
         )
 
+    # 知识运营：过了复核日期要重新确认边界；长期无人使用则进入归档候选
+    knowledge_items = db.scalars(
+        select(KnowledgeItem).where(
+            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.status.in_(
+                (KnowledgeStatus.PUBLISHED.value, KnowledgeStatus.VERIFIED.value)
+            ),
+        )
+    ).all()
+    for item in knowledge_items:
+        if not knowledge_match.review_overdue(item):
+            continue
+        add(
+            "KNOWLEDGE_REVIEW_OVERDUE",
+            "MEDIUM",
+            "knowledge",
+            item.id,
+            f"知识待复核：{item.title}",
+            f"复核日期 {item.review_due_at or '未设置'}；重新确认适用条件、反证与使用证据",
+            owner_user_id=item.owner_user_id,
+        )
+    for candidate in knowledge_match.archive_candidates(db, months=12, limit=200):
+        add(
+            "KNOWLEDGE_ARCHIVE_CANDIDATE",
+            "LOW",
+            "knowledge",
+            candidate.id,
+            f"知识归档候选：{candidate.title}",
+            f"{candidate.unused_days} 天没有使用记录；确认不再适用后可归档",
+        )
+
+    # 工具复核：超过 review_due_at 的工具需要重新确认验证标准与适用边界
+    for tool in db.scalars(select(Tool).where(Tool.is_active.is_(True))).all():
+        if not tool.review_overdue:
+            continue
+        add(
+            "TOOL_REVIEW_OVERDUE",
+            "MEDIUM",
+            "tool",
+            tool.id,
+            f"工具待复核：{tool.name}",
+            f"复核日期 {tool.review_due_at}；重新确认验证标准、前置条件与常见误用",
+            owner_user_id=tool.owner_user_id,
+        )
+
     return findings
 
 
@@ -404,16 +455,35 @@ def scan(db: Session) -> AuditScanResult:
 
 
 def _notify(db: Session, row: GovernanceFinding) -> None:
-    notification_service.notify(
-        db,
-        row.owner_user_id,
-        "GOVERNANCE_FINDING",
-        f"治理待办：{TYPE_LABELS.get(row.type, row.type)} · {row.title}",
-        row.detail,
-        link="deliverables",
-        entity_type="governance_finding",
-        entity_id=row.id,
-    )
+    title = f"治理待办：{TYPE_LABELS.get(row.type, row.type)} · {row.title}"
+    if row.type.startswith("KNOWLEDGE_"):
+        link = "knowledge"
+    elif row.type.startswith("TOOL_"):
+        link = "toolbox"
+    else:
+        link = "deliverables"
+    if row.owner_user_id:
+        notification_service.notify(
+            db,
+            row.owner_user_id,
+            "GOVERNANCE_FINDING",
+            title,
+            row.detail,
+            link=link,
+            entity_type="governance_finding",
+            entity_id=row.id,
+        )
+    elif row.type.startswith(("KNOWLEDGE_", "TOOL_")):
+        # 知识/工具通常由流程管理科维护，没有绑定维护人时提醒管理者
+        notification_service.notify_managers(
+            db,
+            "GOVERNANCE_FINDING",
+            title,
+            row.detail,
+            link=link,
+            entity_type="governance_finding",
+            entity_id=row.id,
+        )
 
 
 def list_findings(

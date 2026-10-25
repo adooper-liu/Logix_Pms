@@ -1143,7 +1143,9 @@ def test_exception_overdue_with_timezone_aware_input(client):
 def test_knowledge_list_and_search(client):
     r = client.get(f"{API}/knowledge")
     assert r.status_code == 200
-    assert r.json()["total"] == 9
+    # 标准制度已移出知识库，默认列表不再包含 STANDARD 条目
+    assert r.json()["total"] == 8
+    assert all(i["type"] != "STANDARD" for i in r.json()["items"])
 
     bpr = client.get(f"{API}/knowledge", params={"methodology": "BPR"}).json()
     assert all(i["methodology"] == "BPR" for i in bpr["items"])

@@ -33,12 +33,15 @@ class WorkflowStepOut(ORMModel):
     deliverables: str
     key_points: str
     is_mandatory: bool
+    # 本步骤可直接推荐的知识数（步骤级 + 阶段级，按知识去重），用于步骤卡提示
+    knowledge_count: int = 0
 
 
 class WorkflowStageOut(BaseModel):
     stage_no: int
     stage_name: str
     stage_goal: Optional[str] = None
+    knowledge_count: int = 0
     steps: List[WorkflowStepOut] = []
 
 
