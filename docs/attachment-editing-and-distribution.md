@@ -45,8 +45,15 @@
 - 覆盖三类受控文件：项目交付物、流程标准文件、工具模板。
 - **项目交付物打印清单**：浏览器打印窗口，包含项目、步骤、交付物、类型、
   状态、当前版本、负责人；可按步骤筛选后打印。
-- 尚未落地：Office/Visio/CAD 的服务端转换预览、服务端 PDF 打印包、
-  标准文件/模板的打印包。
+- **Office → PDF 转换预览（P1，可选）**：
+  - `PREVIEW_CONVERTER=libreoffice` 且镜像内有 `soffice` 时，
+    `docx/xlsx/xlsm/pptx` 转成 PDF 后内联；
+  - 转换结果按源文件 SHA-256 缓存在 `previews/v1/<sha256>.pdf`，同一版本只转一次；
+  - 转换超时、失败、结果过大分别返回 502，并提示下载；
+  - Docker 镜像默认不装 LibreOffice；需要时
+    `docker build --build-arg INSTALL_PREVIEW_CONVERTER=true`。
+- 尚未落地：Visio/CAD 转换（LibreOffice 对 `.vsdx` 不可靠，`.dwg` 需要 ODA/APS）、
+  服务端 PDF 打印包、标准文件/模板的打印包。
 
 ---
 
@@ -220,7 +227,8 @@ exam_attempt(id, course_id, user_id, started_at, submitted_at, score, passed)
 | 阶段 | 范围 | 验收标准 | 估算 |
 |---|---|---|---|
 | P0 | 预览（PDF/图片/文本）+ 项目交付物打印清单 | 常见文件不下载可预览；打印清单版本正确（已完成） | 5–8 人日 |
-| P1 | 服务端转换预览（Office/Visio/CAD）+ 服务端 PDF 打印包 | Office/Visio/CAD 可预览；标准文件/模板可打印 | 5–8 人日 |
+| P1 | Office → PDF 转换预览 + 缓存 | docx/xlsx/pptx 可预览；同版本只转一次（已完成，需装 LibreOffice） | 5–8 人日 |
+| P2 | Visio/CAD 转换预览 + 服务端 PDF 打印包 | vsdx/dwg 可预览；标准文件/模板可打印 | 8–12 人日 |
 | P1 | Office 在线编辑（WOPI + OnlyOffice/Collabora） | 编辑保存生成新版本；并发锁生效；审计完整 | 10–15 人日 |
 | P1 | 受控分享 + 分发签收 | 链接可撤销/过期；签收率可查 | 6–10 人日 |
 | P2 | Visio/CAD 检出/检入 + APS/ODA 预览 | 检出锁、检入新版本、超时释放 | 8–12 人日 |
