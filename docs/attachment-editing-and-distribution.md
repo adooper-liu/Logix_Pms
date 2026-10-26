@@ -59,8 +59,14 @@
   - 转换超时、失败、结果过大分别返回 502，并提示下载；
   - Docker 镜像默认不装 LibreOffice；需要时
     `docker build --build-arg INSTALL_PREVIEW_CONVERTER=true`。
-- 尚未落地：Visio/CAD 转换（LibreOffice 对 `.vsdx` 不可靠，`.dwg` 需要 ODA/APS）、
-  标准文件/模板的完整打印包。
+- **外部转换适配器（P2，可选，用于 Visio/CAD）**：
+  - `PREVIEW_CONVERTER=http` + `PREVIEW_CONVERTER_URL`；
+  - PMS 把源文件 POST 给适配器，接收 `application/pdf`；
+  - 适配器契约：`Content-Type: application/octet-stream`、`X-Filename`（URL 编码）、
+    可选 `Authorization: Bearer <token>`；响应必须是 PDF；
+  - `.vsdx` / `.dwg` / `.dxf` 可走这条链路；实际 ODA/APS 服务需单独部署，
+    PMS 不内置 CAD 转换引擎。
+- 尚未落地：标准文件/模板的完整打印包；实际 ODA/APS 适配器服务。
 
 ---
 
@@ -235,7 +241,7 @@ exam_attempt(id, course_id, user_id, started_at, submitted_at, score, passed)
 |---|---|---|---|
 | P0 | 预览（PDF/图片/文本）+ 项目交付物打印清单 | 常见文件不下载可预览；打印清单版本正确（已完成） | 5–8 人日 |
 | P1 | Office → PDF 转换预览 + 缓存 + 项目打印包（HTML/可选 PDF） | docx/xlsx/pptx 可预览；同版本只转一次；打印包含阶段门槛（已完成，需装 LibreOffice） | 5–8 人日 |
-| P2 | Visio/CAD 转换预览 | vsdx/dwg 可预览；标准文件/模板可打印 | 8–12 人日 |
+| P2 | Visio/CAD 转换适配器 | vsdx/dwg/dxf 可经外部适配器预览（已完成适配层，需部署 ODA/APS 服务） | 8–12 人日 |
 | P1 | Office 在线编辑（WOPI + OnlyOffice/Collabora） | 编辑保存生成新版本；并发锁生效；审计完整 | 10–15 人日 |
 | P1 | 受控分享 + 分发签收 | 链接可撤销/过期；签收率可查 | 6–10 人日 |
 | P2 | Visio/CAD 检出/检入 + APS/ODA 预览 | 检出锁、检入新版本、超时释放 | 8–12 人日 |

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.core.config import settings
 
@@ -421,6 +422,11 @@ def test_pdf_preview_is_inline_and_office_requires_download(client):
 def test_office_preview_converts_to_pdf_and_caches(client, monkeypatch):
     from app.services import preview as preview_service
 
+    monkeypatch.setattr(
+        preview_service,
+        "settings",
+        SimpleNamespace(**{**settings.__dict__, "preview_converter": "libreoffice"}),
+    )
     converted = b"%PDF-1.4\nconverted by fake office\n%%EOF"
     calls = {"count": 0}
 
@@ -459,6 +465,11 @@ def test_office_preview_converts_to_pdf_and_caches(client, monkeypatch):
 def test_office_preview_conversion_failure_returns_502(client, monkeypatch):
     from app.services import preview as preview_service
 
+    monkeypatch.setattr(
+        preview_service,
+        "settings",
+        SimpleNamespace(**{**settings.__dict__, "preview_converter": "libreoffice"}),
+    )
     monkeypatch.setattr(preview_service, "converter_available", lambda: True)
 
     def broken_convert(source, filename):
@@ -507,6 +518,39 @@ def test_print_pack_html_and_pdf(client, monkeypatch):
     assert pdf.status_code == 200, pdf.text
     assert pdf.headers["content-type"].startswith("application/pdf")
     assert pdf.content.startswith(b"%PDF")
+
+
+def test_dwg_preview_via_http_converter(client, monkeypatch):
+    from app.services import preview as preview_service
+
+    monkeypatch.setattr(
+        preview_service,
+        "settings",
+        SimpleNamespace(
+            **{
+                **settings.__dict__,
+                "preview_converter": "http",
+                "preview_converter_url": "http://adapter.local/convert",
+            }
+        ),
+    )
+    monkeypatch.setattr(preview_service, "converter_available", lambda: True)
+    monkeypatch.setattr(
+        preview_service,
+        "convert_to_pdf",
+        lambda source, filename: b"%PDF-1.4\ndwg preview\n%%EOF",
+    )
+
+    project = _create_project(client)
+    instance = _instance(client, project["id"], "2.2")
+    uploaded = _upload(client, instance["id"], "图纸.dwg", b"AC1015" + b"-fake-dwg")
+    assert uploaded.status_code == 201, uploaded.text
+    version = uploaded.json()
+    assert version["preview_kind"] == "PDF"
+    preview = client.get(f"{API}/deliverables/{instance['id']}/versions/{version['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["content-type"].startswith("application/pdf")
+    assert preview.content.startswith(b"%PDF")
 
 
 def test_upload_rejects_extension_and_magic_mismatch(client):

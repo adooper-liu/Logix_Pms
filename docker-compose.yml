@@ -42,8 +42,10 @@ services:
       # 附件落容器内卷；生产可换成 S3/对象存储
       ATTACHMENT_DIR: ${ATTACHMENT_DIR_DOCKER:-/app/var/attachments}
       ATTACHMENT_MAX_MB: ${ATTACHMENT_MAX_MB:-50}
-      # none=只做原生内联；libreoffice=把 Office 转 PDF 后内联（镜像需装转换器）
+      # none=只做原生内联；libreoffice=Office 转 PDF；http=外部转换适配器（ODA/APS）
       PREVIEW_CONVERTER: ${PREVIEW_CONVERTER:-none}
+      PREVIEW_CONVERTER_URL: ${PREVIEW_CONVERTER_URL:-}
+      PREVIEW_CONVERTER_TOKEN: ${PREVIEW_CONVERTER_TOKEN:-}
       PREVIEW_CONVERT_TIMEOUT_SECONDS: ${PREVIEW_CONVERT_TIMEOUT_SECONDS:-120}
       DRAWIO_EMBED_URL: "${DRAWIO_EMBED_URL:-https://embed.diagrams.net/?embed=1&proto=json&spin=1&libraries=1&saveAndExit=1}"
       # 生产环境务必替换

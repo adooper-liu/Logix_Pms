@@ -33,6 +33,7 @@ _MAGIC: dict = {
     ".xlsm": (b"PK\x03\x04",),
     ".pptx": (b"PK\x03\x04",),
     ".vsdx": (b"PK\x03\x04",),
+    ".dwg": (b"AC10",),
     ".zip": (b"PK\x03\x04",),
 }
 

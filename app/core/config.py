@@ -86,6 +86,13 @@ class Settings:
     preview_converter: str = field(
         default_factory=lambda: _env("PREVIEW_CONVERTER", "none").strip().lower()
     )
+    # http 模式：把文件 POST 给外部转换适配器（ODA/APS/自建服务）
+    preview_converter_url: str = field(
+        default_factory=lambda: _env("PREVIEW_CONVERTER_URL", "").strip()
+    )
+    preview_converter_token: str = field(
+        default_factory=lambda: _env("PREVIEW_CONVERTER_TOKEN", "").strip()
+    )
     preview_convert_timeout_seconds: int = field(
         default_factory=lambda: int(_env("PREVIEW_CONVERT_TIMEOUT_SECONDS", "120"))
     )
@@ -97,7 +104,7 @@ class Settings:
             ext.strip().lower()
             for ext in _env(
                 "ATTACHMENT_ALLOWED_EXTENSIONS",
-                ".xlsx,.xlsm,.docx,.pptx,.pdf,.bpmn,.xml,.csv,.txt,.md,.png,.jpg,.jpeg,.vsdx,.zip",
+                ".xlsx,.xlsm,.docx,.pptx,.pdf,.bpmn,.xml,.csv,.txt,.md,.png,.jpg,.jpeg,.vsdx,.dwg,.dxf,.zip",
             ).split(",")
             if ext.strip()
         )

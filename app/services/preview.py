@@ -16,6 +16,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO, Dict, Optional
@@ -36,8 +38,9 @@ _TEXT_MIME_TYPES = {
     "text/plain",
     "text/xml",
 }
-# LibreOffice 能稳定转换的 Office 格式；vsdx/dwg 不在此列，避免给出不可信预览。
-_CONVERTIBLE_EXTENSIONS = {".docx", ".xlsx", ".xlsm", ".pptx"}
+# LibreOffice 能稳定转换的 Office 格式；vsdx/dwg 交给外部适配器，避免给出不可信预览。
+_LIBREOFFICE_EXTENSIONS = {".docx", ".xlsx", ".xlsm", ".pptx"}
+_EXTERNAL_EXTENSIONS = {".docx", ".xlsx", ".xlsm", ".pptx", ".vsdx", ".dwg", ".dxf"}
 _CACHE_PREFIX = "previews/v1"
 
 
@@ -51,11 +54,21 @@ def _soffice_binary() -> Optional[str]:
 
 
 def converter_available() -> bool:
-    return settings.preview_converter == "libreoffice" and _soffice_binary() is not None
+    mode = settings.preview_converter
+    if mode == "libreoffice":
+        return _soffice_binary() is not None
+    if mode == "http":
+        return bool(settings.preview_converter_url)
+    return False
 
 
 def is_convertible(filename: Optional[str], mime_type: Optional[str] = None) -> bool:
-    return Path(filename or "").suffix.lower() in _CONVERTIBLE_EXTENSIONS
+    suffix = Path(filename or "").suffix.lower()
+    if settings.preview_converter == "libreoffice":
+        return suffix in _LIBREOFFICE_EXTENSIONS
+    if settings.preview_converter == "http":
+        return suffix in _EXTERNAL_EXTENSIONS
+    return False
 
 
 def preview_kind(filename: Optional[str], mime_type: Optional[str]) -> Optional[str]:
@@ -108,7 +121,9 @@ def cache_key(checksum: Optional[str], storage_key: str) -> str:
 
 
 def convert_to_pdf(source: BinaryIO, filename: str) -> bytes:
-    """把 Office 文件转成 PDF。测试会 monkeypatch 这个函数。"""
+    """把源文件转成 PDF。测试会 monkeypatch 这个函数。"""
+    if settings.preview_converter == "http":
+        return _convert_via_http(source, filename)
     binary = _soffice_binary()
     if binary is None:
         raise PreviewConversionError("未安装 LibreOffice（soffice）")
@@ -145,6 +160,45 @@ def convert_to_pdf(source: BinaryIO, filename: str) -> bytes:
             detail = detail.strip().splitlines()[-1] if detail.strip() else "未生成 PDF"
             raise PreviewConversionError(f"转换失败：{detail}")
         return output.read_bytes()
+
+
+def _convert_via_http(source: BinaryIO, filename: str) -> bytes:
+    """把文件 POST 给外部转换适配器（ODA/APS/自建服务），返回 PDF 字节。
+
+    适配器契约：
+    - 请求：原始文件字节；`Content-Type: application/octet-stream`；
+      `X-Filename` 为 URL 编码后的文件名；可选 `Authorization: Bearer <token>`；
+    - 响应：`Content-Type: application/pdf`，正文为 PDF。
+    """
+    url = settings.preview_converter_url
+    if not url:
+        raise PreviewConversionError("未配置 PREVIEW_CONVERTER_URL")
+    request = urllib.request.Request(
+        url,
+        data=source.read(),
+        method="POST",
+        headers={
+            "Content-Type": "application/octet-stream",
+            "Accept": "application/pdf",
+            "X-Filename": quote(filename or "upload", safe=""),
+        },
+    )
+    if settings.preview_converter_token:
+        request.add_header("Authorization", "Bearer " + settings.preview_converter_token)
+    try:
+        with urllib.request.urlopen(
+            request, timeout=settings.preview_convert_timeout_seconds
+        ) as response:
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            max_bytes = settings.preview_convert_max_mb * 1024 * 1024
+            pdf = response.read(max_bytes + 1)
+    except urllib.error.HTTPError as exc:
+        raise PreviewConversionError(f"转换服务返回 {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise PreviewConversionError("转换服务不可达或超时") from exc
+    if not content_type.startswith("application/pdf") or not pdf.startswith(b"%PDF"):
+        raise PreviewConversionError("转换服务没有返回 PDF")
+    return pdf
 
 
 def ensure_pdf_preview(
