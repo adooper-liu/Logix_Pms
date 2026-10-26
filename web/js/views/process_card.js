@@ -1,7 +1,10 @@
 /* 视图：流程卡
  *
- * 一条 L3/L4 流程的跨模块聚合：战略、权责、制度、模型、工时、KPI、
- * 变更、改善与治理待办。所有区块都能跳回原模块处理。
+ * 一个 L3/L4 流程对象的 360 视图：战略、权责、制度、模型、工时、KPI、
+ * 变更、改善、成熟度、L5 任务与治理待办。
+ *
+ * 十层层状态、退出门、层内任务和问题由「十层单页」维护；流程卡只展示
+ * 当前试点层摘要并提供跳转，不重复实现第二套十层门禁。
  */
 
 import { esc, num, emptyRow } from '../core/format.js';
@@ -20,6 +23,9 @@ on('process_card.select', (_data, el) => {
   RENDERERS.process_card();
 });
 on('process_card.go', ({ view }) => go(view));
+on('process_card.pilot', ({ path, layer }) => {
+  go('pilot', { params: { path: Number(path), layer: Number(layer) }, push: true });
+});
 on('process_card.designer', () => {
   state.designer.tab = 'model';
   appActions['designer.open'](state.processCard.processId);
@@ -64,10 +70,11 @@ const renderProcessCard = () => {
       if (!processId) {
         return { processes, card: null };
       }
-      const [card, assessments, coverage] = await Promise.all([
+      const [card, assessments, coverage, paths] = await Promise.all([
         GET('/process-card/' + processId),
         GET('/maturity/assessments?process_id=' + processId),
         canManage() ? GET('/maturity/coverage').catch(() => null) : Promise.resolve(null),
+        GET('/pilot/paths').catch(() => []),
       ]);
       const tasks = await GET(
         card.process.level === 4
@@ -75,7 +82,8 @@ const renderProcessCard = () => {
           : '/process-tasks?process_id=' + processId,
       ).catch(() => []);
       state.processCard.level = card.process.level;
-      return { processes, card, assessments, coverage, tasks };
+      const pilot = (paths || []).find((row) => row.process_id === processId) || null;
+      return { processes, card, assessments, coverage, tasks, pilot };
     },
     (d) => {
       const options = d.processes.map((row) =>
@@ -91,6 +99,7 @@ const renderProcessCard = () => {
       }
       const c = d.card;
       state.processCard.data = c;
+      state.processCard.pilot = d.pilot;
       const assessments = d.assessments || [];
       const tasks = d.tasks || [];
       const chain = c.chain.map((item) =>
@@ -110,8 +119,7 @@ const renderProcessCard = () => {
           <span><b>${esc(row.name)}</b><div class="tiny">${esc(row.code)} · ${row.year}</div></span>
           <span class="tag t-blu">${row.target_value === null ? '—' : num(row.target_value, 2)}
             ${esc(row.unit || '')}</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const raciRows = c.raci.map((matter) => `
         <div class="between bpmn-node-row">
           <span>${esc(matter.matter)}
@@ -119,14 +127,12 @@ const renderProcessCard = () => {
               : '<span class="tag t-red">缺少 A</span>'}</span>
           <span class="tiny">${matter.entries.map((entry) =>
             `${esc(entry.raci)} ${esc(entry.role_name || '—')}`).join(' · ')}</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const documentRows = c.documents.map((row) => `
         <div class="between bpmn-node-row">
           <span>${esc(row.title)}<div class="tiny">${esc(row.code)} · ${esc(row.category_label || '')}</div></span>
           <span class="tag t-grn">${esc(row.version_label || '—')}</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const kpiRows = c.kpis.map((row) => `
         <tr>
           <td><b>${esc(row.name)}</b><div class="tiny">${esc(row.code)}</div></td>
@@ -134,28 +140,24 @@ const renderProcessCard = () => {
             → ${row.target_value === null ? '—' : num(row.target_value, 2)} ${esc(row.unit || '')}</td>
           <td><span class="tag ${STATUS_TONE[row.status] || 't-gry'}">${
             esc(row.status_label || row.status || '—')}</span></td>
-        </tr>`).join('') || emptyRow(3, '—');
-
+        </tr>`).join('');
       const changeRows = c.changes.map((row) => `
         <div class="between bpmn-node-row">
           <span>${esc(row.title)}<div class="tiny">${esc(row.code)} · ${esc(row.impact_level_label || '')}</div></span>
           <span class="tag t-yel">${esc(row.status_label || '')}</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const improvementRows = c.improvements.map((row) => `
         <div class="between bpmn-node-row">
           <span>${esc(row.name)}<div class="tiny">${esc(row.code)} · ${esc(row.source_label || '')}</div></span>
           <span class="tag t-blu">${esc(row.status_label || '')} · ${num(row.progress, 0)}%</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const maturityRows = assessments.slice(0, 8).map((row) => `
         <div class="between bpmn-node-row">
           <span><b>${esc(row.dimension_label || row.dimension)}</b>
             <div class="tiny">${esc(row.assessed_by || '—')} · ${esc(row.assessed_at || '')}</div></span>
           <span><span class="tag ${row.level >= 4 ? 't-grn' : row.level >= 2 ? 't-yel' : 't-red'}">
             L${row.level}</span></span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
-
+        </div>`).join('');
       const taskRows = tasks.slice(0, 12).map((row) => `
         <div class="between bpmn-node-row">
           <span><b>${esc(row.code)} ${esc(row.name)}</b>
@@ -163,178 +165,148 @@ const renderProcessCard = () => {
               ${row.frequency ? ' · ' + esc(row.frequency) : ''}</div></span>
           <span class="tag ${row.standard_minutes ? 't-grn' : 't-gry'}">${
             row.standard_minutes ? num(row.standard_minutes, 1) + ' 分' : '待补工时'}</span>
-        </div>`).join('') || '<div class="tiny muted">—</div>';
+        </div>`).join('');
+      const findingRows = c.findings.map((row) => `
+        <div class="between bpmn-node-row">
+          <span>${esc(row.title)}<div class="tiny">${esc(row.type_label || row.type)}</div></span>
+          <span class="tag ${row.severity === 'HIGH' ? 't-red' : 't-yel'}">${
+            esc(SEVERITY_LABELS[row.severity] || row.severity || '—')}</span>
+        </div>`).join('') || '<div class="tiny muted">没有未闭环治理待办</div>';
 
       const canDesign = c.readiness.strategy && c.readiness.raci && c.readiness.policy;
-      const layers = [
-        {
-          no: 1, title: '战略承接', goal: '回答为什么做、做成什么样',
-          ready: c.readiness.strategy && c.objectives.length > 0
-            && c.objectives.some((row) => row.target_value !== null),
-          summary: `${c.objectives.length} 项战略目标`,
-          empty: '年度经营计划需承接 ≥1 项战略指标 → 去关联',
-          action: '<button class="btn-sm" data-act="process_card.go" data-view="strategy">去关联目标</button>',
-          conditions: [
-            { text: '已关联至少 1 项战略目标', ok: c.objectives.length > 0 },
-            { text: '目标值已定义', ok: c.objectives.some((row) => row.target_value !== null) },
-          ],
-          body: c.objectives.length ? objectiveRows : '',
-        },
-        {
-          no: 2, title: '权责矩阵', goal: '谁输入、谁处理、谁决策、谁负责',
-          ready: c.readiness.raci && c.raci.length > 0,
-          summary: `${c.raci.length} 个关键事项`,
-          empty: '每个关键事项必须有唯一 A → 维护权责',
-          action: '<button class="btn-sm" data-act="process_card.raci">维护权责</button>',
-          conditions: [
-            { text: '已配置关键事项', ok: c.raci.length > 0 },
-            { text: '每个事项恰好一个 A', ok: c.raci.length > 0 && c.raci.every((row) => row.has_accountable) },
-          ],
-          body: c.raci.length ? raciRows : '',
-        },
-        {
-          no: 3, title: '制度与标准', goal: '必须做、禁止做什么',
-          ready: c.readiness.policy && c.documents.length > 0,
-          summary: `${c.documents.length} 份生效文件`,
-          empty: '至少一份生效 SOP 才能支撑流程 → 去标准文件',
-          action: '<button class="btn-sm" data-act="process_card.go" data-view="deliverables">标准文件</button>',
-          conditions: [{ text: '至少一份生效 SOP/标准文件', ok: c.documents.length > 0 }],
-          body: c.documents.length ? documentRows : '',
-        },
-        {
-          no: 4, title: '流程模型', goal: '先做什么后做什么，何时升级',
-          ready: c.readiness.model,
-          summary: c.model.status === 'PUBLISHED'
-            ? `已发布 v${c.model.version || '—'} · ${c.model.node_count} 节点`
-            : (c.model.status_label || '未建模'),
-          empty: '先完成第 1–3 层，再打开设计器建模',
-          action: canDesign
-            ? '<button class="btn-sm" data-act="process_card.designer">打开设计器</button>'
-            : '<button class="btn-sm" disabled title="先完成第 1–3 层">打开设计器</button>',
-          conditions: [
-            { text: '模型节点已建立', ok: c.model.node_count > 0 },
-            { text: '模型已发布', ok: c.model.status === 'PUBLISHED' },
-          ],
-          body: `<div class="tiny">状态：${esc(c.model.status_label || '—')} ·
-              版本：${c.model.version || '—'}</div>
-            <div class="tiny">节点 ${c.model.node_count} · 连线 ${c.model.edge_count} ·
-              表单 ${c.model.form_count} · 规则 ${c.model.rule_count} ·
-              工具 ${c.model.tool_count}</div>`,
-        },
-        {
-          no: 5, title: '工作量与产能', goal: '标准时间与有效产出',
-          ready: c.readiness.workload,
-          summary: `${c.workload.verified_standards} 条已验证工时`,
-          empty: '完成现场观测并验证标准工时，才能计算产能 → 去登记工时',
-          action: '<button class="btn-sm" data-act="process_card.workload">工作量</button>',
-          conditions: [
-            { text: '至少一条已验证标准工时', ok: c.workload.verified_standards > 0 },
-            { text: '已登记可用产能', ok: c.workload.capacity_hours > 0 },
-          ],
-          body: `<div class="tiny">已验证标准 ${c.workload.verified_standards} 条
-              · 需求 ${num(c.workload.demand_hours, 1)}h/月
-              · 实际 ${num(c.workload.actual_hours, 1)}h</div>
-            <div class="tiny">可用 ${num(c.workload.capacity_hours, 1)}h
-              · 负荷率 ${c.workload.utilization === null ? '—'
-                : num(c.workload.utilization * 100, 1) + '%'}</div>`,
-        },
-        {
-          no: 6, title: 'KPI', goal: '质量、效率、交付、成本',
-          ready: c.readiness.kpi,
-          summary: `${c.kpis.length} 个关联指标`,
-          empty: '年度经营计划需承接 ≥1 项战略指标 → 去关联 KPI',
-          action: '<button class="btn-sm" data-act="process_card.go" data-view="monitor">运营监控</button>',
-          conditions: [
-            { text: '已关联至少 1 个 KPI', ok: c.kpis.length > 0 },
-            { text: '已有数据点', ok: c.kpis.some((row) => row.latest_value !== null) },
-          ],
-          body: c.kpis.length ? `<table class="tbl"><tbody>${kpiRows}</tbody></table>` : '',
-        },
-        {
-          no: 7, title: '变更', goal: '什么情况触发版本更新',
-          operating: true, ready: c.changes.length > 0,
-          summary: `${c.changes.length} 条变更`,
-          empty: '制度、模型或授权发生变化时提变更申请',
-          action: '<button class="btn-sm" data-act="process_card.changes">变更申请</button>',
-          conditions: [{ text: '已有变更记录', ok: c.changes.length > 0 }],
-          body: c.changes.length ? changeRows : '',
-        },
-        {
-          no: 8, title: '改善', goal: '删浪费、固化更好方法',
-          operating: true, ready: c.improvements.length > 0,
-          summary: `${c.improvements.length} 个改善项目`,
-          empty: '流程运行满一个完整周期后可发起首次改善复盘',
-          action: '<button class="btn-sm" data-act="process_card.go" data-view="projects">项目组合</button>',
-          conditions: [{ text: '已有改善项目', ok: c.improvements.length > 0 }],
-          body: c.improvements.length ? improvementRows : '',
-        },
-        {
-          no: 9, title: '成熟度', goal: '本流程当前达到什么水平',
-          operating: true, ready: assessments.length > 0,
-          summary: assessments.length ? `${assessments.length} 项评估` : '未评估',
-          empty: '至少运行一个完整周期后才可评估',
-          action: canManage()
-            ? '<button class="btn-sm" data-act="process_card.newMaturity">+ 评估</button>' : '',
-          conditions: [{ text: '已有成熟度评估', ok: assessments.length > 0 }],
-          body: assessments.length ? `${coverageHtml}${maturityRows}` : coverageHtml,
-        },
-        {
-          no: 10, title: 'L5 任务', goal: '最底层可执行任务',
-          operating: true, ready: tasks.length > 0,
-          summary: `${tasks.length} 个任务`,
-          empty: c.process.level === 4
-            ? '流程模型定稿后拆解为可执行任务 → 新增任务'
-            : 'L5 任务在 L4 活动下维护；先进入具体 L4 流程',
-          action: c.process.level === 4 && canManage()
-            ? '<button class="btn-sm" data-act="process_card.newTask">+ 任务</button>'
-            : '<button class="btn-sm" data-act="process_card.go" data-view="map">去流程地图</button>',
-          conditions: [{ text: '已有 L5 任务', ok: tasks.length > 0 }],
-          body: tasks.length ? taskRows : '',
-        },
-      ];
-
-      const coreLayers = layers.filter((layer) => !layer.operating);
-      const activeLayer = coreLayers.find((layer) => !layer.ready) || null;
-      const activeNo = activeLayer ? activeLayer.no : 7;
-      const coreReady = coreLayers.filter((layer) => layer.ready).length;
-      const statusFor = (layer) => {
-        if (layer.ready) return layer.operating ? 'operating' : 'ready';
-        if (layer.operating) return 'operating';
-        if (activeLayer && layer.no === activeLayer.no) return 'current';
-        return layer.no > activeNo ? 'locked' : 'ready';
-      };
-      const tone = { ready: 't-grn', current: 't-blu', locked: 't-gry', operating: 't-pur' };
-      const label = { ready: '已完成', current: '当前层', locked: '未解锁', operating: '持续运营' };
-      const layerHtml = layers.map((layer) => {
-        const status = statusFor(layer);
-        const conditions = layer.conditions.map((item) => `
-          <li class="${item.ok ? 'ok' : 'todo'}">
-            <span aria-hidden="true">${item.ok ? '✓' : '○'}</span>${esc(item.text)}</li>`).join('');
-        return `<details class="pc-layer ${status}"${layer.no === activeNo ? ' open' : ''}>
-          <summary class="pc-layer-hd">
-            <span class="pc-no">${layer.no}</span>
-            <span class="pc-title"><b>${esc(layer.title)}</b>
-              <small>${esc(layer.goal)}</small></span>
-            <span class="pc-meta">${esc(layer.summary)}</span>
-            <span class="tag ${tone[status]}">${label[status]}</span>
-          </summary>
-          <div class="pc-layer-body">
-            <div class="between pc-layer-top">
-              <div class="pc-exit"><b>退出条件</b><ul>${conditions}</ul></div>
-              <div class="gap">${status === 'locked' ? '' : (layer.action || '')}</div>
+      const pilot = d.pilot;
+      const readyCount = Object.values(c.readiness || {}).filter(Boolean).length;
+      const readyTotal = Object.keys(c.readiness || {}).length;
+      const moduleCard = (title, count, action, body, guide) => `
+        <div class="card pc-module">
+          <div class="between mb"><h3 style="margin:0">${title}${
+            count === null ? '' : `（${count}）`}</h3>${action || ''}</div>
+          ${guide ? `<div class="pc-empty">${guide}</div>` : ''}
+          ${body || ''}
+        </div>`;
+      const group = (title, cards) => `
+        <section class="pc-group">
+          <div class="pc-group-hd">${title}</div>
+          <div class="grid g2">${cards.join('')}</div>
+        </section>`;
+      const modelAction = canDesign
+        ? '<button class="btn-sm" data-act="process_card.designer">打开设计器</button>'
+        : '<button class="btn-sm" disabled title="建议先完成战略、权责、制度">打开设计器</button>';
+      const modelGuide = c.readiness.model
+        ? ''
+        : (canDesign
+          ? '模型还未发布 → 打开设计器完成建模并发布'
+          : '先完成战略、权责、制度，再打开设计器建模');
+      const pilotHtml = pilot
+        ? `<section class="card pc-pilot">
+            <div class="between">
+              <div><h3>试点落地 · 第 ${pilot.current_layer} 层 ${
+                esc(pilot.current_layer_title || '')}</h3>
+                <div class="desc">${esc(pilot.name)} · ${esc(pilot.status_label || '')}
+                  · 进度 ${num(pilot.progress, 0)}%</div></div>
+              <button class="btn btn-p" data-act="process_card.pilot"
+                data-path="${pilot.id}" data-layer="${pilot.current_layer}">进入十层执行</button>
             </div>
-            ${status === 'locked'
-              ? `<div class="note">先完成第 ${activeNo} 层的退出条件，再进入本层。</div>`
-              : (!layer.ready && layer.empty ? `<div class="pc-empty">${esc(layer.empty)}</div>` : '')}
-            ${status === 'locked' ? '' : layer.body}
-          </div>
-        </details>`;
-      }).join('');
+            <div class="pipe"><i class="fill-brand" style="width:${
+              Math.max(0, Math.min(100, Number(pilot.progress) || 0))}%"></i></div>
+          </section>`
+        : `<section class="card pc-pilot">
+            <div class="between">
+              <div><h3>试点落地</h3>
+                <div class="desc">这条流程还没有试点路径。十层执行的层状态、退出门、任务和问题
+                  都在「十层单页」维护。</div></div>
+              <button class="btn btn-g" data-act="process_card.go"
+                data-view="pilot">去十层单页</button>
+            </div>
+          </section>`;
+      const strategyCard = moduleCard(
+        '战略承接', c.objectives.length,
+        '<button class="btn-sm" data-act="process_card.go" data-view="strategy">战略目标</button>',
+        c.objectives.length ? objectiveRows : '',
+        c.objectives.length ? '' : '年度经营计划需承接 ≥1 项战略指标 → 去关联',
+      );
+      const raciCard = moduleCard(
+        '权责矩阵', c.raci.length,
+        '<button class="btn-sm" data-act="process_card.raci">维护权责</button>',
+        c.raci.length ? raciRows : '',
+        c.raci.length ? '' : '每个关键事项必须有唯一 A → 维护权责',
+      );
+      const documentCard = moduleCard(
+        '制度与标准', c.documents.length,
+        '<button class="btn-sm" data-act="process_card.go" data-view="deliverables">标准文件</button>',
+        c.documents.length ? documentRows : '',
+        c.documents.length ? '' : '至少一份生效 SOP 才能支撑流程 → 去标准文件',
+      );
+      const modelCard = moduleCard(
+        '流程模型', null, modelAction,
+        `<div class="tiny">状态：${esc(c.model.status_label || '—')} ·
+          版本：${c.model.version || '—'}</div>
+         <div class="tiny">节点 ${c.model.node_count} · 连线 ${c.model.edge_count} ·
+          表单 ${c.model.form_count} · 规则 ${c.model.rule_count} ·
+          工具 ${c.model.tool_count}</div>`,
+        modelGuide,
+      );
+      const workloadCard = moduleCard(
+        '工作量与产能', null,
+        '<button class="btn-sm" data-act="process_card.workload">工作量</button>',
+        `<div class="tiny">已验证标准 ${c.workload.verified_standards} 条
+          · 需求 ${num(c.workload.demand_hours, 1)}h/月
+          · 实际 ${num(c.workload.actual_hours, 1)}h</div>
+         <div class="tiny">可用 ${num(c.workload.capacity_hours, 1)}h
+          · 负荷率 ${c.workload.utilization === null ? '—'
+            : num(c.workload.utilization * 100, 1) + '%'}</div>`,
+        c.readiness.workload ? '' : '完成现场观测并验证标准工时，才能计算产能 → 去登记工时',
+      );
+      const kpiCard = moduleCard(
+        'KPI', c.kpis.length,
+        '<button class="btn-sm" data-act="process_card.go" data-view="monitor">运营监控</button>',
+        c.kpis.length ? `<table class="tbl"><tbody>${kpiRows}</tbody></table>` : '',
+        c.kpis.length ? '' : '年度经营计划需承接 ≥1 项战略指标 → 去关联 KPI',
+      );
+      const changeCard = moduleCard(
+        '变更', c.changes.length,
+        '<button class="btn-sm" data-act="process_card.changes">变更申请</button>',
+        c.changes.length ? changeRows : '',
+        c.changes.length ? '' : '制度、模型或授权发生变化时提变更申请',
+      );
+      const improvementCard = moduleCard(
+        '改善', c.improvements.length,
+        '<button class="btn-sm" data-act="process_card.go" data-view="projects">项目组合</button>',
+        c.improvements.length ? improvementRows : '',
+        c.improvements.length ? '' : '流程运行满一个完整周期后可发起首次改善复盘',
+      );
+      const maturityCard = moduleCard(
+        '成熟度', assessments.length,
+        canManage() ? '<button class="btn-sm" data-act="process_card.newMaturity">+ 评估</button>' : '',
+        `${coverageHtml}${assessments.length ? maturityRows : ''}`,
+        assessments.length ? '' : '至少运行一个完整周期后才可评估',
+      );
+      const taskCard = moduleCard(
+        'L5 任务', tasks.length,
+        c.process.level === 4 && canManage()
+          ? '<button class="btn-sm" data-act="process_card.newTask">+ 任务</button>'
+          : '<button class="btn-sm" data-act="process_card.go" data-view="map">去流程地图</button>',
+        tasks.length ? taskRows : '',
+        tasks.length ? ''
+          : (c.process.level === 4
+            ? '流程模型定稿后拆解为可执行任务 → 新增任务'
+            : 'L5 任务在 L4 活动下维护；先进入具体 L4 流程'),
+      );
+      const findingCard = moduleCard(
+        '治理待办', c.findings.length,
+        '<button class="btn-sm" data-act="process_card.findings">查看全部</button>',
+        findingRows, '',
+      );
+      const groups = [
+        group('战略与设计', [strategyCard, raciCard, documentCard, modelCard]),
+        group('运行与结果', [workloadCard, kpiCard, changeCard, improvementCard]),
+        group('治理与执行', [maturityCard, taskCard, findingCard]),
+      ].join('');
 
       viewEl().innerHTML = `
         <div class="card page-head pc-head">
           <div class="between">
-            <div><h2>流程卡<span class="module-badge">一个流程 · 十层治理</span></h2>
+            <div><h2>流程卡<span class="module-badge">对象 360 · 模块聚合</span></h2>
               <div class="tiny">${chain || '—'}</div></div>
             <div class="gap">
               <select class="sel sel-sm" data-act="process_card.select">
@@ -347,12 +319,13 @@ const renderProcessCard = () => {
               <span class="tiny muted">层级 L${c.process.level} · Owner ${esc(c.process.owner || '—')}
                 · ${esc(c.process.org_unit_name || c.process.department || '—')}</span></div>
             <div class="gap">
-              <span class="tag t-blu">核心层 ${coreReady}/${coreLayers.length}</span>
+              <span class="tag t-blu">模块就绪 ${readyCount}/${readyTotal}</span>
               <button class="btn-sm" data-act="process_card.findings">治理待办 ${c.findings.length}</button>
             </div>
           </div>
         </div>
-        <div class="pc-layers">${layerHtml}</div>`;
+        ${pilotHtml}
+        ${groups}`;
     },
   );
 };

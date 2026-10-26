@@ -181,7 +181,8 @@ function paintWorkbench(d, wf) {
       </button></li>${row.stage_no < 5 ? '<li class="wb-connector" aria-hidden="true"></li>' : ''}`;
   }).join('');
 
-  const stepCards = data.steps.map((step) => {
+  const hasInProgress = data.steps.some((step) => step.status === 'IN_PROGRESS');
+  const stepCards = data.steps.map((step, index) => {
     const statusLabel = step.status_label || step.status;
     const evidence = (step.evidence || []).length
       ? step.evidence.map(esc).join('；') : '—';
@@ -201,26 +202,43 @@ function paintWorkbench(d, wf) {
       ? `<div class="wb-alert wb-alert-decision">需决策：${(step.decision_options || []).map(esc).join(' / ') || '—'}
           · 决策人 ${esc(step.decision_maker || '—')}
           ${step.decision_due ? ' · 时限 ' + esc(step.decision_due) : ''}</div>` : '';
-    return `<article class="wb-step st-${esc(step.status)}${
+    const open = step.status === 'IN_PROGRESS' || (!hasInProgress && index === 0);
+    const summaryText = step.next_action
+      ? `下一步：${step.next_action}`
+      : (step.goal || '尚未填写目标');
+    const counts = `${(step.evidence || []).length} 项证据 · ${(step.tools || []).length} 个工具`;
+    return `<li class="wb-tl-item st-${esc(step.status)}${
       step.status === 'IN_PROGRESS' ? ' current' : ''}">
-      <h3><span>${esc(step.step_no)} ${esc(step.name)}</span>
-        <span class="tag ${WB_TONE[step.status] || 't-gry'}">${esc(statusLabel)}</span></h3>
-      <p><strong>目标：</strong>${esc(step.goal || '—')}</p>
-      <div class="wb-meta">
-        <div><label>输入</label><span>${inputs}</span></div>
-        <div><label>输出</label><span>${esc(step.output || '—')}</span></div>
-        <div><label>验收证据</label><span>${evidence}</span></div>
-        <div><label>责任人 / 下一步</label><span>${esc(step.owner || '—')}
-          → ${esc(step.next_action || '—')}</span></div>
+      <div class="wb-tl-rail" aria-hidden="true">
+        <span class="wb-tl-dot">${step.status === 'DONE' ? '✓' : esc(step.step_no.split('.').pop())}</span>
       </div>
-      <details class="wb-fold"><summary>处理要点（${(step.process_steps || []).length}）</summary>
-        <ul class="wb-fold-body">${process}</ul></details>
-      ${tools}
-      ${blocker}${decision}
-      ${!readOnly && canWrite() ? `<div class="wb-step-act">
-        <button class="btn-sm" data-act="workflow.editStep" data-id="${step.id}">更新状态 / 证据</button>
-      </div>` : ''}
-    </article>`;
+      <details class="wb-tl-card"${open ? ' open' : ''}>
+        <summary class="wb-tl-head">
+          <span class="wb-tl-title"><b>${esc(step.step_no)} ${esc(step.name)}</b>
+            <small>${esc(summaryText)}</small></span>
+          <span class="tag ${WB_TONE[step.status] || 't-gry'}">${esc(statusLabel)}</span>
+          <span class="wb-tl-meta">${esc(step.owner || '未指定')} · ${counts}</span>
+          <span class="wb-tl-chev" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="wb-tl-body">
+          <p><strong>目标：</strong>${esc(step.goal || '—')}</p>
+          <div class="wb-meta">
+            <div><label>输入</label><span>${inputs}</span></div>
+            <div><label>输出</label><span>${esc(step.output || '—')}</span></div>
+            <div><label>验收证据</label><span>${evidence}</span></div>
+            <div><label>责任人 / 下一步</label><span>${esc(step.owner || '—')}
+              → ${esc(step.next_action || '—')}</span></div>
+          </div>
+          <details class="wb-fold"><summary>处理要点（${(step.process_steps || []).length}）</summary>
+            <ul class="wb-fold-body">${process}</ul></details>
+          ${tools}
+          ${blocker}${decision}
+          ${!readOnly && canWrite() ? `<div class="wb-tl-act">
+            <button class="btn-sm" data-act="workflow.editStep" data-id="${step.id}">更新状态 / 证据</button>
+          </div>` : ''}
+        </div>
+      </details>
+    </li>`;
   }).join('') || '<div class="empty">当前阶段还没有步骤模板。</div>';
 
   const conditionRows = gate.conditions.map((row) => `
@@ -267,7 +285,9 @@ function paintWorkbench(d, wf) {
         </section>
         <section class="wb-section">
           <div class="wb-eyebrow">当前阶段步骤</div>
-          <div class="wb-steps">${stepCards}</div>
+          ${data.steps.length
+            ? `<ol class="wb-timeline">${stepCards}</ol>`
+            : '<div class="empty">当前阶段还没有步骤模板。</div>'}
         </section>
         <section class="wb-section">
           <div class="wb-eyebrow">下一阶段进入条件（折叠）</div>

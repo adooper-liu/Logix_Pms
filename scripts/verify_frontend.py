@@ -172,13 +172,14 @@ def main() -> int:
                     btn.first.click()
                     page.wait_for_timeout(400)
                     return
-            page.evaluate("() => closeModal()")
+            page.evaluate("() => { for (let i = 0; i < 8; i += 1) window.closeModal(); }")
             page.wait_for_timeout(200)
 
         def goto(view: str) -> None:
             # 上一个检查可能留下未关的弹窗/全屏画布，遮罩会挡住导航点击
             page.keyboard.press("Escape")
-            page.evaluate("() => closeModal()")
+            # 弹窗可能是嵌套栈，重复关闭直到栈清空（window 只暴露 closeModal）
+            page.evaluate("() => { for (let i = 0; i < 8; i += 1) window.closeModal(); }")
             page.wait_for_timeout(150)
             page.click(f'.nav a[data-view="{view}"]')
             try:
@@ -477,7 +478,21 @@ def main() -> int:
             nodes = page.eval_on_selector_all("#view .wb-stage-node", "els => els.length")
             assert nodes == 5, f"阶段骨架应为 5 个节点：{nodes}"
             assert "阶段退出门槛" in view, "工作台缺少退出门槛"
-            assert page.locator("#view .wb-step").count() >= 1, "当前阶段没有步骤卡"
+            assert page.locator("#view .wb-timeline .wb-tl-item").count() >= 1, (
+                "当前阶段没有竖向时间线"
+            )
+            assert page.locator("#view .wb-tl-card[open]").count() == 1, (
+                "时间线默认应只展开一个当前步骤"
+            )
+            # 折叠/展开：点标题收起，再点重新展开
+            timeline_card = page.locator("#view .wb-tl-card").first
+            timeline_head = timeline_card.locator(".wb-tl-head")
+            timeline_head.click()
+            page.wait_for_timeout(200)
+            assert page.locator("#view .wb-tl-card[open]").count() == 0, "步骤卡不能折叠"
+            timeline_head.click()
+            page.wait_for_timeout(200)
+            assert page.locator("#view .wb-tl-card[open]").count() == 1, "步骤卡不能重新展开"
 
             advance = page.locator("#view .wb-advance")
             assert advance.count() == 1, "工作台缺少推进按钮"
@@ -486,7 +501,7 @@ def main() -> int:
                     "推进被阻断时没有给出原因"
                 )
 
-            page.click('#view .wb-step button:has-text("更新状态 / 证据") >> nth=0')
+            page.click('#view .wb-tl-card[open] button[data-act="workflow.editStep"] >> nth=0')
             page.wait_for_selector("#mask.show")
             body = page.inner_text("#mBody")
             for marker in ("状态", "验收证据", "处理要点", "下一步"):
@@ -2424,9 +2439,10 @@ def main() -> int:
             page.wait_for_timeout(1400)
             view = page.inner_text("#view")
             assert "流程卡" in view, "流程卡未渲染"
-            assert page.locator("#view .pc-layer").count() == 10, "流程卡不是十层结构"
-            assert page.locator("#view .pc-layer.current").count() == 1, "流程卡没有唯一当前层"
-            assert page.locator("#view .pc-layer[open]").count() == 1, "流程卡不应同时展开多层"
+            assert "对象 360" in view, "流程卡没有切回对象 360 定位"
+            assert "试点落地" in view, "流程卡缺少当前试点层摘要"
+            assert page.locator("#view .pc-group").count() == 3, "流程卡模块分组不完整"
+            assert page.locator("#view .pc-module").count() >= 10, "流程卡模块卡不足"
             for marker in (
                 "战略承接",
                 "权责矩阵",
