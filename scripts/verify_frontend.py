@@ -2424,6 +2424,9 @@ def main() -> int:
             page.wait_for_timeout(1400)
             view = page.inner_text("#view")
             assert "流程卡" in view, "流程卡未渲染"
+            assert page.locator("#view .pc-layer").count() == 10, "流程卡不是十层结构"
+            assert page.locator("#view .pc-layer.current").count() == 1, "流程卡没有唯一当前层"
+            assert page.locator("#view .pc-layer[open]").count() == 1, "流程卡不应同时展开多层"
             for marker in (
                 "战略承接",
                 "权责矩阵",
