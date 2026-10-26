@@ -43,8 +43,15 @@
 - 预览响应头：`X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、
   `Content-Security-Policy: frame-ancestors 'self'`。
 - 覆盖三类受控文件：项目交付物、流程标准文件、工具模板。
-- **项目交付物打印清单**：浏览器打印窗口，包含项目、步骤、交付物、类型、
-  状态、当前版本、负责人；可按步骤筛选后打印。
+- **项目交付物新建**：交付物行提供「新建」：
+  - 从本步骤推荐工具的已生效模板复制，创建新版本并固定来源版本；
+  - 也可以登记空白版本，稍后上传文件；
+  - 与「上传」「关联模型」「预览」并列，形成动作 → 产物/证据闭环。
+- **项目交付物打印包**：
+  - `GET /projects/{id}/deliverables/print-pack` 生成可打印 HTML，
+    包含项目信息、各阶段步骤、交付物版本/来源、阶段退出门槛；
+  - 配置 LibreOffice 后可加 `?format=pdf` 生成服务端 PDF；
+  - 前端「打印清单」只打印交付物表，「打印包」打印完整阶段视图。
 - **Office → PDF 转换预览（P1，可选）**：
   - `PREVIEW_CONVERTER=libreoffice` 且镜像内有 `soffice` 时，
     `docx/xlsx/xlsm/pptx` 转成 PDF 后内联；
@@ -53,7 +60,7 @@
   - Docker 镜像默认不装 LibreOffice；需要时
     `docker build --build-arg INSTALL_PREVIEW_CONVERTER=true`。
 - 尚未落地：Visio/CAD 转换（LibreOffice 对 `.vsdx` 不可靠，`.dwg` 需要 ODA/APS）、
-  服务端 PDF 打印包、标准文件/模板的打印包。
+  标准文件/模板的完整打印包。
 
 ---
 
@@ -227,8 +234,8 @@ exam_attempt(id, course_id, user_id, started_at, submitted_at, score, passed)
 | 阶段 | 范围 | 验收标准 | 估算 |
 |---|---|---|---|
 | P0 | 预览（PDF/图片/文本）+ 项目交付物打印清单 | 常见文件不下载可预览；打印清单版本正确（已完成） | 5–8 人日 |
-| P1 | Office → PDF 转换预览 + 缓存 | docx/xlsx/pptx 可预览；同版本只转一次（已完成，需装 LibreOffice） | 5–8 人日 |
-| P2 | Visio/CAD 转换预览 + 服务端 PDF 打印包 | vsdx/dwg 可预览；标准文件/模板可打印 | 8–12 人日 |
+| P1 | Office → PDF 转换预览 + 缓存 + 项目打印包（HTML/可选 PDF） | docx/xlsx/pptx 可预览；同版本只转一次；打印包含阶段门槛（已完成，需装 LibreOffice） | 5–8 人日 |
+| P2 | Visio/CAD 转换预览 | vsdx/dwg 可预览；标准文件/模板可打印 | 8–12 人日 |
 | P1 | Office 在线编辑（WOPI + OnlyOffice/Collabora） | 编辑保存生成新版本；并发锁生效；审计完整 | 10–15 人日 |
 | P1 | 受控分享 + 分发签收 | 链接可撤销/过期；签收率可查 | 6–10 人日 |
 | P2 | Visio/CAD 检出/检入 + APS/ODA 预览 | 检出锁、检入新版本、超时释放 | 8–12 人日 |
