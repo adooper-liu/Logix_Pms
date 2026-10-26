@@ -15,7 +15,7 @@ import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui
 import { state } from '../core/state.js';
 import { renderAsync, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
-import { GET, PATCH, POST, POST_FORM, download } from '../core/api.js';
+import { GET, PATCH, POST, POST_FORM, download, fetchBlob } from '../core/api.js';
 import { openDocumentCopy, openTemplateCopy } from '../core/template-copy.js';
 import { openPreview } from '../core/preview.js';
 
@@ -33,6 +33,14 @@ on('dlv.clearStep', () => {
   paintProjectTab();
 });
 on('dlv.openUpload', ({ id }) => openDeliverableUpload(Number(id)));
+on('dlv.newVersion', ({ id }) => openNewVersion(Number(id)));
+on('dlv.createFromTemplate', ({ instance, template, title }) =>
+  createFromTemplate(Number(instance), Number(template), title));
+on('dlv.createBlank', ({ instance }) => createBlankVersion(Number(instance)));
+on('dlv.goToolbox', ({ step }) => {
+  closeModal();
+  go('toolbox', { params: { step, sort: 'fit' }, push: true });
+});
 on('dlv.openDeliverable', ({ id }) => openDeliverable(Number(id)));
 on('dlv.linkModel', ({ id }) => openLinkModel(Number(id)));
 on('dlv.submitLinkModel', ({ id }) => submitLinkModel(Number(id)));
@@ -46,6 +54,7 @@ on('dlv.preview', ({ url, kind, label }) => {
   openPreview(url, kind, label).catch((e) => toast(e.message, true));
 });
 on('dlv.printList', () => printDeliverables());
+on('dlv.printPack', () => openPrintPack());
 on('dlv.close', () => closeModal());
 on('dlv.submitUpload', ({ instance }) => submitDeliverableUpload(Number(instance)));
 on('dlv.transition', ({ id, version, target }) =>
@@ -226,6 +235,8 @@ function paintProjectTab() {
               ${esc(p.code)} · ${esc(p.name)}</option>`).join('')}
           </select>
           <button class="btn-sm" data-act="dlv.printList">打印清单</button>
+          <button class="btn-sm" data-act="dlv.printPack"
+            title="含阶段、步骤、交付物与阶段门槛的完整打印包">打印包</button>
         </div>
       </div>
       <div id="dlvSummary">${skeleton(1)}</div>
@@ -277,6 +288,8 @@ async function loadProjectDeliverables(projectId) {
         : '<span class="tiny">未登记</span>';
       const canLinkModel = canWrite() && MODEL_LINK_STEPS.has(i.step_no) && i.process_id;
       const actions = [
+        canWrite() ? `<button class="btn-sm" data-act="dlv.newVersion" data-id="${i.id}"
+          title="从工具模板新建，或登记空白版本">新建</button>` : '',
         canWrite() ? `<button class="btn-sm" data-act="dlv.openUpload" data-id="${i.id}">上传</button>` : '',
         canLinkModel
           ? `<button class="btn-sm" data-act="dlv.linkModel" data-id="${i.id}">关联模型</button>` : '',
@@ -363,6 +376,122 @@ function printDeliverables() {
   win.document.close();
   win.focus();
   setTimeout(() => win.print(), 300);
+}
+
+async function openPrintPack() {
+  const projectId = Number(state.deliverables.projectId);
+  if (!projectId) return toast('请先选择项目', true);
+  const win = window.open('', '_blank');
+  if (!win) return toast('浏览器拦截了打印窗口，请允许弹出窗口后重试', true);
+  win.document.write(
+    '<p style="font:14px sans-serif;padding:24px">正在生成打印包…</p>',
+  );
+  try {
+    const blob = await fetchBlob(
+      '/projects/' + projectId + '/deliverables/print-pack?format=html',
+    );
+    const html = await blob.text();
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (e) {
+    win.close();
+    toast(e.message, true);
+  }
+}
+
+async function openNewVersion(instanceId) {
+  const item = (state.deliverables.items || []).find((row) => row.id === instanceId);
+  if (!item) return toast('交付物不存在', true);
+  const gen = openModal('新建交付物 · ' + item.definition_name, skeleton(3), '', true);
+  try {
+    const rec = await GET(
+      '/workflow/steps/' + encodeURIComponent(item.step_no) + '/recommendations',
+    );
+    if (!modalAlive(gen)) return;
+    const usable = (tpl) => !tpl.deliverable_definition_id
+      || tpl.deliverable_definition_id === item.definition_id;
+    const templateRow = (tpl) => {
+      const version = tpl.effective_version;
+      return `<div class="between bpmn-node-row">
+        <span><b>${esc(tpl.name)}</b>
+          <span class="tag t-gry">${esc(tpl.format_label || tpl.format)}</span>
+          <div class="tiny">${esc(tpl.code)}${
+            version ? ' · 现行 ' + esc(version.version_label) : ' · 无生效版本'}</div></span>
+        ${version ? `<button class="btn-sm" data-act="dlv.createFromTemplate"
+          data-instance="${item.id}" data-template="${tpl.id}"
+          data-title="${esc(item.definition_name)}">新建</button>` : ''}
+      </div>`;
+    };
+    const toolBlocks = (rec.tools || []).map((tool) => {
+      const templates = (tool.templates || []).filter(usable);
+      return `<div class="note mb">
+        <div class="between"><b>${esc(tool.name)}</b>
+          <span class="tiny">${esc(tool.category_label || '')}
+            ${tool.level_label ? ' · ' + esc(tool.level_label) : ''}</span></div>
+        ${templates.length
+          ? templates.map(templateRow).join('')
+          : '<div class="tiny muted">该工具暂时没有匹配本交付物的模板</div>'}
+      </div>`;
+    }).join('') || '<div class="note mb">本步骤还没有推荐工具。</div>';
+    const extraTemplates = (rec.deliverable_templates || []).filter(usable);
+    const extra = extraTemplates.length
+      ? `<h3 class="mt">其他可用模板</h3>${extraTemplates.map(templateRow).join('')}`
+      : '';
+    openModal('新建交付物 · ' + item.definition_name, `
+      <div class="note mb">从工具模板新建会创建新版本并固定来源版本；
+        也可以先登记空白版本，稍后上传文件。</div>
+      ${toolBlocks}
+      ${extra}
+      <h3 class="mt">空白新建</h3>
+      <div class="row2">
+        <div class="field"><label>版本标题</label>
+          <input id="nvTitle" value="${esc(item.definition_name)}"></div>
+        <div class="field"><label>说明</label>
+          <input id="nvNote" placeholder="选填"></div>
+      </div>
+      <button class="btn btn-g" data-act="dlv.createBlank"
+        data-instance="${item.id}">登记空白版本</button>`,
+    `<button class="btn btn-g" data-act="dlv.close">取消</button>
+     <button class="btn btn-g" data-act="dlv.goToolbox"
+       data-step="${esc(item.step_no)}">去工具箱选工具</button>`, true, { replace: true });
+  } catch (e) {
+    if (modalAlive(gen)) {
+      openModal('加载失败', '<div class="errbar"><div>' + esc(e.message) + '</div></div>',
+        '', false, { replace: true });
+    }
+  }
+}
+
+async function createFromTemplate(instanceId, templateId, title) {
+  try {
+    const version = await POST('/tool-templates/' + templateId + '/copy', {
+      deliverable_instance_id: instanceId,
+      title: title || null,
+    });
+    toast('已新建 ' + version.version_label);
+    closeModal();
+    loadProjectDeliverables(state.deliverables.projectId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function createBlankVersion(instanceId) {
+  const title = document.getElementById('nvTitle')?.value.trim();
+  const note = document.getElementById('nvNote')?.value.trim() || null;
+  if (!title) return toast('请填写版本标题', true);
+  try {
+    const version = await POST('/deliverables/' + instanceId + '/versions', {
+      title,
+      note,
+    });
+    toast('已新建 ' + version.version_label);
+    closeModal();
+    loadProjectDeliverables(state.deliverables.projectId);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function openLinkModel(instanceId) {

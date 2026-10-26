@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import io
 import mimetypes
 import re
 from datetime import date
@@ -13,7 +14,7 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload, selectinload
 from starlette.background import BackgroundTask
@@ -56,6 +57,7 @@ from app.schemas.deliverable import (
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import preview as preview_service
+from app.services import print_pack as print_pack_service
 from app.services import storage as storage_service
 from app.services import tool_template as template_service
 
@@ -310,6 +312,49 @@ def list_project_deliverables(
 def project_deliverable_summary(project_id: int, db: DbSession):
     _get_project(db, project_id)
     return deliverable_service.project_summary(db, project_id)
+
+
+@project_router.get(
+    "/{project_id}/deliverables/print-pack",
+    summary="项目交付物打印包（HTML；配置转换器时可生成 PDF）",
+)
+def project_print_pack(
+    project_id: int,
+    db: DbSession,
+    user: CurrentUser,
+    format: str = Query(default="html", pattern="^(html|pdf)$"),
+):
+    project = _get_project(db, project_id)
+    html = print_pack_service.build_print_pack(db, project)
+    if format == "pdf":
+        if not preview_service.converter_available():
+            raise HTTPException(
+                status_code=503,
+                detail="未配置 LibreOffice 转换器，无法生成服务端 PDF；请使用 HTML 打印包",
+            )
+        try:
+            pdf = preview_service.convert_to_pdf(
+                io.BytesIO(html.encode("utf-8")),
+                f"{project.code}-print-pack.html",
+            )
+        except preview_service.PreviewConversionError as exc:
+            raise HTTPException(status_code=502, detail=f"打印包生成失败：{exc}") from exc
+        headers = {
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(project.code + '-print-pack.pdf')}"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        }
+        return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf", headers=headers)
+    return HTMLResponse(
+        html,
+        headers={
+            "Content-Disposition": (
+                f"inline; filename*=UTF-8''{quote(project.code + '-print-pack.html')}"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @project_router.post(

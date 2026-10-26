@@ -859,6 +859,55 @@ def main() -> int:
             assert "名称" in body and "范围" in body, "创建基线弹窗字段缺失"
             close_modal()
 
+        # 项目交付物：新建版本（选工具/模板或空白登记）
+        def deliverable_new_version() -> None:
+            project_id = page.evaluate(
+                """async () => {
+                  const t = localStorage.getItem('psm_token');
+                  const r = await fetch('/api/v1/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               Authorization: 'Bearer ' + t },
+                    body: JSON.stringify({ name: '自检用新建交付物项目', methodology: 'BPI',
+                      owner: '自检员', start_date: '2026-10-01', end_date: '2027-03-31' })
+                  });
+                  return (await r.json()).id;
+                }"""
+            )
+            try:
+                goto("deliverables")
+                page.click('#view .tabs button:has-text("项目交付物")')
+                page.wait_for_timeout(800)
+                page.select_option("#view select.sel", str(project_id))
+                page.wait_for_timeout(1200)
+                row_btn = page.locator(
+                    '#dlvList tr:has-text("2.1") button[data-act="dlv.newVersion"]'
+                )
+                assert row_btn.count(), "2.1 行没有新建入口"
+                row_btn.first.click()
+                page.wait_for_selector("#nvTitle", timeout=8000)
+                body = page.inner_text("#mBody")
+                assert "SIPOC" in body, "新建交付物弹窗没有展示本步骤推荐工具"
+                assert "空白新建" in body, "新建交付物弹窗缺少空白新建"
+                assert "去工具箱选工具" in page.inner_text("#mFoot"), "缺少工具选择入口"
+                page.fill("#nvTitle", "自检新建版本")
+                page.click('#mBody button[data-act="dlv.createBlank"]')
+                page.wait_for_timeout(1500)
+                assert "已新建" in page.inner_text("#toast"), page.inner_text("#toast")
+                page.wait_for_function(
+                    """() => document.getElementById('dlvList')?.innerText.includes('R1')""",
+                    timeout=8000,
+                )
+            finally:
+                page.evaluate(
+                    """async (pid) => {
+                      const t = localStorage.getItem('psm_token');
+                      await fetch('/api/v1/projects/' + pid,
+                        { method: 'DELETE', headers: { Authorization: 'Bearer ' + t } });
+                    }""",
+                    int(project_id),
+                )
+
         def deliverables_upload() -> None:
             project_id = page.evaluate(
                 """async () => {
@@ -907,6 +956,17 @@ def main() -> int:
                 popup.wait_for_timeout(600)
                 assert "项目交付物清单" in popup.content()
                 popup.close()
+
+                # 打印包：服务端 HTML，含阶段门槛与交付物
+                with page.expect_popup() as pack_info:
+                    page.click('#view button[data-act="dlv.printPack"]')
+                pack = pack_info.value
+                pack.wait_for_function(
+                    """() => document.body.innerText.includes('项目交付物打印包')""",
+                    timeout=8000,
+                )
+                assert "阶段退出门槛" in pack.content()
+                pack.close()
             finally:
                 page.evaluate(
                     """async (pid) => {
@@ -2843,6 +2903,7 @@ def main() -> int:
         check("工具箱详情 + 按问题找工具", toolbox)
         check("交付物关联流程模型", deliverable_model_link)
         check("交付物与模板库", deliverables_view)
+        check("交付物新建版本", deliverable_new_version)
         check("交付物上传（真实入库）", deliverables_upload)
         check("组织与人员管理界面", admin_orgs)
         check("草图 draw.io 消息协议", sketch_drawio_protocol)

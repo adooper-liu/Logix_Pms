@@ -476,6 +476,39 @@ def test_office_preview_conversion_failure_returns_502(client, monkeypatch):
     assert "转换预览失败" in failed.json()["detail"]
 
 
+def test_print_pack_html_and_pdf(client, monkeypatch):
+    from app.services import preview as preview_service
+
+    project = _create_project(client)
+    html = client.get(f"{API}/projects/{project['id']}/deliverables/print-pack")
+    assert html.status_code == 200, html.text
+    assert html.headers["content-type"].startswith("text/html")
+    body = html.text
+    assert "项目交付物打印包" in body
+    assert project["code"] in body
+    assert "1.1" in body and "企业流程地图" in body
+    assert "阶段退出门槛" in body
+
+    # 未安装转换器时，服务端 PDF 明确拒绝，前端可退回 HTML 打印。
+    unavailable = client.get(
+        f"{API}/projects/{project['id']}/deliverables/print-pack", params={"format": "pdf"}
+    )
+    assert unavailable.status_code == 503
+
+    monkeypatch.setattr(preview_service, "converter_available", lambda: True)
+    monkeypatch.setattr(
+        preview_service,
+        "convert_to_pdf",
+        lambda source, filename: b"%PDF-1.4\nprint pack\n%%EOF",
+    )
+    pdf = client.get(
+        f"{API}/projects/{project['id']}/deliverables/print-pack", params={"format": "pdf"}
+    )
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.headers["content-type"].startswith("application/pdf")
+    assert pdf.content.startswith(b"%PDF")
+
+
 def test_upload_rejects_extension_and_magic_mismatch(client):
     project = _create_project(client)
     instance = _instance(client, project["id"], "2.2")
