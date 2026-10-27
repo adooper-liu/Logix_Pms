@@ -129,6 +129,16 @@ function wireChrome() {
         state.toolbox.status = '';
         state.toolbox.selected = '';
       }
+      if (a.dataset.view === 'knowledge') {
+        // 侧栏进入是顶层入口：回到“按问题”，并清空上一轮的筛选
+        state.knowledge.navSection = 'problem';
+        state.knowledge.stage = null;
+        state.knowledge.scenario = '';
+        state.knowledge.keyword = '';
+        state.knowledge.step = '';
+        state.knowledge.tool = '';
+        state.knowledge.page = 1;
+      }
       closeModal();
       go(a.dataset.view, { skipOrigin: true });
     };

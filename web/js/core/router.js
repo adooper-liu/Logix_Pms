@@ -15,20 +15,27 @@ export function register(view, render) {
   RENDERERS[view] = render;
 }
 
-/** 带骨架屏的渲染：先显示 loading，再填充内容 */
-export async function renderAsync(view, loader, painter) {
+/** 带骨架屏的渲染：首次进入视图显示骨架；同一视图重渲染保留旧内容，避免闪烁和滚动跳动。 */
+export async function renderAsync(view, loader, painter, options = {}) {
   const el = viewEl();
-  el.innerHTML = '<div class="card">' + skeleton(5) + '</div>';
+  const sameView = el.dataset.renderView === view && !options.forceSkeleton;
+  if (!sameView) {
+    el.innerHTML = '<div class="card">' + skeleton(5) + '</div>';
+    el.dataset.renderView = view;
+  }
+  el.classList.add('is-loading');
   let data;
   try {
     data = await loader();
   } catch (e) {
+    el.classList.remove('is-loading');
     el.innerHTML = '<div class="errbar"><div><b>加载失败</b> · ' + esc(e.message) +
       '</div><button class="btn btn-g" data-act="shell.retry" data-view="' + view +
       '">重试</button></div>';
     return;
   }
   if (state.view !== view) return;   // 用户在加载期间切换了页面
+  el.classList.remove('is-loading');
   painter(data);
 }
 

@@ -117,6 +117,8 @@ const renderKnowledge = () => {
   if ('tag' in params) k.tag = params.tag;
   if ('tool' in params) k.tool = params.tool;
   if ('page' in params) k.page = Number(params.page) || 1;
+  // 从步骤/工具/搜索进入时，默认展开「按问题」，方便继续按场景筛选
+  if (params.step || params.tool || params.q) k.navSection = 'problem';
 
   const qs = [];
   if (k.type) qs.push('type=' + k.type);
@@ -173,12 +175,20 @@ function paint(d) {
     </button>`).join('');
 
   const reco = d.recommend;
+  const recoItems = reco
+    ? reco.items.filter((item) => !k.stage
+      || (item.matched_on || []).includes(`阶段 ${k.stage}`))
+    : [];
   const recoHtml = reco
-    ? (reco.items.length
-      ? `<div class="kb-reco-head">为你推荐 <b>${reco.items.length}</b> 项
-          <span class="tiny">按「场景匹配 + 使用证据 + 工作流位置」排序，浏览量不参与</span></div>
-        <div class="kb-reco-list">${reco.items.map((item) => recoCard(item, labels, statusLabels, scenarioNames)).join('')}</div>`
-      : '<div class="note">没有匹配到知识。换一个痛点，或直接新建一条并走求真审核。</div>')
+    ? (recoItems.length
+      ? `<div class="kb-reco-head">为你推荐 <b>${recoItems.length}</b> 项
+          <span class="tiny">${
+            k.stage ? `仅显示命中阶段${k.stage}的知识与工具 · ` : ''
+          }按「场景匹配 + 使用证据 + 工作流位置」排序，浏览量不参与</span></div>
+        <div class="kb-reco-list">${recoItems.map((item) => recoCard(item, labels, statusLabels, scenarioNames)).join('')}</div>`
+      : `<div class="note">${k.stage
+        ? `阶段${k.stage}没有匹配到知识。可以看下方「全部资源」，或换一个阶段。`
+        : '没有匹配到知识。换一个痛点，或直接新建一条并走求真审核。'}</div>`)
     : `<div class="kb-reco-empty">先选一个痛点，或在输入框描述你遇到的问题。
         <span class="tiny">例：供应商交期经常延误，采购和仓储互相推</span></div>`;
 

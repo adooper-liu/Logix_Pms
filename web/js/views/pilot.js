@@ -642,10 +642,19 @@ function paint(payload) {
       </div>
     </div>
 
-    <div class="pilot-layers">${layerStrip(detail, layer.layer_no)}</div>
-    ${contextList(detail, layer.layer_no)}
-    ${workspace(detail, layer)}
-    ${nextList(detail, layer.layer_no)}`;
+    <div class="pilot-shell">
+      <aside class="pilot-side">
+        <div class="card pilot-nav">
+          <div class="tiny muted" style="margin-bottom:8px">十层导航</div>
+          <div class="pilot-nav-list">${layerStrip(detail, layer.layer_no)}</div>
+        </div>
+      </aside>
+      <main class="pilot-main">${workspace(detail, layer)}</main>
+      <aside class="pilot-aside">
+        ${contextList(detail, layer.layer_no)}
+        ${nextList(detail, layer.layer_no)}
+      </aside>
+    </div>`;
 }
 
 const renderPilot = () => {

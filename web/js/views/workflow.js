@@ -181,8 +181,7 @@ function paintWorkbench(d, wf) {
       </button></li>${row.stage_no < 5 ? '<li class="wb-connector" aria-hidden="true"></li>' : ''}`;
   }).join('');
 
-  const hasInProgress = data.steps.some((step) => step.status === 'IN_PROGRESS');
-  const stepCards = data.steps.map((step, index) => {
+  const stepCards = data.steps.map((step) => {
     const statusLabel = step.status_label || step.status;
     const evidence = (step.evidence || []).length
       ? step.evidence.map(esc).join('；') : '—';
@@ -202,7 +201,7 @@ function paintWorkbench(d, wf) {
       ? `<div class="wb-alert wb-alert-decision">需决策：${(step.decision_options || []).map(esc).join(' / ') || '—'}
           · 决策人 ${esc(step.decision_maker || '—')}
           ${step.decision_due ? ' · 时限 ' + esc(step.decision_due) : ''}</div>` : '';
-    const open = step.status === 'IN_PROGRESS' || (!hasInProgress && index === 0);
+    const open = step.status === 'IN_PROGRESS';
     const summaryText = step.next_action
       ? `下一步：${step.next_action}`
       : (step.goal || '尚未填写目标');
@@ -256,10 +255,27 @@ function paintWorkbench(d, wf) {
         data-id="${row.id}">更新</button>` : ''}
     </li>`).join('') || '<li class="tiny muted">本阶段还没有配置门槛条件。</li>';
 
-  const blockHtml = gate.block_reasons.length
+  const gateReasons = gate.conditions
+    .filter((row) => row.is_critical && !row.is_met)
+    .map((row) => row.text);
+  const stepReasons = data.steps
+    .filter((step) => ['BLOCKED', 'DECISION', 'PENDING_VERIFY'].includes(step.status))
+    .map((step) => {
+      if (step.status === 'BLOCKED') {
+        return `步骤受阻：${step.name}（${step.blocked_reason || '未填写原因'}）`;
+      }
+      if (step.status === 'DECISION') {
+        return `步骤需决策：${step.name}（决策人 ${step.decision_maker || '未指定'}）`;
+      }
+      return `步骤待验证：${step.name}（接收方 ${step.receiver || '未指定'}）`;
+    });
+  const blockHtml = stepReasons.length
     ? `<div class="wb-alert"><strong>当前不能推进：</strong>
-        <ul>${gate.block_reasons.map((reason) => `<li>${esc(reason)}</li>`).join('')}</ul></div>`
-    : '<div class="note">所有关键门槛已满足，可进入下一阶段。</div>';
+        <ul>${stepReasons.map((reason) => `<li>${esc(reason)}</li>`).join('')}</ul></div>
+       ${gateReasons.length ? `<div class="tiny muted mt">另有 ${gateReasons.length} 项关键门槛未满足，见上方门槛。</div>` : ''}`
+    : gateReasons.length
+      ? `<div class="note">当前不能推进：${gateReasons.length} 项关键门槛未满足，见上方门槛。</div>`
+      : '<div class="note">所有关键门槛已满足，可进入下一阶段。</div>';
 
   const prev = data.previous;
   const next = data.next;

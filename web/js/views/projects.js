@@ -169,14 +169,23 @@ const renderProjects = () => {
 
       const opt = (v, label, cur) =>
         '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
-      // 改善项目 5 阶段、体系落地项目 9 阶段；未筛选类型时按纯阶段号列出
+      // 改善项目 5 阶段、体系落地项目 9 阶段；未筛选类型时同时给出两套阶段名称
       const stageCount = f.projectType === 'IMPROVEMENT' ? 5 : 9;
-      const stageNames = f.projectType === 'GOVERNANCE_SETUP'
-        ? state.meta.setupStage : state.meta.stage;
+      const improvementNames = state.meta.stage || {};
+      const setupNames = state.meta.setupStage || {};
       const stageOptions = Array.from({ length: stageCount }, (_, index) => {
         const no = index + 1;
-        const name = f.projectType ? (stageNames[no] || '') : '';
-        return opt(String(no), '阶段' + no + (name ? ' ' + name : ''), f.stage);
+        let name = '';
+        if (f.projectType === 'IMPROVEMENT') {
+          name = improvementNames[no] || '';
+        } else if (f.projectType === 'GOVERNANCE_SETUP') {
+          name = setupNames[no] || '';
+        } else {
+          const a = improvementNames[no];
+          const b = setupNames[no];
+          name = a && b && a !== b ? `${a} / ${b}` : (a || b || '');
+        }
+        return opt(String(no), '阶段' + no + (name ? ' · ' + name : ''), f.stage);
       }).join('');
 
       const today = new Date().toISOString().slice(0, 10);
@@ -763,7 +772,8 @@ async function openGateModal(projectId) {
     <div class="row3">
       <div class="field"><label>阶段</label><select id="gtStage">
         ${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${
-          n === p.current_stage ? ' selected' : ''}>阶段${n}</option>`).join('')}
+          n === p.current_stage ? ' selected' : ''}>阶段${n}${
+          (state.meta.stage || {})[n] ? ' · ' + esc((state.meta.stage || {})[n]) : ''}</option>`).join('')}
       </select></div>
       <div class="field"><label>结论</label><select id="gtConclusion">
         ${Object.entries(conclusions).map(([code, label]) =>

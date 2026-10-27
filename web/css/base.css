@@ -221,7 +221,9 @@ html.nav-collapsed .nav .nav-expert .lbl{display:none}
 .origin-bar .mainline-btn{background:var(--brand-softer);border-color:var(--brand-line);
   color:var(--brand);font-weight:600}
 .origin-bar .mainline-btn:hover{background:var(--brand-soft)}
-.view{padding:22px 26px 34px;overflow-y:auto;flex:1}
+.view{padding:22px 26px 34px;overflow-y:auto;flex:1;scrollbar-gutter:stable}
+/* 同页重渲染不再先清空内容；仅保留极轻的加载光标，避免高度塌陷导致抖动 */
+.view.is-loading{cursor:progress}
 
 /* ===== 登录 ===== */
 .login-mask{position:fixed;inset:0;background:linear-gradient(135deg,var(--nav-bg),var(--nav-bg-2));

@@ -131,7 +131,9 @@ export function renderDesigner() {
       state.designer.processCode = (list.find((r) => r.id === id) || {}).code;
     }
   };
-  renderAsync('designer', load, () => paintDesigner());
+  const forceSkeleton = !!state.designer.forceSkeleton;
+  state.designer.forceSkeleton = false;
+  renderAsync('designer', load, () => paintDesigner(), { forceSkeleton });
 }
 
 function paintDesigner() {
@@ -368,6 +370,7 @@ function paintSuggestions(a) {
 function switchProcess(id) {
   state.designer.processId = Number(id);
   state.designer.processCode = (state.designer.processes.find((p) => p.id === Number(id)) || {}).code;
+  state.designer.forceSkeleton = true;
   setUrlState('designer', { process: Number(id) }, { push: true });
   state.designer.tab = 'model';
   state.designer.assignmentCtx = null;

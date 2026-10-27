@@ -488,18 +488,18 @@ def main() -> int:
             assert page.locator("#view .wb-timeline .wb-tl-item").count() >= 1, (
                 "当前阶段没有竖向时间线"
             )
-            assert page.locator("#view .wb-tl-card[open]").count() == 1, (
-                "时间线默认应只展开一个当前步骤"
-            )
-            # 折叠/展开：点标题收起，再点重新展开
+            assert page.locator("#view .wb-tl-card[open]").count() == 0, "步骤卡默认不应展开"
+            # 点击标题才展开；再点收起
             timeline_card = page.locator("#view .wb-tl-card").first
             timeline_head = timeline_card.locator(".wb-tl-head")
+            timeline_head.click()
+            page.wait_for_timeout(200)
+            assert page.locator("#view .wb-tl-card[open]").count() == 1, "步骤卡不能展开"
             timeline_head.click()
             page.wait_for_timeout(200)
             assert page.locator("#view .wb-tl-card[open]").count() == 0, "步骤卡不能折叠"
             timeline_head.click()
             page.wait_for_timeout(200)
-            assert page.locator("#view .wb-tl-card[open]").count() == 1, "步骤卡不能重新展开"
 
             advance = page.locator("#view .wb-advance")
             assert advance.count() == 1, "工作台缺少推进按钮"
@@ -2120,6 +2120,34 @@ def main() -> int:
             page.wait_for_timeout(1000)
             assert "流程标准文件" in page.inner_text("#view .tabs button.on"), "刷新后页签丢失"
 
+        # 知识库：按阶段选择后，左侧折叠互斥，中间推荐只保留该阶段命中项
+        def knowledge_stage_filter() -> None:
+            goto("knowledge")
+            page.click('#view .kb-nav-fold summary:has-text("按阶段")')
+            page.wait_for_timeout(200)
+            page.click("#view .kb-stage-link >> nth=1")
+            page.wait_for_timeout(1200)
+            assert "stage=2" in page.url, f"阶段选择没有写入 URL：{page.url}"
+            details = page.locator("#view .kb-nav-fold")
+            assert details.count() == 3, "左侧导航不是三个折叠区"
+            assert not details.nth(0).evaluate("el => el.open"), "选择阶段后「按问题」应折叠"
+            assert details.nth(1).evaluate("el => el.open"), "选择阶段后「按阶段」应展开"
+            view = page.inner_text("#view")
+            assert "仅显示命中阶段2" in view or "阶段2没有匹配到知识" in view, (
+                f"中间推荐没有跟随阶段筛选：{view[:200]}"
+            )
+
+        # 项目组合：阶段筛选下拉必须显示阶段名称
+        def projects_stage_names() -> None:
+            goto("projects")
+            labels = page.eval_on_selector_all(
+                '#view select[data-key="stage"] option', "els => els.map(e => e.textContent)"
+            )
+            assert any("识别与优先级排序" in item for item in labels), (
+                f"改善项目阶段名缺失：{labels}"
+            )
+            assert any("立项定界" in item for item in labels), f"体系落地阶段名缺失：{labels}"
+
         # 知识库 → 工具箱：详情里的「查看关联工具」应真正跳转并打开工具详情
         def knowledge_tool_jump() -> None:
             goto("knowledge")
@@ -2470,7 +2498,10 @@ def main() -> int:
             assert page.locator("#view .pc-module").count() == 1, "中间应只展示一个模块详情"
             assert page.locator("#view .pc-related-col").count() == 1, "右侧操作/相关栏缺失"
             page.locator('#view .pc-nav-item:has-text("KPI")').first.click()
-            page.wait_for_timeout(300)
+            page.wait_for_function(
+                """() => document.querySelector('#view .pc-main')?.innerText.includes('KPI')""",
+                timeout=5000,
+            )
             assert "KPI" in page.inner_text("#view .pc-main"), "点击左侧条目未切换中间详情"
             for marker in (
                 "战略承接",
@@ -2610,6 +2641,9 @@ def main() -> int:
             view = page.inner_text("#view")
             assert "自检用十层路径" in view, "试点路径未创建"
             assert page.locator("#view .pilot-layer").count() == 10, "十层导航不完整"
+            assert page.locator("#view .pilot-side .pilot-layer").count() == 10, (
+                "十层导航没有落在左侧栏"
+            )
 
             page.click('#view .pilot-layer[data-layer="4"]')
             page.wait_for_timeout(900)
@@ -2998,6 +3032,8 @@ def main() -> int:
         check("监控异常处理弹窗", monitor)
         check("标准工时观测与评审", time_study_workflow)
         check("数据治理数据域与数据流", data_governance_view)
+        check("知识库阶段筛选", knowledge_stage_filter)
+        check("项目组合阶段名称", projects_stage_names)
         check("知识库详情 + 快速找工具", knowledge)
         check("知识库 → 工具箱双向跳转", knowledge_tool_jump)
         check("工作流 → 知识库步骤上下文", knowledge_step_context)
