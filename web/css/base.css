@@ -216,6 +216,11 @@ html.nav-collapsed .nav .nav-expert .lbl{display:none}
   background:linear-gradient(135deg,var(--cyan),var(--brand));
   display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
 .theme-sel{padding:6px 9px;font-size:12px}
+.origin-bar{display:flex;align-items:center;gap:10px;padding:8px 26px 0;
+  background:var(--bg);flex-wrap:wrap}
+.origin-bar .mainline-btn{background:var(--brand-softer);border-color:var(--brand-line);
+  color:var(--brand);font-weight:600}
+.origin-bar .mainline-btn:hover{background:var(--brand-soft)}
 .view{padding:22px 26px 34px;overflow-y:auto;flex:1}
 
 /* ===== 登录 ===== */

@@ -34,7 +34,17 @@ export async function renderAsync(view, loader, painter) {
 
 export function go(view, options = {}) {
   const opts = typeof options === 'boolean' ? { skipHash: options } : options;
+  const previousView = state.view;
+  const previousParams = urlParams();
   if (!RENDERERS[view]) view = 'dashboard';
+  // 跨页面跳转记录来源；侧栏切换（skipOrigin）清空来源栈，
+  // 「返回来源」使用 keepTrail 出栈后不再把当前页压回去。
+  if (!opts.keepTrail) {
+    if (opts.skipOrigin) state.navTrail = [];
+    else if (previousView && previousView !== view) {
+      pushTrail(previousView, previousParams);
+    }
+  }
   ensureExpertVisible(view);
   state.view = view;
   document.querySelectorAll('.nav a').forEach((a) => {
@@ -46,8 +56,59 @@ export function go(view, options = {}) {
   if (!opts.skipHash) {
     setUrlState(view, opts.params || {}, { push: opts.push !== false });
   }
+  updateOriginBar();
   const render = RENDERERS[view];
   if (render) render();
+}
+
+/** 来源栈最多保留 10 层，避免长时间使用后无限增长。 */
+function pushTrail(view, params) {
+  const trail = state.navTrail || (state.navTrail = []);
+  const top = trail[trail.length - 1];
+  const same = top && top.view === view
+    && JSON.stringify(top.params || {}) === JSON.stringify(params || {});
+  if (same) return;
+  trail.push({ view, params: params || {} });
+  while (trail.length > 10) trail.shift();
+}
+
+/**
+ * 返回来源页：优先回到应用内记录的上一个视图（保留其 URL 上下文），
+ * 没有来源栈时退回浏览器历史，再兜底到驾驶舱。
+ */
+export function goBackToOrigin() {
+  const trail = state.navTrail || (state.navTrail = []);
+  const origin = trail.pop();
+  if (origin) {
+    go(origin.view, { params: origin.params, push: true, keepTrail: true });
+    return;
+  }
+  if (typeof history !== 'undefined' && history.length > 1) {
+    history.back();
+    return;
+  }
+  go('dashboard', { push: true, skipOrigin: true });
+}
+
+function updateOriginBar() {
+  const back = document.getElementById('originBack');
+  const context = document.getElementById('originContext');
+  if (!back) return;
+  const trail = state.navTrail || [];
+  const origin = trail[trail.length - 1];
+  if (!origin || origin.view === state.view) {
+    back.classList.add('hide');
+    if (context) context.textContent = '';
+    return;
+  }
+  back.classList.remove('hide');
+  back.textContent = '← 返回 ' + (TITLES[origin.view] || origin.view);
+  const parts = Object.entries(origin.params || {});
+  if (context) {
+    context.textContent = parts.length
+      ? '来源上下文：' + parts.map(([key, value]) => `${key}=${value}`).join(' · ')
+      : '';
+  }
 }
 
 /** 读取当前 hash 里的上下文参数：#view?key=value */
@@ -134,7 +195,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('hashchange', () => {
     const view = explicitView();
     if (!view) return;
-    if (state.view !== view) go(view, { skipHash: true, push: false });
+    if (state.view !== view) go(view, { skipHash: true, push: false, skipOrigin: true });
     else RENDERERS[view]();
   });
 }

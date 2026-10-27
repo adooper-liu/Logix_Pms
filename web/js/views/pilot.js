@@ -118,8 +118,10 @@ async function openPathModal() {
   } catch (e) {
     return toast(e.message, true);
   }
+  const preferred = Number(state.pilot.pendingProcess) || 0;
   const options = processes.filter((row) => row.level === 3 || row.level === 4)
-    .map((row) => `<option value="${row.id}">L${row.level} ${esc(row.code)} ${esc(row.name)}</option>`)
+    .map((row) => `<option value="${row.id}"${row.id === preferred ? ' selected' : ''}>L${
+      row.level} ${esc(row.code)} ${esc(row.name)}</option>`)
     .join('');
   openModal('新建试点路径', `
     <div class="field"><label>路径名称 *</label>
@@ -151,6 +153,7 @@ on('pilot.savePath', async () => {
     closeModal();
     state.pilot.pathId = detail.id;
     state.pilot.layerNo = detail.current_layer;
+    state.pilot.pendingProcess = null;
     toast('试点路径已创建');
     go('pilot', {
       params: { path: detail.id, layer: detail.current_layer },
@@ -650,6 +653,7 @@ const renderPilot = () => {
     'pilot',
     async () => {
       const params = urlParams();
+      if (params.process) state.pilot.pendingProcess = Number(params.process) || null;
       const [paths, meta] = await Promise.all([GET('/pilot/paths'), GET('/pilot/meta')]);
       if (!paths.length) return { paths, meta, detail: null };
       const wantedPath = Number(params.path) || null;

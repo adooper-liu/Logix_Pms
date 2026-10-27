@@ -100,25 +100,9 @@ def main() -> int:
         # 默认入口与专家模式：登录后应落在「开始使用」（除非首次上线 S0–S7 已 8/8），
         # 专家工具默认收起；开启后再跑后面的 16 个视图巡检。
         def default_entry_and_expert_mode() -> None:
-            token = page.evaluate("() => localStorage.getItem('psm_token')")
-            status = page.evaluate(
-                """async (token) => {
-                    const res = await fetch('/api/v1/start/status', {
-                        headers: { Authorization: 'Bearer ' + token },
-                    });
-                    return res.ok ? await res.json() : null;
-                }""",
-                token,
-            )
-            expected = "管理驾驶舱"
-            if (
-                not status
-                or not status["pilot_confirmed"]
-                or status["pilot_ready_count"] < status["pilot_total"]
-            ):
-                expected = "开始使用"
-            assert page.inner_text("#pageTitle") == expected, (
-                f"默认落地页应为「{expected}」，实际「{page.inner_text('#pageTitle')}」"
+            # 固定唯一主入口：无论试点是否上线，都落在「开始使用」
+            assert page.inner_text("#pageTitle") == "开始使用", (
+                f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
             )
             assert page.locator('.nav a[data-view="workflow"]').is_hidden(), "专家工具默认应收起"
             page.click("#expertToggle")
@@ -2354,7 +2338,7 @@ def main() -> int:
             goto("start")
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
-            assert "开始使用" in view and "一条流程的试点路径" in view, "启动向导未渲染"
+            assert "开始使用" in view and "唯一主入口" in view, "启动向导未渲染"
             assert page.locator("#view .tl-step").count() == 9, "九阶段时间轴不完整"
             assert page.locator("#view .tl-step.current").count() == 1, "时间轴没有当前全局证据阶段"
             assert page.locator("#view .tl-step.done").count() >= 1, "时间轴没有已完成阶段"
@@ -2472,6 +2456,37 @@ def main() -> int:
                     "刷新后没有恢复同一条流程"
                 )
                 assert "流程卡" in page.inner_text("#view")
+
+        # 返回来源与固定主线：跨页跳转可回来源，任意页可回 0→1 主线
+        def navigation_origin_and_mainline() -> None:
+            goto("process_card")
+            page.wait_for_timeout(1200)
+            entry = page.locator(
+                '#view button[data-act="process_card.pilot"], '
+                '#view button[data-act="process_card.goPilot"], '
+                '#view button[data-act="process_card.go"][data-view="pilot"]'
+            ).first
+            assert entry.count(), "流程卡没有进入十层单页的入口"
+            entry.click()
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "十层单页"
+            assert page.is_visible("#originBack"), "跨页跳转后没有返回来源"
+            assert "返回 流程卡" in page.inner_text("#originBack")
+            if "process=" in page.url:
+                process_id = page.url.split("process=")[1].split("&")[0]
+                page.click('#view button[data-act="pilot.newPath"]')
+                page.wait_for_selector("#plProcess")
+                assert page.input_value("#plProcess") == process_id, "十层单页没有带入来源流程"
+                close_modal()
+            page.click("#originBack")
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "流程卡"
+            assert not page.is_visible("#originBack"), "返回来源后返回按钮应隐藏"
+
+            page.click('#originBar button[data-act="shell.mainline"]')
+            page.wait_for_timeout(1200)
+            assert page.inner_text("#pageTitle") == "开始使用", "主线按钮没有回到唯一主入口"
+            assert not page.is_visible("#originBack")
 
         def select_click_stable() -> None:
             goto("projects")
@@ -2905,6 +2920,7 @@ def main() -> int:
         check("战略目标承接", strategy_view)
         check("开始使用九步向导", start_view)
         check("流程卡聚合视图", process_card_view)
+        check("返回来源与固定主线", navigation_origin_and_mainline)
         check("下拉选择稳定", select_click_stable)
         check("授权矩阵与例外台账", authorization_view)
         check("十层单页与第4层工作区", pilot_view)

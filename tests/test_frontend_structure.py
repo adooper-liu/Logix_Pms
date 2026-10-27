@@ -176,14 +176,30 @@ def test_spa_views_cover_all_registered_views():
 
 
 def test_default_view_is_start():
-    """未指定 hash/路径时默认进「开始使用」；首次上线 S0–S7 就绪后改落驾驶舱。"""
+    """未指定 hash/路径时固定进「开始使用」；它是唯一主入口，不再按试点进度切驾驶舱。"""
     router_src = (JS_ROOT / "core" / "router.js").read_text(encoding="utf-8")
     assert "export function explicitView()" in router_src
 
     auth_src = (JS_ROOT / "core" / "auth.js").read_text(encoding="utf-8")
     assert "const explicit = explicitView()" in auth_src
-    assert "let view = 'start'" in auth_src
-    assert "startup.pilot_confirmed && startup.pilot_ready_count >= startup.pilot_total" in auth_src
+    assert "go('start'" in auth_src
+    assert "skipOrigin: true" in auth_src
+    assert "pilot_ready_count" not in auth_src
+
+
+def test_navigation_origin_and_mainline_exist():
+    """跨页跳转要有来源栈与返回来源；任意页面都能回固定主线。"""
+    router_src = (JS_ROOT / "core" / "router.js").read_text(encoding="utf-8")
+    assert "export function goBackToOrigin()" in router_src
+    assert "navTrail" in router_src
+
+    main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
+    assert "shell.backToOrigin" in main_src
+    assert "shell.mainline" in main_src
+
+    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="originBar"' in html
+    assert 'data-act="shell.mainline"' in html
 
 
 def test_workload_page_consumes_boundary_note():

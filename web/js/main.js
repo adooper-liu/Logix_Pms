@@ -10,7 +10,7 @@ import {
   AUTH, doLogin, enterDefaultView, hideLogin, isLoggedIn, loadMeta, logout, renderUserChip,
   showLogin,
 } from './core/auth.js';
-import { initExpertMode, register, go, toggleExpertMode, onSearch } from './core/router.js';
+import { initExpertMode, register, go, goBackToOrigin, toggleExpertMode, onSearch } from './core/router.js';
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, on } from './core/ui.js';
@@ -84,7 +84,12 @@ window.addEventListener('pms:login', () => { refreshNotifications(); });
 on('shell.notifications', () => openNotifications());
 on('shell.theme', (_data, el) => applyTheme(el.value));
 on('shell.logout', () => logout());
-on('shell.retry', ({ view }) => go(view, { push: false, skipHash: true }));
+on('shell.retry', ({ view }) => go(view, { push: false, skipHash: true, skipOrigin: true }));
+on('shell.backToOrigin', () => goBackToOrigin());
+on('shell.mainline', () => {
+  // 主线是唯一固定入口；从任何模块回来都清空来源栈。
+  go('start', { push: true, skipOrigin: true });
+});
 
 // 仅保留最小操作面；模板不再依赖这些全局函数。
 Object.assign(window, { go, closeModal, state, actions });
@@ -124,7 +129,7 @@ function wireChrome() {
         state.toolbox.status = '';
       }
       closeModal();
-      go(a.dataset.view);
+      go(a.dataset.view, { skipOrigin: true });
     };
   });
   const navCollapse = document.getElementById('navCollapse');

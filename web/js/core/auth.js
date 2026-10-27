@@ -150,19 +150,11 @@ export async function loadMeta() {
 export async function enterDefaultView() {
   const explicit = explicitView();
   if (explicit) {
-    go(explicit, { push: false, skipHash: true });
+    go(explicit, { push: false, skipHash: true, skipOrigin: true });
     return;
   }
-  let view = 'start';
-  try {
-    const startup = await GET('/start/status');
-    if (startup.pilot_confirmed && startup.pilot_ready_count >= startup.pilot_total) {
-      view = 'dashboard';
-    }
-  } catch (e) {
-    // 启动页会自己展示错误与重试，不要把用户挡在空白页
-  }
-  go(view, { push: false });
+  // 固定唯一主入口：0→1 启动路径。驾驶舱/流程卡等是模块视图，不再抢默认落地。
+  go('start', { push: false, skipOrigin: true });
 }
 
 // 令牌失效由 api 层回调到这里：清身份 + 弹登录页

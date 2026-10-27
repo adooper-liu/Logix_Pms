@@ -546,7 +546,7 @@ function paint(data) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">一条流程的试点路径</span>${tipHelp(
+          <h2>开始使用<span class="module-badge">唯一主入口 · 0→1 启动路径</span>${tipHelp(
             '先答完 8 个问题，把一条流程从「要什么」走到「下一步」；每个答案都来自系统里已有的证据。'
             + '主线：战略 → 架构 → 组织 → 制度 → 流程 → 表单/工具 → 工作量 → 绩效 → 改善 → 新版本。'
             + '原则：统一原则、统一基线、分级授权、受控差异。')}</h2>

@@ -26,6 +26,9 @@ on('process_card.go', ({ view }) => go(view));
 on('process_card.pilot', ({ path, layer }) => {
   go('pilot', { params: { path: Number(path), layer: Number(layer) }, push: true });
 });
+on('process_card.goPilot', ({ process }) => {
+  go('pilot', { params: { process: Number(process) }, push: true });
+});
 on('process_card.designer', () => {
   state.designer.tab = 'model';
   appActions['designer.open'](state.processCard.processId);
@@ -215,8 +218,8 @@ const renderProcessCard = () => {
               <div><h3>试点落地</h3>
                 <div class="desc">这条流程还没有试点路径。十层执行的层状态、退出门、任务和问题
                   都在「十层单页」维护。</div></div>
-              <button class="btn btn-g" data-act="process_card.go"
-                data-view="pilot">去十层单页</button>
+              <button class="btn btn-g" data-act="process_card.goPilot"
+                data-process="${c.process.id}">去十层单页</button>
             </div>
           </section>`;
       const strategyCard = moduleCard(

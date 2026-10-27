@@ -85,6 +85,13 @@
         <button class="btn-sm" data-act="shell.logout">退出</button>
       </div>
     </div>
+    <div class="origin-bar" id="originBar">
+      <button class="btn-sm mainline-btn" type="button" data-act="shell.mainline"
+        title="回到唯一主路径：0→1 启动">⌂ 主线：0→1</button>
+      <button class="btn-sm hide" id="originBack" type="button"
+        data-act="shell.backToOrigin">← 返回来源</button>
+      <span class="tiny muted" id="originContext"></span>
+    </div>
     <div class="view" id="view"></div>
   </div>
 </div>
