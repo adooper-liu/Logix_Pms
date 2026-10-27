@@ -50,6 +50,10 @@ on('process_card.submitMaturity', () => submitMaturity());
 on('process_card.newTask', () => openTaskModal());
 on('process_card.submitTask', () => submitTask());
 on('process_card.findings', () => openFindingsModal());
+on('process_card.selectModule', ({ module }) => {
+  state.processCard.activeModule = module;
+  RENDERERS.process_card();
+});
 
 const STATUS_TONE = { RED: 't-red', YELLOW: 't-yel', GREEN: 't-grn', GRAY: 't-gry' };
 const SEVERITY_LABELS = { HIGH: '高', MEDIUM: '中', LOW: '低' };
@@ -187,11 +191,6 @@ const renderProcessCard = () => {
           ${guide ? `<div class="pc-empty">${guide}</div>` : ''}
           ${body || ''}
         </div>`;
-      const group = (title, cards) => `
-        <section class="pc-group">
-          <div class="pc-group-hd">${title}</div>
-          <div class="grid g2">${cards.join('')}</div>
-        </section>`;
       const modelAction = canDesign
         ? '<button class="btn-sm" data-act="process_card.designer">打开设计器</button>'
         : '<button class="btn-sm" disabled title="建议先完成战略、权责、制度">打开设计器</button>';
@@ -300,11 +299,53 @@ const renderProcessCard = () => {
         '<button class="btn-sm" data-act="process_card.findings">查看全部</button>',
         findingRows, '',
       );
-      const groups = [
-        group('战略与设计', [strategyCard, raciCard, documentCard, modelCard]),
-        group('运行与结果', [workloadCard, kpiCard, changeCard, improvementCard]),
-        group('治理与执行', [maturityCard, taskCard, findingCard]),
-      ].join('');
+      const modules = [
+        { key: 'strategy', group: '战略与设计', label: '战略承接', count: c.objectives.length,
+          html: strategyCard, guide: !c.objectives.length },
+        { key: 'raci', group: '战略与设计', label: '权责矩阵', count: c.raci.length,
+          html: raciCard, guide: !c.raci.length },
+        { key: 'document', group: '战略与设计', label: '制度与标准', count: c.documents.length,
+          html: documentCard, guide: !c.documents.length },
+        { key: 'model', group: '战略与设计', label: '流程模型', count: null,
+          html: modelCard, guide: !c.readiness.model },
+        { key: 'workload', group: '运行与结果', label: '工作量与产能', count: null,
+          html: workloadCard, guide: !c.readiness.workload },
+        { key: 'kpi', group: '运行与结果', label: 'KPI', count: c.kpis.length,
+          html: kpiCard, guide: !c.kpis.length },
+        { key: 'change', group: '运行与结果', label: '变更', count: c.changes.length,
+          html: changeCard, guide: !c.changes.length },
+        { key: 'improvement', group: '运行与结果', label: '改善', count: c.improvements.length,
+          html: improvementCard, guide: !c.improvements.length },
+        { key: 'maturity', group: '治理与执行', label: '成熟度', count: assessments.length,
+          html: maturityCard, guide: !assessments.length },
+        { key: 'task', group: '治理与执行', label: 'L5 任务', count: tasks.length,
+          html: taskCard, guide: !tasks.length },
+        { key: 'finding', group: '治理与执行', label: '治理待办', count: c.findings.length,
+          html: findingCard, guide: false },
+      ];
+      const activeKey = modules.some((row) => row.key === state.processCard.activeModule)
+        ? state.processCard.activeModule
+        : (modules.find((row) => row.guide)?.key || 'strategy');
+      state.processCard.activeModule = activeKey;
+      const active = modules.find((row) => row.key === activeKey) || modules[0];
+      const navGroups = ['战略与设计', '运行与结果', '治理与执行'].map((group) => `
+        <div class="pc-nav-group">${group}</div>
+        ${modules.filter((row) => row.group === group).map((row) => `
+          <button class="pc-nav-item${row.key === active.key ? ' on' : ''}"
+            data-act="process_card.selectModule" data-module="${row.key}">
+            <span class="pc-nav-dot ${row.guide ? 'todo' : 'ok'}"></span>
+            <span class="pc-nav-label">${esc(row.label)}</span>
+            ${row.count === null ? '' : `<span class="pc-nav-count">${row.count}</span>`}
+          </button>`).join('')}`).join('');
+      const readinessHtml = `
+        <div class="card pc-related">
+          <h3>模块就绪</h3>
+          <div class="gap">
+            <span class="tag t-blu">${readyCount}/${readyTotal}</span>
+            <button class="btn-sm" data-act="process_card.findings">治理待办 ${c.findings.length}</button>
+          </div>
+          <div class="tiny muted mt">点击左侧模块查看详情；十层执行在右侧试点卡进入。</div>
+        </div>`;
 
       viewEl().innerHTML = `
         <div class="card page-head pc-head">
@@ -327,8 +368,11 @@ const renderProcessCard = () => {
             </div>
           </div>
         </div>
-        ${pilotHtml}
-        ${groups}`;
+        <div class="pc-shell">
+          <aside class="pc-side"><div class="card pc-nav">${navGroups}</div></aside>
+          <main class="pc-main">${active.html}</main>
+          <aside class="pc-related-col">${pilotHtml}${readinessHtml}</aside>
+        </div>`;
     },
   );
 };

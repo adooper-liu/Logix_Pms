@@ -304,6 +304,20 @@ function paint(d) {
     </div>
 
     <div class="kb-layout">
+      <aside class="kb-nav">
+        <div class="card">
+          <h3>按问题</h3>
+          <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
+        </div>
+        <div class="card">
+          <h3>按阶段</h3>
+          <div class="kb-stage-list">${stageLinks}</div>
+        </div>
+        <div class="card">
+          <h3>按类型</h3>
+          <div class="kb-chips">${typeChips}</div>
+        </div>
+      </aside>
       <main>
         <section class="card kb-scenario">
           <div class="between mb">
@@ -312,7 +326,6 @@ function paint(d) {
                 + '浏览量只作为阅读统计，不是推荐依据。')}</h3></div>
             <span class="tag t-blu">推荐依据：匹配度 + 证据</span>
           </div>
-          <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
           <div class="kb-match">
             <input id="kbQ" class="sel" style="flex:1;min-width:240px"
               value="${esc(k.keyword)}"
@@ -340,7 +353,6 @@ function paint(d) {
               ${statusOptions}
             </div>
           </div>
-          <div class="kb-chips">${typeChips}</div>
           ${k.tool ? `<div class="note mb">只显示关联工具 <b>${esc(k.tool)}</b> 的知识。
             <button class="btn-sm" data-act="knowledge.clear">显示全部</button></div>` : ''}
           <div class="grid g3 kb-grid">${cards}</div>
@@ -358,11 +370,6 @@ function paint(d) {
       </main>
 
       <aside class="kb-side">
-        <div class="card">
-          <h3>与五阶段工作流打通</h3>
-          <div class="desc">在工作现场直接推送，不用离开工作台来翻库</div>
-          <div class="kb-stage-list">${stageLinks}</div>
-        </div>
         ${archiveHtml}
         ${effectHtml}
         ${standardHtml}

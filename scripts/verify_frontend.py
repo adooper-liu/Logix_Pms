@@ -326,6 +326,8 @@ def main() -> int:
         def pcf_guided_wizard() -> None:
             goto("start")
             page.wait_for_timeout(700)
+            page.click('#view .start-nav-item:has-text("Q4 做什么")')
+            page.wait_for_timeout(300)
             page.click('#view button:has-text("1+3+10 建架构")')
             page.wait_for_selector("#mask.show", timeout=8000)
             page.wait_for_selector('#pcfGuided input[data-act="map.guidedL1"]', timeout=12000)
@@ -557,9 +559,9 @@ def main() -> int:
             page.click('#view button:has-text("显示全部工具")')
             page.wait_for_timeout(900)
             names_all = page.eval_on_selector_all(
-                "#view .tb-card .tb-card-title b", "els => els.map(e => e.textContent.trim())"
+                "#view .tb-nav-item .tb-nav-name", "els => els.map(e => e.textContent.trim())"
             )
-            assert len(names_all) > 2, f"清除过滤后应显示更多工具：{names_all}"
+            assert len(names_all) > 2, f"清除过滤后左侧工具导航应显示更多工具：{names_all}"
 
         # 方法论匹配引擎（真实调用后端）
         def workflow_recommend() -> None:
@@ -2115,11 +2117,11 @@ def main() -> int:
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "方法论工具箱", "知识库→工具箱没有跳转"
             assert "open=" in page.url, f"工具详情没有写入 URL：{page.url}"
-            page.wait_for_selector("#mask.show")
-            body = page.inner_text("#mBody")
+            page.wait_for_selector("#view .tb-detail-card", timeout=8000)
+            body = page.inner_text("#view .tb-detail-card")
             assert "验证标准" in body, "工具详情缺少验证标准"
             assert "不适用" in body, "工具详情缺少反证条件"
-            close_modal()
+            page.click('#view button[data-act="toolbox.clearSelected"]')
             page.wait_for_timeout(400)
 
         # 工作流步骤 → 知识库：保留 step 上下文并可直接记录使用证据
@@ -2344,21 +2346,38 @@ def main() -> int:
             assert page.locator("#view .tl-step.done").count() >= 1, "时间轴没有已完成阶段"
             assert "当前" in page.inner_text("#view .start-timeline")
             assert page.locator("#view .start-shell").count() == 1, "开始页没有三栏布局"
-            assert page.locator("#view .start-q").count() == 8, "开始页不是八问"
+            assert page.locator("#view .start-q").count() == 1, "开始页应一次只展示一个 Q 详情"
+            assert page.locator("#view .start-nav-item.on").count() == 1, (
+                "左侧 Q 导航没有唯一选中项"
+            )
             for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
                 assert marker in view, f"开始页缺少「{marker}」"
-            assert "全局证据进度" in view, "Q7 没有标明全局证据进度"
+            assert "全局证据进度" in view, "右侧缺少全局证据进度"
+
+            # 点 Q7 才展示 Q7 详情与当前阶段
+            page.click('#view .start-nav-item:has-text("Q7 输出什么")')
+            page.wait_for_timeout(300)
+            assert page.locator("#view .start-q").count() == 1, "切换到 Q7 后不应铺开其他 Q"
+            assert "Q7" in page.inner_text("#view .start-q")
             q7_tip = page.locator("#q7 .start-q-answer .metric-help.has-tip")
             assert q7_tip.count() == 1, "Q7 没有把全局口径收进 toptip"
             q7_tip_text = q7_tip.first.get_attribute("data-tip") or ""
             assert "不限定某一条试点路径" in q7_tip_text, "Q7 toptip 缺少全局口径"
             assert "这里不是项目当前层" in q7_tip_text, "Q7 toptip 没有区分项目当前层"
+
+            # 点 Q8 才展示下一步与上线口径
+            page.click('#view .start-nav-item:has-text("Q8 下一步")')
+            page.wait_for_timeout(300)
+            assert page.locator("#view .start-q").count() == 1
+            assert "Q8" in page.inner_text("#view .start-q")
             q8_tip = page.locator("#q8 .start-q-answer .metric-help.has-tip")
             if q8_tip.count():
                 assert "全局证据阶段退出门" in (q8_tip.first.get_attribute("data-tip") or ""), (
                     "Q8 没有把退出门口径收进 toptip"
                 )
-            assert "前置" in view and "下一步" in view, "Q 卡缺少依赖关系提示"
+            assert "前 8 个阶段" in page.inner_text("#view") and "评审与固化" in page.inner_text(
+                "#view"
+            ), "启动页缺少上线范围"
             gate = page.evaluate(
                 """async () => {
                     const token = localStorage.getItem('psm_token');
@@ -2368,6 +2387,7 @@ def main() -> int:
                     return res.ok ? await res.json() : null;
                 }"""
             )
+            view = page.inner_text("#view")
             if gate and gate["pilot_confirmed"]:
                 assert "已确认上线" in view and "撤销确认" in view
             elif gate and gate["pilot_gate_open"]:
@@ -2375,8 +2395,11 @@ def main() -> int:
             else:
                 assert "还差 " in view and "个阶段" in view, "启动页缺少上线缺口说明"
 
-            assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
-            assert page.locator("#view .seg button[data-mode]").count() == 0, "模式开关应已移除"
+            # 回 Q7，验证当前步与证据面板
+            page.click('#view .start-nav-item:has-text("Q7 输出什么")')
+            page.wait_for_timeout(300)
+            view = page.inner_text("#view")
+            assert "前置" in view and "下一步" in view, "Q 卡缺少依赖关系提示"
             has_current = page.locator("#view .start-current").count() == 1
             assert has_current or "九个阶段都齐了" in view or "能做的都做了" in view, (
                 "启动页没有当前步"
@@ -2406,7 +2429,7 @@ def main() -> int:
                     "跳过步骤未在时间轴标记为未验证"
                 )
                 assert "未验证" in page.inner_text("#view .start-timeline")
-                # “已经具备 / 这次先不做”默认折叠，恢复入口在折叠面板里
+                # 恢复入口在右侧折叠列表
                 page.locator("#view details.start-fold summary").first.click()
                 page.wait_for_timeout(300)
                 unskip = page.locator(f'#view button[data-act="start.unskip"][data-key="{key}"]')
@@ -2425,8 +2448,12 @@ def main() -> int:
             assert "流程卡" in view, "流程卡未渲染"
             assert "对象 360" in view, "流程卡没有切回对象 360 定位"
             assert "试点落地" in view, "流程卡缺少当前试点层摘要"
-            assert page.locator("#view .pc-group").count() == 3, "流程卡模块分组不完整"
-            assert page.locator("#view .pc-module").count() >= 10, "流程卡模块卡不足"
+            assert page.locator("#view .pc-nav-item").count() >= 10, "流程卡左侧模块导航不完整"
+            assert page.locator("#view .pc-module").count() == 1, "中间应只展示一个模块详情"
+            assert page.locator("#view .pc-related-col").count() == 1, "右侧操作/相关栏缺失"
+            page.locator('#view .pc-nav-item:has-text("KPI")').first.click()
+            page.wait_for_timeout(300)
+            assert "KPI" in page.inner_text("#view .pc-main"), "点击左侧条目未切换中间详情"
             for marker in (
                 "战略承接",
                 "权责矩阵",

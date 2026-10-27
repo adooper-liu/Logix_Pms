@@ -127,6 +127,7 @@ function wireChrome() {
         state.toolbox.step = '';
         state.toolbox.stage = null;
         state.toolbox.status = '';
+        state.toolbox.selected = '';
       }
       closeModal();
       go(a.dataset.view, { skipOrigin: true });

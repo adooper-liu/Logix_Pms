@@ -76,6 +76,14 @@ on('toolbox.goWorkflow', () => {
   closeAllModals();
   go('workflow');
 });
+on('toolbox.selectTool', ({ code }) => {
+  state.toolbox.selected = code || '';
+  RENDERERS.toolbox();
+});
+on('toolbox.clearSelected', () => {
+  state.toolbox.selected = '';
+  RENDERERS.toolbox();
+});
 on('toolbox.close', () => closeModal());
 on('toolbox.closeGoWorkflow', () => {
   closeAllModals();
@@ -107,7 +115,10 @@ const renderToolbox = () => {
   if ('stage' in params) tb.stage = Number(params.stage) || null;
   if ('step' in params) tb.step = params.step;
   if ('sort' in params) tb.sort = params.sort;
-  if ('open' in params) tb.open = params.open;
+  if ('open' in params) {
+    tb.open = params.open;
+    tb.selected = params.open || tb.selected;
+  }
   if ('status' in params) tb.status = params.status;
   // 顶栏搜索写入的是 toolboxKeyword，这里消费一次后转入 toolbox.q
   if (state.toolboxKeyword) {
@@ -133,8 +144,11 @@ const renderToolbox = () => {
       hasQuery ? POST('/tools/match', { ...payload, problem: tb.q || null, limit: 8 })
         : Promise.resolve(null),
       GET('/workflow/stages'),
-    ]).then(([meta, groups, catalog, match, stages]) => ({
-      meta, groups, catalog, match, stages,
+      tb.selected
+        ? GET('/tools/' + encodeURIComponent(tb.selected)).catch(() => null)
+        : Promise.resolve(null),
+    ]).then(([meta, groups, catalog, match, stages, detail]) => ({
+      meta, groups, catalog, match, stages, detail,
     })),
     (d) => paint(d));
 };
@@ -153,7 +167,6 @@ function paint(d) {
   const catalogHits = (d.catalog.hits || []).filter(filterHit);
   const matchHits = d.match ? (d.match.hits || []).filter(filterHit) : null;
   const hasQuery = !!(tb.q || tb.scenario || tb.stage || tb.step);
-  const scoreByCode = new Map((matchHits || []).map((hit) => [hit.tool.code, hit]));
 
   const scenarioChips = scenarios.map((scenario) => `
     <button class="tb-qchip${tb.scenario === scenario.code ? ' on' : ''}"
@@ -188,17 +201,6 @@ function paint(d) {
       <span><b>${esc(stage.stage_name)}</b><small>${esc(stage.stage_goal || '')}</small></span>
     </button>`).join('');
 
-  const catalogCards = catalogHits.length
-    ? catalogHits.map((hit) => toolCard(
-      scoreByCode.get(hit.tool.code) || hit,
-      meta,
-      {
-        showFit: hasQuery,
-        level: filter && filter.meta ? filter.meta[hit.tool.code] : null,
-      },
-    )).join('')
-    : '<div class="empty">没有符合条件的工具。清空问题或四象限筛选后再试。</div>';
-
   const filterBanner = filter
     ? `<div class="note mb between">
         <div>只显示 <b>${esc(filter.label)}</b> 的推荐工具（${filter.codes.length} 个），
@@ -207,7 +209,6 @@ function paint(d) {
       </div>` : '';
 
   const hasFilter = tb.q || tb.scenario || (tb.categories || []).length || tb.stage || tb.step;
-  const showCatalog = !filter;
   const toolCount = filter ? filter.codes.length : d.catalog.hits.length;
   const sortOptions = [
     ['fit', '按适配度'],
@@ -226,6 +227,14 @@ function paint(d) {
         <option value="ARCHIVED"${tb.status === 'ARCHIVED' ? ' selected' : ''}>已归档</option>
       </select>` : '';
 
+  const detail = d.detail;
+  const toolNav = catalogHits.map((hit) => `
+    <button class="tb-nav-item${tb.selected === hit.tool.code ? ' on' : ''}"
+      data-act="toolbox.selectTool" data-code="${esc(hit.tool.code)}">
+      <span class="tb-nav-name">${esc(hit.tool.name)}</span>
+      <span class="tiny">${esc(hit.tool.category_label || '')}</span>
+    </button>`).join('') || '<div class="tiny muted">没有工具</div>';
+
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
@@ -233,7 +242,6 @@ function paint(d) {
           <span class="module-badge">问题驱动 · 验证标准</span></h2>
           <div class="desc">工具箱回答「该用什么、为什么、怎么验证」；知识库回答「有没有案例、模板和参考」</div></div>
         <div class="gap">
-          ${statusOptions}
           ${canWrite() ? '<button class="btn btn-p" data-act="toolbox.newTool">+ 新建工具</button>' : ''}
           <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>
         </div>
@@ -241,55 +249,59 @@ function paint(d) {
       ${filterBanner}
     </div>
 
-    <div class="tb-layout">
-      <main>
-        <section class="card tb-hero">
-          <div class="between mb">
-            <div><h3 style="margin:0">① 我遇到了什么问题？${
-              tipHelp('描述问题或点选痛点。系统按「问题匹配 + 场景 + 使用证据」排序，'
-                + '而不是按工具属性分类，也不是让你在工具卡里自己找。')}</h3></div>
-            <span class="tag t-blu">四象限是辅助筛选</span>
-          </div>
-          <div class="tb-match">
-            <input id="toolQ" class="sel" style="flex:1;min-width:260px"
-              value="${esc(tb.q)}"
-              placeholder="例如：审批节点太多，一个采购单要走五个人，周期总是超期">
-            <button class="btn btn-p" data-act="toolbox.match">匹配工具</button>
-            ${hasFilter ? '<button class="btn btn-g" data-act="toolbox.clear">清空</button>' : ''}
-          </div>
-          <div class="tb-chips"><span class="tiny">快捷痛点：</span>${scenarioChips}</div>
-          <div class="tb-result-head">
-            <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}${
-              tipHelp('先描述一个问题，或点选上方快捷痛点。系统会按「问题匹配 + 场景 + 使用证据」'
-                + '排序；没有输入时显示等待状态，不会用默认排序假装已经匹配。')}</h3>
-            ${d.match ? `<span class="tiny">已按适配度排序 · ${matchHits.length} 个工具匹配</span>` : ''}
-            <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
-          </div>
-          <div class="tb-cards">${matchCards}</div>
-        </section>
+    <div class="tb-shell">
+      <aside class="tb-nav-col">
+        <div class="card tb-nav-card">
+          <h3>快捷痛点</h3>
+          <div class="tb-chips">${scenarioChips}</div>
+          <h3 class="mt">工具四象限</h3>
+          <div class="tb-quads">${categoryRows}</div>
+          <h3 class="mt">五阶段</h3>
+          <div class="tb-stage-list">${stageLinks}</div>
+          <h3 class="mt">全部工具（${catalogHits.length}）</h3>
+          <div class="tb-tool-nav">${toolNav}</div>
+        </div>
+      </aside>
 
-        ${showCatalog ? `
-        <section class="card">
-          <div class="between mb">
-            <div><h3 style="margin:0">② 全部工具（${catalogHits.length}）${
-              tipHelp('四象限是工具天然属性，只用于辅助筛选和缩小范围；'
-                + '主排序仍由问题、场景和使用证据决定。')}</h3></div>
-          </div>
-          <div class="tb-cards">${catalogCards}</div>
-        </section>` : ''}
+      <main class="tb-main">
+        ${detail
+          ? `<div class="card tb-detail-card">${toolDetailHtml(detail)}</div>`
+          : `<section class="card tb-hero">
+              <div class="between mb">
+                <div><h3 style="margin:0">① 我遇到了什么问题？${
+                  tipHelp('描述问题或点选痛点。系统按「问题匹配 + 场景 + 使用证据」排序，'
+                    + '而不是按工具属性分类，也不是让你在工具卡里自己找。')}</h3></div>
+                <span class="tag t-blu">左侧四象限是辅助筛选</span>
+              </div>
+              <div class="tb-match">
+                <input id="toolQ" class="sel" style="flex:1;min-width:260px"
+                  value="${esc(tb.q)}"
+                  placeholder="例如：审批节点太多，一个采购单要走五个人，周期总是超期">
+                <button class="btn btn-p" data-act="toolbox.match">匹配工具</button>
+                ${hasFilter ? '<button class="btn btn-g" data-act="toolbox.clear">清空</button>' : ''}
+              </div>
+              <div class="tb-result-head">
+                <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}${
+                  tipHelp('先描述一个问题，或点选左侧快捷痛点。系统会按「问题匹配 + 场景 + 使用证据」'
+                    + '排序；没有输入时显示等待状态，不会用默认排序假装已经匹配。')}</h3>
+                ${d.match ? `<span class="tiny">已按适配度排序 · ${matchHits.length} 个工具匹配</span>` : ''}
+                <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
+              </div>
+              <div class="tb-cards">${matchCards}</div>
+            </section>`}
       </main>
 
       <aside class="tb-side">
         <div class="card">
-          <h3>工具四象限（辅助筛选）</h3>
-          <div class="desc">工具天然属性，用于缩小范围，不替代问题匹配</div>
-          <div class="tb-quads">${categoryRows}</div>
+          <h3>${detail ? '工具操作' : '匹配与操作'}</h3>
+          ${detail
+            ? `<div class="gap" style="flex-wrap:wrap">${toolDetailActions(detail, true)}</div>`
+            : `<div class="desc">在中间输入问题，或从左侧工具列表选择。</div>
+               <div class="gap">
+                 <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤</a>
+               </div>`}
         </div>
-        <div class="card">
-          <h3>与五阶段工作流打通</h3>
-          <div class="desc">工具会主动出现在工作流对应步骤；点阶段可筛选</div>
-          <div class="tb-stage-list">${stageLinks}</div>
-        </div>
+        ${statusOptions ? `<div class="card"><h3>维护状态</h3>${statusOptions}</div>` : ''}
         <div class="card">
           <h3>求真校验</h3>
           <div class="desc">每个工具都应能回答：主张、证据、适用条件、反证、维护人</div>
@@ -303,11 +315,6 @@ function paint(d) {
         </div>
       </aside>
     </div>`;
-
-  if (tb.open && tb.open !== state.toolbox_opened) {
-    state.toolbox_opened = tb.open;
-    openToolByCode(tb.open);
-  }
 }
 
 function toolCard(hit, meta, options = {}) {
@@ -404,7 +411,7 @@ async function openToolByCode(code, keepPrevious) {
   }
 }
 
-function paintTool(t) {
+function toolDetailHtml(t) {
   const usage = t.usage || {};
   const usageText = usage.used
     ? `已用 ${usage.used} 次 · 有效 ${usage.effective} 次（${num(usage.rate, 0)}%）`
@@ -425,14 +432,6 @@ function paintTool(t) {
     ? steps.map((step) => `<span class="tag t-blu">${esc(step.step_no)} ${esc(step.name)}</span>`).join(' ')
     : '<span class="tiny muted">还没有步骤契约引用这个工具</span>';
   state.toolboxCurrent = t;
-  const stepCtx = state.toolbox.step;
-  const applyButton = stepCtx
-    ? `<button class="btn btn-p" data-act="toolbox.applyStep" data-code="${esc(t.code)}">
-         用到步骤 ${esc(stepCtx)}</button>`
-    : '';
-  const canEdit = canWrite() && ['DRAFT', 'IN_REVIEW'].includes(t.status);
-  const canReview = canManage() && t.status === 'IN_REVIEW';
-  const canArchive = canManage() && t.status !== 'ARCHIVED';
   const statusTone = {
     DRAFT: 't-gry', IN_REVIEW: 't-yel', PUBLISHED: 't-blu',
     VERIFIED: 't-grn', ARCHIVED: 't-gry',
@@ -470,7 +469,7 @@ function paintTool(t) {
          <tbody>${planRows}</tbody></table>`
     : '';
 
-  openModal(t.name + (t.alias ? ' · ' + t.alias : ''), `
+  return `
     <div class="gap mb" style="flex-wrap:wrap">
       <span class="tag t-blu">${esc(t.category_label || t.category)}</span>
       <span class="tag ${statusTone}">${esc(t.status_label || t.status)}</span>
@@ -505,8 +504,21 @@ function paintTool(t) {
     <h3 class="mt">相关案例 / 模板 / 知识</h3>
     ${knowledgeHtml}
     ${usageTable}
-    ${plansTable}`,
-    `<button class="btn btn-g" data-act="toolbox.close">关闭</button>
+    ${plansTable}`;
+}
+
+function toolDetailActions(t, inline = false) {
+  const stepCtx = state.toolbox.step;
+  const applyButton = stepCtx
+    ? `<button class="btn btn-p" data-act="toolbox.applyStep" data-code="${esc(t.code)}">
+         用到步骤 ${esc(stepCtx)}</button>`
+    : '';
+  const canEdit = canWrite() && ['DRAFT', 'IN_REVIEW'].includes(t.status);
+  const canReview = canManage() && t.status === 'IN_REVIEW';
+  const canArchive = canManage() && t.status !== 'ARCHIVED';
+  return `${inline
+    ? '<button class="btn btn-g" data-act="toolbox.clearSelected">返回匹配</button>'
+    : '<button class="btn btn-g" data-act="toolbox.close">关闭</button>'}
      ${applyButton}
      ${canWrite() ? `<button class="btn btn-g" data-act="toolbox.planTool"
        data-code="${esc(t.code)}">加入使用计划</button>` : ''}
@@ -521,7 +533,13 @@ function paintTool(t) {
      ${canArchive ? `<button class="btn btn-g" data-act="toolbox.archiveTool"
        data-code="${esc(t.code)}">归档</button>` : ''}
      <button class="btn btn-g" data-act="toolbox.goKnowledge"
-       data-code="${esc(t.code)}">在知识库查看</button>`, true, { replace: true });
+       data-code="${esc(t.code)}">在知识库查看</button>`;
+}
+
+function paintTool(t) {
+  state.toolboxCurrent = t;
+  openModal(t.name + (t.alias ? ' · ' + t.alias : ''),
+    toolDetailHtml(t), toolDetailActions(t), true, { replace: true });
 }
 
 async function openToolApply(code) {

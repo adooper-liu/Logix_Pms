@@ -121,17 +121,35 @@ button.bpmn-lint-item:last-child{border-bottom:none}
 .bpmn-node-row:last-child{border-bottom:none}
 
 /* ===== 流程卡：对象 360 ===== */
-.pc-group{margin-bottom:16px}
-.pc-group-hd{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:11.5px;
-  font-weight:700;letter-spacing:.05em;color:var(--sub-2);text-transform:uppercase}
-.pc-group-hd::before{content:"";width:4px;height:14px;border-radius:3px;
-  background:linear-gradient(180deg,var(--brand),var(--purple))}
-.pc-pilot{margin-bottom:16px}
+.pc-shell{display:grid;grid-template-columns:200px minmax(0,1fr) 300px;gap:16px;
+  align-items:start}
+.pc-side{position:sticky;top:0}
+.pc-main{min-width:0}
+.pc-related-col{position:sticky;top:0;display:flex;flex-direction:column;gap:12px}
+.pc-related-col .card{margin-bottom:0}
+.pc-nav{padding:10px}
+.pc-nav-group{font-size:10.5px;letter-spacing:.8px;color:var(--sub-2);padding:10px 8px 4px}
+.pc-nav-item{display:flex;align-items:center;gap:8px;width:100%;border:0;
+  background:transparent;color:var(--sub);font:inherit;font-size:12.5px;
+  text-align:left;padding:7px 8px;border-radius:8px;cursor:pointer}
+.pc-nav-item:hover{background:var(--panel-3);color:var(--text)}
+.pc-nav-item.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.pc-nav-dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+.pc-nav-dot.ok{background:var(--ok)}
+.pc-nav-dot.todo{background:var(--warn)}
+.pc-nav-label{flex:1}
+.pc-nav-count{font-size:11px;color:var(--sub-2)}
+.pc-pilot .between{flex-wrap:wrap;gap:10px}
+.pc-pilot .btn{white-space:nowrap}
 .pc-pilot h3{font-size:14px}
 .pc-pilot .pipe{margin-top:10px}
-.pc-module{min-height:120px;margin-bottom:0}
+.pc-module{min-height:180px;margin-bottom:0}
 .pc-empty{margin:10px 0 0;padding:10px 12px;border:1px dashed var(--brand-line);
   background:var(--brand-softer);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text)}
+@media(max-width:1180px){
+  .pc-shell{grid-template-columns:1fr}
+  .pc-side,.pc-related-col{position:static}
+}
 
 /* ===== PCF 架构草稿向导 ===== */
 .pcf-tree{max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:10px;
@@ -552,8 +570,9 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
 .start-chain{margin-top:14px;font-size:12.5px;color:var(--sub);line-height:1.65;letter-spacing:.2px}
 .start-shell{display:grid;grid-template-columns:210px minmax(0,1fr) 280px;
   gap:16px;align-items:start;margin-top:16px}
-.start-side,.start-aside{position:sticky;top:0}
-.start-aside{display:flex;flex-direction:column;gap:12px}
+.start-side{position:sticky;top:0;display:grid;gap:12px}
+.start-aside{position:sticky;top:0;display:flex;flex-direction:column;gap:12px}
+.start-side .card,.start-aside .card{margin-bottom:0}
 .start-center{min-width:0;display:flex;flex-direction:column;gap:14px}
 .start-nav{padding:10px}
 .start-nav-layer{font-size:10.5px;letter-spacing:.8px;color:var(--sub-2);padding:10px 8px 4px}
@@ -561,13 +580,13 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
   background:transparent;color:var(--sub);font:inherit;font-size:12.5px;
   text-align:left;padding:7px 8px;border-radius:8px;cursor:pointer}
 .start-nav-item:hover{background:var(--panel-3);color:var(--text)}
+.start-nav-item.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.start-nav-item.on .nav-dot{background:var(--brand)}
 .nav-dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:var(--sub-2)}
 .nav-dot.ok{background:var(--ok)}
 .nav-dot.warn{background:var(--warn)}
 .nav-dot.gray{background:var(--line-strong)}
 .nav-dot.purple{background:var(--purple)}
-.start-block-hd{display:flex;align-items:center;gap:8px;padding:2px 2px 0}
-.start-block-hd b{font-size:14px}
 .start-q{padding:16px}
 .start-q-hd{display:flex;align-items:flex-start;gap:10px}
 .start-q-no{width:32px;height:32px;flex:0 0 32px;border-radius:9px;display:inline-flex;
@@ -703,10 +722,16 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
 .start-map-line b{color:var(--text);margin-right:4px}
 
 /* ===== 场景驱动知识库 ===== */
-.kb-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
+.kb-layout{display:grid;grid-template-columns:210px minmax(0,1fr) 320px;gap:18px;align-items:start}
 .kb-layout > main{min-width:0}
-.kb-side{display:grid;gap:18px;position:sticky;top:82px}
-@media(max-width:1180px){.kb-layout{grid-template-columns:1fr}.kb-side{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kb-nav{position:sticky;top:0;display:grid;gap:12px}
+.kb-nav .card{margin-bottom:0}
+.kb-side{display:grid;gap:18px;position:sticky;top:0}
+@media(max-width:1180px){
+  .kb-layout{grid-template-columns:1fr}
+  .kb-nav,.kb-side{position:static}
+  .kb-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media(max-width:760px){.kb-side{grid-template-columns:1fr}}
 
 .kb-scenario{background:linear-gradient(135deg,var(--panel),var(--brand-softer));border-left:4px solid var(--brand)}
@@ -808,10 +833,24 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
 }
 
 /* ===== 问题驱动工具箱 ===== */
-.tb-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
-.tb-layout > main{min-width:0}
-.tb-side{display:grid;gap:18px;position:sticky;top:82px}
-@media(max-width:1180px){.tb-layout{grid-template-columns:1fr}.tb-side{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tb-shell{display:grid;grid-template-columns:210px minmax(0,1fr) 300px;gap:18px;align-items:start}
+.tb-nav-col{position:sticky;top:0}
+.tb-main{min-width:0}
+.tb-side{display:flex;flex-direction:column;gap:14px;position:sticky;top:0}
+.tb-nav-card{padding:12px}
+.tb-nav-item{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;
+  border:0;background:transparent;padding:6px 8px;border-radius:8px;cursor:pointer;
+  font:inherit;color:var(--text)}
+.tb-nav-item:hover{background:var(--panel-3)}
+.tb-nav-item.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.tb-nav-name{font-size:12.5px}
+.tb-tool-nav{display:grid;gap:2px;max-height:320px;overflow:auto;margin-top:6px}
+.tb-detail-card{padding:18px 20px}
+@media(max-width:1180px){
+  .tb-shell{grid-template-columns:1fr}
+  .tb-nav-col,.tb-side{position:static}
+  .tb-side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media(max-width:760px){.tb-side{grid-template-columns:1fr}}
 
 .tb-hero{background:linear-gradient(135deg,var(--panel),var(--brand-softer));border-left:4px solid var(--brand)}

@@ -6,7 +6,7 @@
 
 import { esc, dtShort, tipHelp } from '../core/format.js';
 import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
-import { renderAsync, go } from '../core/router.js';
+import { renderAsync, go, RENDERERS } from '../core/router.js';
 import { GET, POST, DEL } from '../core/api.js';
 import { state } from '../core/state.js';
 
@@ -280,11 +280,6 @@ function questionCard({ id, no, title, map, status, answer, chips, extra, action
     </div>`;
 }
 
-function blockHeader(tag, title, desc) {
-  return `<div class="start-block-hd"><span class="tag t-blu">${tag}</span>
-    <b>${title}</b><span class="tiny muted">${desc}</span></div>`;
-}
-
 function viewButton(label, view, cls = 'btn btn-g') {
   return `<button class="${cls}" data-act="start.go" data-view="${esc(view)}">${esc(label)}</button>`;
 }
@@ -301,8 +296,9 @@ function navDot(step) {
   return `<span class="nav-dot ${RAIL_TONE[step.status] || 'gray'}"></span>`;
 }
 
-function navItem(target, label, step) {
-  return `<button class="start-nav-item" data-act="start.jump" data-target="${target}">
+function navItem(target, label, step, active) {
+  return `<button class="start-nav-item${active ? ' on' : ''}"
+    data-act="start.selectQ" data-q="${target}">
     ${navDot(step)}<span>${esc(label)}</span></button>`;
 }
 
@@ -448,7 +444,8 @@ function paint(data) {
         + '这里不是项目当前层。当前阶段和状态见下方「展开当前阶段工作区」。')}`
       : '全局证据进度：九个阶段都已具备或标记为本次不做。',
     extra: current
-      ? `<details class="start-subfold" id="pilot-current-stage">
+      ? `<details class="start-subfold" id="pilot-current-stage"${
+        state.start.openStage ? ' open' : ''}>
           <summary><span>展开当前阶段工作区</span>
             <span class="tiny muted">${esc(current.title)} · ${esc(current.status_label)}</span>
           </summary>
@@ -489,21 +486,30 @@ function paint(data) {
   const q8Step = {
     status: data.pilot_confirmed ? 'READY' : data.pilot_gate_open ? 'IN_PROGRESS' : 'NOT_STARTED',
   };
+  const activeQ = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8']
+    .includes(state.start.activeQ) ? state.start.activeQ : 'q1';
   const nav = `
     <div class="card start-nav">
       <div class="start-nav-layer">地图层</div>
-      ${navItem('q1', 'Q1 要什么', strategy)}
-      ${navItem('q2', 'Q2 有什么', arch)}
-      ${navItem('q3', 'Q3 还缺什么', q3Step)}
+      ${navItem('q1', 'Q1 要什么', strategy, activeQ === 'q1')}
+      ${navItem('q2', 'Q2 有什么', arch, activeQ === 'q2')}
+      ${navItem('q3', 'Q3 还缺什么', q3Step, activeQ === 'q3')}
       <div class="start-nav-layer">骨架层</div>
-      ${navItem('q4', 'Q4 做什么', arch)}
-      ${navItem('q5', 'Q5 输入什么', arch)}
+      ${navItem('q4', 'Q4 做什么', arch, activeQ === 'q4')}
+      ${navItem('q5', 'Q5 输入什么', arch, activeQ === 'q5')}
       <div class="start-nav-layer">执行层</div>
-      ${navItem('q6', 'Q6 用什么', design)}
-      ${navItem('q7', 'Q7 输出什么', current || { status: 'READY' })}
-      ${navItem('q8', 'Q8 下一步', q8Step)}
+      ${navItem('q6', 'Q6 用什么', design, activeQ === 'q6')}
+      ${navItem('q7', 'Q7 输出什么', current || { status: 'READY' }, activeQ === 'q7')}
+      ${navItem('q8', 'Q8 下一步', q8Step, activeQ === 'q8')}
+    </div>
+    <div class="card start-aside-card">
+      <h3>三层与页面</h3>
+      <div class="start-map-line"><b>地图层</b>战略目标 → 企业流程地图 → 差距</div>
+      <div class="start-map-line"><b>骨架层</b>PCF / 流程地图 → 组织与人员 / 设计器</div>
+      <div class="start-map-line"><b>执行层</b>设计器 / 工具箱 → 当前阶段 → 十层单页 / 项目</div>
     </div>`;
 
+  const qCards = { q1, q2, q3, q4, q5, q6, q7, q8 };
   const gateCard = pilotGateCard(data);
   const aside = `
     <div class="card start-aside-card">
@@ -535,12 +541,8 @@ function paint(data) {
       </div>
       <div class="tiny muted mt">按问题取用，不预设绑定。</div>
     </div>
-    <div class="card start-aside-card">
-      <h3>三层与页面</h3>
-      <div class="start-map-line"><b>地图层</b>战略目标 → 企业流程地图 → 差距</div>
-      <div class="start-map-line"><b>骨架层</b>PCF / 流程地图 → 组织与人员 / 设计器</div>
-      <div class="start-map-line"><b>执行层</b>设计器 / 工具箱 → 当前阶段 → 十层单页 / 项目</div>
-    </div>`;
+    ${doneList(done)}
+    ${upcomingList(upcoming)}`;
 
   viewEl().innerHTML = `
     <div class="card page-head">
@@ -566,16 +568,7 @@ function paint(data) {
     ${railCard}
     <div class="start-shell">
       <aside class="start-side">${nav}</aside>
-      <main class="start-center">
-        ${blockHeader('地图层', '统一认知', '定方向、定差距')}
-        ${q1}${q2}${q3}
-        ${blockHeader('骨架层', '统一语言', '定口径、定边界、定责任')}
-        ${q4}${q5}
-        ${blockHeader('执行层', '逐层推进', '定方法、留证据、过退出门')}
-        ${q6}${q7}
-        ${q8}
-        ${doneList(done)}${upcomingList(upcoming)}
-      </main>
+      <main class="start-center">${qCards[activeQ] || q1}</main>
       <aside class="start-aside">${aside}</aside>
     </div>`;
 }
@@ -584,20 +577,36 @@ function paint(data) {
 
 on('start.go', ({ view }) => go(view));
 
+on('start.selectQ', ({ q }) => {
+  if (!q) return;
+  state.start.activeQ = q;
+  state.start.openStage = false;
+  RENDERERS.start();
+});
+
 on('start.jump', ({ target }) => {
-  if (target === 'q7') {
-    const details = document.getElementById('pilot-current-stage');
-    if (details) details.open = true;
+  if (target && /^q[1-8]$/.test(target)) {
+    state.start.activeQ = target;
+    state.start.openStage = target === 'q7';
+    RENDERERS.start();
+    setTimeout(() => {
+      const el = document.getElementById(target);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+    return;
   }
   const el = document.getElementById(target);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 on('start.openCurrentStage', () => {
-  const details = document.getElementById('pilot-current-stage');
-  if (details) details.open = true;
-  const el = document.getElementById('q7');
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  state.start.activeQ = 'q7';
+  state.start.openStage = true;
+  RENDERERS.start();
+  setTimeout(() => {
+    const el = document.getElementById('q7');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 50);
 });
 
 on('start.guidedPcf', () => {
