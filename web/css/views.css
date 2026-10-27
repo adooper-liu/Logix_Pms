@@ -323,6 +323,9 @@ button.tree-item{width:100%;text-align:left;font:inherit;color:inherit;backgroun
   padding:1px 5px;border-radius:4px}
 .map-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .map-go{color:var(--brand);font-size:12px;font-weight:600;white-space:nowrap}
+.map-go-btn{border:0;background:none;padding:0;font:inherit;color:var(--brand);
+  font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
+.map-go-btn:hover{text-decoration:underline}
 .map-row:hover .map-go{text-decoration:underline}
 .map-bench-pills{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
 .map-bench-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;

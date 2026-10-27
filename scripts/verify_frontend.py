@@ -271,6 +271,14 @@ def main() -> int:
             assert len(after) > len(before), f"面包屑未增长：{before!r} → {after!r}"
             assert page.inner_text("#view").count("Owner:") > 0
 
+        def map_enter_button() -> None:
+            goto("map")
+            before = page.inner_text(".crumb")
+            page.click('#view .map-go-btn:has-text("进入") >> nth=0')
+            page.wait_for_timeout(700)
+            after = page.inner_text(".crumb")
+            assert len(after) > len(before), f"「进入」按钮没有下钻：{before!r} → {after!r}"
+
         # 流程详情里的配套文件入口：L4 叶子节点 → 管理标准文件
         def map_documents_entry() -> None:
             goto("map")
@@ -2934,6 +2942,7 @@ def main() -> int:
         check("设计器→流程执行", designer_to_execution)
         check("项目详情→流程执行", project_to_execution)
         check("地图下钻", map_drill)
+        check("地图「进入」按钮", map_enter_button)
         check("架构树计数", map_tree_counts)
         check("流程详情配套文件入口", map_documents_entry)
         check("对标框架切换", benchmark_switch)

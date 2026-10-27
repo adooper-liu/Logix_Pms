@@ -214,7 +214,9 @@ const renderMap = () => {
             ${n.level === 3 && canWrite()
               ? `<a class="link" data-act="map.startProject" data-id="${n.id}"
                 data-name="${esc(n.name)}">立项</a> · ` : ''}
-            ${hasKids ? '进入 ›' : '详情 ›'}
+            <button class="map-go-btn" type="button" data-act="map.row"
+              data-code="${esc(n.code)}" data-kids="${hasKids ? '1' : '0'}">${
+              hasKids ? '进入 ›' : '详情 ›'}</button>
           </td>
         </tr>`;
     }).join('') || emptyRow(7, improvementOnly
