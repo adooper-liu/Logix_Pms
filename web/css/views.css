@@ -432,9 +432,18 @@ a.kpi.stat:hover{border-color:var(--brand);box-shadow:var(--shadow-hover);transf
 @media(max-width:900px){.donut-note{max-width:none;margin-left:0}}
 
 /* ===== 五阶段项目工作台：只读阶段骨架 + 当前阶段工作区 + 右侧门槛 ===== */
-.wb-progress{padding:14px 16px}
+.wb-progress{padding:14px 12px;margin-bottom:0}
 .wb-progress-list{display:flex;align-items:center;gap:8px;list-style:none;
   overflow-x:auto;padding:2px 0 4px}
+.wb-progress-vertical{flex-direction:column;align-items:stretch;overflow:visible;gap:0;
+  padding:0}
+.wb-progress-vertical .wb-stage-node{width:100%}
+.wb-progress-vertical .wb-stage-link{width:100%;border-radius:10px;align-items:flex-start;
+  padding:8px 10px}
+.wb-progress-vertical .wb-stage-link b{font-size:12.5px}
+.wb-progress-vertical .wb-stage-link > span:last-child{flex:1;min-width:0}
+.wb-progress-vertical .wb-connector{flex:0 0 14px;min-width:0;width:2px;height:14px;
+  margin-left:21px}
 .wb-stage-node{flex:0 0 auto}
 .wb-stage-link{display:flex;align-items:center;gap:10px;padding:8px 13px;cursor:pointer;
   border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--panel);
@@ -460,7 +469,9 @@ a.kpi.stat:hover{border-color:var(--brand);box-shadow:var(--shadow-hover);transf
 .wb-connector{flex:1 0 18px;min-width:18px;height:2px;background:var(--line);list-style:none}
 .wb-stage-node.complete + .wb-connector{background:var(--ok)}
 
-.wb-layout{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:18px;align-items:start}
+.wb-layout{display:grid;grid-template-columns:220px minmax(0,1fr) 330px;gap:16px;
+  align-items:start}
+.wb-stage-side{position:sticky;top:0}
 .wb-main{margin-bottom:0;padding:0;overflow:hidden}
 .wb-stage-head{padding:20px 22px;border-bottom:1px solid var(--line-soft)}
 .wb-stage-head h2{font-size:18px;margin:8px 0 6px}
@@ -562,7 +573,7 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
 
 @media(max-width:1100px){
   .wb-layout{grid-template-columns:1fr}
-  .wb-side{position:static}
+  .wb-side,.wb-stage-side{position:static}
 }
 @media(max-width:720px){
   .wb-meta{grid-template-columns:1fr}

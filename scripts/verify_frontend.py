@@ -481,6 +481,9 @@ def main() -> int:
             assert "项目工作台" in view, "工作台不是默认页签"
             nodes = page.eval_on_selector_all("#view .wb-stage-node", "els => els.length")
             assert nodes == 5, f"阶段骨架应为 5 个节点：{nodes}"
+            assert page.locator("#view .wb-stage-side .wb-stage-node").count() == 5, (
+                "阶段导航没有落在左侧栏"
+            )
             assert "阶段退出门槛" in view, "工作台缺少退出门槛"
             assert page.locator("#view .wb-timeline .wb-tl-item").count() >= 1, (
                 "当前阶段没有竖向时间线"

@@ -264,10 +264,13 @@ function paintWorkbench(d, wf) {
   const prev = data.previous;
   const next = data.next;
   viewEl().innerHTML = `${head}
-    <nav class="card wb-progress" aria-label="项目阶段">
-      <ol class="wb-progress-list">${stageNav}</ol>
-    </nav>
     <div class="wb-layout">
+      <aside class="wb-stage-side">
+        <nav class="card wb-progress" aria-label="项目阶段">
+          <div class="wb-eyebrow">阶段</div>
+          <ol class="wb-progress-list wb-progress-vertical">${stageNav}</ol>
+        </nav>
+      </aside>
       <main class="card wb-main">
         <div class="wb-stage-head">
           <span class="wb-pulse">${readOnly ? '只读快照' : '当前决策：' + esc(stage ? stage.summary : '')}</span>
