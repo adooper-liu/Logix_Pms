@@ -176,6 +176,9 @@ canvas{max-width:100%}
 .page-head h2{font-size:16px}
 .page-head .desc{margin-bottom:0}
 .seg{display:inline-flex;background:var(--panel-3);border-radius:var(--radius-sm);padding:3px;gap:2px}
+.cockpit-tabs{padding:8px 12px;margin-bottom:18px}
+.cockpit-tabs .seg{display:flex;width:100%;overflow-x:auto}
+.cockpit-tabs .seg button{flex:1;min-width:84px}
 .seg button{border:none;background:transparent;color:var(--sub);font-family:inherit;
   font-size:12.5px;padding:6px 13px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .seg button.on{background:var(--panel);color:var(--text);font-weight:600;box-shadow:var(--shadow-sm)}

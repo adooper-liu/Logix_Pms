@@ -261,7 +261,7 @@ const renderProcessCard = () => {
       );
       const kpiCard = moduleCard(
         'KPI', c.kpis.length,
-        '<button class="btn-sm" data-act="process_card.go" data-view="monitor">运营监控</button>',
+        '<button class="btn-sm" data-act="process_card.go" data-view="monitor">运营驾驶舱</button>',
         c.kpis.length ? `<table class="tbl"><tbody>${kpiRows}</tbody></table>` : '',
         c.kpis.length ? '' : '年度经营计划需承接 ≥1 项战略指标 → 去关联 KPI',
       );

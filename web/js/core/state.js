@@ -31,12 +31,13 @@ export const state = {
   knowledge: {
     type: '', sort: 'recent', keyword: '', tag: '', page: 1,
     scenario: '', stage: null, step: '', status: '', tool: '',
+    navSection: 'problem',
   },
   pcf: {
     framework: 'APQC_PCF', frameworks: null, tree: null, treeFramework: null,
     expanded: new Set(), selectedId: null, keyword: '',
   },
-  monitor: { status: '', tab: 'overview', kind: '', period: '', miningProcess: null },
+  monitor: { status: '', tab: 'kpi', kind: '', period: '', miningProcess: null },
   strategy: { year: new Date().getFullYear() },
   dataGov: null,
   processCard: { processId: null, activeModule: 'strategy' },
@@ -55,20 +56,20 @@ export const state = {
 };
 
 export const TITLES = {
-  dashboard: '管理驾驶舱',
   map: '企业流程地图',
   workflow: '五阶段标准工作流',
   projects: '流程项目组合',
   execution: '流程执行',
   toolbox: '方法论工具箱',
   designer: '流程设计器',
-  monitor: '运营监控与KPI',
+  monitor: '运营驾驶舱',
   strategy: '战略目标',
   data: '数据治理',
   start: '开始使用',
   pilot: '十层单页',
   process_card: '流程卡',
   authorization: '授权矩阵',
+  dashboard: '运营驾驶舱',
   knowledge: '流程知识库',
   pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',

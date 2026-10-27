@@ -7,8 +7,9 @@ import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
 import { metricHelp } from '../core/metrics.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
+import { cockpitTabBar } from '../core/cockpit.js';
 
-/* ============================================================ 7. 运营监控与KPI */
+/* ============================================================ 7. 运营驾驶舱：KPI / 异常 / 工作量 / 过程挖掘 */
 
 on('monitor.tab', ({ tab }) => setMonitorTab(tab));
 on('monitor.status', (_data, el) => setMonitorStatus(el.value));
@@ -51,28 +52,42 @@ on('monitor.goExecution', () => go('execution'));
 const renderMonitor = () => {
   const params = urlParams();
   if (params.tab) state.monitor.tab = params.tab;
+  // 旧默认 overview 已并入 KPI；总览由 dashboard 承担。
+  const tab = state.monitor.tab === 'overview' ? 'kpi' : (state.monitor.tab || 'kpi');
+  state.monitor.tab = tab;
+  const needKpi = tab === 'kpi';
+  const needExceptions = tab === 'exceptions' || needKpi;
+  const needWorkload = tab === 'workload';
+  const needMining = tab === 'mining';
   const qs = state.monitor.status ? '?status=' + state.monitor.status : '';
+  const miningPromise = needMining
+    ? GET('/execution/processes')
+      .then(async (processes) => {
+        const pid = state.monitor.miningProcess || (processes[0] ? processes[0].id : null);
+        state.monitor.miningProcess = pid;
+        const mining = pid
+          ? await GET('/execution/mining?process_id=' + pid).catch(() => null)
+          : null;
+        return { processes, mining };
+      })
+      .catch(() => ({ processes: [], mining: null }))
+    : Promise.resolve({ processes: [], mining: null });
   return renderAsync('monitor',
     () => Promise.all([
       GET('/monitor/kpi-radar'),
-      GET('/monitor/exceptions' + qs),
+      needExceptions ? GET('/monitor/exceptions' + qs) : Promise.resolve([]),
       GET('/monitor/exceptions/summary'),
       GET('/monitor/meta'),
-      GET('/workload/summary' + (state.monitor.period ? '?period=' + state.monitor.period + '-01' : '')),
-      GET('/workload/meta'),
-      GET('/monitor/improvement-candidates'),
-      GET('/workforce/forecast?months=3').catch(() => null),
-      canManage() ? GET('/workforce/balance').catch(() => null) : Promise.resolve(null),
-      GET('/execution/processes')
-        .then(async (processes) => {
-          const pid = state.monitor.miningProcess || (processes[0] ? processes[0].id : null);
-          state.monitor.miningProcess = pid;
-          const mining = pid
-            ? await GET('/execution/mining?process_id=' + pid).catch(() => null)
-            : null;
-          return { processes, mining };
-        })
-        .catch(() => ({ processes: [], mining: null })),
+      needWorkload
+        ? GET('/workload/summary' + (state.monitor.period
+          ? '?period=' + state.monitor.period + '-01' : ''))
+        : Promise.resolve(null),
+      needWorkload ? GET('/workload/meta') : Promise.resolve(null),
+      needKpi ? GET('/monitor/improvement-candidates') : Promise.resolve([]),
+      needWorkload ? GET('/workforce/forecast?months=3').catch(() => null) : Promise.resolve(null),
+      needWorkload && canManage()
+        ? GET('/workforce/balance').catch(() => null) : Promise.resolve(null),
+      miningPromise,
     ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates, forecast, balance, miningData]) => ({
       radar, exceptions, summary, meta, workload, workloadMeta, candidates, forecast, balance,
       processes: miningData.processes, mining: miningData.mining,
@@ -81,7 +96,7 @@ const renderMonitor = () => {
       state.monitorRadar = d.radar;
       state.monitorMeta = d.meta;
       state.workloadMeta = d.workloadMeta;
-      const tab = state.monitor.tab || 'overview';
+      const tab = state.monitor.tab || 'kpi';
       const s = d.summary;
       const dimColor = {
         EFFICIENCY: 'var(--brand)', QUALITY: 'var(--ok)',
@@ -223,7 +238,13 @@ const renderMonitor = () => {
 
       state.monitorTrend = { trend, periods };
 
-      const wl = d.workload;
+      const wl = d.workload || {
+        period: '',
+        totals: {
+          demand_minutes: 0, available_minutes: 0, actual_minutes: 0, utilization: null,
+        },
+        standards: [], capacity: [], actual: [],
+      };
       state.monitorWorkload = wl;
       const hours = (minutes) => num((minutes || 0) / 60, 1);
       const periodValue = state.monitor.period
@@ -466,7 +487,9 @@ const renderMonitor = () => {
               <tbody>${balanceRows}</tbody>
             </table>
           </div>
-        </div>
+        </div>`;
+
+      const miningPane = `
         <div class="card">
           <div class="between mb">
             <div><h3 style="margin:0">流程挖掘</h3>
@@ -482,14 +505,6 @@ const renderMonitor = () => {
               <th>平均周期</th><th>平均实际工时</th></tr></thead>
             <tbody>${miningRows}</tbody>
           </table>
-        </div>`;
-
-      const tabs = `
-        <div class="seg">
-          <button class="${tab === 'overview' ? 'on' : ''}" data-act="monitor.tab" data-tab="overview">概览</button>
-          <button class="${tab === 'kpi' ? 'on' : ''}" data-act="monitor.tab" data-tab="kpi">KPI 明细</button>
-          <button class="${tab === 'exceptions' ? 'on' : ''}" data-act="monitor.tab" data-tab="exceptions">异常台账</button>
-          <button class="${tab === 'workload' ? 'on' : ''}" data-act="monitor.tab" data-tab="workload">工作量</button>
         </div>`;
 
       const overview = `
@@ -609,7 +624,7 @@ const renderMonitor = () => {
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between">
-            <div><h2>运营监控<span class="module-badge">运营结果 · KPI 与异常</span></h2>
+            <div><h2>运营驾驶舱<span class="module-badge">KPI · 异常 · 工作量 · 过程挖掘</span></h2>
               <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
                 · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>
             <div class="gap">
@@ -618,13 +633,15 @@ const renderMonitor = () => {
               ${canManage() ? '<button class="btn btn-g" data-act="monitor.newKpi">+ 新建 KPI</button>' : ''}
             </div>
           </div>
-          <div class="mt">${tabs}</div>
+          <div class="mt">${cockpitTabBar(tab)}</div>
         </div>
-        ${tab === 'kpi' ? kpiPane
+        ${tab === 'kpi' ? `${overview}${kpiPane}`
           : tab === 'exceptions' ? excPane
-            : tab === 'workload' ? workloadPane : overview}`;
+            : tab === 'workload' ? workloadPane
+              : tab === 'mining' ? miningPane
+                : `${overview}${kpiPane}`}`;
 
-      if (tab === 'overview') {
+      if (tab === 'kpi' || !['exceptions', 'workload', 'mining'].includes(tab)) {
         drawRadar(d.radar);
         drawOverallTrend(trend, periods);
       }
@@ -634,8 +651,8 @@ const renderMonitor = () => {
 };
 
 function setMonitorTab(tab) {
-  state.monitor.tab = tab;
-  setUrlState('monitor', { tab }, { push: false });
+  state.monitor.tab = tab === 'overview' ? 'kpi' : tab;
+  setUrlState('monitor', { tab: state.monitor.tab }, { push: false });
   RENDERERS.monitor();
 }
 

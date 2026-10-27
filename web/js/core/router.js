@@ -47,8 +47,9 @@ export function go(view, options = {}) {
   }
   ensureExpertVisible(view);
   state.view = view;
+  const activeView = view === 'monitor' ? 'dashboard' : view;
   document.querySelectorAll('.nav a').forEach((a) => {
-    a.classList.toggle('active', a.dataset.view === view);
+    a.classList.toggle('active', a.dataset.view === activeView);
   });
   document.getElementById('pageTitle').textContent = TITLES[view] || view;
   // 先把上下文写进 URL，再渲染：视图的 loader 会同步读取 urlParams()，

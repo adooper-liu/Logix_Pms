@@ -159,10 +159,10 @@ function completionCard(data) {
         : `九个阶段都齐了 ${data.ready_count}/${data.total}`}</h3>
       <div class="desc">${skipped
         ? `其中 ${skipped} 个阶段标了“这次先不做”；进入运营后仍可回到本页恢复并补齐。`
-        : '进入运营监控与流程卡持续运行；后续改善走同一条改善链，改完发布新版本。'}</div>
+        : '进入运营驾驶舱与流程卡持续运行；后续改善走同一条改善链，改完发布新版本。'}</div>
       <div class="gap">
-        <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
-        <button class="btn btn-g" data-act="start.go" data-view="monitor">运营监控</button>
+        <button class="btn btn-p" data-act="start.go" data-view="dashboard">运营驾驶舱（总览）</button>
+        <button class="btn btn-g" data-act="start.go" data-view="monitor">运营驾驶舱（KPI）</button>
         <button class="btn btn-g" data-act="start.go" data-view="process_card">流程卡</button>
       </div>
     </div>`;
@@ -536,7 +536,7 @@ function paint(data) {
         <button class="btn-sm" data-act="start.go" data-view="toolbox">方法工具箱</button>
         <button class="btn-sm" data-act="start.go" data-view="authorization">授权矩阵</button>
         <button class="btn-sm" data-act="start.go" data-view="designer">流程设计器</button>
-        <button class="btn-sm" data-act="start.go" data-view="monitor">运营监控</button>
+        <button class="btn-sm" data-act="start.go" data-view="monitor">运营驾驶舱</button>
         <button class="btn-sm" data-act="start.go" data-view="knowledge">知识库</button>
       </div>
       <div class="tiny muted mt">按问题取用，不预设绑定。</div>

@@ -5,6 +5,7 @@ import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, go } from '../core/router.js';
 import { GET } from '../core/api.js';
+import { cockpitTabBar } from '../core/cockpit.js';
 
 /* ============================================================ 1. 管理驾驶舱 */
 
@@ -228,14 +229,15 @@ const renderDashboard = () => renderAsync('dashboard',
     viewEl().innerHTML = `
       <div class="card page-head">
         <div class="between">
-          <div><h2>管理驾驶舱<span class="module-badge">全局概览</span></h2>
-            <div class="desc">先看需要关注的事，再看项目推进</div></div>
+          <div><h2>运营驾驶舱<span class="module-badge">总览</span></h2>
+            <div class="desc">当前角色、核心指标、改善优先级与阶段分布</div></div>
           <a class="link-btn" data-act="dashboard.goProjects">项目组合 →</a>
         </div>
         <div class="grid g4 stat-row">${kpis}</div>
         <div class="meta-line">${meta}</div>
       </div>
 
+      ${cockpitTabBar('overview')}
       ${homeHtml}
       ${nextActionsHtml}
 

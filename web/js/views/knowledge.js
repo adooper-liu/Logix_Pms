@@ -35,17 +35,25 @@ const SCENARIO_ICON = {
 const TYPE_ORDER = ['CASE', 'TEMPLATE', 'METHOD', 'TOOL'];
 
 on('knowledge.open', ({ id }) => openKnowledge(Number(id)));
-on('knowledge.setType', ({ value }) => setK('type', value));
+on('knowledge.setType', ({ value }) => {
+  state.knowledge.navSection = 'type';
+  setK('type', value);
+});
 on('knowledge.setSort', (_data, el) => setK('sort', el.value));
 on('knowledge.setStatus', (_data, el) => setK('status', el.value));
-on('knowledge.setStage', (_data, el) => setK('stage', el.value ? Number(el.value) : null));
+on('knowledge.setStage', (_data, el) => {
+  state.knowledge.navSection = 'stage';
+  setK('stage', el.value ? Number(el.value) : null);
+});
 on('knowledge.scenario', ({ code }) => {
+  state.knowledge.navSection = 'problem';
   state.knowledge.scenario = state.knowledge.scenario === code ? '' : code;
   state.knowledge.page = 1;
   syncKnowledgeUrl();
   RENDERERS.knowledge();
 });
 on('knowledge.stageLink', ({ stage }) => {
+  state.knowledge.navSection = 'stage';
   state.knowledge.stage = Number(stage) || null;
   state.knowledge.page = 1;
   state.knowledge.sort = 'match';
@@ -54,6 +62,7 @@ on('knowledge.stageLink', ({ stage }) => {
 });
 on('knowledge.match', () => {
   const input = document.getElementById('kbQ');
+  state.knowledge.navSection = 'problem';
   state.knowledge.keyword = input ? input.value.trim() : state.knowledge.keyword;
   state.knowledge.page = 1;
   if (!state.knowledge.scenario && state.knowledge.keyword.length < 2) {
@@ -211,7 +220,8 @@ function paint(d) {
 
   const hasFilter = k.scenario || k.keyword || k.type || k.status || k.stage || k.tag || k.tool;
   const stageLinks = (d.stages || []).map((stage) => `
-    <button class="kb-stage-link" data-act="knowledge.stageLink" data-stage="${stage.stage_no}">
+    <button class="kb-stage-link${k.stage === stage.stage_no ? ' on' : ''}"
+      data-act="knowledge.stageLink" data-stage="${stage.stage_no}">
       <span class="num">${stage.stage_no}</span>
       <span><b>${esc(stage.stage_name)}</b><small>${esc(stage.stage_goal || '')}${
         stage.knowledge_count ? ' · ' + stage.knowledge_count + ' 条推荐知识' : ''}</small></span>
@@ -305,17 +315,20 @@ function paint(d) {
 
     <div class="kb-layout">
       <aside class="kb-nav">
-        <div class="card">
-          <h3>按问题</h3>
-          <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
-        </div>
-        <div class="card">
-          <h3>按阶段</h3>
-          <div class="kb-stage-list">${stageLinks}</div>
-        </div>
-        <div class="card">
-          <h3>按类型</h3>
-          <div class="kb-chips">${typeChips}</div>
+        <div class="card kb-nav-card">
+          <details class="kb-nav-fold"${
+            k.navSection !== 'stage' && k.navSection !== 'type' ? ' open' : ''}>
+            <summary>按问题</summary>
+            <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
+          </details>
+          <details class="kb-nav-fold"${k.navSection === 'stage' ? ' open' : ''}>
+            <summary>按阶段</summary>
+            <div class="kb-stage-list">${stageLinks}</div>
+          </details>
+          <details class="kb-nav-fold"${k.navSection === 'type' ? ' open' : ''}>
+            <summary>按类型</summary>
+            <div class="kb-chips">${typeChips}</div>
+          </details>
         </div>
       </aside>
       <main>
@@ -507,6 +520,7 @@ function clearK() {
   state.knowledge = {
     type: '', sort: 'recent', keyword: '', tag: '', page: 1,
     scenario: '', stage: null, step: '', status: '', tool: '',
+    navSection: 'problem',
   };
   document.getElementById('searchInput').value = '';
   syncKnowledgeUrl();

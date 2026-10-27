@@ -22,7 +22,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 VIEWS = [
-    ("dashboard", "管理驾驶舱"),
+    ("dashboard", "运营驾驶舱"),
     ("start", "开始使用"),
     ("strategy", "战略目标"),
     ("map", "企业流程地图"),
@@ -33,7 +33,7 @@ VIEWS = [
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
     ("designer", "流程设计器"),
-    ("monitor", "运营监控与KPI"),
+    ("monitor", "运营驾驶舱"),
     ("data", "数据治理"),
     ("knowledge", "流程知识库"),
     ("execution", "流程执行"),
@@ -118,7 +118,11 @@ def main() -> int:
         # ---------------------------------------------------- 第一段：视图渲染
         print("── 视图渲染 ──")
         for view, _title in VIEWS:
-            page.click(f'.nav a[data-view="{view}"]')
+            if view == "monitor":
+                # 合并后侧栏只有一个「运营驾驶舱」，monitor 从 KPI 页签进入
+                page.evaluate("() => go('monitor', {params: {tab: 'kpi'}, skipOrigin: true})")
+            else:
+                page.click(f'.nav a[data-view="{view}"]')
             try:
                 page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
@@ -177,6 +181,12 @@ def main() -> int:
             goto("workflow")
             page.click(f'#view .wb-tabs button:has-text("{label}")')
             page.wait_for_timeout(600)
+
+        def goto_cockpit_tab(label: str) -> None:
+            """运营驾驶舱只有一个侧栏入口，其余页签从总览切。"""
+            goto("dashboard")
+            page.click(f'#view .cockpit-tabs button:has-text("{label}")')
+            page.wait_for_timeout(900)
 
         def pick_editable_design() -> None:
             """选一条可编辑、节点足够且含 n3 的流程，避免本地数据进入评审后自检失效。"""
@@ -1858,21 +1868,20 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
-        # 运营监控：KPI 明细 + 异常处理弹窗
+        # 运营驾驶舱：总览 + KPI / 异常 / 工作量 / 过程挖掘 页签
         def monitor() -> None:
-            goto("monitor")
-            page.click('#view .seg button:has-text("概览")')
-            page.wait_for_timeout(500)
-            view = page.inner_text("#view")
-            assert "流程健康度雷达" in view, "雷达图未渲染"
-            assert "整体达成率趋势" in view, "整体趋势图未渲染"
-            page.click('#view .seg button:has-text("KPI 明细")')
-            page.wait_for_timeout(600)
+            goto("dashboard")
+            page.wait_for_timeout(700)
+            assert page.inner_text("#pageTitle") == "运营驾驶舱"
+            assert "改善优先级" in page.inner_text("#view"), "总览缺少改善优先级"
+            page.click('#view .cockpit-tabs button:has-text("KPI")')
+            page.wait_for_timeout(1200)
             kpi_view = page.inner_text("#view")
-            assert "KPI 明细" in kpi_view, "KPI 明细未渲染"
-            assert "改善候选" in kpi_view, "KPI 明细缺少改善候选卡"
-            assert "红/黄/绿" in kpi_view, "KPI 明细缺少红黄绿状态列"
-            assert "全部类型" in kpi_view, "KPI 明细缺少类型筛选"
+            assert "流程健康度雷达" in kpi_view, "KPI 页签缺少雷达图"
+            assert "整体达成率趋势" in kpi_view, "KPI 页签缺少整体趋势"
+            assert "改善候选" in kpi_view, "KPI 页签缺少改善候选"
+            assert "红/黄/绿" in kpi_view, "KPI 页签缺少红黄绿状态列"
+            assert "全部类型" in kpi_view, "KPI 页签缺少类型筛选"
 
             # 定义卡：新建弹窗必须能填写口径、阈值与类型；编辑弹窗回填公式
             page.click('#view button:has-text("+ 新建 KPI")')
@@ -1901,7 +1910,7 @@ def main() -> int:
             page.wait_for_timeout(300)
 
             # 工作量：标准工时与产能必须能从标准需求算到负荷率
-            page.click('#view .seg button:has-text("工作量")')
+            page.click('#view .cockpit-tabs button:has-text("工作量")')
             page.wait_for_timeout(800)
             workload_view = page.inner_text("#view")
             assert "标准工时卡" in workload_view, "工作量页缺少标准工时卡"
@@ -1933,7 +1942,7 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
-            page.click('#view .seg button:has-text("异常台账")')
+            page.click('#view .cockpit-tabs button:has-text("异常")')
             page.wait_for_timeout(600)
             # 异常台账在最后一张表，行内才有「处理」按钮
             page.click('#view button:has-text("处理") >> nth=0')
@@ -1971,8 +1980,7 @@ def main() -> int:
                 return res.ok ? await res.json() : { error: await res.text() };
             }""")
             assert created.get("id"), created
-            goto("monitor")
-            page.click('#view .seg button:has-text("工作量")')
+            goto_cockpit_tab("工作量")
             page.wait_for_timeout(800)
 
             row = page.locator('#view tr:has-text("自检用标准工时")').first
@@ -2015,7 +2023,6 @@ def main() -> int:
             assert "标准 vs 实际" in workload_view, "工作量看板缺少标准 vs 实际"
             assert "瓶颈岗位" in workload_view, "工作量看板缺少瓶颈岗位"
             assert "未来 3 个月缺口" in workload_view, "工作量看板缺少预测"
-            assert "流程挖掘" in workload_view, "工作量看板缺少过程挖掘"
 
         # 数据治理：数据域/数据流登记与缺口概览
         def data_governance_view() -> None:
@@ -2184,7 +2191,7 @@ def main() -> int:
 
         # 登记异常（写入口）
         def exception_create() -> None:
-            goto("monitor")
+            goto_cockpit_tab("异常")
             page.click("text=+ 登记异常")
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(500)
@@ -2228,7 +2235,7 @@ def main() -> int:
 
         # 主题壳：切换后 data-theme 生效，Canvas 图表要跟着重绘
         def theme_switch() -> None:
-            goto("monitor")
+            goto_cockpit_tab("KPI")
             page.select_option("#themeSel", "slate")
             page.wait_for_timeout(400)
             assert page.evaluate("document.documentElement.dataset.theme") == "slate"
@@ -2307,8 +2314,8 @@ def main() -> int:
             goto("dashboard")
             page.click("#view a.kpi.stat >> nth=2")
             page.wait_for_timeout(900)
-            assert page.inner_text("#pageTitle") == "运营监控与KPI"
-            assert "异常台账" in page.inner_text("#view")
+            assert page.inner_text("#pageTitle") == "运营驾驶舱"
+            assert "异常事件台账" in page.inner_text("#view")
 
         # 战略目标：年度目标与「目标 → 流程 → KPI」承接
         def strategy_view() -> None:
