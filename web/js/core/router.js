@@ -228,21 +228,6 @@ export function onSearch(value) {
         new_objective: state.projects.newObjective || '',
       }, { push: false });
       RENDERERS.projects();
-    } else if (v === 'knowledge') {
-      state.knowledge.keyword = value;
-      state.knowledge.page = 1;
-      setUrlState('knowledge', {
-        type: state.knowledge.type,
-        tag: state.knowledge.tag,
-        q: value,
-        sort: state.knowledge.sort,
-        scenario: state.knowledge.scenario,
-        stage: state.knowledge.stage || '',
-        step: state.knowledge.step,
-        status: state.knowledge.status,
-        tool: state.knowledge.tool,
-      }, { push: false });
-      RENDERERS.knowledge();
     } else if (v === 'toolbox') {
       state.toolbox.q = value;
       state.toolboxKeyword = value;

@@ -1,80 +1,53 @@
-/* 视图：knowledge —— 场景驱动的知识工作台
+/* 模块：knowledge —— 知识资源（案例 / 模板）
  *
- * 页面首先回答「我现在想解决什么」，而不是展示文件分类。
- * 推荐依据是场景匹配 + 使用证据 + 工作流位置；浏览量只作为阅读统计。
+ * 知识库页面已并入「方法论工具箱」：这里保留资源卡片、详情弹窗、求真审核与
+ * 使用证据等 action，供工具箱和工作流复用。旧的 #knowledge 链接会重定向。
  */
-import { esc, fmtDate, num, skeleton, tipHelp } from '../core/format.js';
+import { esc, fmtDate, num, skeleton } from '../core/format.js';
 import {
-  toast, openModal, closeModal, modalAlive, viewEl, on, confirmDialog,
+  toast, openModal, closeModal, modalAlive, on, confirmDialog,
 } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
+import { RENDERERS, go, urlParams } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, PATCH, POST } from '../core/api.js';
+import { STATUS_TONE, TYPE_TONE, syncToolboxUrl } from './shared/knowledge_resources.js';
 
 /* ============================================================ 8. 流程知识库 */
 
-const STATUS_TONE = {
-  DRAFT: 't-gry',
-  IN_REVIEW: 't-yel',
-  PUBLISHED: 't-blu',
-  VERIFIED: 't-grn',
-  ARCHIVED: 't-gry',
-};
-const TYPE_TONE = {
-  CASE: 't-red',
-  TEMPLATE: 't-blu',
-  METHOD: 't-pur',
-  TOOL: 't-yel',
-  BEST_PRACTICE: 't-pur',
-  STANDARD: 't-gry',
-};
-const SCENARIO_ICON = {
-  FLOW: '🔀', CYCLE: '⏱️', ERROR: '⚠️', RACI: '👤', COST: '💰', STANDARD: '📐',
-};
-const TYPE_ORDER = ['CASE', 'TEMPLATE', 'METHOD', 'TOOL'];
+export const TYPE_ORDER = ['CASE', 'TEMPLATE'];
 
 on('knowledge.open', ({ id }) => openKnowledge(Number(id)));
 on('knowledge.setType', ({ value }) => {
-  state.knowledge.navSection = 'type';
-  setK('type', value);
-});
-on('knowledge.setSort', (_data, el) => setK('sort', el.value));
-on('knowledge.setStatus', (_data, el) => setK('status', el.value));
-on('knowledge.setStage', (_data, el) => {
-  state.knowledge.navSection = 'stage';
-  setK('stage', el.value ? Number(el.value) : null);
-});
-on('knowledge.scenario', ({ code }) => {
-  state.knowledge.navSection = 'problem';
-  state.knowledge.scenario = state.knowledge.scenario === code ? '' : code;
+  state.knowledge.type = value;
   state.knowledge.page = 1;
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
+  state.toolbox.section = 'resources';
+  state.toolbox.navSection = 'type';
+  syncToolboxUrl();
+  RENDERERS.toolbox();
 });
-on('knowledge.stageLink', ({ stage }) => {
-  state.knowledge.navSection = 'stage';
-  state.knowledge.stage = Number(stage) || null;
+on('knowledge.setSort', (_data, el) => {
+  state.knowledge.sort = el.value;
   state.knowledge.page = 1;
-  state.knowledge.sort = 'match';
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
+  state.toolbox.section = 'resources';
+  syncToolboxUrl();
+  RENDERERS.toolbox();
 });
-on('knowledge.match', () => {
-  const input = document.getElementById('kbQ');
-  state.knowledge.navSection = 'problem';
-  state.knowledge.keyword = input ? input.value.trim() : state.knowledge.keyword;
+on('knowledge.setStatus', (_data, el) => {
+  state.knowledge.status = el.value;
   state.knowledge.page = 1;
-  if (!state.knowledge.scenario && state.knowledge.keyword.length < 2) {
-    return toast('请先选一个痛点，或至少输入 2 个字描述问题', true);
-  }
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
+  state.toolbox.section = 'resources';
+  syncToolboxUrl();
+  RENDERERS.toolbox();
 });
-on('knowledge.clear', () => clearK());
 on('knowledge.page', ({ page }) => setKPage(Number(page)));
+on('knowledge.clearResourceTool', () => {
+  state.knowledge.tool = '';
+  state.knowledge.page = 1;
+  syncToolboxUrl();
+  RENDERERS.toolbox();
+});
 on('knowledge.new', () => newKnowledgeModal());
-on('knowledge.goWorkflow', () => go('workflow'));
 on('knowledge.goDocuments', () => go('deliverables', { params: { tab: 'document' }, push: true }));
 on('knowledge.close', () => closeModal());
 on('knowledge.openTool', ({ code }) => {
@@ -104,437 +77,29 @@ on('knowledge.migrateStandard', ({ id }) => openStandardMigration(Number(id)));
 on('knowledge.submitMigration', ({ id }) => submitStandardMigration(Number(id)));
 
 const renderKnowledge = () => {
-  const k = state.knowledge;
+  // 兼容旧链接：知识库已并入方法论工具箱，参数按 toolbox 的命名映射。
   const params = urlParams();
-  if ('scenario' in params) k.scenario = params.scenario;
-  if ('q' in params) k.keyword = params.q;
-  else if ('keyword' in params) k.keyword = params.keyword;
-  if ('stage' in params) k.stage = Number(params.stage) || null;
-  if ('step' in params) k.step = params.step;
-  if ('type' in params) k.type = params.type;
-  if ('sort' in params) k.sort = params.sort;
-  if ('status' in params) k.status = params.status;
-  if ('tag' in params) k.tag = params.tag;
-  if ('tool' in params) k.tool = params.tool;
-  if ('page' in params) k.page = Number(params.page) || 1;
-  // 从步骤/工具/搜索进入时，默认展开「按问题」，方便继续按场景筛选
-  if (params.step || params.tool || params.q) k.navSection = 'problem';
-
-  const qs = [];
-  if (k.type) qs.push('type=' + k.type);
-  if (k.tag) qs.push('tag=' + encodeURIComponent(k.tag));
-  if (k.keyword) qs.push('keyword=' + encodeURIComponent(k.keyword));
-  if (k.scenario) qs.push('scenario=' + encodeURIComponent(k.scenario));
-  if (k.stage) qs.push('stage_no=' + k.stage);
-  if (k.step) qs.push('step_no=' + encodeURIComponent(k.step));
-  if (k.status) qs.push('status=' + k.status);
-  if (k.tool) qs.push('tool_code=' + encodeURIComponent(k.tool));
-  qs.push('sort=' + k.sort, 'page=' + (k.page || 1), 'page_size=24');
-
-  const shouldRecommend = !!(k.scenario || k.keyword || k.stage || k.step);
-  return renderAsync('knowledge',
-    () => Promise.all([
-      GET('/knowledge?' + qs.join('&')),
-      GET('/knowledge/meta'),
-      GET('/workflow/stages'),
-      shouldRecommend
-        ? POST('/knowledge/recommend', {
-          problem: k.keyword || null,
-          scenario_codes: k.scenario ? [k.scenario] : [],
-          stage_no: k.stage || null,
-          step_no: k.step || null,
-          limit: 6,
-        })
-        : Promise.resolve(null),
-      canManage() ? GET('/knowledge/archive-candidates?limit=8').catch(() => []) : Promise.resolve([]),
-      canManage() ? GET('/knowledge/effect-stats').catch(() => null) : Promise.resolve(null),
-      canManage() ? GET('/knowledge/standard-candidates').catch(() => []) : Promise.resolve([]),
-    ]).then(([page, meta, stages, recommend, archiveCandidates, effectStats, standardCandidates]) =>
-      ({ page, meta, stages, recommend, archiveCandidates, effectStats, standardCandidates })),
-    (d) => paint(d));
+  const mapped = {};
+  const keyword = params.q || params.keyword;
+  if (keyword) mapped.q = keyword;
+  ['scenario', 'stage', 'step'].forEach((key) => {
+    if (params[key]) mapped[key] = params[key];
+  });
+  if (params.type) mapped.rtype = params.type;
+  if (params.sort) mapped.rsort = params.sort;
+  if (params.status) mapped.rstatus = params.status;
+  if (params.page) mapped.rpage = params.page;
+  if (params.tool) mapped.rtool = params.tool;
+  mapped.section = params.section
+    || (keyword || params.scenario || params.step ? 'reco' : 'resources');
+  go('toolbox', { params: mapped, push: false, skipOrigin: true });
 };
-
-function paint(d) {
-  const k = state.knowledge;
-  const meta = d.meta;
-  state.knowledgeMeta = meta;
-  if (d.stages) state.wf = d.stages;
-  const stats = meta.stats || {};
-  const labels = meta.type_labels || {};
-  const statusLabels = meta.status_labels || {};
-  const scenarios = meta.scenarios || [];
-  const scenarioNames = Object.fromEntries(scenarios.map((s) => [s.code, s.name]));
-  if (k.status && !canManage()) k.status = '';
-
-  const scenarioButtons = scenarios.map((scenario) => `
-    <button class="kb-pain${k.scenario === scenario.code ? ' on' : ''}"
-      data-act="knowledge.scenario" data-code="${esc(scenario.code)}"
-      aria-pressed="${k.scenario === scenario.code ? 'true' : 'false'}">
-      <span class="ic">${SCENARIO_ICON[scenario.code] || '•'}</span>
-      <span><b>${esc(scenario.name)}</b><small>${esc(scenario.description || '')}</small></span>
-    </button>`).join('');
-
-  const reco = d.recommend;
-  const recoItems = reco
-    ? reco.items.filter((item) => !k.stage
-      || (item.matched_on || []).includes(`阶段 ${k.stage}`))
-    : [];
-  const recoHtml = reco
-    ? (recoItems.length
-      ? `<div class="kb-reco-head">为你推荐 <b>${recoItems.length}</b> 项
-          <span class="tiny">${
-            k.stage ? `仅显示命中阶段${k.stage}的知识与工具 · ` : ''
-          }按「场景匹配 + 使用证据 + 工作流位置」排序，浏览量不参与</span></div>
-        <div class="kb-reco-list">${recoItems.map((item) => recoCard(item, labels, statusLabels, scenarioNames)).join('')}</div>`
-      : `<div class="note">${k.stage
-        ? `阶段${k.stage}没有匹配到知识。可以看下方「全部资源」，或换一个阶段。`
-        : '没有匹配到知识。换一个痛点，或直接新建一条并走求真审核。'}</div>`)
-    : `<div class="kb-reco-empty">先选一个痛点，或在输入框描述你遇到的问题。
-        <span class="tiny">例：供应商交期经常延误，采购和仓储互相推</span></div>`;
-
-  const typeChips = [
-    `<button class="chip${!k.type ? ' on' : ''}" data-act="knowledge.setType" data-value="">全部</button>`,
-    ...TYPE_ORDER.filter((code) => labels[code]).map((code) =>
-      `<button class="chip${k.type === code ? ' on' : ''}" data-act="knowledge.setType"
-        data-value="${code}">${esc(labels[code])}</button>`),
-  ].join('');
-
-  const statusOptions = canManage()
-    ? `<select class="sel sel-sm" data-act="knowledge.setStatus">
-        <option value="">全部公开</option>
-        ${['VERIFIED', 'PUBLISHED', 'IN_REVIEW', 'DRAFT', 'ARCHIVED'].map((code) =>
-          `<option value="${code}"${k.status === code ? ' selected' : ''}>${
-            esc(statusLabels[code] || code)}</option>`).join('')}
-      </select>`
-    : '';
-
-  const stageOptions = (d.stages || []).map((stage) =>
-    `<option value="${stage.stage_no}"${k.stage === stage.stage_no ? ' selected' : ''}>`
-    + `阶段${stage.stage_no} ${esc(stage.stage_name)}</option>`).join('');
-
-  const cards = d.page.items.map((item) =>
-    cardHtml(item, labels, statusLabels, scenarioNames)).join('')
-    || '<div class="empty">没有符合条件的知识。换个场景或类型试试。</div>';
-
-  const pageSize = d.page.page_size || 24;
-  const pages = Math.max(1, Math.ceil(d.page.total / pageSize));
-  const current = Math.min(Math.max(1, d.page.page || k.page || 1), pages);
-  const pager = pages > 1 ? `
-    <div class="pager">
-      <button class="btn-sm" ${current <= 1 ? 'disabled' : ''}
-        data-act="knowledge.page" data-page="${current - 1}">上一页</button>
-      <span class="tiny">第 ${current} / ${pages} 页 · 共 ${d.page.total} 条</span>
-      <button class="btn-sm" ${current >= pages ? 'disabled' : ''}
-        data-act="knowledge.page" data-page="${current + 1}">下一页</button>
-    </div>` : '';
-
-  const hasFilter = k.scenario || k.keyword || k.type || k.status || k.stage || k.tag || k.tool;
-  const stageLinks = (d.stages || []).map((stage) => `
-    <button class="kb-stage-link${k.stage === stage.stage_no ? ' on' : ''}"
-      data-act="knowledge.stageLink" data-stage="${stage.stage_no}">
-      <span class="num">${stage.stage_no}</span>
-      <span><b>${esc(stage.stage_name)}</b><small>${esc(stage.stage_goal || '')}${
-        stage.knowledge_count ? ' · ' + stage.knowledge_count + ' 条推荐知识' : ''}</small></span>
-    </button>`).join('');
-
-  const archiveCandidates = d.archiveCandidates || [];
-  const archiveHtml = canManage() ? `
-        <div class="card">
-          <div class="between">
-            <h3 style="margin:0">归档候选</h3>
-            <span class="tag ${archiveCandidates.length ? 't-yel' : 't-gry'}">${
-              archiveCandidates.length}</span>
-          </div>
-          <div class="desc">超过 12 个月没有使用证据的公开知识。归档后不再进入列表与推荐，
-            记录仍然保留，便于追溯。</div>
-          ${archiveCandidates.length
-            ? `<div class="kb-archive-list">${archiveCandidates.map((item) => `
-                <div class="kb-archive-item">
-                  <div><b>${esc(item.title)}</b>
-                    <div class="tiny">${item.unused_days} 天未使用${
-                      item.last_used_at ? ' · 最近使用 ' + fmtDate(item.last_used_at) : ''}</div></div>
-                  <div class="gap">
-                    <button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>
-                    <button class="btn-sm" data-act="knowledge.archive" data-id="${item.id}">归档</button>
-                  </div>
-                </div>`).join('')}</div>`
-            : '<div class="tiny muted">暂无候选。长期未使用的条目会自动出现在这里。</div>'}
-        </div>` : '';
-
-  const effects = d.effectStats;
-  const effectHtml = canManage() && effects ? `
-        <div class="card">
-          <h3>使用效果</h3>
-          <div class="desc">只统计有使用证据的公开知识；按使用人回填的效果汇总</div>
-          <div class="grid g2 stat-row">
-            <div class="kpi stat"><div class="num">${effects.usage_total}</div>
-              <div class="lab">累计使用</div></div>
-            <div class="kpi stat"><div class="num">${
-              effects.effectiveness_rate === null || effects.effectiveness_rate === undefined
-                ? '—' : num(effects.effectiveness_rate, 0) + '<small>%</small>'}</div>
-              <div class="lab">有效率 · 有效 ${effects.effective_count}
-                / 部分 ${effects.partial_count} / 无效 ${effects.ineffective_count}</div></div>
-          </div>
-          ${effects.by_type.length ? `<div class="kb-eff-types">${effects.by_type.map((row) => `
-            <div class="kb-eff-row">
-              <span>${esc(row.type_label)}</span>
-              <span>${row.used_count} 次 · 有效率 ${
-                row.effectiveness_rate === null ? '—' : num(row.effectiveness_rate, 0) + '%'}</span>
-            </div>`).join('')}</div>` : ''}
-          ${effects.top_items.length ? `<div class="kb-eff-top">
-            <div class="tiny muted">使用最多</div>
-            ${effects.top_items.slice(0, 3).map((item) => `
-              <button class="kb-eff-item" data-act="knowledge.open" data-id="${item.id}">
-                <b>${esc(item.title)}</b>
-                <span>${item.used_count} 次 · 有效率 ${
-                  item.effectiveness_rate === null ? '—' : num(item.effectiveness_rate, 0) + '%'}</span>
-              </button>`).join('')}</div>`
-            : '<div class="tiny muted">还没有使用记录。用过后回填，统计才会积累。</div>'}
-        </div>` : '';
-
-  const standardCandidates = d.standardCandidates || [];
-  const standardHtml = canManage() && standardCandidates.length ? `
-        <div class="card">
-          <h3>旧制度迁移</h3>
-          <div class="desc">这些条目仍是 STANDARD 类型且已归档；确认归属流程后
-            可一键生成制度中心的标准文件草稿。</div>
-          <div class="kb-archive-list">${standardCandidates.map((item) => `
-            <div class="kb-archive-item">
-              <div><b>${esc(item.title)}</b>
-                <div class="tiny">${esc(item.summary || '')}</div></div>
-              <button class="btn-sm" data-act="knowledge.migrateStandard"
-                data-id="${item.id}">迁移</button>
-            </div>`).join('')}</div>
-        </div>` : '';
-
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div><h2>流程知识库<span class="module-badge">场景驱动 · 使用证据</span></h2>
-          <div class="desc">已收录 ${stats.total || 0} 条 · 已验证 ${stats.verified || 0} 条
-            · 待复核 ${stats.review_overdue || 0} 条 · 待审核 ${stats.pending_review || 0} 条</div></div>
-        <div class="gap">
-          <a class="link-btn" data-act="knowledge.goDocuments">制度中心 →</a>
-          <a class="link-btn" data-act="knowledge.goWorkflow">五阶段工作流 →</a>
-          ${canManage() ? `<button class="btn-sm" data-act="knowledge.manageScenarios">场景管理</button>
-            <button class="btn-sm" data-act="knowledge.showRecommendLogs">推荐日志</button>` : ''}
-          ${canWrite() ? '<button class="btn btn-p" data-act="knowledge.new">+ 新建条目</button>' : ''}
-        </div>
-      </div>
-    </div>
-
-    <div class="kb-layout">
-      <aside class="kb-nav">
-        <div class="card kb-nav-card">
-          <details class="kb-nav-fold"${
-            k.navSection !== 'stage' && k.navSection !== 'type' ? ' open' : ''}>
-            <summary>按问题</summary>
-            <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
-          </details>
-          <details class="kb-nav-fold"${k.navSection === 'stage' ? ' open' : ''}>
-            <summary>按阶段</summary>
-            <div class="kb-stage-list">${stageLinks}</div>
-          </details>
-          <details class="kb-nav-fold"${k.navSection === 'type' ? ' open' : ''}>
-            <summary>按类型</summary>
-            <div class="kb-chips">${typeChips}</div>
-          </details>
-        </div>
-      </aside>
-      <main>
-        <section class="card kb-scenario">
-          <div class="between mb">
-            <div><h3 style="margin:0">① 我先想解决什么？${
-              tipHelp('选痛点或描述问题。系统按场景匹配 + 使用证据 + 工作流位置推荐，'
-                + '浏览量只作为阅读统计，不是推荐依据。')}</h3></div>
-            <span class="tag t-blu">推荐依据：匹配度 + 证据</span>
-          </div>
-          <div class="kb-match">
-            <input id="kbQ" class="sel" style="flex:1;min-width:240px"
-              value="${esc(k.keyword)}"
-              placeholder="或自由描述问题，如：供应商交期经常延误，采购和仓储互相推">
-            <button class="btn btn-p" data-act="knowledge.match">按痛点匹配</button>
-            ${hasFilter ? '<button class="btn btn-g" data-act="knowledge.clear">清空</button>' : ''}
-          </div>
-          ${recoHtml}
-        </section>
-
-        <section class="card">
-          <div class="between mb">
-            <div><h3 style="margin:0">② 全部资源${
-              tipHelp('知识库只放可参考、可改编的案例、模板、方法与工具指南；'
-                + '强制制度已移到制度中心，避免把「必须遵守」和「可以参考」混在一起。')}</h3></div>
-            <div class="gap">
-              <select class="sel sel-sm" data-act="knowledge.setStage">
-                <option value="">全部阶段</option>${stageOptions}
-              </select>
-              <select class="sel sel-sm" data-act="knowledge.setSort">
-                <option value="match"${k.sort === 'match' ? ' selected' : ''}>按匹配度</option>
-                <option value="effect"${k.sort === 'effect' ? ' selected' : ''}>按使用效果</option>
-                <option value="recent"${k.sort === 'recent' ? ' selected' : ''}>按最近更新</option>
-              </select>
-              ${statusOptions}
-            </div>
-          </div>
-          ${k.tool ? `<div class="note mb">只显示关联工具 <b>${esc(k.tool)}</b> 的知识。
-            <button class="btn-sm" data-act="knowledge.clear">显示全部</button></div>` : ''}
-          <div class="grid g3 kb-grid">${cards}</div>
-          ${pager}
-        </section>
-
-        <section class="card kb-standard">
-          <div class="between">
-            <div><h3 style="margin:0">标准制度：已独立为制度中心</h3>
-              <div class="desc" style="margin:2px 0 0">制度是强制遵守，知识是可参考。
-                流程标准文件带生效状态、版本和适用范围。</div></div>
-            <button class="btn btn-g" data-act="knowledge.goDocuments">去制度中心 →</button>
-          </div>
-        </section>
-      </main>
-
-      <aside class="kb-side">
-        ${archiveHtml}
-        ${effectHtml}
-        ${standardHtml}
-        <div class="card">
-          <h3>每条知识的固定字段</h3>
-          <ul class="kb-fields">
-            <li>名称 / 类型 / 适用场景 / 不适用场景</li>
-            <li>主张 / 输入条件 / 步骤要点 / 输出物</li>
-            <li>使用证据（谁用过、效果如何）</li>
-            <li>维护人 / 版本 / 最后验证日期</li>
-            <li>关联工作流阶段 / 关联工具</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>入库求真审核</h3>
-          <div class="desc">主张 → 反证 → 证据 → 裁决；未通过审核不对外可见</div>
-          <div class="kb-audit">
-            <div>✓ <b>主张</b>：解决什么具体问题</div>
-            <div>✓ <b>适用条件</b>：什么时候该用</div>
-            <div>✓ <b>反证</b>：什么时候不该用</div>
-            <div>✓ <b>证据</b>：谁用过、效果如何</div>
-            <div>✓ <b>维护人</b>：谁负责复核</div>
-          </div>
-        </div>
-      </aside>
-    </div>`;
-}
-
-function recoCard(item, labels, statusLabels, scenarioNames) {
-  const isTool = item.kind === 'tool';
-  const rate = item.effectiveness_rate === null || item.effectiveness_rate === undefined
-    ? '暂无使用记录'
-    : `有效率 ${num(item.effectiveness_rate, 0)}%（${item.effective_count}/${item.used_count}）`;
-  const step = state.knowledge.step;
-  const openAction = isTool
-    ? `<button class="btn-sm" data-act="knowledge.openTool"
-        data-code="${esc(item.code)}">查看工具</button>`
-    : `<button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>`;
-  const applyAction = step
-    ? (isTool
-      ? `<button class="btn-sm" data-act="knowledge.applyToolStep"
-          data-code="${esc(item.code)}">用到 ${esc(step)}</button>`
-      : `<button class="btn-sm" data-act="knowledge.applyStep"
-          data-id="${item.id}">用到 ${esc(step)}</button>`)
-    : '';
-  return `
-    <div class="kb-reco-item">
-      <div class="kb-score ${item.match_level}">${num(item.score, 0)}</div>
-      <div class="kb-reco-body">
-        <div class="between">
-          <b>${esc(item.title)}</b>
-          <span>
-            <span class="tag ${TYPE_TONE[item.type] || 't-blu'}">${
-              esc(isTool ? '工具' : (labels[item.type] || item.type))}</span>
-            ${item.code ? `<span class="tiny">${esc(item.code)}</span>` : ''}
-            ${item.is_best_practice ? '<span class="tag t-grn">最佳实践</span>' : ''}
-          </span>
-        </div>
-        <p>${esc(item.summary)}</p>
-        <div class="kb-evidence">
-          ${item.scenarios.map((scenario) =>
-            `<span class="tag t-gry">${esc(scenario.name || scenarioNames[scenario.code] || '')}</span>`).join(' ')}
-          <span>${rate}</span>
-          <span>${esc(item.owner || '—')}</span>
-          ${item.review_overdue ? '<span class="tag t-yel">待复核</span>' : ''}
-        </div>
-        ${item.matched_on && item.matched_on.length
-          ? `<div class="tiny">命中：${item.matched_on.map(esc).join(' · ')}</div>` : ''}
-      </div>
-      <div class="kb-reco-act">
-        ${openAction}
-        ${applyAction}
-        ${!isTool && item.tool_code ? `<button class="btn-sm" data-act="knowledge.openTool"
-          data-code="${esc(item.tool_code)}">关联工具</button>` : ''}
-      </div>
-    </div>`;
-}
-
-function cardHtml(item, labels, statusLabels, scenarioNames) {
-  const rate = item.effectiveness_rate === null || item.effectiveness_rate === undefined
-    ? '暂无使用记录'
-    : `有效率 ${num(item.effectiveness_rate, 0)}%（${item.effective_count}/${item.used_count}）`;
-  const date = item.last_verified_at ? '验证 ' + fmtDate(item.last_verified_at)
-    : '更新 ' + fmtDate(item.updated_at || item.created_at);
-  return `
-    <button class="tool kb-card" type="button" data-act="knowledge.open" data-id="${item.id}">
-      <div class="between">
-        <span class="tag ${TYPE_TONE[item.type] || 't-blu'}">${esc(labels[item.type] || item.type)}</span>
-        <span class="tag ${STATUS_TONE[item.status] || 't-gry'}">${
-          esc(statusLabels[item.status] || item.status)}</span>
-      </div>
-      <h4>${esc(item.title)}</h4>
-      <p>${esc(item.summary)}</p>
-      <div class="kb-fit">${(item.scenario_names || []).map((name) =>
-        `<span>${esc(name)}</span>`).join('') || '<span>未标注场景</span>'}</div>
-      <div class="kb-evidence">
-        <span>${rate}</span>
-        ${item.is_best_practice ? '<span class="tag t-grn">最佳实践</span>' : ''}
-        ${item.review_overdue ? '<span class="tag t-yel">待复核</span>' : ''}
-      </div>
-      <div class="kb-meta"><span>${esc(item.owner || '—')}</span><span>${esc(date)}</span></div>
-    </button>`;
-}
-
-function syncKnowledgeUrl() {
-  const k = state.knowledge;
-  setUrlState('knowledge', {
-    scenario: k.scenario,
-    q: k.keyword,
-    type: k.type,
-    sort: k.sort,
-    page: k.page > 1 ? k.page : '',
-    stage: k.stage || '',
-    step: k.step || '',
-    status: k.status,
-    tag: k.tag,
-    tool: k.tool,
-  }, { push: false });
-}
-
-function setK(key, value) {
-  state.knowledge[key] = value;
-  state.knowledge.page = 1;
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
-}
 
 function setKPage(page) {
   state.knowledge.page = Math.max(1, page);
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
-}
-
-function clearK() {
-  state.knowledge = {
-    type: '', sort: 'recent', keyword: '', tag: '', page: 1,
-    scenario: '', stage: null, step: '', status: '', tool: '',
-    navSection: 'problem',
-  };
-  document.getElementById('searchInput').value = '';
-  syncKnowledgeUrl();
-  RENDERERS.knowledge();
+  state.toolbox.section = 'resources';
+  syncToolboxUrl();
+  RENDERERS.toolbox();
 }
 
 /* -------------------------------------------------- 详情与使用证据 */
@@ -649,7 +214,8 @@ async function openKnowledge(id) {
         <div class="field"><label>效果说明</label>
           <input id="kuNote" placeholder="如：审批时长下降 40%，连续 4 周稳定"></div>
         <div class="field"><label>关联工作流步骤（可选）</label>
-          <input id="kuStep" value="${esc(state.knowledge.step || (item.step_nos && item.step_nos[0]) || '')}"
+          <input id="kuStep" value="${esc(state.toolbox.step || state.knowledge.step
+            || (item.step_nos && item.step_nos[0]) || '')}"
             placeholder="如 2.1；从工作流步骤进入时会自动带上"></div>
         <div class="gap">
           <button class="btn btn-g" data-act="knowledge.saveUsage" data-id="${item.id}">保存使用记录</button>
@@ -689,14 +255,14 @@ async function saveUsage(id) {
     });
     toast('使用证据已记录');
     await openKnowledge(id);
-    if (state.view === 'knowledge') RENDERERS.knowledge();
+    if (state.view === 'toolbox') RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
 function openApplyStep(id) {
-  const step = state.knowledge.step;
+  const step = state.toolbox.step || state.knowledge.step;
   if (!step) return toast('请先从工作流步骤进入知识库', true);
   openModal('用到当前步骤', `
     <div class="note mb">记录一次使用证据，关联工作流步骤 <b>${esc(step)}</b>。
@@ -714,7 +280,7 @@ function openApplyStep(id) {
 }
 
 async function submitApplyStep(id) {
-  const step = state.knowledge.step;
+  const step = state.toolbox.step || state.knowledge.step;
   if (!step) return toast('步骤上下文已丢失，请重新从工作流进入', true);
   const outcome = document.getElementById('kaOutcome')?.value || 'EFFECTIVE';
   const note = document.getElementById('kaNote')?.value.trim() || null;
@@ -726,14 +292,14 @@ async function submitApplyStep(id) {
     });
     toast('已记录到步骤 ' + step);
     closeModal();
-    if (state.view === 'knowledge') RENDERERS.knowledge();
+    if (state.view === 'toolbox') RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
 function openApplyToolStep(code) {
-  const step = state.knowledge.step;
+  const step = state.toolbox.step || state.knowledge.step;
   if (!step) return toast('请先从工作流步骤进入知识库', true);
   openModal('用到当前步骤 · 工具', `
     <div class="note mb">记录一次工具使用证据，关联工作流步骤 <b>${esc(step)}</b>。</div>
@@ -751,7 +317,7 @@ function openApplyToolStep(code) {
 }
 
 async function submitApplyToolStep(code) {
-  const step = state.knowledge.step;
+  const step = state.toolbox.step || state.knowledge.step;
   if (!step) return toast('步骤上下文已丢失，请重新从工作流进入', true);
   const outcome = document.getElementById('ktaOutcome')?.value || 'EFFECTIVE';
   const note = document.getElementById('ktaNote')?.value.trim() || null;
@@ -763,7 +329,7 @@ async function submitApplyToolStep(code) {
     });
     toast('已记录到步骤 ' + step);
     closeModal();
-    if (state.view === 'knowledge') RENDERERS.knowledge();
+    if (state.view === 'toolbox') RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -774,7 +340,7 @@ async function submitForReview(id) {
     await POST('/knowledge/' + id + '/submit', {});
     toast('已提交审核');
     closeModal();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -785,7 +351,7 @@ async function reviewKnowledge(id, decision) {
     await POST('/knowledge/' + id + '/review', { decision });
     toast(decision === 'APPROVE' ? '已通过审核' : '已驳回，退回草稿');
     closeModal();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -801,7 +367,7 @@ async function archiveKnowledge(id) {
     await POST('/knowledge/' + id + '/archive', {});
     toast('已归档');
     closeModal();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -817,7 +383,7 @@ async function promoteKnowledge(id) {
     await POST('/knowledge/' + id + '/promote', {});
     toast('已晋升为最佳实践');
     closeModal();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -872,7 +438,7 @@ async function saveScenario(id) {
     });
     toast('场景已保存');
     await openScenarioManager();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -892,7 +458,7 @@ async function createScenario() {
     });
     toast('场景已新增');
     await openScenarioManager();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -966,7 +532,7 @@ async function submitStandardMigration(id) {
     });
     toast('已生成制度草稿 ' + result.document_code);
     closeModal();
-    RENDERERS.knowledge();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }
@@ -1133,8 +699,8 @@ async function submitKnowledge() {
     closeModal();
     toast('已提交求真审核');
     state.knowledge.status = 'IN_REVIEW';
-    syncKnowledgeUrl();
-    RENDERERS.knowledge();
+    syncToolboxUrl();
+    RENDERERS.toolbox();
   } catch (e) {
     toast(e.message, true);
   }

@@ -23,15 +23,17 @@ export const state = {
   toolbox: {
     q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '', status: '',
     selected: '',
+    /** 主区展开哪一块：reco = ① 问题匹配，resources = ② 全部资源，'' = 都折叠 */
+    section: 'reco',
+    /** 左侧折叠组：problem / stage / type / tools */
+    navSection: 'problem',
   },
   designer: {
     processId: null, processCode: null, model: null, analysis: null, tab: 'model',
     changes: null, changeMeta: null, raci: null, raciMeta: null, governanceRoles: null,
   },
   knowledge: {
-    type: '', sort: 'recent', keyword: '', tag: '', page: 1,
-    scenario: '', stage: null, step: '', status: '', tool: '',
-    navSection: 'problem',
+    type: '', sort: 'recent', page: 1, status: '', tool: '', tag: '', step: '',
   },
   pcf: {
     framework: 'APQC_PCF', frameworks: null, tree: null, treeFramework: null,
@@ -70,7 +72,7 @@ export const TITLES = {
   process_card: '流程卡',
   authorization: '授权矩阵',
   dashboard: '运营驾驶舱',
-  knowledge: '流程知识库',
+  knowledge: '方法论工具箱',
   pcf: 'PCF 分类框架',
   deliverables: '交付物与模板库',
   orgs: '组织与人员',

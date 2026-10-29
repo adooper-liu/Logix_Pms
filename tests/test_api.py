@@ -1144,15 +1144,15 @@ def test_knowledge_list_and_search(client):
     r = client.get(f"{API}/knowledge")
     assert r.status_code == 200
     # 标准制度已移出知识库，默认列表不再包含 STANDARD 条目
-    assert r.json()["total"] == 8
+    assert r.json()["total"] == 5
     assert all(i["type"] != "STANDARD" for i in r.json()["items"])
 
     bpr = client.get(f"{API}/knowledge", params={"methodology": "BPR"}).json()
     assert all(i["methodology"] == "BPR" for i in bpr["items"])
 
-    kw = client.get(f"{API}/knowledge", params={"keyword": "VSM"}).json()
+    kw = client.get(f"{API}/knowledge", params={"keyword": "RACI"}).json()
     assert kw["total"] >= 1
-    assert any("VSM" in i["title"] for i in kw["items"])
+    assert any("RACI" in i["title"] for i in kw["items"])
 
 
 def test_knowledge_tag_filter_and_cloud(client):

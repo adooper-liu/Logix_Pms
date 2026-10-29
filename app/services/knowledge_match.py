@@ -62,6 +62,8 @@ OUTCOME_LABELS = {
 REVIEW_DECISION_LABELS = {"APPROVE": "通过", "REJECT": "驳回"}
 
 VISIBLE_STATUSES = (KnowledgeStatus.PUBLISHED.value, KnowledgeStatus.VERIFIED.value)
+# 知识库只承载案例/模板；方法、工具指南已并入 tool 表。
+RESOURCE_TYPES = ("CASE", "TEMPLATE")
 
 HINT = (
     "推荐按「场景匹配 + 使用证据 + 工作流位置」排序，浏览量不参与排序。"
@@ -253,7 +255,7 @@ def _visible_query():
         )
         .where(
             KnowledgeItem.status.in_(VISIBLE_STATUSES),
-            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.type.in_(RESOURCE_TYPES),
         )
     )
 
@@ -408,7 +410,7 @@ def step_counts(db: Session, steps: Iterable[Tuple[int, str]]) -> Dict[Tuple[int
         .join(KnowledgeItem, KnowledgeItem.id == KnowledgeWorkflowLink.knowledge_id)
         .where(
             KnowledgeItem.status.in_(VISIBLE_STATUSES),
-            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.type.in_(RESOURCE_TYPES),
         )
     ).all()
     stage_ids: Dict[int, set] = {}
@@ -437,7 +439,7 @@ def knowledge_counts_by_tool(db: Session, codes: Iterable[str]) -> Dict[str, int
         .where(
             KnowledgeItem.tool_code.in_(wanted),
             KnowledgeItem.status.in_(VISIBLE_STATUSES),
-            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.type.in_(RESOURCE_TYPES),
         )
         .group_by(KnowledgeItem.tool_code)
     ).all()
@@ -454,7 +456,7 @@ def stage_counts(db: Session, stage_nos: Iterable[int]) -> Dict[int, int]:
         .join(KnowledgeItem, KnowledgeItem.id == KnowledgeWorkflowLink.knowledge_id)
         .where(
             KnowledgeItem.status.in_(VISIBLE_STATUSES),
-            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.type.in_(RESOURCE_TYPES),
             KnowledgeWorkflowLink.stage_no.in_(wanted),
         )
     ).all()
@@ -510,7 +512,7 @@ def effect_stats(db: Session) -> KnowledgeEffectStatsOut:
     """全局使用效果：按结果、类型和条目聚合，供运营面板使用。"""
     visible = (
         KnowledgeItem.status.in_(VISIBLE_STATUSES),
-        KnowledgeItem.type != "STANDARD",
+        KnowledgeItem.type.in_(RESOURCE_TYPES),
     )
     rows = db.execute(
         select(

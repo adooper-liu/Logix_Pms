@@ -33,9 +33,12 @@ def test_tool_detail_has_decision_fields_and_related_knowledge(client):
     assert detail["difficulty_label"] == "中"
     assert "CYCLE" in detail["scenario_codes"]
     assert detail["usage"]["used"] >= 3
-    assert detail["knowledge"], "VSM 没有关联知识"
-    assert detail["knowledge_count"] >= len(detail["knowledge"])
+    assert detail["content"], "VSM 的方法正文没有并入工具"
     assert detail["workflow_steps"], "VSM 没有被步骤契约引用"
+
+    raci = client.get(f"{API}/tools/RACI").json()
+    assert raci["knowledge"], "RACI 没有关联案例/模板"
+    assert raci["knowledge_count"] >= len(raci["knowledge"])
 
 
 def test_tool_match_by_scenario(client):
@@ -183,7 +186,7 @@ def test_tool_submission_review_and_direct_usage(client, manager_client, viewer_
 def test_step_context_boosts_contract_tool(client):
     with_step = client.post(
         f"{API}/tools/match",
-        json={"scenario_codes": ["CYCLE"], "step_no": "2.1", "limit": 10},
+        json={"scenario_codes": ["CYCLE"], "step_no": "2.1", "limit": 33},
     ).json()["hits"]
     sipoc = next(row for row in with_step if row["tool"]["code"] == "SIPOC")
     assert "步骤 2.1" in sipoc["matched_on"]

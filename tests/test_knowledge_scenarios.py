@@ -17,7 +17,7 @@ def _create_draft(client, **overrides):
     code = uuid.uuid4().hex[:6].upper()
     payload = {
         "title": f"知识测试-{code}",
-        "type": "METHOD",
+        "type": "CASE",
         "summary": "测试用知识摘要",
         "content": "测试正文：用于验证场景推荐与审核链路。",
         "claim": "解决流程责任不清的问题",
@@ -55,7 +55,8 @@ def test_scenarios_and_meta(client):
     assert len(meta["scenarios"]) == 6
     assert meta["stats"]["total"] >= 1
     assert meta["stats"]["verified"] >= 1
-    assert meta["type_labels"]["METHOD"] == "方法"
+    assert meta["type_labels"]["CASE"] == "案例"
+    assert meta["type_labels"]["TEMPLATE"] == "模板"
     assert meta["status_labels"]["VERIFIED"] == "已验证"
 
 
@@ -90,28 +91,23 @@ def test_primary_step_link(client):
         assert client.delete(f"{API}/knowledge/{item['id']}").status_code == 200
 
 
-def test_tool_guide_requires_existing_tool(client):
+def test_non_resource_types_are_rejected(client):
     base = {
-        "title": "工具指南测试",
-        "type": "TOOL",
-        "summary": "测试工具指南",
+        "title": "非资源类型测试",
+        "summary": "测试知识库只收案例/模板",
         "content": "正文",
-        "claim": "验证工具引用",
-        "applicable_when": "测试",
-        "not_applicable_when": "测试",
         "scenario_codes": ["FLOW"],
     }
-    missing = client.post(f"{API}/knowledge", json=base)
-    assert missing.status_code == 400, missing.text
-    assert "工具编码" in missing.json()["detail"]
+    for legacy_type in ("METHOD", "TOOL", "BEST_PRACTICE"):
+        rejected = client.post(f"{API}/knowledge", json={**base, "type": legacy_type})
+        assert rejected.status_code == 400, rejected.text
+        assert "方法论工具箱" in rejected.json()["detail"]
 
-    unknown = client.post(f"{API}/knowledge", json={**base, "tool_code": "NO-SUCH-TOOL"})
+    unknown = client.post(
+        f"{API}/knowledge", json={**base, "type": "CASE", "tool_code": "NO-SUCH-TOOL"}
+    )
     assert unknown.status_code == 400, unknown.text
     assert "不存在" in unknown.json()["detail"]
-
-    valid = client.post(f"{API}/knowledge", json={**base, "tool_code": "VSM"})
-    assert valid.status_code == 201, valid.text
-    assert client.delete(f"{API}/knowledge/{valid.json()['id']}").status_code == 200
 
 
 def test_usage_evidence_changes_score(client):
@@ -465,7 +461,7 @@ def test_best_practice_promotion_and_effect_stats(client, viewer_client):
         body = stats.json()
         assert body["usage_total"] >= 5
         assert any(row["id"] == item["id"] for row in body["top_items"])
-        assert any(row["type"] == "METHOD" for row in body["by_type"])
+        assert any(row["type"] == "CASE" for row in body["by_type"])
         assert viewer_client.get(f"{API}/knowledge/effect-stats").status_code == 403
         assert viewer_client.post(f"{API}/knowledge/{item['id']}/promote").status_code == 403
     finally:

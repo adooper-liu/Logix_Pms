@@ -24,6 +24,7 @@ class ToolOut(ORMModel):
     purpose: str
     when_to_use: str
     steps: List[str] = []
+    content: Optional[str] = None
     template_ref: Optional[str] = None
     pitfalls: Optional[str] = None
 
@@ -152,6 +153,7 @@ class ToolCreate(BaseModel):
     purpose: str = Field(min_length=1)
     when_to_use: str = Field(min_length=1)
     steps: List[str] = []
+    content: Optional[str] = None
     template_ref: Optional[str] = Field(default=None, max_length=200)
     pitfalls: Optional[str] = None
     scenario_codes: List[str] = []
@@ -171,6 +173,7 @@ class ToolUpdate(BaseModel):
     purpose: Optional[str] = None
     when_to_use: Optional[str] = None
     steps: Optional[List[str]] = None
+    content: Optional[str] = None
     template_ref: Optional[str] = Field(default=None, max_length=200)
     pitfalls: Optional[str] = None
     scenario_codes: Optional[List[str]] = None

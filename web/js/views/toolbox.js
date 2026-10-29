@@ -8,14 +8,39 @@ import {
   toast, openModal, closeModal, closeAllModals, modalAlive, viewEl, on, confirmDialog, promptDialog,
 } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
+import { renderAsync, go, RENDERERS, urlParams } from '../core/router.js';
 import { GET, POST, PATCH } from '../core/api.js';
 import { canWrite, canManage } from '../core/auth.js';
+import {
+  SCENARIO_ICON, relatedResourceCard, resourceCard, resourceManagerCards,
+  resourcePagerHtml, resourceQuery, syncToolboxUrl,
+} from './shared/knowledge_resources.js';
 
 /* ============================================================ 5. 方法论工具箱 */
 
+const NAV_SECTIONS = new Set(['problem', 'stage', 'type', 'tools']);
+
 on('toolbox.match', () => matchTools());
+on('toolbox.navSection', ({ section }) => {
+  // 左栏四个折叠区共用一套受控手风琴：点击展开自己并收起其他，
+  // 再点一次全部收起。不要依赖 <details> 的原生 toggle，否则状态不会
+  // 写回 navSection，重渲染后会出现多个折叠区同时展开。
+  if (!NAV_SECTIONS.has(section)) return;
+  const tb = state.toolbox;
+  tb.navSection = tb.navSection === section ? '' : section;
+  syncToolboxUrl();
+  RENDERERS.toolbox();
+});
+on('toolbox.section', ({ section }) => {
+  const tb = state.toolbox;
+  tb.section = tb.section === section ? '' : section;
+  if (tb.section === 'reco') tb.navSection = 'problem';
+  syncToolboxUrl();
+  RENDERERS.toolbox();
+});
 on('toolbox.quick', ({ scenario, query }) => {
+  state.toolbox.section = 'reco';
+  state.toolbox.navSection = 'problem';
   state.toolbox.scenario = state.toolbox.scenario === scenario ? '' : scenario;
   state.toolbox.q = state.toolbox.scenario ? (query || '') : '';
   state.toolbox.sort = 'fit';
@@ -32,19 +57,31 @@ on('toolbox.toggleCategory', ({ category }) => {
   if (current.has(category)) current.delete(category);
   else current.add(category);
   state.toolbox.categories = [...current];
+  state.toolbox.section = 'resources';
+  state.toolbox.navSection = 'type';
+  state.knowledge.type = 'TOOL';
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
 on('toolbox.stageLink', ({ stage }) => {
   state.toolbox.stage = Number(stage) || null;
   state.toolbox.sort = 'fit';
+  state.toolbox.section = 'resources';
+  state.toolbox.navSection = 'stage';
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
 on('toolbox.clear', () => {
   state.toolbox = {
     q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '', status: '',
+    selected: '', section: 'reco', navSection: 'problem',
   };
+  state.knowledge.type = '';
+  state.knowledge.sort = 'recent';
+  state.knowledge.status = '';
+  state.knowledge.page = 1;
+  state.knowledge.tag = '';
+  state.knowledge.tool = '';
   const input = document.getElementById('searchInput');
   if (input) input.value = '';
   syncToolboxUrl();
@@ -70,7 +107,13 @@ on('toolbox.savePlan', ({ code }) => submitToolPlan(code));
 on('toolbox.planStatus', ({ id, status }) => updateToolPlan(Number(id), status));
 on('toolbox.goKnowledge', ({ code }) => {
   closeAllModals();
-  go('knowledge', { params: { tool: code, sort: 'match' }, push: true });
+  state.toolbox.section = 'resources';
+  state.toolbox.navSection = 'type';
+  state.knowledge.type = '';
+  state.knowledge.tool = code;
+  state.knowledge.page = 1;
+  syncToolboxUrl();
+  RENDERERS.toolbox();
 });
 on('toolbox.goWorkflow', () => {
   closeAllModals();
@@ -78,10 +121,15 @@ on('toolbox.goWorkflow', () => {
 });
 on('toolbox.selectTool', ({ code }) => {
   state.toolbox.selected = code || '';
+  state.toolbox.open = code || '';
+  state.toolbox.navSection = 'tools';
+  syncToolboxUrl();
   RENDERERS.toolbox();
 });
 on('toolbox.clearSelected', () => {
   state.toolbox.selected = '';
+  state.toolbox.open = '';
+  syncToolboxUrl();
   RENDERERS.toolbox();
 });
 on('toolbox.close', () => closeModal());
@@ -90,22 +138,9 @@ on('toolbox.closeGoWorkflow', () => {
   go('workflow');
 });
 
-function syncToolboxUrl() {
-  const tb = state.toolbox;
-  setUrlState('toolbox', {
-    q: tb.q,
-    scenario: tb.scenario,
-    category: (tb.categories || []).join(','),
-    stage: tb.stage || '',
-    step: tb.step || '',
-    sort: tb.sort,
-    open: tb.open || '',
-    status: tb.status || '',
-  }, { push: false });
-}
-
 const renderToolbox = () => {
   const tb = state.toolbox;
+  const k = state.knowledge;
   const params = urlParams();
   if ('q' in params) tb.q = params.q;
   if ('scenario' in params) tb.scenario = params.scenario;
@@ -120,6 +155,34 @@ const renderToolbox = () => {
     tb.selected = params.open || tb.selected;
   }
   if ('status' in params) tb.status = params.status;
+  // 知识资源筛选（rtype/rsort/...）与旧 #knowledge 参数都落到 state.knowledge
+  if ('rtype' in params) k.type = params.rtype;
+  if ('rsort' in params) k.sort = params.rsort;
+  if ('rstatus' in params) k.status = params.rstatus;
+  if ('rpage' in params) k.page = Number(params.rpage) || 1;
+  if ('rtool' in params) k.tool = params.rtool;
+  if ('type' in params && !('rtype' in params)) k.type = params.type;
+  if ('keyword' in params) tb.q = params.keyword;
+  if ('tag' in params) k.tag = params.tag;
+  if ('section' in params) {
+    tb.section = params.section === 'none' ? '' : params.section;
+  } else if (params.scenario || params.q || params.step) {
+    tb.section = 'reco';
+  } else if (params.category || params.stage || params.rtype || params.rtool) {
+    tb.section = 'resources';
+  }
+  if (tb.section === 'reco') tb.navSection = 'problem';
+  else if (params.stage) tb.navSection = 'stage';
+  else if (params.category || params.rtype || params.rtool) tb.navSection = 'type';
+  // nav 是用户点击折叠区后的显式选择（none = 全部收起），优先级最高；
+  // 深链打开工具详情时默认展开工具目录，与其他折叠区的上下文保持一致。
+  if ('nav' in params) {
+    tb.navSection = params.nav === 'none'
+      ? ''
+      : (NAV_SECTIONS.has(params.nav) ? params.nav : tb.navSection);
+  } else if (params.open) {
+    tb.navSection = 'tools';
+  }
   // 顶栏搜索写入的是 toolboxKeyword，这里消费一次后转入 toolbox.q
   if (state.toolboxKeyword) {
     tb.q = state.toolboxKeyword;
@@ -128,6 +191,8 @@ const renderToolbox = () => {
   syncToolboxUrl();
 
   const hasQuery = !!(tb.q || tb.scenario || tb.stage || tb.step);
+  const showResources = tb.section === 'resources';
+  const wantsKnowledge = showResources && k.type !== 'TOOL';
   const payload = {
     scenario_codes: tb.scenario ? [tb.scenario] : [],
     category_filters: tb.categories || [],
@@ -147,19 +212,41 @@ const renderToolbox = () => {
       tb.selected
         ? GET('/tools/' + encodeURIComponent(tb.selected)).catch(() => null)
         : Promise.resolve(null),
-    ]).then(([meta, groups, catalog, match, stages, detail]) => ({
-      meta, groups, catalog, match, stages, detail,
+      GET('/knowledge/meta'),
+      hasQuery
+        ? POST('/knowledge/recommend', {
+          problem: tb.q || null,
+          scenario_codes: tb.scenario ? [tb.scenario] : [],
+          stage_no: tb.stage || null,
+          step_no: tb.step || null,
+          limit: 4,
+        })
+        : Promise.resolve(null),
+      wantsKnowledge ? GET(resourceQuery(tb)) : Promise.resolve(null),
+      showResources && canManage()
+        ? GET('/knowledge/archive-candidates?limit=8').catch(() => []) : Promise.resolve([]),
+      showResources && canManage()
+        ? GET('/knowledge/effect-stats').catch(() => null) : Promise.resolve(null),
+      showResources && canManage()
+        ? GET('/knowledge/standard-candidates').catch(() => []) : Promise.resolve([]),
+    ]).then(([
+      meta, groups, catalog, match, stages, detail, knowledgeMeta, related,
+      resourcePage, archiveCandidates, effectStats, standardCandidates,
+    ]) => ({
+      meta, groups, catalog, match, stages, detail, knowledgeMeta, related,
+      resourcePage, archiveCandidates, effectStats, standardCandidates,
     })),
     (d) => paint(d));
 };
 
 function paint(d) {
   const tb = state.toolbox;
+  const k = state.knowledge;
   const meta = d.meta;
   state.toolboxMeta = meta;
+  if (d.knowledgeMeta) state.knowledgeMeta = d.knowledgeMeta;
   const scenarios = meta.scenarios || [];
   const categoryLabels = meta.category_labels || {};
-  const difficultyLabels = meta.difficulty_labels || {};
   const filter = state.toolboxFilter;
   const allowed = filter ? new Set(filter.codes) : null;
   const filterHit = (hit) => !allowed || allowed.has(hit.tool.code);
@@ -167,22 +254,25 @@ function paint(d) {
   const catalogHits = (d.catalog.hits || []).filter(filterHit);
   const matchHits = d.match ? (d.match.hits || []).filter(filterHit) : null;
   const hasQuery = !!(tb.q || tb.scenario || tb.stage || tb.step);
+  const showReco = tb.section === 'reco';
+  const showResources = tb.section === 'resources';
 
-  const scenarioChips = scenarios.map((scenario) => `
-    <button class="tb-qchip${tb.scenario === scenario.code ? ' on' : ''}"
+  const knowledgeMeta = d.knowledgeMeta || {};
+  const resLabels = knowledgeMeta.type_labels || {};
+  const resStatusLabels = knowledgeMeta.status_labels || {};
+  const resStats = knowledgeMeta.stats || {};
+  const resScenarioNames = Object.fromEntries(
+    (knowledgeMeta.scenarios || []).map((row) => [row.code, row.name]),
+  );
+
+  const scenarioButtons = scenarios.map((scenario) => `
+    <button class="kb-pain${tb.scenario === scenario.code ? ' on' : ''}"
       data-act="toolbox.quick" data-scenario="${esc(scenario.code)}"
-      data-query="${esc(scenario.name)}">${esc(scenario.name)}</button>`).join('');
-
-  const matchCards = matchHits
-    ? (matchHits.length
-      ? matchHits.map((hit, index) =>
-        toolCard(hit, meta, {
-          showFit: true,
-          recommended: index < 3,
-          level: filter && filter.meta ? filter.meta[hit.tool.code] : null,
-        })).join('')
-      : '<div class="empty">没有匹配到工具。换一种说法，或清空筛选后浏览全部工具。</div>')
-    : `<div class="note">先描述一个问题，或点选上方快捷痛点。</div>`;
+      data-query="${esc(scenario.name)}"
+      aria-pressed="${tb.scenario === scenario.code ? 'true' : 'false'}">
+      <span class="ic">${SCENARIO_ICON[scenario.code] || '•'}</span>
+      <span><b>${esc(scenario.name)}</b><small>${esc(scenario.description || '')}</small></span>
+    </button>`).join('');
 
   const categoryCounts = {};
   (d.groups || []).forEach((group) => {
@@ -195,11 +285,28 @@ function paint(d) {
       <span class="n">${categoryCounts[code] || 0}</span>
     </button>`).join('');
 
+  const resourceTypeChips = [
+    ['', '全部'],
+    ['TOOL', resLabels.TOOL || '工具'],
+    ['CASE', resLabels.CASE || '案例'],
+    ['TEMPLATE', resLabels.TEMPLATE || '模板'],
+  ].map(([value, label]) => `
+    <button class="chip${k.type === value ? ' on' : ''}"
+      data-act="knowledge.setType" data-value="${value}">${esc(label)}</button>`).join('');
+
   const stageLinks = (d.stages || []).map((stage) => `
-    <button class="tb-stage-link" data-act="toolbox.stageLink" data-stage="${stage.stage_no}">
+    <button class="kb-stage-link${tb.stage === stage.stage_no ? ' on' : ''}"
+      data-act="toolbox.stageLink" data-stage="${stage.stage_no}">
       <span class="num">${stage.stage_no}</span>
       <span><b>${esc(stage.stage_name)}</b><small>${esc(stage.stage_goal || '')}</small></span>
     </button>`).join('');
+
+  const toolNav = catalogHits.map((hit) => `
+    <button class="tb-nav-item${tb.selected === hit.tool.code ? ' on' : ''}"
+      data-act="toolbox.selectTool" data-code="${esc(hit.tool.code)}">
+      <span class="tb-nav-name">${esc(hit.tool.name)}</span>
+      <span class="tiny">${esc(hit.tool.category_label || '')}</span>
+    </button>`).join('') || '<div class="tiny muted">没有工具</div>';
 
   const filterBanner = filter
     ? `<div class="note mb between">
@@ -208,8 +315,11 @@ function paint(d) {
         <button class="btn-sm" data-act="toolbox.clearFilter">显示全部工具</button>
       </div>` : '';
 
-  const hasFilter = tb.q || tb.scenario || (tb.categories || []).length || tb.stage || tb.step;
+  const hasFilter = tb.q || tb.scenario || (tb.categories || []).length || tb.stage || tb.step
+    || k.type || k.status || k.tool;
   const toolCount = filter ? filter.codes.length : d.catalog.hits.length;
+  const resourceCount = resStats.total || 0;
+
   const sortOptions = [
     ['fit', '按适配度'],
     ['difficulty', '按难度（低→高）'],
@@ -217,6 +327,13 @@ function paint(d) {
     ['usage', '按使用频率'],
   ].map(([value, label]) =>
     `<option value="${value}"${tb.sort === value ? ' selected' : ''}>${label}</option>`).join('');
+
+  const resSortOptions = [
+    ['match', '按匹配度'],
+    ['effect', '按使用效果'],
+    ['recent', '按最近更新'],
+  ].map(([value, label]) =>
+    `<option value="${value}"${k.sort === value ? ' selected' : ''}>${label}</option>`).join('');
 
   const statusOptions = canManage()
     ? `<select class="sel sel-sm" data-act="toolbox.setStatus">
@@ -227,22 +344,144 @@ function paint(d) {
         <option value="ARCHIVED"${tb.status === 'ARCHIVED' ? ' selected' : ''}>已归档</option>
       </select>` : '';
 
-  const detail = d.detail;
-  const toolNav = catalogHits.map((hit) => `
-    <button class="tb-nav-item${tb.selected === hit.tool.code ? ' on' : ''}"
-      data-act="toolbox.selectTool" data-code="${esc(hit.tool.code)}">
-      <span class="tb-nav-name">${esc(hit.tool.name)}</span>
-      <span class="tiny">${esc(hit.tool.category_label || '')}</span>
-    </button>`).join('') || '<div class="tiny muted">没有工具</div>';
+  const resStatusOptions = canManage()
+    ? `<select class="sel sel-sm" data-act="knowledge.setStatus">
+        <option value="">全部公开</option>
+        ${['VERIFIED', 'PUBLISHED', 'IN_REVIEW', 'DRAFT', 'ARCHIVED'].map((code) =>
+          `<option value="${code}"${k.status === code ? ' selected' : ''}>${
+            esc(resStatusLabels[code] || code)}</option>`).join('')}
+      </select>` : '';
+
+  const matchCards = matchHits
+    ? (matchHits.length
+      ? matchHits.map((hit, index) =>
+        toolCard(hit, meta, {
+          showFit: true,
+          recommended: index < 3,
+          level: filter && filter.meta ? filter.meta[hit.tool.code] : null,
+        })).join('')
+      : '<div class="empty">没有匹配到工具。换一种说法，或清空筛选后浏览全部工具。</div>')
+    : `<div class="note">先描述一个问题，或点选左侧快捷痛点。</div>`;
+
+  const relatedItems = d.related
+    ? (d.related.items || []).filter((item) => item.kind === 'knowledge').slice(0, 3)
+    : [];
+  const relatedHtml = relatedItems.length ? `
+    <div class="kb-related-strip">
+      <div class="between mb">
+        <div class="tiny">配套案例 / 模板 <b>${relatedItems.length}</b>
+          · 与当前问题最相关的参考</div>
+        <button class="btn-sm" data-act="toolbox.section" data-section="resources">查看全部资源 →</button>
+      </div>
+      <div class="kb-reco-list">${relatedItems.map((item) =>
+        relatedResourceCard(item, resLabels, resStatusLabels, resScenarioNames)).join('')}</div>
+    </div>` : '';
+
+  const resourcePage = d.resourcePage;
+  const showToolGrid = showResources && (k.type === '' || k.type === 'TOOL');
+  const showKnowledgeGrid = showResources && k.type !== 'TOOL';
+  const toolGrid = showToolGrid ? `
+    <div class="kb-res-group">
+      <div class="kb-res-group-hd"><b>工具</b>
+        <span class="tiny">${catalogHits.length} 个 · 点击查看详情</span></div>
+      <div class="tb-mini-grid">${catalogHits.map((hit) => compactToolCard(hit, meta)).join('')}</div>
+    </div>` : '';
+  const knowledgeGrid = showKnowledgeGrid
+    ? (resourcePage
+      ? `<div class="kb-res-group">
+          <div class="kb-res-group-hd"><b>案例 / 模板</b>
+            <span class="tiny">${resourcePage.total || 0} 条</span></div>
+          <div class="grid g3 kb-grid">${
+            resourcePage.items.map((item) =>
+              resourceCard(item, resLabels, resStatusLabels, resScenarioNames)).join('')
+            || '<div class="empty">没有符合条件的案例或模板。</div>'}</div>
+          ${resourcePagerHtml(resourcePage, 12)}
+        </div>`
+      : '<div class="note">资源加载中…</div>')
+    : '';
+
+  const toolFilterNote = k.tool
+    ? `<div class="note mb">只显示关联工具 <b>${esc(k.tool)}</b> 的案例/模板。
+        <button class="btn-sm" data-act="knowledge.clearResourceTool">显示全部</button></div>` : '';
+
+  const resourceFilters = `
+    <div class="between mb kb-res-filters">
+      <div class="gap" style="flex-wrap:wrap">
+        <span class="tiny muted">资源类型</span>${resourceTypeChips}
+      </div>
+      <div class="gap" style="flex-wrap:wrap">
+        ${showToolGrid ? `<span class="tiny muted">工具</span>
+          <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
+          ${statusOptions}` : ''}
+        ${showKnowledgeGrid ? `<span class="tiny muted">案例/模板</span>
+          <select class="sel sel-sm" data-act="knowledge.setSort">${resSortOptions}</select>
+          ${resStatusOptions}` : ''}
+      </div>
+    </div>`;
+
+  const sectionsHtml = `
+    <section class="card tb-hero tb-section">
+      <div class="kb-section-hd">
+        <button class="kb-section-toggle" type="button"
+          data-act="toolbox.section" data-section="reco">
+          <span class="kb-section-title">① 我遇到了什么问题？${
+            tipHelp('描述问题或点选痛点。系统按「问题匹配 + 场景 + 使用证据」排序，'
+              + '而不是按工具属性分类。')}</span>
+          <span class="kb-chev" aria-hidden="true">${showReco ? '−' : '+'}</span>
+        </button>
+        <span class="tag t-blu">推荐依据：问题匹配 + 场景 + 证据</span>
+      </div>
+      ${showReco ? `<div class="kb-section-body">
+        <div class="tb-match">
+          <input id="toolQ" class="sel" style="flex:1;min-width:260px"
+            value="${esc(tb.q)}"
+            placeholder="例如：审批节点太多，一个采购单要走五个人，周期总是超期">
+          <button class="btn btn-p" data-act="toolbox.match">匹配工具</button>
+          ${hasFilter ? '<button class="btn btn-g" data-act="toolbox.clear">清空</button>' : ''}
+        </div>
+        <div class="tb-result-head">
+          <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}${
+            tipHelp('先描述一个问题，或点选左侧快捷痛点。系统会按「问题匹配 + 场景 + 使用证据」'
+              + '排序；没有输入时显示等待状态。')}</h3>
+          ${d.match ? `<span class="tiny">已按适配度排序 · ${matchHits.length} 个工具匹配</span>` : ''}
+          <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
+        </div>
+        <div class="tb-cards">${matchCards}</div>
+        ${relatedHtml}
+      </div>` : ''}
+    </section>
+
+    <section class="card tb-section">
+      <div class="kb-section-hd">
+        <button class="kb-section-toggle" type="button"
+          data-act="toolbox.section" data-section="resources">
+          <span class="kb-section-title">② 全部资源${
+            tipHelp('案例、模板与工具统一在这里浏览。工具可参考、可改编；'
+              + '强制制度已移到制度中心。')}</span>
+          <span class="kb-chev" aria-hidden="true">${showResources ? '−' : '+'}</span>
+        </button>
+        <span class="tiny muted">点击左侧阶段/类型自动展开</span>
+      </div>
+      ${showResources ? `<div class="kb-section-body">
+        ${resourceFilters}
+        ${toolFilterNote}
+        ${toolGrid}
+        ${knowledgeGrid}
+      </div>` : ''}
+    </section>`;
 
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
-        <div><h2>方法论工具箱（${toolCount} 个工具）
-          <span class="module-badge">问题驱动 · 验证标准</span></h2>
-          <div class="desc">工具箱回答「该用什么、为什么、怎么验证」；知识库回答「有没有案例、模板和参考」</div></div>
+        <div><h2>方法论工具箱（${toolCount} 个工具 · ${resourceCount} 条资源）
+          <span class="module-badge">问题驱动 · 案例/模板</span></h2>
+          <div class="desc">先按问题匹配工具；案例、模板与使用证据统一放在「全部资源」。</div></div>
         <div class="gap">
           ${canWrite() ? '<button class="btn btn-p" data-act="toolbox.newTool">+ 新建工具</button>' : ''}
+          ${canWrite() ? '<button class="btn btn-g" data-act="knowledge.new">+ 新建案例/模板</button>' : ''}
+          ${canManage() ? '<button class="btn-sm" data-act="knowledge.manageScenarios">场景管理</button>' : ''}
+          ${canManage() ? '<button class="btn-sm" data-act="knowledge.showRecommendLogs">推荐日志</button>' : ''}
+          <a class="link-btn" data-act="knowledge.goDocuments">制度中心 →</a>
           <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>
         </div>
       </div>
@@ -252,56 +491,50 @@ function paint(d) {
     <div class="tb-shell">
       <aside class="tb-nav-col">
         <div class="card tb-nav-card">
-          <h3>快捷痛点</h3>
-          <div class="tb-chips">${scenarioChips}</div>
-          <h3 class="mt">工具四象限</h3>
-          <div class="tb-quads">${categoryRows}</div>
-          <h3 class="mt">五阶段</h3>
-          <div class="tb-stage-list">${stageLinks}</div>
-          <h3 class="mt">全部工具（${catalogHits.length}）</h3>
-          <div class="tb-tool-nav">${toolNav}</div>
+          <details class="kb-nav-fold"${tb.navSection === 'problem' ? ' open' : ''}>
+            <summary data-act="toolbox.navSection" data-section="problem">按问题</summary>
+            <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
+          </details>
+          <details class="kb-nav-fold"${tb.navSection === 'stage' ? ' open' : ''}>
+            <summary data-act="toolbox.navSection" data-section="stage">按阶段</summary>
+            <div class="kb-stage-list">${stageLinks}</div>
+          </details>
+          <details class="kb-nav-fold"${tb.navSection === 'type' ? ' open' : ''}>
+            <summary data-act="toolbox.navSection" data-section="type">按类型</summary>
+            <div class="kb-chips">${resourceTypeChips}</div>
+            <div class="tb-quads mt">${categoryRows}</div>
+          </details>
+          <details class="kb-nav-fold"${tb.navSection === 'tools' ? ' open' : ''}>
+            <summary data-act="toolbox.navSection" data-section="tools">工具目录（${catalogHits.length}）</summary>
+            <div class="tb-tool-nav">${toolNav}</div>
+          </details>
         </div>
       </aside>
 
       <main class="tb-main">
-        ${detail
-          ? `<div class="card tb-detail-card">${toolDetailHtml(detail)}</div>`
-          : `<section class="card tb-hero">
-              <div class="between mb">
-                <div><h3 style="margin:0">① 我遇到了什么问题？${
-                  tipHelp('描述问题或点选痛点。系统按「问题匹配 + 场景 + 使用证据」排序，'
-                    + '而不是按工具属性分类，也不是让你在工具卡里自己找。')}</h3></div>
-                <span class="tag t-blu">左侧四象限是辅助筛选</span>
-              </div>
-              <div class="tb-match">
-                <input id="toolQ" class="sel" style="flex:1;min-width:260px"
-                  value="${esc(tb.q)}"
-                  placeholder="例如：审批节点太多，一个采购单要走五个人，周期总是超期">
-                <button class="btn btn-p" data-act="toolbox.match">匹配工具</button>
-                ${hasFilter ? '<button class="btn btn-g" data-act="toolbox.clear">清空</button>' : ''}
-              </div>
-              <div class="tb-result-head">
-                <h3>${d.match ? '匹配结果' : '匹配结果（等待输入）'}${
-                  tipHelp('先描述一个问题，或点选左侧快捷痛点。系统会按「问题匹配 + 场景 + 使用证据」'
-                    + '排序；没有输入时显示等待状态，不会用默认排序假装已经匹配。')}</h3>
-                ${d.match ? `<span class="tiny">已按适配度排序 · ${matchHits.length} 个工具匹配</span>` : ''}
-                <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
-              </div>
-              <div class="tb-cards">${matchCards}</div>
-            </section>`}
+        ${d.detail
+          ? `<div class="card tb-detail-card">${toolDetailHtml(d.detail)}</div>`
+          : sectionsHtml}
       </main>
 
       <aside class="tb-side">
         <div class="card">
-          <h3>${detail ? '工具操作' : '匹配与操作'}</h3>
-          ${detail
-            ? `<div class="gap" style="flex-wrap:wrap">${toolDetailActions(detail, true)}</div>`
-            : `<div class="desc">在中间输入问题，或从左侧工具列表选择。</div>
+          <h3>${d.detail ? '工具操作' : '操作'}</h3>
+          ${d.detail
+            ? `<div class="gap" style="flex-wrap:wrap">${toolDetailActions(d.detail, true)}</div>`
+            : `<div class="desc">在 ① 输入问题匹配工具，或在 ② 浏览全部资源。</div>
                <div class="gap">
+                 <button class="btn-sm" data-act="toolbox.section"
+                   data-section="resources">${showResources ? '收起全部资源' : '浏览全部资源'}</button>
                  <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤</a>
                </div>`}
         </div>
-        ${statusOptions ? `<div class="card"><h3>维护状态</h3>${statusOptions}</div>` : ''}
+        ${statusOptions ? `<div class="card"><h3>工具维护状态</h3>${statusOptions}</div>` : ''}
+        ${showResources ? resourceManagerCards({
+          archiveCandidates: d.archiveCandidates || [],
+          effectStats: d.effectStats || null,
+          standardCandidates: d.standardCandidates || [],
+        }) : ''}
         <div class="card">
           <h3>求真校验</h3>
           <div class="desc">每个工具都应能回答：主张、证据、适用条件、反证、维护人</div>
@@ -315,6 +548,16 @@ function paint(d) {
         </div>
       </aside>
     </div>`;
+}
+
+function compactToolCard(hit, meta) {
+  const tool = hit.tool;
+  return `
+    <button class="tb-mini" type="button" data-act="toolbox.open" data-code="${esc(tool.code)}">
+      <span class="tb-mini-name">${esc(tool.name)}</span>
+      <span class="tiny">${esc(tool.category_label || meta.category_labels[tool.category] || '')}</span>
+      <span class="tb-mini-purpose">${esc(tool.purpose)}</span>
+    </button>`;
 }
 
 function toolCard(hit, meta, options = {}) {
@@ -426,7 +669,7 @@ function toolDetailHtml(t) {
             <div class="tiny">${esc(item.summary)}</div></div>
           <button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>
         </div>`).join('')}</div>`
-    : '<div class="note">还没有关联的案例/模板。流程管理科可以在知识库里通过 tool_code 关联。</div>';
+    : '<div class="note">还没有关联的案例/模板。新建资源时填写关联工具编码即可挂到这里。</div>';
   const steps = (t.workflow_steps || []);
   const stepHtml = steps.length
     ? steps.map((step) => `<span class="tag t-blu">${esc(step.step_no)} ${esc(step.name)}</span>`).join(' ')
@@ -498,6 +741,7 @@ function toolDetailHtml(t) {
       ${t.steps.map((step) => '<li>' + esc(step) + '</li>').join('')}
     </ol>
 
+    ${t.content ? '<h3>使用指南</h3><div class="kb-content">' + esc(t.content) + '</div>' : ''}
     ${t.template_ref ? '<h3>模板 / 工具指引</h3><div class="note mb">' + esc(t.template_ref) + '</div>' : ''}
     ${t.pitfalls ? '<h3>常见误用</h3><div class="warnbox">' + esc(t.pitfalls) + '</div>' : ''}
 
@@ -533,7 +777,7 @@ function toolDetailActions(t, inline = false) {
      ${canArchive ? `<button class="btn btn-g" data-act="toolbox.archiveTool"
        data-code="${esc(t.code)}">归档</button>` : ''}
      <button class="btn btn-g" data-act="toolbox.goKnowledge"
-       data-code="${esc(t.code)}">在知识库查看</button>`;
+       data-code="${esc(t.code)}">查看关联案例/模板</button>`;
 }
 
 function paintTool(t) {
@@ -640,6 +884,8 @@ function toolFormFields(t) {
     </div>
     <div class="field"><label>标准步骤（每行一条）</label>
       <textarea id="tfSteps" rows="5">${esc((current.steps || []).join('\n'))}</textarea></div>
+    <div class="field"><label>使用指南 / 正文</label>
+      <textarea id="tfContent" rows="6">${esc(current.content || '')}</textarea></div>
     <div class="field"><label>常见误用</label>
       <textarea id="tfPitfalls" rows="2">${esc(current.pitfalls || '')}</textarea></div>
     <div class="field"><label>适用场景</label>
@@ -684,6 +930,7 @@ async function submitToolForm(code) {
     typical_duration: val('tfDuration') || null,
     template_ref: val('tfTemplate') || null,
     steps: val('tfSteps').split('\n').map((row) => row.trim()).filter(Boolean),
+    content: val('tfContent') || null,
     pitfalls: val('tfPitfalls') || null,
     scenario_codes: [...document.querySelectorAll('input[name="tfScenario"]:checked')]
       .map((el) => el.value),
