@@ -300,7 +300,7 @@ def test_project_detail(client):
     assert detail["next_action"]["stage_no"] == detail["project"]["current_stage"]
 
 
-def test_project_step_progress_advances(client):
+def test_project_step_progress_does_not_skip_stage_gate(client):
     created = client.post(
         f"{API}/projects",
         json={"name": "测试项目", "methodology": "BPI", "owner": "测试员", "current_stage": 1},
@@ -315,7 +315,7 @@ def test_project_step_progress_advances(client):
         assert r.status_code == 200
 
     detail = client.get(f"{API}/projects/{pid}").json()
-    assert detail["project"]["current_stage"] == 2, "阶段1全部完成后应自动推进到阶段2"
+    assert detail["project"]["current_stage"] == 1, "完成步骤不能绕过阶段退出门"
     assert detail["project"]["progress"] == 16.7  # 4/24
 
     assert client.delete(f"{API}/projects/{pid}").status_code == 200

@@ -20,10 +20,17 @@ from app.api.deps import (
 from app.core.timeutil import utcnow
 from app.models.deliverable import DeliverableInstance, DeliverableVersion
 from app.models.enums import Methodology, ProjectStatus, ProjectType, Role, StepStatus
+from app.models.evidence import ProjectEvidenceClaim
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
 from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 from app.schemas.common import DeleteResult, Page, as_columns
+from app.schemas.evidence import (
+    EvidenceClaimMetaOut,
+    ProjectEvidenceClaimCreate,
+    ProjectEvidenceClaimDecision,
+    ProjectEvidenceClaimOut,
+)
 from app.schemas.project import (
     MethodologyRecommendation,
     MethodologyRecommendRequest,
@@ -52,8 +59,8 @@ from app.schemas.project_workflow import (
 )
 from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
+from app.services import evidence as evidence_service
 from app.services import improvement as improvement_service
-from app.services import maturity as maturity_service
 from app.services import methodology as methodology_service
 from app.services import project_workflow as workbench_service
 from app.services import setup_program as setup_service
@@ -234,6 +241,8 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
             status_code=400,
             detail="治理体系落地项目请使用 /projects/setup-program 创建（9 阶段模板）",
         )
+    if payload.current_stage != 1:
+        raise HTTPException(status_code=400, detail="新建改善项目必须从阶段1开始")
     data = as_columns(payload.model_dump(exclude={"code", "seed_workflow"}))
     # 归属以账号 id 为准；只给了姓名的历史数据按唯一 display_name 尝试绑定
     data["owner_user_id"], data["owner"] = resolve_owner(
@@ -276,6 +285,91 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     db.commit()
     db.refresh(project)
     return _to_out(project, _process_names(db).get(project.process_id))
+
+
+@router.get("/claims/meta", response_model=EvidenceClaimMetaOut, summary="判断证据标签")
+def evidence_claim_meta():
+    return EvidenceClaimMetaOut(
+        evidence_level_labels=evidence_service.EVIDENCE_LEVEL_LABELS,
+        verdict_labels=evidence_service.VERDICT_LABELS,
+    )
+
+
+@router.get(
+    "/{project_id}/claims",
+    response_model=List[ProjectEvidenceClaimOut],
+    summary="项目主张与证据链",
+)
+def list_project_claims(project_id: int, db: DbSession):
+    if db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return evidence_service.list_claims(db, project_id)
+
+
+@router.post(
+    "/{project_id}/claims",
+    response_model=ProjectEvidenceClaimOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="登记主张、反证与证据",
+)
+def create_project_claim(
+    project_id: int,
+    payload: ProjectEvidenceClaimCreate,
+    db: DbSession,
+    user: WriteUser,
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    row = evidence_service.create_claim(db, project_id, payload.model_dump(), user)
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "project_evidence_claim",
+        row.id,
+        f"项目 {project.code} 登记主张：{row.claim[:100]}",
+    )
+    db.commit()
+    db.refresh(row)
+    return evidence_service.claim_out(row)
+
+
+@router.patch(
+    "/{project_id}/claims/{claim_id}",
+    response_model=ProjectEvidenceClaimOut,
+    summary="独立裁决项目主张",
+)
+def decide_project_claim(
+    project_id: int,
+    claim_id: int,
+    payload: ProjectEvidenceClaimDecision,
+    db: DbSession,
+    user: WriteUser,
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    row = db.get(ProjectEvidenceClaim, claim_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="证据主张不存在")
+    try:
+        evidence_service.decide_claim(db, row, payload.verdict, payload.decision_note, user)
+    except evidence_service.EvidenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "project_evidence_claim",
+        row.id,
+        f"项目 {project.code} 主张裁决为 {row.verdict}",
+    )
+    db.commit()
+    db.refresh(row)
+    return evidence_service.claim_out(row)
 
 
 @router.post(
@@ -424,8 +518,8 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
         data["dmaic_updated_at"] = utcnow()
     if "current_stage" in data and data["current_stage"] > project.current_stage:
         try:
-            maturity_service.ensure_advance_allowed(db, project, data["current_stage"])
-        except maturity_service.MaturityError as exc:
+            workbench_service.ensure_advance_allowed(db, project, data["current_stage"])
+        except workbench_service.WorkbenchError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     for field, value in data.items():
         setattr(project, field, value)
@@ -751,7 +845,11 @@ def update_step(step_id: int, payload: ProjectStepUpdate, db: DbSession, user: W
 
     # 阶段内步骤全部完成则推进阶段，并按完成占比回算整体进度
     if project is not None:
-        recompute_progress(db, project)
+        recompute_progress(
+            db,
+            project,
+            auto_advance=project.project_type == ProjectType.GOVERNANCE_SETUP.value,
+        )
         audit_service.record(
             db,
             user,

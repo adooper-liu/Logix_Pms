@@ -27,6 +27,8 @@ GATE_CONDITIONS: Dict[int, List[str]] = {
     1: [
         "项目范围与流程对象已确认",
         "目标值与基线已定义",
+        "至少2项战略指标已关联，且有指标编码与目标值",
+        "流程触发条件与完成时限已定义",
         "立项决策与责任人已记录",
         "关键依赖与资源约束已识别",
     ],
@@ -51,6 +53,10 @@ GATE_CONDITIONS: Dict[int, List[str]] = {
         "监控责任人、采样频率已确认",
         "复盘周期与偏差触发条件已记录",
     ],
+}
+
+GATE_CONDITION_CODES: Dict[tuple[int, int], str] = {
+    (2, 1): "ROOT_CAUSE_EVIDENCE",
 }
 
 
@@ -119,6 +125,7 @@ def seed_project_steps(db: Session, project: Project) -> int:
                     ProjectGateCondition(
                         project_id=project.id,
                         stage_no=stage_no,
+                        condition_code=GATE_CONDITION_CODES.get((stage_no, order)),
                         text=text,
                         is_met=stage_no < project.current_stage,
                         is_critical=True,

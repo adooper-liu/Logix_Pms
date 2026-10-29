@@ -72,6 +72,7 @@ from app.models.enums import (
     WorkMeasurementSource,
     WorkMeasurementStatus,
 )
+from app.models.evidence import ProjectEvidenceClaim
 from app.models.execution import (
     FormDefinition,
     IdempotencyRecord,
@@ -136,6 +137,7 @@ __all__ = [
     "Project",
     "ProjectStep",
     "ProjectGateCondition",
+    "ProjectEvidenceClaim",
     "WorkflowTemplate",
     "Sketch",
     "Tool",

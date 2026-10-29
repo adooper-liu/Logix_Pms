@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
-from app.models.enums import ProjectStatus, StepStatus
+from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
+from app.models.enums import ProjectStatus, ProjectType, StepStatus
+from app.models.process import ProcessArch
 from app.models.project import Project, ProjectGateCondition, ProjectStep
 from app.schemas.project_workflow import (
     AdvanceResultOut,
@@ -21,7 +23,9 @@ from app.schemas.project_workflow import (
     WorkbenchStageOut,
     WorkbenchStepOut,
 )
+from app.services import evidence as evidence_service
 from app.services import improvement as improvement_service
+from app.services import maturity as maturity_service
 from app.services import workflow as workflow_service
 
 STEP_STATUS_LABELS = {
@@ -94,6 +98,7 @@ def _condition_out(row: ProjectGateCondition) -> GateConditionOut:
     return GateConditionOut(
         id=row.id,
         stage_no=row.stage_no,
+        condition_code=row.condition_code,
         text=row.text,
         evidence=row.evidence,
         owner=row.owner,
@@ -128,7 +133,104 @@ def _blocking_reasons(
             reasons.append(f"步骤需决策：{step.name}（决策人 {step.decision_maker or '未指定'}）")
         elif step.status == StepStatus.PENDING_VERIFY.value:
             reasons.append(f"步骤待验证：{step.name}（接收方 {step.receiver or '未指定'}）")
+        elif step.status != StepStatus.DONE.value:
+            reasons.append(f"步骤未完成：{step.name}")
+        elif not step.evidence:
+            reasons.append(f"步骤缺少验收证据：{step.name}")
     return reasons
+
+
+def _apqc_architecture_reasons(db: Session, project: Project, stage_no: int) -> List[str]:
+    if (
+        not project.gate_required
+        or project.project_type != ProjectType.IMPROVEMENT.value
+        or stage_no != 1
+    ):
+        return []
+
+    reasons: List[str] = []
+    process = db.get(ProcessArch, project.process_id) if project.process_id else None
+    if process is None:
+        return ["未关联企业 L3 流程，无法建立 APQC 对标"]
+    if process.level != 3:
+        reasons.append("项目必须承接企业 L3 端到端流程")
+    if not (process.owner_user_id or (process.owner or "").strip()):
+        reasons.append("企业 L3 流程尚未指定 Owner")
+    if not (process.org_unit_id or (process.department or "").strip()):
+        reasons.append("企业 L3 流程尚未指定责任部门")
+
+    framework_rows = db.scalars(
+        select(BenchmarkFramework).where(BenchmarkFramework.is_active.is_(True))
+    ).all()
+    base = next((row for row in framework_rows if row.code == "APQC_PCF"), None)
+    framework_ids = {
+        row.id
+        for row in framework_rows
+        if row.code == "APQC_PCF" or (base is not None and row.base_framework_id == base.id)
+    }
+    mapped = False
+    if framework_ids:
+        mapped = (
+            db.scalar(
+                select(ProcessBenchmarkMap.id)
+                .join(BenchmarkCategory, BenchmarkCategory.id == ProcessBenchmarkMap.category_id)
+                .where(
+                    ProcessBenchmarkMap.process_id == process.id,
+                    BenchmarkCategory.framework_id.in_(framework_ids),
+                    BenchmarkCategory.level <= 3,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+    if not mapped:
+        reasons.append("企业 L3 流程尚未映射到 APQC PCF L1-L3")
+    return reasons
+
+
+def _stage_blocking_reasons(db: Session, project: Project, stage_no: int) -> List[str]:
+    steps = list(
+        db.scalars(
+            select(ProjectStep).where(
+                ProjectStep.project_id == project.id,
+                ProjectStep.stage_no == stage_no,
+            )
+        ).all()
+    )
+    conditions = list(
+        db.scalars(
+            select(ProjectGateCondition).where(
+                ProjectGateCondition.project_id == project.id,
+                ProjectGateCondition.stage_no == stage_no,
+            )
+        ).all()
+    )
+    reasons = _blocking_reasons(steps, conditions)
+    if any(row.condition_code == "ROOT_CAUSE_EVIDENCE" for row in conditions) and (
+        not evidence_service.root_cause_evidence_ready(db, project.id)
+    ):
+        reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
+    reasons.extend(_apqc_architecture_reasons(db, project, stage_no))
+    return reasons
+
+
+def ensure_advance_allowed(db: Session, project: Project, target_stage: int) -> None:
+    if target_stage <= project.current_stage:
+        return
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        return
+    if target_stage != project.current_stage + 1:
+        raise WorkbenchError("一次只能通过当前阶段退出门进入紧邻的下一阶段")
+    if project.gate_required:
+        try:
+            maturity_service.ensure_advance_allowed(db, project, target_stage)
+        except maturity_service.MaturityError as exc:
+            raise WorkbenchError(str(exc)) from exc
+
+    for stage_no in range(project.current_stage, target_stage):
+        reasons = _stage_blocking_reasons(db, project, stage_no)
+        if reasons:
+            raise WorkbenchError(f"阶段门未通过（阶段{stage_no}）：" + "；".join(reasons))
 
 
 def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -> WorkbenchOut:
@@ -174,9 +276,21 @@ def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -
     current_ids = {row.id for row in current_steps}
     conditions = [row for row in gate_conditions if row.stage_no == target_stage]
     conditions.sort(key=lambda row: (row.sort_order, row.id))
-    reasons = _blocking_reasons(current_steps, conditions)
-    met_count = sum(1 for row in conditions if row.is_met)
     is_current = target_stage == project.current_stage
+    reasons = _blocking_reasons(current_steps, conditions)
+    if any(row.condition_code == "ROOT_CAUSE_EVIDENCE" for row in conditions) and (
+        not evidence_service.root_cause_evidence_ready(db, project.id)
+    ):
+        reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
+    if is_current:
+        reasons.extend(_apqc_architecture_reasons(db, project, target_stage))
+        if project.gate_required and target_stage < 5:
+            try:
+                maturity_service.ensure_advance_allowed(db, project, target_stage + 1)
+            except maturity_service.MaturityError as exc:
+                reasons.append(str(exc))
+    reasons = list(dict.fromkeys(reasons))
+    met_count = sum(1 for row in conditions if row.is_met)
     can_advance = is_current and not reasons and project.current_stage < 5
 
     previous_stage = target_stage - 1
@@ -220,6 +334,9 @@ def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -
             for row in current_steps
             if row.id in current_ids
         ],
+        claims=evidence_service.list_claims(db, project.id),
+        evidence_level_labels=evidence_service.EVIDENCE_LEVEL_LABELS,
+        evidence_verdict_labels=evidence_service.VERDICT_LABELS,
         gate=WorkbenchGateOut(
             conditions=[_condition_out(row) for row in conditions],
             met_count=met_count,
@@ -307,6 +424,12 @@ def update_condition(
 ) -> ProjectGateCondition:
     if condition.project_id != project.id:
         raise WorkbenchError("门槛条件不属于该项目")
+    if (
+        condition.condition_code == "ROOT_CAUSE_EVIDENCE"
+        and data.get("is_met")
+        and not evidence_service.root_cause_evidence_ready(db, project.id)
+    ):
+        raise WorkbenchError("根因结论至少需要两类已独立裁决、相互印证的 L1-L3 证据")
     for field, value in data.items():
         if hasattr(condition, field):
             setattr(condition, field, value)
@@ -343,25 +466,7 @@ def add_condition(db: Session, project: Project, data: dict) -> ProjectGateCondi
 def advance(db: Session, project: Project) -> AdvanceResultOut:
     if project.current_stage >= 5:
         raise WorkbenchError("已经是最后一个阶段，不能继续推进")
-    steps = list(
-        db.scalars(
-            select(ProjectStep).where(
-                ProjectStep.project_id == project.id,
-                ProjectStep.stage_no == project.current_stage,
-            )
-        ).all()
-    )
-    conditions = list(
-        db.scalars(
-            select(ProjectGateCondition).where(
-                ProjectGateCondition.project_id == project.id,
-                ProjectGateCondition.stage_no == project.current_stage,
-            )
-        ).all()
-    )
-    reasons = _blocking_reasons(steps, conditions)
-    if reasons:
-        raise WorkbenchError("阶段门未通过：" + "；".join(reasons))
+    ensure_advance_allowed(db, project, project.current_stage + 1)
     project.current_stage += 1
     db.flush()
     workflow_service.recompute_progress(db, project, auto_advance=False)

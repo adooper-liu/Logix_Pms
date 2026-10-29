@@ -638,7 +638,10 @@ pytest 里检查 import 路径是否存在、十五个视图是否都注册且�
 | GET | `/projects/{id}` | 项目详情：五阶段进度、当前待办、下一步建议、KPI 趋势、改善项目卡 |
 | PATCH | `/projects/{id}` | 更新项目 |
 | GET | `/projects/{id}/steps` | 步骤清单 |
-| PATCH | `/projects/steps/{id}` | 更新步骤状态；阶段完成自动推进，进度自动回算 |
+| PATCH | `/projects/steps/{id}` | 更新步骤状态与进度；阶段需通过退出门后显式推进 |
+| GET/POST | `/projects/{id}/claims` | 查询 / 登记主张、反证、证据来源与样本范围 |
+| PATCH | `/projects/{id}/claims/{claim_id}` | 由非创建人独立裁决；L4-L5 不能作为执行结论 |
+| POST | `/projects/{id}/workflow/advance` | 统一校验阶段步骤证据、退出条件与可选签收门禁 |
 | GET | `/projects/meta/summary` | 组合汇总 |
 | **POST** | **`/projects/recommend-methodology`** | **立项向导：自动匹配方法论** |
 

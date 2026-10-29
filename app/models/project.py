@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from sqlalchemy import (
     JSON,
@@ -21,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.core.timeutil import utcnow
+
+if TYPE_CHECKING:
+    from app.models.evidence import ProjectEvidenceClaim
 
 
 class Project(Base):
@@ -121,6 +124,12 @@ class Project(Base):
         cascade="all, delete-orphan",
         order_by="ProjectGateCondition.stage_no, ProjectGateCondition.sort_order",
     )
+    evidence_claims: Mapped[List["ProjectEvidenceClaim"]] = relationship(
+        "ProjectEvidenceClaim",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ProjectEvidenceClaim.created_at, ProjectEvidenceClaim.id",
+    )
     source_kpi: Mapped[Optional["KpiDefinition"]] = relationship("KpiDefinition")  # noqa: F821
 
     __table_args__ = (Index("ix_project_status_stage", "status", "current_stage"),)
@@ -189,6 +198,7 @@ class ProjectGateCondition(Base):
         ForeignKey("project.id", ondelete="CASCADE"), index=True
     )
     stage_no: Mapped[int] = mapped_column(Integer, index=True)
+    condition_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     text: Mapped[str] = mapped_column(String(240))
     evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
