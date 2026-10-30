@@ -106,6 +106,7 @@ class WorkbenchOut(BaseModel):
     steps: List[WorkbenchStepOut] = []
     claims: List[ProjectEvidenceClaimOut] = []
     evidence_level_labels: Dict[str, str] = {}
+    evidence_type_labels: Dict[str, str] = {}
     evidence_verdict_labels: Dict[str, str] = {}
     gate: WorkbenchGateOut = WorkbenchGateOut()
     previous: WorkbenchContextOut = WorkbenchContextOut()

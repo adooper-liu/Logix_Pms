@@ -1,15 +1,14 @@
 """启动向导状态：从现有数据自动计算九步 readiness。
 
-不新增业务表，也不维护第二套进度口径：
+这是治理体系落地的唯一阶段口径：
 - 每个步骤的“是否就绪”由真实数据推导；
-- 未就绪时给出下一步动作与跳转入口；
-- 流程卡复用同一套判定。
+- 治理体系落地项目的 current_stage 直接使用 open stage，不按步骤勾选另推进；
+- 改善项目的五阶段仍走阶段门，不读这里的公司级计数。
 
 “首次上线”范围 = S0–S7（8 步，含制度与授权）；S8 改善闭环不阻塞首次上线。
 默认首页以 pilot_ready_count 是否达到 pilot_total 为切换门槛。
 
-唯一的写操作是人工“跳过”：它只记录“本轮不把现有数据作为就绪证据”，
-不修改任何业务对象，也不与 24 步 / 9 阶段项目的步骤状态混用。
+人工“跳过”只记录“本轮不把现有数据作为就绪证据”，不修改业务对象。
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ STEP_DEFINITIONS: List[Dict] = [
         "定一个负责人和一个发起人。",
         "input": "痛点、战略、法人/工厂范围、可用的人和时间。",
         "output": "一页试点章程、负责人/发起人名单、范围与非范围、停止条件。",
-        "exit_criteria": "试点流程有且只有一个负责人；至少一个治理角色；有发起人/赞助人。",
+        "exit_criteria": "至少一条 L3 已绑定负责人；至少一个治理角色；有发起人。",
         "estimated": "1–2 周",
         "pilot": True,
         "actions": [
@@ -202,7 +201,7 @@ STEP_DEFINITIONS: List[Dict] = [
 STEP_KEYS = {step["key"] for step in STEP_DEFINITIONS}
 
 EVIDENCE_LABELS: Dict[str, str] = {
-    "l3_with_owner": "试点流程有负责人",
+    "l3_with_owner": "L3 已绑定负责人",
     "governance_roles": "治理角色",
     "sponsor_projects": "有发起人的试点项目",
     "objectives": "年度目标",
@@ -301,6 +300,45 @@ EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
     ],
 }
 
+# 计数点开后落到的页面。参数只打开该页里已经有的页签。
+EVIDENCE_DESTINATIONS: Dict[str, Tuple[str, Dict[str, str]]] = {
+    "l3_with_owner": ("map", {"owners": "l3"}),
+    "governance_roles": ("orgs", {"tab": "governance"}),
+    "sponsor_projects": ("projects", {}),
+    "objectives": ("strategy", {}),
+    "linked_objectives": ("strategy", {}),
+    "objectives_with_owner": ("strategy", {}),
+    "objectives_with_baseline": ("strategy", {}),
+    "l1": ("map", {}),
+    "l2": ("map", {}),
+    "l3": ("map", {}),
+    "pcf_mapped_l3": ("map", {"benchmark": "1"}),
+    "benchmark_maps": ("map", {"benchmark": "1"}),
+    "positions": ("orgs", {"tab": "position"}),
+    "raci_matters": ("designer", {"tab": "raci"}),
+    "invalid_processes": ("designer", {"tab": "raci"}),
+    "documents": ("deliverables", {"tab": "document"}),
+    "effective_documents": ("deliverables", {"tab": "document"}),
+    "effective_authorization_rules": ("authorization", {}),
+    "open_authorization_exceptions": ("authorization", {"pane": "exceptions"}),
+    "l3_published": ("designer", {"tab": "model"}),
+    "bindings": ("execution", {"tab": "config", "focus": "forms"}),
+    "forms": ("execution", {"tab": "config", "focus": "forms"}),
+    "rules": ("execution", {"tab": "config", "focus": "forms"}),
+    "node_tools": ("designer", {"tab": "model"}),
+    "verified_standards": ("monitor", {"tab": "workload"}),
+    "capacity_rows": ("monitor", {"tab": "workload"}),
+    "actual_worklogs": ("monitor", {"tab": "workload"}),
+    "kpi_cards": ("monitor", {"tab": "kpi"}),
+    "kpi_records": ("monitor", {"tab": "kpi"}),
+    "red_yellow": ("monitor", {"tab": "kpi"}),
+    "improvement_projects": ("projects", {}),
+    "applied_changes": ("designer", {"tab": "change"}),
+    "open_findings": ("deliverables", {"tab": "baseline", "focus": "findings"}),
+    "knowledge_items": ("toolbox", {"section": "resources"}),
+    "kpi_records_30d": ("monitor", {"tab": "kpi"}),
+}
+
 
 class StartupStepNotFound(ValueError):
     """步骤不存在或不在九步定义里。"""
@@ -334,6 +372,54 @@ def evidence_met(key: str, value: int) -> bool:
     return _met(key, value)
 
 
+def governance_position(db: Session) -> tuple[int, float]:
+    """治理落地的当前阶段与进度，和启动页用同一组证据。
+
+    当前阶段 = 第一个未就绪且未跳过的阶段（从 1 计）。
+    全部就绪时停在最后一阶段，进度为 100。
+    """
+    evidence = _collect_evidence(db)
+    skips = _skip_map(db)
+    ready = 0
+    open_stage: Optional[int] = None
+    total = len(STEP_DEFINITIONS) or 1
+    for index, definition in enumerate(STEP_DEFINITIONS, start=1):
+        key = definition["key"]
+        items = EVIDENCE_ITEMS[key]
+        met = all(_met(item_key, evidence[item_key]) for item_key, required in items if required)
+        if met:
+            ready += 1
+        if open_stage is None and not met and skips.get(key) is None:
+            open_stage = index
+    if open_stage is None:
+        open_stage = len(STEP_DEFINITIONS) or 1
+    return open_stage, round(ready / total * 100, 1)
+
+
+def apply_governance_stages(db: Session) -> None:
+    """把所有进行中的治理落地项目阶段写成上面的同一个数。"""
+    from app.models.enums import ProjectStatus, ProjectType
+    from app.models.project import Project
+
+    stage, progress = governance_position(db)
+    rows = db.scalars(
+        select(Project).where(
+            Project.project_type == ProjectType.GOVERNANCE_SETUP.value,
+            Project.status.in_(
+                (
+                    ProjectStatus.PLANNING.value,
+                    ProjectStatus.ACTIVE.value,
+                    ProjectStatus.ON_HOLD.value,
+                )
+            ),
+        )
+    ).all()
+    for row in rows:
+        row.current_stage = stage
+        row.progress = progress
+    db.flush()
+
+
 def _status(started: bool, ready: bool, skipped: bool) -> Tuple[str, str]:
     if skipped:
         return "SKIPPED", "这次先不做（未验证）"
@@ -363,7 +449,7 @@ def _kpi_card_stats(db: Session) -> Tuple[int, int, int]:
         )
         if has_card:
             cards += 1
-        periods = sorted(kpi.records, key=lambda row: row.period)
+        periods = kpi_service.ordered_records(kpi.records)
         records += len(periods)
         if not periods:
             continue
@@ -602,6 +688,8 @@ def status(db: Session) -> StartupStatusOut:
                         value=evidence[item_key],
                         required=required,
                         met=_met(item_key, evidence[item_key]),
+                        view=EVIDENCE_DESTINATIONS[item_key][0],
+                        view_params=EVIDENCE_DESTINATIONS[item_key][1],
                     )
                     for item_key, required in items
                 ],

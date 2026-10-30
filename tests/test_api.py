@@ -1026,6 +1026,26 @@ def test_kpi_achievement_direction(client):
     assert otd["achievement_rate"] == 92.6
 
 
+def test_project_current_value_follows_kpi(client):
+    """项目当前值与来源 KPI 的最新数据点是同一个数，手改会被写回。"""
+    kpis = client.get(f"{API}/monitor/kpis").json()
+    kpi = next(row for row in kpis if row["code"] == "EFF-01")
+    posted = client.post(
+        f"{API}/monitor/kpis/{kpi['id']}/records",
+        json={"period": "2026-12-01", "value": 6.4, "note": "口径回写"},
+    )
+    assert posted.status_code == 201, posted.text
+
+    listing = client.get(f"{API}/projects", params={"keyword": "采购需求提报"}).json()
+    project = next(row for row in listing["items"] if row["code"] == "PR-2026-018")
+    assert project["source_kpi_id"] == kpi["id"]
+    assert project["current_value"] == 6.4
+
+    patched = client.patch(f"{API}/projects/{project['id']}", json={"current_value": 1.0})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["current_value"] == 6.4
+
+
 def test_kpi_record_upsert(client):
     kpis = client.get(f"{API}/monitor/kpis").json()
     kpi_id = kpis[0]["id"]

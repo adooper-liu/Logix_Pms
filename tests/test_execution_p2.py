@@ -161,6 +161,23 @@ def test_form_version_freezes_on_instance(client):
         client.delete(f"{API}/process-map/{pid}")
 
 
+def test_publish_rollback_respects_change_gate(client):
+    pid = _minimal_process(client)
+    try:
+        patched = client.patch(f"{API}/process-map/{pid}", json={"requires_change_request": True})
+        assert patched.status_code == 200, patched.text
+        versions = client.get(f"{API}/processes/{pid}/design/versions").json()
+        published = next(row for row in versions if row["status"] == "PUBLISHED")
+        rolled = client.post(
+            f"{API}/processes/{pid}/design/versions/{published['id']}/publish-rollback",
+            json={"note": "不应绕过变更门禁"},
+        )
+        assert rolled.status_code == 409
+        assert "变更门禁" in rolled.json()["detail"]
+    finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
 def test_publish_rollback_to_history(client):
     pid = _minimal_process(client)
     try:

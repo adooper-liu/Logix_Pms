@@ -228,7 +228,7 @@ def _kpis(db: Session, process_id: int, l4_ids: List[int]) -> List[CardKpiOut]:
     ).all()
     result: List[CardKpiOut] = []
     for kpi in rows:
-        records = sorted(kpi.records, key=lambda row: row.period)
+        records = kpi_service.ordered_records(kpi.records)
         latest = records[-1].value if records else None
         state = kpi_service.status_for(
             latest,

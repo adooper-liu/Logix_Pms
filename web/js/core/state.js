@@ -45,7 +45,7 @@ export const state = {
   processCard: { processId: null, activeModule: 'strategy' },
   /** 跨页面跳转来源栈：供「返回来源」按钮使用，侧栏切换时清空 */
   navTrail: [],
-  start: { data: null, activeQ: 'q1', openStage: false },
+  start: { data: null, stageKey: null },
   pilot: { pathId: null, layerNo: null, data: null, paths: null, meta: null, users: null,
     pendingProcess: null },
   execution: { tab: 'tasks', filter: 'open' },

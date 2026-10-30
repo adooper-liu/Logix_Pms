@@ -67,6 +67,10 @@ HEALTH_ALERT_THRESHOLD = 70.0
 
 
 def build_overview(db: Session, board_limit: int = 8) -> DashboardOverview:
+    kpi_service.align_open_projects(db)
+    from app.services.startup import apply_governance_stages
+
+    apply_governance_stages(db)
     projects = db.scalars(select(Project).where(Project.project_type == "IMPROVEMENT")).all()
     steps = db.scalars(
         select(ProjectStep).join(Project).where(Project.project_type == "IMPROVEMENT")
@@ -309,7 +313,7 @@ def _kpi_red_yellow(db: Session, owner_user_id: int | None = None) -> tuple[int,
     red_yellow = 0
     for kpi in db.scalars(stmt).all():
         total += 1
-        records = sorted(kpi.records, key=lambda row: row.period)
+        records = kpi_service.ordered_records(kpi.records)
         if not records:
             continue
         state = kpi_service.status_for(

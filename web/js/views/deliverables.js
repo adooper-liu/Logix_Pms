@@ -1382,6 +1382,7 @@ async function loadFindings() {
     const rows = await GET('/baselines/findings?status=OPEN&limit=50');
     if (!rows.length) {
       box.innerHTML = '<div class="card"><div class="empty">没有待处理的治理问题。</div></div>';
+      if (urlParams().focus === 'findings') box.scrollIntoView({ block: 'start' });
       return;
     }
     box.innerHTML = `
@@ -1405,6 +1406,7 @@ async function loadFindings() {
           </tr>`).join('')}</tbody>
         </table>
       </div>`;
+    if (urlParams().focus === 'findings') box.scrollIntoView({ block: 'start' });
   } catch (e) {
     box.innerHTML = '<div class="errbar"><div>' + esc(e.message) + '</div></div>';
   }

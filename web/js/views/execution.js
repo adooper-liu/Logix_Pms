@@ -312,7 +312,7 @@ const renderExecution = () => {
           <tbody>${assignmentRows}</tbody>
         </table>
       </div>
-      <div class="card">
+      <div class="card" id="execution-evidence">
         <div class="between mb">
           <div><h3 style="margin:0">表单与规则</h3>
             <div class="desc" style="margin:2px 0 0">表单随实例启动冻结；规则按优先级匹配，显式下一步优先</div></div>
@@ -431,6 +431,11 @@ const renderExecution = () => {
         <div class="mt">${tabs}</div>
       </div>
       ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : ex.tab === 'integrations' ? integrationsPane : taskPane}`;
+
+    if (params.focus === 'forms' && ex.tab === 'config') {
+      const evidence = document.getElementById('execution-evidence');
+      if (evidence) evidence.scrollIntoView({ block: 'start' });
+    }
 
     // 发布后自动拉起启动弹窗；消费一次后把 start 参数从 URL 去掉，避免重渲染再弹一次
     if (ex.startProcess !== undefined && ex.startProcess !== null) {

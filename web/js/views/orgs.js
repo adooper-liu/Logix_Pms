@@ -5,7 +5,7 @@
 import { esc, dtShort, emptyRow, skeleton } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS } from '../core/router.js';
+import { renderAsync, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { role } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 
@@ -52,7 +52,11 @@ function flatten(nodes, depth = 0, out = []) {
   return out;
 }
 
+const ORG_TABS = ['org', 'user', 'position', 'governance'];
+
 const renderOrgs = () => {
+  const params = urlParams();
+  if (ORG_TABS.includes(params.tab)) adminState().tab = params.tab;
   if (role() !== 'ADMIN') {
     viewEl().innerHTML = `
       <div class="card">
@@ -112,7 +116,9 @@ function paintShell() {
 }
 
 function setAdminTab(tab) {
+  if (!ORG_TABS.includes(tab)) return;
   adminState().tab = tab;
+  setUrlState('orgs', { tab }, { push: false });
   paintShell();
 }
 

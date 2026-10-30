@@ -10,7 +10,7 @@ import {
   AUTH, doLogin, enterDefaultView, hideLogin, isLoggedIn, loadMeta, logout, renderUserChip,
   showLogin,
 } from './core/auth.js';
-import { initExpertMode, register, go, goBackToOrigin, toggleExpertMode, onSearch } from './core/router.js';
+import { register, go, goBackToOrigin, onSearch } from './core/router.js';
 import { state } from './core/state.js';
 import { applyTheme as setTheme, initTheme } from './core/theme.js';
 import { closeModal, on } from './core/ui.js';
@@ -146,14 +146,11 @@ function wireChrome() {
   });
   const navCollapse = document.getElementById('navCollapse');
   if (navCollapse) navCollapse.onclick = toggleNav;
-  const expertToggle = document.getElementById('expertToggle');
-  if (expertToggle) expertToggle.onclick = toggleExpertMode;
   try {
     applyNavCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
   } catch (e) {
     applyNavCollapsed(false);
   }
-  initExpertMode();
   document.getElementById('mask').onclick = (e) => {
     if (e.target.id === 'mask') closeModal();
   };

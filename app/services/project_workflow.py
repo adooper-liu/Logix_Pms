@@ -224,6 +224,20 @@ def _apqc_architecture_reasons(db: Session, project: Project, stage_no: int) -> 
     return reasons
 
 
+def _root_cause_gate_reasons(
+    db: Session, project: Project, conditions: List[ProjectGateCondition]
+) -> List[str]:
+    reasons: List[str] = []
+    for condition in conditions:
+        if condition.condition_code != "ROOT_CAUSE_EVIDENCE":
+            continue
+        if not (project.root_cause or "").strip():
+            reasons.append("根因门：请先填写项目根因结论")
+        if not evidence_service.root_cause_evidence_ready(db, project.id, condition.id):
+            reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
+    return reasons
+
+
 def _stage_blocking_reasons(db: Session, project: Project, stage_no: int) -> List[str]:
     steps = list(
         db.scalars(
@@ -242,20 +256,17 @@ def _stage_blocking_reasons(db: Session, project: Project, stage_no: int) -> Lis
         ).all()
     )
     reasons = _blocking_reasons(steps, conditions)
+    if not steps:
+        reasons.append(f"阶段{stage_no}未生成标准工作流步骤，无法核验退出门")
     if stage_no == 1:
         reasons.extend(_stage1_strategy_gate_reasons(db, project))
-    if any(row.condition_code == "ROOT_CAUSE_EVIDENCE" for row in conditions) and (
-        not evidence_service.root_cause_evidence_ready(db, project.id)
-    ):
-        reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
+    reasons.extend(_root_cause_gate_reasons(db, project, conditions))
     reasons.extend(_apqc_architecture_reasons(db, project, stage_no))
     return reasons
 
 
 def ensure_advance_allowed(db: Session, project: Project, target_stage: int) -> None:
     if target_stage <= project.current_stage:
-        return
-    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
         return
     if target_stage != project.current_stage + 1:
         raise WorkbenchError("一次只能通过当前阶段退出门进入紧邻的下一阶段")
@@ -316,10 +327,9 @@ def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -
     conditions.sort(key=lambda row: (row.sort_order, row.id))
     is_current = target_stage == project.current_stage
     reasons = _blocking_reasons(current_steps, conditions)
-    if any(row.condition_code == "ROOT_CAUSE_EVIDENCE" for row in conditions) and (
-        not evidence_service.root_cause_evidence_ready(db, project.id)
-    ):
-        reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
+    if not current_steps:
+        reasons.append(f"阶段{target_stage}未生成标准工作流步骤，无法核验退出门")
+    reasons.extend(_root_cause_gate_reasons(db, project, conditions))
     if is_current:
         if target_stage == 1:
             reasons.extend(_stage1_strategy_gate_reasons(db, project))
@@ -376,6 +386,7 @@ def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -
         ],
         claims=evidence_service.list_claims(db, project.id),
         evidence_level_labels=evidence_service.EVIDENCE_LEVEL_LABELS,
+        evidence_type_labels=evidence_service.EVIDENCE_TYPE_LABELS,
         evidence_verdict_labels=evidence_service.VERDICT_LABELS,
         gate=WorkbenchGateOut(
             conditions=[_condition_out(row) for row in conditions],
@@ -464,12 +475,11 @@ def update_condition(
 ) -> ProjectGateCondition:
     if condition.project_id != project.id:
         raise WorkbenchError("门槛条件不属于该项目")
-    if (
-        condition.condition_code == "ROOT_CAUSE_EVIDENCE"
-        and data.get("is_met")
-        and not evidence_service.root_cause_evidence_ready(db, project.id)
-    ):
-        raise WorkbenchError("根因结论至少需要两类已独立裁决、相互印证的 L1-L3 证据")
+    if condition.condition_code == "ROOT_CAUSE_EVIDENCE" and data.get("is_met"):
+        if not (project.root_cause or "").strip():
+            raise WorkbenchError("请先填写项目根因结论，再标记根因门满足")
+        if not evidence_service.root_cause_evidence_ready(db, project.id, condition.id):
+            raise WorkbenchError("根因结论至少需要两类已独立裁决、相互印证的 L1-L3 证据")
     for field, value in data.items():
         if hasattr(condition, field):
             setattr(condition, field, value)
@@ -504,6 +514,8 @@ def add_condition(db: Session, project: Project, data: dict) -> ProjectGateCondi
 
 
 def advance(db: Session, project: Project) -> AdvanceResultOut:
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        raise WorkbenchError("治理体系落地项目的阶段与启动页同一套证据，不能单独推进")
     if project.current_stage >= 5:
         raise WorkbenchError("已经是最后一个阶段，不能继续推进")
     ensure_advance_allowed(db, project, project.current_stage + 1)

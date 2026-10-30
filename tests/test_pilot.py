@@ -20,7 +20,12 @@ def _create_path(client, **overrides) -> dict:
 
 def test_create_path_has_ten_layers(client):
     path = _create_path(client)
-    assert path["current_layer"] == 1
+    closed = [layer for layer in path["layers"] if not layer["gate_open"]]
+    if closed:
+        assert path["current_layer"] == closed[0]["layer_no"]
+    else:
+        assert path["current_layer"] == 10
+    assert sum(1 for layer in path["layers"] if layer["current"]) == 1
     assert path["status"] == "ACTIVE"
     assert len(path["layers"]) == 10
     assert [layer["layer_no"] for layer in path["layers"]] == list(range(1, 11))
@@ -59,7 +64,9 @@ def test_advance_is_blocked_by_exit_conditions(client):
         client.patch(f"{API}/pilot/issues/{issue.json()['id']}", json={"status": "CLOSED"})
         after = client.post(f"{API}/pilot/paths/{pid}/advance")
         if after.status_code == 200:
-            assert after.json()["current_layer"] == 2
+            body = after.json()
+            assert body["status"] == "COMPLETED"
+            assert all(layer["gate_open"] for layer in body["layers"])
         else:
             assert "阻断" not in str(after.json()["detail"])
     finally:

@@ -6,7 +6,7 @@
 
 import { esc, num, emptyRow } from '../core/format.js';
 import { viewEl, on, openModal, closeModal, confirmDialog, promptDialog, toast } from '../core/ui.js';
-import { renderAsync, go, RENDERERS } from '../core/router.js';
+import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { state } from '../core/state.js';
 
@@ -18,13 +18,14 @@ const EXC_TONE = {
 on('authorization.go', ({ view }) => go(view));
 
 on('authorization.tab', (_data, el) => {
-  const pane = el.dataset.pane;
+  const pane = el.dataset.pane === 'exceptions' ? 'exceptions' : 'rules';
   document.querySelectorAll('#view [data-az-pane]').forEach((box) => {
     box.classList.toggle('hide', box.dataset.azPane !== pane);
   });
   el.parentElement.querySelectorAll('button').forEach((btn) => {
     btn.classList.toggle('on', btn === el);
   });
+  setUrlState('authorization', pane === 'exceptions' ? { pane } : {}, { push: false });
 });
 
 on('authorization.newRule', () => openRuleModal(null));
@@ -368,6 +369,7 @@ const renderAuthorization = () => {
     ]).then(([rules, exceptions, meta]) => ({ rules, exceptions, meta })),
     (data) => {
       state.authorization = { ...(state.authorization || {}), ...data };
+      const pane = urlParams().pane === 'exceptions' ? 'exceptions' : 'rules';
       const effective = data.rules.filter((row) => row.status === 'EFFECTIVE').length;
       const openExceptions = data.exceptions.filter(
         (row) => row.status === 'REQUESTED' || row.status === 'APPROVED').length;
@@ -389,17 +391,19 @@ const renderAuthorization = () => {
         </div>
         <div class="card">
           <div class="seg mb">
-            <button class="on" data-act="authorization.tab" data-pane="rules">授权规则</button>
-            <button data-act="authorization.tab" data-pane="exceptions">例外台账</button>
+            <button class="${pane === 'rules' ? 'on' : ''}" data-act="authorization.tab"
+              data-pane="rules">授权规则</button>
+            <button class="${pane === 'exceptions' ? 'on' : ''}" data-act="authorization.tab"
+              data-pane="exceptions">例外台账</button>
           </div>
-          <div data-az-pane="rules">
+          <div data-az-pane="rules"${pane === 'rules' ? '' : ' class="hide"'}>
             <table class="tbl">
               <thead><tr><th>规则 / 事项</th><th>类别</th><th>范围 / 审批角色</th>
                 <th>金额上限</th><th>状态</th><th>操作</th></tr></thead>
               <tbody>${ruleRows(data.rules)}</tbody>
             </table>
           </div>
-          <div data-az-pane="exceptions" class="hide">
+          <div data-az-pane="exceptions"${pane === 'exceptions' ? '' : ' class="hide"'}>
             <table class="tbl">
               <thead><tr><th>例外 / 依据规则</th><th>原因 / 范围</th><th>状态</th>
                 <th>申请 / 审批</th><th>操作</th></tr></thead>

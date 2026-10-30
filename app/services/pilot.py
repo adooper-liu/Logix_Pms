@@ -525,6 +525,17 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
             )
         )
 
+    # 当前位置 = 第一个证据未齐的层。不再单独保存一个可以超前或落后的层号。
+    derived = next(
+        (layer.layer_no for layer in layers if not layer.gate_open), len(LAYER_DEFINITIONS)
+    )
+    if path.status != PilotPathStatus.COMPLETED.value:
+        path.current_layer = derived
+    layers = [
+        layer.model_copy(update={"current": layer.layer_no == path.current_layer})
+        for layer in layers
+    ]
+
     process = db.get(ProcessArch, path.process_id) if path.process_id else None
     current = LAYER_BY_NO.get(path.current_layer)
     return PilotPathOut(
@@ -627,19 +638,15 @@ def delete_path(db: Session, path: PilotPath) -> None:
 
 
 def advance_path(db: Session, path: PilotPath) -> PilotPathOut:
+    """按证据重算当前层。证据未齐时拒绝；全部齐备才标记完成。"""
     detail = path_detail(db, path)
     current = next((layer for layer in detail.layers if layer.current), None)
-    if current is None:
-        raise PilotError("当前层不存在")
-    if not current.gate_open:
-        missing = [item.label for item in current.evidence_items if not item.met]
-        if current.status == PilotLayerStatus.BLOCKED.value:
+    if current is None or not current.gate_open:
+        missing = [item.label for item in current.evidence_items if not item.met] if current else []
+        if current is not None and current.status == PilotLayerStatus.BLOCKED.value:
             missing.append("未关闭的阻断异常")
-        raise PilotGateError(missing)
-    if path.current_layer >= len(LAYER_DEFINITIONS):
-        path.status = PilotPathStatus.COMPLETED.value
-    else:
-        path.current_layer += 1
+        raise PilotGateError(missing or ["当前层证据未齐"])
+    path.status = PilotPathStatus.COMPLETED.value
     db.flush()
     return path_detail(db, path)
 

@@ -18,6 +18,7 @@ on('map.row', ({ code, kids }) => mapClick(code, kids === '1'));
 on('map.coverage', ({ index }) => openCoverageCategory(Number(index)));
 on('map.categoryMetrics', ({ index }) => openCategoryMetrics(Number(index)));
 on('map.goProjects', () => go('projects'));
+on('map.goSketches', () => go('sketches'));
 on('map.benchmarkFramework', (_data, el) => setBenchmarkFramework(el.value));
 on('map.pcfWizard', () => openPcfDraftWizard());
 on('map.promoteAll', () => promoteAllDrafts());
@@ -141,7 +142,10 @@ const renderMap = () => {
 
     const kw = state.mapKeyword || '';
     const improvementOnly = !!state.map.improvementOnly;
-    let shown = nodes;
+    const ownerList = !!state.map.ownerList && path.length === 0;
+    let shown = ownerList
+      ? flattenTree(tree).filter((n) => n.level === 3 && n.owner_user_id)
+      : nodes;
     if (kw) {
       shown = shown.filter((n) => (n.name + n.code + (n.owner || '')).includes(kw));
     }
@@ -160,8 +164,10 @@ const renderMap = () => {
       : '—';
 
     const childWord = current && current.level === 3 ? '活动' : '流程';
-    const title = current ? current.name : '全部价值链';
-    const desc = current
+    const title = ownerList ? 'L3 已绑定负责人' : (current ? current.name : '全部价值链');
+    const desc = ownerList
+      ? `只计 L3，并且负责人已经绑到账号。这里是这 ${shown.length} 条`
+      : current
       ? `${LEVEL_LABELS[current.level] || ''} · ${(current.children || []).length} 个${childWord}` +
         (kw ? ` · 匹配 ${shown.length} 项` : '')
       : `L1 价值链 · ${tree.length} 条主线，点击任一行逐级下钻` +
@@ -219,7 +225,9 @@ const renderMap = () => {
               hasKids ? '进入 ›' : '详情 ›'}</button>
           </td>
         </tr>`;
-    }).join('') || emptyRow(7, improvementOnly
+    }).join('') || emptyRow(7, ownerList
+      ? '还没有绑定负责人账号的 L3'
+      : improvementOnly
       ? '该层级没有待改善流程，点击「显示全部」恢复'
       : '该层级下没有流程（或没有匹配结果）');
 
@@ -271,6 +279,7 @@ const renderMap = () => {
               从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
           </div>
           <div class="gap">
+            <a class="link-btn" data-act="map.goSketches">架构草图</a>
             <a class="link-btn" data-act="map.goProjects">去立项 →</a>
             <select class="sel" data-act="map.benchmarkFramework" title="切换对标框架">
               <option value="">不对标</option>
@@ -352,6 +361,19 @@ const renderMap = () => {
     if (!state.map.frameworks) {
       state.map.frameworks = await GET('/benchmark/frameworks');
     }
+    state.map.ownerList = params.owners === 'l3';
+    if (state.map.ownerList) state.map.path = [];
+    if (params.benchmark && params.benchmark !== '0') {
+      const frameworks = state.map.frameworks || [];
+      const wanted = params.benchmark === '1'
+        ? (frameworks.find(
+          (f) => f.code === 'APQC_PCF' || f.base_framework_code === 'APQC_PCF') || {}).code
+        : (frameworks.some((f) => f.code === params.benchmark) ? params.benchmark : '');
+      if (wanted && state.map.benchmarkFramework !== wanted) {
+        state.map.benchmarkFramework = wanted;
+        state.map.benchmark = null;
+      }
+    }
     if (!state.map.tree) {
       const tree = await GET('/process-map/tree');
       state.map.tree = tree;
@@ -391,6 +413,17 @@ const renderMap = () => {
 };
 
 function mapClick(code, hasKids) {
+  if (state.map.ownerList) {
+    const path = findPathTo(code, state.map.tree || [], []);
+    if (!path) return;
+    dropOwnerList();
+    if (hasKids) {
+      state.map.path = path;
+      RENDERERS.map();
+      return;
+    }
+    state.map.path = path.slice(0, -1);
+  }
   if (hasKids) {
     state.map.path = state.map.path.concat([code]);
     RENDERERS.map();
@@ -519,6 +552,7 @@ function startProjectFromProcess(processId, processName) {
 }
 
 function mapGo(index) {
+  dropOwnerList();
   state.map.path = index < 0 ? [] : state.map.path.slice(0, index + 1);
   RENDERERS.map();
 }
@@ -533,6 +567,7 @@ function toggleMapNav() {
 function mapSelect(code) {
   const path = findPathTo(code, state.map.tree || [], []);
   if (!path) return;
+  dropOwnerList();
   state.map.path = path;
   state.mapKeyword = '';
   const search = document.getElementById('searchInput');
@@ -963,6 +998,12 @@ function promoteAllDrafts() {
 async function setBenchmarkFramework(code) {
   state.map.benchmarkFramework = code;
   state.map.benchmark = null;
+  const current = urlParams();
+  const next = {};
+  if (current.process) next.process = current.process;
+  if (current.owners === 'l3') next.owners = 'l3';
+  if (code) next.benchmark = code;
+  setUrlState('map', next, { push: false });
   if (code) {
     try {
       state.map.benchmark = await GET(
@@ -1031,6 +1072,16 @@ function invalidateProcessCaches() {
   state.designer.processes = null;
   state.designer.model = null;
   state.designer.analysis = null;
+}
+
+function dropOwnerList() {
+  if (!state.map.ownerList && urlParams().owners !== 'l3') return;
+  state.map.ownerList = false;
+  const current = urlParams();
+  const next = {};
+  if (current.process) next.process = current.process;
+  if (current.benchmark) next.benchmark = current.benchmark;
+  setUrlState('map', next, { push: false });
 }
 
 function flattenTree(list, out) {

@@ -244,9 +244,9 @@ def list_changes(
     return [change_out(db, row) for row in rows]
 
 
-def approved_for_process(db: Session, process_id: int) -> Optional[ChangeRequestOut]:
-    """发布门禁使用：该流程最新一张已批准的变更申请。"""
-    row = db.scalar(
+def latest_approved_request(db: Session, process_id: int) -> Optional[ProcessChangeRequest]:
+    """该流程最新一张已批准、尚未应用的变更申请。"""
+    return db.scalar(
         select(ProcessChangeRequest)
         .where(
             ProcessChangeRequest.process_id == process_id,
@@ -254,6 +254,11 @@ def approved_for_process(db: Session, process_id: int) -> Optional[ChangeRequest
         )
         .order_by(ProcessChangeRequest.approved_at.desc(), ProcessChangeRequest.id.desc())
     )
+
+
+def approved_for_process(db: Session, process_id: int) -> Optional[ChangeRequestOut]:
+    """发布门禁使用：该流程最新一张已批准的变更申请。"""
+    row = latest_approved_request(db, process_id)
     return change_out(db, row) if row else None
 
 

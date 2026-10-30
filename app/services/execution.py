@@ -380,11 +380,15 @@ def _create_task(
     return task
 
 
-def _complete_instance(instance: ProcessInstance) -> None:
+def _complete_instance(db: Session, instance: ProcessInstance) -> None:
     instance.status = InstanceStatus.COMPLETED.value
     instance.current_node_key = None
     instance.current_node_name = None
     instance.completed_at = utcnow()
+    db.flush()
+    from app.services import kpi as kpi_service
+
+    kpi_service.record_completed_instance(db, instance)
 
 
 def _advance(
@@ -405,13 +409,13 @@ def _advance(
             raise HTTPException(status_code=400, detail=f"流程模型缺少节点 {current}")
         node_type = node.get("type")
         if node_type == NodeType.END.value:
-            _complete_instance(instance)
+            _complete_instance(db, instance)
             db.flush()
             return None
         if node_type == NodeType.START.value:
             outgoing = _outgoing(instance.snapshot, current)
             if not outgoing:
-                _complete_instance(instance)
+                _complete_instance(db, instance)
                 db.flush()
                 return None
             if len(outgoing) > 1:
@@ -765,7 +769,7 @@ def complete_task(
     )
 
     if next_key is None:
-        _complete_instance(instance)
+        _complete_instance(db, instance)
         db.flush()
     else:
         _advance(db, instance, next_key, actor=user)

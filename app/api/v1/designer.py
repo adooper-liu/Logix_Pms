@@ -568,11 +568,22 @@ def publish_rollback(
     user: ManagerUser,
 ):
     process = _require_process(db, process_id)
+    change_row = None
+    if process.requires_change_request:
+        change_row = change_service.latest_approved_request(db, process_id)
+        if change_row is None:
+            raise HTTPException(
+                status_code=409,
+                detail="该流程启用了变更门禁：回滚发布也必须先有一张已批准的变更申请",
+            )
     source = _require_version(db, process_id, version_id)
     row = model_service.rollback(
         db, process, source, user, payload.note or f"回滚并发布自 v{source.version}"
     )
-    model_service.publish(db, process, user, row.id, note=row.change_note)
+    row = model_service.publish(db, process, user, row.id, note=row.change_note)
+    if change_row is not None:
+        row.change_request_id = change_row.id
+        change_service.mark_applied(db, change_row)
     audit_service.record(
         db,
         user,

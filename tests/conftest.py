@@ -30,12 +30,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import app.models  # noqa: F401,E402
 from app.core.config import settings  # noqa: E402
-from app.core.database import Base, engine  # noqa: E402
+from app.core.database import Base, engine, ensure_postgres_extensions  # noqa: E402
 from app.main import app  # noqa: E402
 
 # 针对真实数据库跑测试时，先重建 schema，避免上一轮残留数据影响断言。
 # 放在模块级而不是 fixture 里，保证在任何用例之前执行。
 if not settings.is_sqlite:
+    ensure_postgres_extensions()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 

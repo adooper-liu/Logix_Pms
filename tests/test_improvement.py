@@ -16,8 +16,21 @@ def _draft(client, kpi_id: int):
     return client.post(f"{API}/monitor/kpis/{kpi_id}/improvement-draft")
 
 
+def _seed_reimbursement(client) -> dict:
+    """费用报销种子项目与 EFF-05 同一口径，进行中时不应再平行立项。"""
+    listing = client.get(f"{API}/projects", params={"keyword": "费用报销"}).json()
+    return next(row for row in listing["items"] if row["code"] == "PR-2026-029")
+
+
 def test_candidates_scan_and_exclusion(client):
     kpi = _kpi(client, "EFF-05")
+    seed = _seed_reimbursement(client)
+    assert seed["source_kpi_id"] == kpi["id"]
+    rows = client.get(f"{API}/monitor/improvement-candidates").json()
+    assert "EFF-05" not in {row["code"] for row in rows}
+
+    closed = client.patch(f"{API}/projects/{seed['id']}", json={"status": "CLOSED"})
+    assert closed.status_code == 200, closed.text
     rows = client.get(f"{API}/monitor/improvement-candidates").json()
     assert "EFF-05" in {row["code"] for row in rows}
     candidate = next(row for row in rows if row["code"] == "EFF-05")
@@ -29,10 +42,15 @@ def test_candidates_scan_and_exclusion(client):
     rows = client.get(f"{API}/monitor/improvement-candidates").json()
     assert "EFF-05" not in {row["code"] for row in rows}
     client.delete(f"{API}/projects/{created.json()['id']}")
+    client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
 def test_red_kpi_creates_improvement_project(client):
     kpi = _kpi(client, "EFF-05")  # 10 天 > 红线 7.6 → 红
+    seed = _seed_reimbursement(client)
+    assert (
+        client.patch(f"{API}/projects/{seed['id']}", json={"status": "CLOSED"}).status_code == 200
+    )
     assert kpi["status"] == "RED"
 
     created = _draft(client, kpi["id"])
@@ -85,10 +103,15 @@ def test_red_kpi_creates_improvement_project(client):
     assert data["observation_until"] == "2026-12-31"
 
     assert client.delete(f"{API}/projects/{pid}").status_code == 200
+    client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
 def test_closed_project_allows_new_draft(client):
     kpi = _kpi(client, "EFF-05")
+    seed = _seed_reimbursement(client)
+    assert (
+        client.patch(f"{API}/projects/{seed['id']}", json={"status": "CLOSED"}).status_code == 200
+    )
     first = _draft(client, kpi["id"])
     assert first.status_code == 201, first.text
     pid = first.json()["id"]
@@ -97,6 +120,7 @@ def test_closed_project_allows_new_draft(client):
     assert second.status_code == 201, second.text
     client.delete(f"{API}/projects/{second.json()['id']}")
     client.delete(f"{API}/projects/{pid}")
+    client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
 def test_green_kpi_is_not_a_candidate(client):

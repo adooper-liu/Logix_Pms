@@ -6,7 +6,7 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.deps import (
     CurrentUser,
@@ -124,7 +124,7 @@ def _dimension_status(rate: float) -> str:
 
 
 def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
-    records = sorted(kpi.records, key=lambda r: r.period)
+    records = kpi_service.ordered_records(kpi.records)
     latest = records[-1].value if records else None
     status = kpi_service.status_for(
         latest,
@@ -173,7 +173,7 @@ def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
 
 
 def _to_series(kpi: KpiDefinition) -> KpiTrendSeries:
-    records = sorted(kpi.records, key=lambda r: r.period)
+    records = kpi_service.ordered_records(kpi.records)
     latest = records[-1].value if records else None
     status = kpi_service.status_for(
         latest,
@@ -497,37 +497,37 @@ def add_record(kpi_id: int, payload: KpiRecordCreate, db: DbSession, user: Manag
     kpi = db.get(KpiDefinition, kpi_id)
     if kpi is None:
         raise HTTPException(status_code=404, detail="KPI 不存在")
-    existing = db.scalar(
-        select(KpiRecord).where(
+    existed = db.scalar(
+        select(KpiRecord.id).where(
             KpiRecord.kpi_id == kpi_id,
             KpiRecord.period == payload.period,
-            KpiRecord.project_id == payload.project_id,
+            (
+                KpiRecord.project_id.is_(None)
+                if payload.project_id is None
+                else KpiRecord.project_id == payload.project_id
+            ),
+            or_(KpiRecord.note.is_(None), KpiRecord.note != kpi_service.EXECUTION_NOTE),
         )
     )
-    if existing is not None:
-        existing.value = payload.value
-        existing.note = payload.note
-        audit_service.record(
-            db,
-            user,
-            "UPDATE",
-            "kpi_record",
-            existing.id,
-            f"{kpi.code} {payload.period} 数据点改为 {payload.value}",
-        )
-        db.commit()
-        db.refresh(existing)
-        return KpiRecordOut.model_validate(existing)
-    obj = KpiRecord(kpi_id=kpi_id, **as_columns(payload.model_dump()))
-    db.add(obj)
-    db.flush()
+    obj = kpi_service.save_record(
+        db,
+        kpi,
+        period=payload.period,
+        value=payload.value,
+        project_id=payload.project_id,
+        note=payload.note,
+    )
     audit_service.record(
         db,
         user,
-        "CREATE",
+        "UPDATE" if existed is not None else "CREATE",
         "kpi_record",
         obj.id,
-        f"{kpi.code} 新增 {payload.period} 数据点 {payload.value}",
+        (
+            f"{kpi.code} {payload.period} 数据点改为 {payload.value}"
+            if existed is not None
+            else f"{kpi.code} 新增 {payload.period} 数据点 {payload.value}"
+        ),
     )
     db.commit()
     db.refresh(obj)
