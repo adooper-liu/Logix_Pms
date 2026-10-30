@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any, Dict
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -37,6 +37,19 @@ class Base(DeclarativeBase):
     """所有 ORM 模型的基类。"""
 
     pass
+
+
+def ensure_postgres_extensions(bind=engine) -> None:
+    """create_all 路径不执行 Alembic 的 CREATE EXTENSION，这里补上。
+
+    `knowledge_item.search_text` 的 GIN 索引依赖 pg_trgm；测试/临时环境
+    用 create_all 建表时如果不先装扩展，PostgreSQL 会直接报
+    `operator class "gin_trgm_ops" does not exist`。
+    """
+    if bind.dialect.name != "postgresql":
+        return
+    with bind.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
 
 
 def get_db() -> Iterator[Session]:

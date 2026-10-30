@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -10,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
+    MANAGER_ROLES,
     DbSession,
     ManagerUser,
     WriteUser,
@@ -243,6 +245,11 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
         )
     if payload.current_stage != 1:
         raise HTTPException(status_code=400, detail="新建改善项目必须从阶段1开始")
+    if not payload.seed_workflow:
+        raise HTTPException(
+            status_code=400,
+            detail="改善项目必须生成标准工作流；请使用 seed_workflow=true 创建",
+        )
     data = as_columns(payload.model_dump(exclude={"code", "seed_workflow"}))
     # 归属以账号 id 为准；只给了姓名的历史数据按唯一 display_name 尝试绑定
     data["owner_user_id"], data["owner"] = resolve_owner(
@@ -291,6 +298,7 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
 def evidence_claim_meta():
     return EvidenceClaimMetaOut(
         evidence_level_labels=evidence_service.EVIDENCE_LEVEL_LABELS,
+        evidence_type_labels=evidence_service.EVIDENCE_TYPE_LABELS,
         verdict_labels=evidence_service.VERDICT_LABELS,
     )
 
@@ -322,6 +330,12 @@ def create_project_claim(
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
     ensure_can_edit_owned(user, project.owner_user_id, project.owner)
+    if payload.gate_condition_id is not None:
+        condition = db.get(ProjectGateCondition, payload.gate_condition_id)
+        if condition is None or condition.project_id != project_id:
+            raise HTTPException(status_code=400, detail="关联的门槛条件不存在或不属于该项目")
+        if condition.condition_code != "ROOT_CAUSE_EVIDENCE":
+            raise HTTPException(status_code=400, detail="目前只有根因门条件可以关联证据")
     row = evidence_service.create_claim(db, project_id, payload.model_dump(), user)
     audit_service.record(
         db,
@@ -516,9 +530,30 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
     changed = sorted(data.keys())
     if "dmaic_stage" in data:
         data["dmaic_updated_at"] = utcnow()
-    if "current_stage" in data and data["current_stage"] > project.current_stage:
+    previous_stage = project.current_stage
+    if "project_type" in data and data["project_type"] != project.project_type:
+        raise HTTPException(status_code=400, detail="项目类型创建后不可变更")
+    if "gate_required" in data:
+        if data["gate_required"] is None:
+            raise HTTPException(status_code=400, detail="严格门禁开关不能为空")
+        if data["gate_required"] != project.gate_required and user.role not in MANAGER_ROLES:
+            raise HTTPException(
+                status_code=403,
+                detail="严格门禁开关只能由流程管理科或系统管理员变更",
+            )
+    target_stage = data.get("current_stage")
+    if target_stage is not None and target_stage > previous_stage:
+        # 用本次请求合并后的有效状态校验，避免“同一次 PATCH 里先关/开门禁再推进”
+        # 读到更新前的 project_type / gate_required。
+        effective = SimpleNamespace(
+            id=project.id,
+            project_type=data.get("project_type", project.project_type),
+            gate_required=data.get("gate_required", project.gate_required),
+            current_stage=previous_stage,
+            process_id=data.get("process_id", project.process_id),
+        )
         try:
-            workbench_service.ensure_advance_allowed(db, project, data["current_stage"])
+            workbench_service.ensure_advance_allowed(db, effective, target_stage)
         except workbench_service.WorkbenchError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     for field, value in data.items():

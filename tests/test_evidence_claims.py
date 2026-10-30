@@ -55,7 +55,13 @@ def _link_two_strategy_kpis(client, process_id: int) -> int:
     return objective_id
 
 
-def _claim(client, project_id: int, evidence_type: str, level: str = "L1") -> dict:
+def _claim(
+    client,
+    project_id: int,
+    evidence_type: str,
+    level: str = "L1",
+    gate_condition_id: int | None = None,
+) -> dict:
     response = client.post(
         f"{API}/projects/{project_id}/claims",
         json={
@@ -63,6 +69,7 @@ def _claim(client, project_id: int, evidence_type: str, level: str = "L1") -> di
             "counterevidence": "样本中存在审批时间短但总周期仍长的订单",
             "evidence_level": level,
             "evidence_type": evidence_type,
+            "gate_condition_id": gate_condition_id,
             "source_description": f"{evidence_type} 记录",
             "source_url": f"https://example.com/{evidence_type.lower()}",
             "sample_scope": "最近30天，20个订单",
@@ -129,6 +136,11 @@ def test_diagnosis_gate_requires_two_confirmed_evidence_types(client, manager_cl
     project = _project(client, process["id"])
     project_id = project["id"]
     try:
+        patched = client.patch(
+            f"{API}/projects/{project_id}",
+            json={"root_cause": "审批等待是周期过长的主要原因"},
+        )
+        assert patched.status_code == 200, patched.text
         workbench = client.get(f"{API}/projects/{project_id}/workflow").json()
         for condition in workbench["gate"]["conditions"]:
             response = client.patch(
@@ -158,10 +170,36 @@ def test_diagnosis_gate_requires_two_confirmed_evidence_types(client, manager_cl
         assert blocked.status_code == 400
         assert "两类" in blocked.json()["detail"]
 
-        for claim in (
+        # 未绑定到根因门条件的证据，即使已裁决也不能满足根因门
+        unlinked = (
             _claim(client, project_id, "OBSERVATION"),
             _claim(client, project_id, "SYSTEM_LOG", "L2"),
+        )
+        for claim in unlinked:
+            confirmed = manager_client.patch(
+                f"{API}/projects/{project_id}/claims/{claim['id']}",
+                json={"verdict": "CONFIRMED", "decision_note": "数据复核支持该判断"},
+            )
+            assert confirmed.status_code == 200, confirmed.text
+            assert confirmed.json()["gate_condition_id"] is None
+        still_blocked = client.patch(
+            f"{API}/projects/{project_id}/workflow/conditions/{root_gate['id']}",
+            json={"is_met": True, "evidence": "未绑定根因门的证据"},
+        )
+        assert still_blocked.status_code == 400
+        assert "两类" in still_blocked.json()["detail"]
+
+        for claim in (
+            _claim(client, project_id, "OBSERVATION", gate_condition_id=root_gate["id"]),
+            _claim(
+                client,
+                project_id,
+                "SYSTEM_LOG",
+                "L2",
+                gate_condition_id=root_gate["id"],
+            ),
         ):
+            assert claim["gate_condition_id"] == root_gate["id"]
             confirmed = manager_client.patch(
                 f"{API}/projects/{project_id}/claims/{claim['id']}",
                 json={"verdict": "CONFIRMED", "decision_note": "数据复核支持该判断"},
@@ -176,3 +214,48 @@ def test_diagnosis_gate_requires_two_confirmed_evidence_types(client, manager_cl
     finally:
         client.delete(f"{API}/projects/{project_id}")
         assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
+
+
+def test_claim_rejects_unknown_evidence_type(client):
+    project = _project(client)
+    try:
+        response = client.post(
+            f"{API}/projects/{project['id']}/claims",
+            json={
+                "claim": "未知证据类型测试",
+                "counterevidence": "需要可复核",
+                "evidence_level": "L1",
+                "evidence_type": "GUESS",
+                "source_description": "测试来源",
+                "sample_scope": "测试样本",
+                "finding": "测试发现",
+            },
+        )
+        assert response.status_code == 422, response.text
+    finally:
+        assert client.delete(f"{API}/projects/{project['id']}").status_code == 200
+
+
+def test_claim_can_only_bind_to_root_cause_gate(client):
+    project = _project(client)
+    try:
+        workbench = client.get(f"{API}/projects/{project['id']}/workflow").json()
+        condition = workbench["gate"]["conditions"][0]
+        assert condition.get("condition_code") != "ROOT_CAUSE_EVIDENCE"
+        response = client.post(
+            f"{API}/projects/{project['id']}/claims",
+            json={
+                "claim": "普通门槛条件绑定测试",
+                "counterevidence": "需要可复核",
+                "evidence_level": "L1",
+                "evidence_type": "OBSERVATION",
+                "gate_condition_id": condition["id"],
+                "source_description": "测试来源",
+                "sample_scope": "测试样本",
+                "finding": "测试发现",
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert "根因门" in response.json()["detail"]
+    finally:
+        assert client.delete(f"{API}/projects/{project['id']}").status_code == 200
