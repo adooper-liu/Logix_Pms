@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 import app.models  # noqa: F401
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import Base, SessionLocal, engine, ensure_postgres_extensions
 from app.core.migrations import upgrade_head
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI):
     if settings.auto_migrate:
         upgrade_head()
     else:
+        ensure_postgres_extensions()
         Base.metadata.create_all(bind=engine)
 
     if settings.seed_on_startup:

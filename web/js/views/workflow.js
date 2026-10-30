@@ -266,7 +266,9 @@ function paintWorkbench(d, wf) {
         <span class="tag ${claim.verdict === 'CONFIRMED' ? 't-grn'
     : claim.verdict === 'PENDING' ? 't-yel' : 't-gry'}">
           ${esc(claim.verdict_label)}</span>
-        <span class="tiny">${esc(claim.evidence_level_label)} · ${esc(claim.evidence_type)}</span>
+        <span class="tiny">${esc(claim.evidence_level_label)} ·
+          ${esc(claim.evidence_type_label || claim.evidence_type)}</span>
+        ${claim.gate_condition_id ? '<span class="tag t-pur">根因门证据</span>' : ''}
       </summary>
       <div class="wb-fold-body">
         <div><b>反证：</b>${esc(claim.counterevidence)}</div>
@@ -554,6 +556,12 @@ function openClaimModal() {
   const levelOptions = Object.entries(data?.evidence_level_labels || {}).map(
     ([code, label]) => `<option value="${esc(code)}">${esc(code)} · ${esc(label)}</option>`,
   ).join('');
+  const typeOptions = Object.entries(data?.evidence_type_labels || {}).map(
+    ([code, label]) => `<option value="${esc(code)}">${esc(code)} · ${esc(label)}</option>`,
+  ).join('');
+  const rootGate = (data?.gate?.conditions || []).find(
+    (row) => row.condition_code === 'ROOT_CAUSE_EVIDENCE',
+  );
   openModal('登记主张与证据', `
     <div class="note mb">先记录可被反驳的主张、反证及证据范围；新记录默认待验证，裁决需由非创建人完成。</div>
     <div class="field"><label>主张 *</label><textarea id="ecClaim" rows="2"></textarea></div>
@@ -561,8 +569,13 @@ function openClaimModal() {
       <textarea id="ecCounter" rows="2"></textarea></div>
     <div class="row2">
       <div class="field"><label>证据等级 *</label><select id="ecLevel">${levelOptions}</select></div>
-      <div class="field"><label>证据类型 *</label><input id="ecType" placeholder="现场观测 / 系统日志 / 业务结果"></div>
+      <div class="field"><label>证据类型 *</label><select id="ecType">${typeOptions}</select></div>
     </div>
+    ${rootGate ? `<div class="field">
+      <label class="kb-check"><input type="checkbox" id="ecRootGate">
+        作为根因门证据（${esc(rootGate.text)}）</label>
+      <div class="tiny muted">只有勾选并绑定到该门条件的 L1-L3 证据，才能满足根因门。</div>
+    </div>` : ''}
     <div class="field"><label>来源说明 *</label><textarea id="ecSource" rows="2"></textarea></div>
     <div class="field"><label>来源链接</label><input id="ecUrl" placeholder="报告、系统查询或原始记录链接"></div>
     <div class="field"><label>样本与时间范围 *</label><textarea id="ecScope" rows="2"></textarea></div>
@@ -573,17 +586,24 @@ function openClaimModal() {
 
 async function createClaim() {
   const val = (id) => document.getElementById(id)?.value.trim() || '';
+  const rootGate = (state.wfWorkbench?.gate?.conditions || []).find(
+    (row) => row.condition_code === 'ROOT_CAUSE_EVIDENCE',
+  );
+  const bindRootGate = Boolean(rootGate && document.getElementById('ecRootGate')?.checked);
   const payload = {
     claim: val('ecClaim'),
     counterevidence: val('ecCounter'),
     evidence_level: val('ecLevel'),
     evidence_type: val('ecType'),
+    gate_condition_id: bindRootGate ? rootGate.id : null,
     source_description: val('ecSource'),
     source_url: val('ecUrl') || null,
     sample_scope: val('ecScope'),
     finding: val('ecFinding'),
   };
-  if (Object.entries(payload).some(([key, value]) => key !== 'source_url' && !value)) {
+  if (Object.entries(payload).some(
+    ([key, value]) => !['source_url', 'gate_condition_id'].includes(key) && !value,
+  )) {
     return toast('请填写主张、反证、证据来源、样本范围与发现', true);
   }
   try {
@@ -603,7 +623,7 @@ function openClaimDecision(claimId) {
   const verdicts = Object.entries(data.evidence_verdict_labels || {})
     .filter(([code]) => code !== 'PENDING')
     .map(([code, label]) => `<option value="${esc(code)}">${esc(label)}</option>`).join('');
-  openModal('独立裁决 · ' + claim.evidence_type, `
+  openModal('独立裁决 · ' + (claim.evidence_type_label || claim.evidence_type), `
     <div class="note mb">主张创建人不能裁决自己的记录；只有 L1-L3 可被裁决为支持。</div>
     <div><b>主张：</b>${esc(claim.claim)}</div>
     <div class="mt"><b>反证：</b>${esc(claim.counterevidence)}</div>

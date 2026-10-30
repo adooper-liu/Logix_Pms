@@ -552,3 +552,12 @@ def test_components_have_no_hardcoded_colors():
     base = (WEB_ROOT / "css" / "base.css").read_text(encoding="utf-8")
     assert '[data-theme="slate"]' in base, "base.css 缺少主题覆盖示例"
     assert "--brand:" in base and "--panel:" in base, "base.css 缺少基础主题令牌"
+
+
+def test_workflow_claim_form_uses_backend_labels_and_root_gate():
+    """证据类型由后端下发；根因门证据必须显式绑定条件，不能只靠自由文本。"""
+    src = (JS_ROOT / "views" / "workflow.js").read_text(encoding="utf-8")
+    assert "evidence_type_labels" in src, "证据类型没有使用后端下发的标签"
+    assert '<select id="ecType">' in src, "证据类型不是受控下拉框"
+    assert "ecRootGate" in src and "gate_condition_id" in src, "证据登记没有绑定根因门条件"
+    assert "evidence_type_label" in src, "主张列表没有展示后端证据类型标签"

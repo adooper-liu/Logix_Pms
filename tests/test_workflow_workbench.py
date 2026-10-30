@@ -215,3 +215,85 @@ def test_step_status_requires_evidence_and_sets_done(client):
         assert row["verified_by"] == "系统管理员"
     finally:
         client.delete(f"{API}/projects/{project['id']}")
+
+
+def test_new_project_requires_standard_workflow(client):
+    response = client.post(
+        f"{API}/projects",
+        json={
+            "name": "空工作流测试",
+            "methodology": "BPI",
+            "owner": "流程管理科",
+            "seed_workflow": False,
+        },
+    )
+    assert response.status_code == 400
+    assert "标准工作流" in response.json()["detail"]
+
+
+def test_project_type_cannot_change(client):
+    project = _project(client)
+    try:
+        response = client.patch(
+            f"{API}/projects/{project['id']}",
+            json={"project_type": "GOVERNANCE_SETUP"},
+        )
+        assert response.status_code == 400
+        assert "不可变更" in response.json()["detail"]
+        detail = client.get(f"{API}/projects/{project['id']}").json()
+        assert detail["project"]["project_type"] == "IMPROVEMENT"
+    finally:
+        client.delete(f"{API}/projects/{project['id']}")
+
+
+def test_owner_cannot_toggle_gate_required(owner_client, client):
+    created = owner_client.post(
+        f"{API}/projects",
+        json={"name": "Owner 门禁开关测试", "methodology": "BPI", "owner": "陈经理"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    try:
+        response = owner_client.patch(
+            f"{API}/projects/{project_id}",
+            json={"gate_required": True},
+        )
+        assert response.status_code == 403
+        assert "流程管理科" in response.json()["detail"]
+    finally:
+        assert client.delete(f"{API}/projects/{project_id}").status_code == 200
+
+
+def test_same_request_gate_toggle_uses_effective_value(client):
+    process = next(
+        row for row in client.get(f"{API}/process-map/flat").json() if row["code"] == "L3-032"
+    )
+    objective_id = _link_two_strategy_kpis(client, process["id"])
+    project = _project(client, process["id"])
+    project_id = project["id"]
+    try:
+        workbench = client.get(f"{API}/projects/{project_id}/workflow").json()
+        for condition in workbench["gate"]["conditions"]:
+            updated = client.patch(
+                f"{API}/projects/{project_id}/workflow/conditions/{condition['id']}",
+                json={"is_met": True, "evidence": "验收材料"},
+            )
+            assert updated.status_code == 200, updated.text
+        for step in workbench["steps"]:
+            updated = client.patch(
+                f"{API}/projects/{project_id}/workflow/steps/{step['id']}",
+                json={"status": "DONE", "evidence": ["验收材料"]},
+            )
+            assert updated.status_code == 200, updated.text
+
+        # 同一请求里启用严格门禁并推进：必须按“启用后”的状态校验，不能被旧值绕过
+        blocked = client.patch(
+            f"{API}/projects/{project_id}",
+            json={"gate_required": True, "current_stage": 2},
+        )
+        assert blocked.status_code == 400
+        assert "签收" in blocked.json()["detail"]
+        assert client.get(f"{API}/projects/{project_id}").json()["project"]["current_stage"] == 1
+    finally:
+        client.delete(f"{API}/projects/{project_id}")
+        assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200

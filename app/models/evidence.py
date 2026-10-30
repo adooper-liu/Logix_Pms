@@ -23,6 +23,15 @@ class ProjectEvidenceClaim(Base):
     counterevidence: Mapped[str] = mapped_column(Text)
     evidence_level: Mapped[str] = mapped_column(String(2), index=True)
     evidence_type: Mapped[str] = mapped_column(String(32), index=True)
+    gate_condition_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "project_gate_condition.id",
+            ondelete="SET NULL",
+            name="fk_project_evidence_claim_gate_condition",
+        ),
+        nullable=True,
+        index=True,
+    )
     source_description: Mapped[str] = mapped_column(Text)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     sample_scope: Mapped[str] = mapped_column(Text)

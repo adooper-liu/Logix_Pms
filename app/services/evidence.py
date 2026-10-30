@@ -19,6 +19,14 @@ EVIDENCE_LEVEL_LABELS = {
     "L4": "外部对标数据",
     "L5": "反证数据",
 }
+EVIDENCE_TYPE_LABELS = {
+    "OBSERVATION": "现场观测",
+    "SYSTEM_LOG": "系统日志",
+    "BUSINESS_RESULT": "业务结果",
+    "INTERVIEW": "访谈记录",
+    "DOCUMENT": "文件/记录",
+    "INDUSTRY_BENCHMARK": "行业对标",
+}
 VERDICT_LABELS = {
     "PENDING": "待验证",
     "CONFIRMED": "支持",
@@ -41,6 +49,8 @@ def claim_out(row: ProjectEvidenceClaim) -> ProjectEvidenceClaimOut:
         evidence_level=row.evidence_level,
         evidence_level_label=EVIDENCE_LEVEL_LABELS.get(row.evidence_level, row.evidence_level),
         evidence_type=row.evidence_type,
+        evidence_type_label=EVIDENCE_TYPE_LABELS.get(row.evidence_type, row.evidence_type),
+        gate_condition_id=row.gate_condition_id,
         source_description=row.source_description,
         source_url=row.source_url,
         sample_scope=row.sample_scope,
@@ -104,10 +114,12 @@ def decide_claim(
     return row
 
 
-def root_cause_evidence_ready(db: Session, project_id: int) -> bool:
+def root_cause_evidence_ready(db: Session, project_id: int, condition_id: int) -> bool:
+    """根因门只认显式绑定到该门条件的、已独立裁决的 L1-L3 证据。"""
     rows = db.scalars(
         select(ProjectEvidenceClaim).where(
             ProjectEvidenceClaim.project_id == project_id,
+            ProjectEvidenceClaim.gate_condition_id == condition_id,
             ProjectEvidenceClaim.verdict == "CONFIRMED",
             ProjectEvidenceClaim.evidence_level.in_(("L1", "L2", "L3")),
         )
