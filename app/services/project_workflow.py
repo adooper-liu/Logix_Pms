@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
 from app.models.benchmark import BenchmarkCategory, BenchmarkFramework, ProcessBenchmarkMap
 from app.models.enums import ProjectStatus, ProjectType, StepStatus
+from app.models.monitor import KpiDefinition
 from app.models.process import ProcessArch
 from app.models.project import Project, ProjectGateCondition, ProjectStep
+from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.schemas.project_workflow import (
     AdvanceResultOut,
     GateConditionOut,
@@ -26,6 +28,7 @@ from app.schemas.project_workflow import (
 from app.services import evidence as evidence_service
 from app.services import improvement as improvement_service
 from app.services import maturity as maturity_service
+from app.services import process_scope
 from app.services import workflow as workflow_service
 
 STEP_STATUS_LABELS = {
@@ -140,6 +143,39 @@ def _blocking_reasons(
     return reasons
 
 
+def _stage1_strategy_gate_reasons(db: Session, project: Project) -> List[str]:
+    if project.project_type != ProjectType.IMPROVEMENT.value:
+        return []
+    if project.process_id is None:
+        return ["阶段1门禁：项目必须关联流程，才能核验战略目标与 KPI 承接关系"]
+
+    process_ids = process_scope.ancestor_ids(db, project.process_id)
+    linked_kpis = db.scalars(
+        select(ObjectiveProcessLink.kpi_id)
+        .join(
+            StrategyObjective,
+            StrategyObjective.id == ObjectiveProcessLink.objective_id,
+        )
+        .join(KpiDefinition, KpiDefinition.id == ObjectiveProcessLink.kpi_id)
+        .where(
+            ObjectiveProcessLink.process_id.in_(process_ids),
+            ObjectiveProcessLink.kpi_id.is_not(None),
+            StrategyObjective.status == "ACTIVE",
+            StrategyObjective.target_value.is_not(None),
+            func.trim(StrategyObjective.code) != "",
+            KpiDefinition.is_active.is_(True),
+            KpiDefinition.target_value.is_not(None),
+            func.trim(KpiDefinition.code) != "",
+        )
+        .distinct()
+    ).all()
+    if len(linked_kpis) < 2:
+        return [
+            "阶段1门禁：至少关联 2 项有效战略 KPI；每项均须关联有效战略目标，且目标与 KPI 都有编码和目标值"
+        ]
+    return []
+
+
 def _apqc_architecture_reasons(db: Session, project: Project, stage_no: int) -> List[str]:
     if (
         not project.gate_required
@@ -206,6 +242,8 @@ def _stage_blocking_reasons(db: Session, project: Project, stage_no: int) -> Lis
         ).all()
     )
     reasons = _blocking_reasons(steps, conditions)
+    if stage_no == 1:
+        reasons.extend(_stage1_strategy_gate_reasons(db, project))
     if any(row.condition_code == "ROOT_CAUSE_EVIDENCE" for row in conditions) and (
         not evidence_service.root_cause_evidence_ready(db, project.id)
     ):
@@ -283,6 +321,8 @@ def workbench(db: Session, project: Project, view_stage: Optional[int] = None) -
     ):
         reasons.append("根因判断需有同一主张下至少两类已独立裁决的 L1-L3 证据")
     if is_current:
+        if target_stage == 1:
+            reasons.extend(_stage1_strategy_gate_reasons(db, project))
         reasons.extend(_apqc_architecture_reasons(db, project, target_stage))
         if project.gate_required and target_stage < 5:
             try:

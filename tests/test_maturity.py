@@ -66,6 +66,39 @@ def _create_project(client, process_id: int) -> dict:
     return created.json()
 
 
+def _link_two_strategy_kpis(client, process_id: int, *, objective_target: float = 5.0) -> int:
+    objective = client.post(
+        f"{API}/strategy/objectives",
+        json={
+            "name": "阶段门战略目标-" + uuid.uuid4().hex[:8],
+            "year": 2026,
+            "target_value": objective_target,
+            "status": "ACTIVE",
+        },
+    )
+    assert objective.status_code == 201, objective.text
+    objective_id = objective.json()["id"]
+
+    for index, target in enumerate((0.0, 10.0), start=1):
+        kpi = client.post(
+            f"{API}/monitor/kpis",
+            json={
+                "code": "GATE-" + uuid.uuid4().hex[:8].upper(),
+                "name": f"阶段门战略指标{index}",
+                "dimension": "EFFICIENCY",
+                "formula": "阶段门测试计算口径",
+                "target_value": target,
+            },
+        )
+        assert kpi.status_code == 201, kpi.text
+        link = client.post(
+            f"{API}/strategy/objectives/{objective_id}/links",
+            json={"process_id": process_id, "kpi_id": kpi.json()["id"]},
+        )
+        assert link.status_code == 201, link.text
+    return objective_id
+
+
 def test_maturity_assessment_and_coverage(client):
     meta = client.get(f"{API}/maturity/meta").json()
     assert meta["dimension_labels"]["GOVERNANCE"] == "治理与责任"
@@ -100,6 +133,7 @@ def test_maturity_assessment_and_coverage(client):
 
 def test_gate_blocks_stage_advance_until_pass(client):
     process_id, _ = _new_apqc_process(client)
+    objective_id = _link_two_strategy_kpis(client, process_id)
     project = _create_project(client, process_id)
     project_id = project["id"]
     try:
@@ -165,11 +199,13 @@ def test_gate_blocks_stage_advance_until_pass(client):
         assert any(row["conclusion"] == "PASS" for row in gates)
     finally:
         assert client.delete(f"{API}/projects/{project_id}").status_code == 200
+        assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
         assert client.delete(f"{API}/process-map/{process_id}").status_code == 200
 
 
 def test_strict_gate_requires_apqc_l3_mapping(client):
     process_id, category_id = _new_apqc_process(client, add_mapping=False)
+    objective_id = _link_two_strategy_kpis(client, process_id)
     project = _create_project(client, process_id)
     project_id = project["id"]
     try:
@@ -214,4 +250,37 @@ def test_strict_gate_requires_apqc_l3_mapping(client):
         assert advanced.status_code == 200, advanced.text
     finally:
         assert client.delete(f"{API}/projects/{project_id}").status_code == 200
+        assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
+        assert client.delete(f"{API}/process-map/{process_id}").status_code == 200
+
+
+def test_stage_one_requires_two_strongly_linked_strategic_kpis(client):
+    process_id, _ = _new_apqc_process(client)
+    project = _create_project(client, process_id)
+    objective_id = None
+    try:
+        reasons = client.get(f"{API}/projects/{project['id']}/workflow").json()["gate"][
+            "block_reasons"
+        ]
+        assert any("至少关联 2 项有效战略 KPI" in reason for reason in reasons)
+
+        objective_id = _link_two_strategy_kpis(client, process_id, objective_target=None)
+        reasons = client.get(f"{API}/projects/{project['id']}/workflow").json()["gate"][
+            "block_reasons"
+        ]
+        assert any("至少关联 2 项有效战略 KPI" in reason for reason in reasons)
+
+        updated = client.patch(
+            f"{API}/strategy/objectives/{objective_id}",
+            json={"target_value": 0.0},
+        )
+        assert updated.status_code == 200, updated.text
+        reasons = client.get(f"{API}/projects/{project['id']}/workflow").json()["gate"][
+            "block_reasons"
+        ]
+        assert not any("至少关联 2 项有效战略 KPI" in reason for reason in reasons)
+    finally:
+        assert client.delete(f"{API}/projects/{project['id']}").status_code == 200
+        if objective_id is not None:
+            assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
         assert client.delete(f"{API}/process-map/{process_id}").status_code == 200

@@ -7,17 +7,52 @@ import uuid
 API = "/api/v1"
 
 
-def _project(client) -> dict:
+def _project(client, process_id: int | None = None) -> dict:
+    payload = {
+        "name": "工作台测试项目 " + uuid.uuid4().hex[:4],
+        "methodology": "BPI",
+        "owner": "流程管理科",
+    }
+    if process_id is not None:
+        payload["process_id"] = process_id
     created = client.post(
         f"{API}/projects",
-        json={
-            "name": "工作台测试项目 " + uuid.uuid4().hex[:4],
-            "methodology": "BPI",
-            "owner": "流程管理科",
-        },
+        json=payload,
     )
     assert created.status_code == 201, created.text
     return created.json()
+
+
+def _link_two_strategy_kpis(client, process_id: int) -> int:
+    objective = client.post(
+        f"{API}/strategy/objectives",
+        json={
+            "name": "工作台阶段门目标-" + uuid.uuid4().hex[:8],
+            "year": 2026,
+            "target_value": 5.0,
+            "status": "ACTIVE",
+        },
+    )
+    assert objective.status_code == 201, objective.text
+    objective_id = objective.json()["id"]
+    for index, target in enumerate((0.0, 10.0), start=1):
+        kpi = client.post(
+            f"{API}/monitor/kpis",
+            json={
+                "code": "WB-GATE-" + uuid.uuid4().hex[:8].upper(),
+                "name": f"工作台阶段门指标{index}",
+                "dimension": "EFFICIENCY",
+                "formula": "工作台测试计算口径",
+                "target_value": target,
+            },
+        )
+        assert kpi.status_code == 201, kpi.text
+        link = client.post(
+            f"{API}/strategy/objectives/{objective_id}/links",
+            json={"process_id": process_id, "kpi_id": kpi.json()["id"]},
+        )
+        assert link.status_code == 201, link.text
+    return objective_id
 
 
 def test_project_detail_exposes_step_status_labels(client):
@@ -35,7 +70,11 @@ def test_project_detail_exposes_step_status_labels(client):
 
 
 def test_workbench_seeds_gate_and_blocks_advance(client):
-    project = _project(client)
+    process = next(
+        row for row in client.get(f"{API}/process-map/flat").json() if row["code"] == "L3-032"
+    )
+    objective_id = _link_two_strategy_kpis(client, process["id"])
+    project = _project(client, process["id"])
     try:
         wb = client.get(f"{API}/projects/{project['id']}/workflow")
         assert wb.status_code == 200, wb.text
@@ -81,6 +120,7 @@ def test_workbench_seeds_gate_and_blocks_advance(client):
         assert historical["viewing_stage"] == 1
     finally:
         client.delete(f"{API}/projects/{project['id']}")
+        assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
 
 
 def test_project_stage_patch_cannot_bypass_workbench_gate(client):
