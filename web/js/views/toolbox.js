@@ -58,7 +58,7 @@ on('toolbox.toggleCategory', ({ category }) => {
   else current.add(category);
   state.toolbox.categories = [...current];
   state.toolbox.section = 'resources';
-  state.toolbox.navSection = 'type';
+  state.toolbox.navSection = 'tools';
   state.knowledge.type = 'TOOL';
   syncToolboxUrl();
   RENDERERS.toolbox();
@@ -173,7 +173,8 @@ const renderToolbox = () => {
   }
   if (tb.section === 'reco') tb.navSection = 'problem';
   else if (params.stage) tb.navSection = 'stage';
-  else if (params.category || params.rtype || params.rtool) tb.navSection = 'type';
+  else if (params.category) tb.navSection = 'tools';
+  else if (params.rtype || params.rtool) tb.navSection = 'type';
   // nav 是用户点击折叠区后的显式选择（none = 全部收起），优先级最高；
   // 深链打开工具详情时默认展开工具目录，与其他折叠区的上下文保持一致。
   if ('nav' in params) {
@@ -500,13 +501,14 @@ function paint(d) {
             <div class="kb-stage-list">${stageLinks}</div>
           </details>
           <details class="kb-nav-fold"${tb.navSection === 'type' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="type">按类型</summary>
+            <summary data-act="toolbox.navSection" data-section="type">按资源类型</summary>
             <div class="kb-chips">${resourceTypeChips}</div>
-            <div class="tb-quads mt">${categoryRows}</div>
           </details>
           <details class="kb-nav-fold"${tb.navSection === 'tools' ? ' open' : ''}>
             <summary data-act="toolbox.navSection" data-section="tools">工具目录（${catalogHits.length}）</summary>
-            <div class="tb-tool-nav">${toolNav}</div>
+            <div class="tiny muted mb">按工具类别筛选</div>
+            <div class="tb-quads">${categoryRows}</div>
+            <div class="tb-tool-nav mt">${toolNav}</div>
           </details>
         </div>
       </aside>

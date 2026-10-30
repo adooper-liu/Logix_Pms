@@ -713,7 +713,7 @@ def main() -> int:
             assert "新建工具" in view and "新建案例/模板" in view, "管理员工具箱缺少新建入口"
 
             # 左栏四个折叠区共用一套互斥手风琴：点开一个，其他必须收起
-            for label in ("按阶段", "按类型", "工具目录", "按问题"):
+            for label in ("按阶段", "按资源类型", "工具目录", "按问题"):
                 page.click(f'#view .kb-nav-fold summary:has-text("{label}")')
                 page.wait_for_timeout(1200)
                 opened = page.eval_on_selector_all(
@@ -761,9 +761,18 @@ def main() -> int:
             res2 = page.inner_text("#view")
             assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:240]!r}"
 
-            # 四象限是辅助筛选，不是主入口（先展开左栏「按类型」）
-            page.click('#view .kb-nav-fold summary:has-text("按类型")')
-            page.wait_for_timeout(300)
+            # 工具类别属于「工具目录」，不属于「按资源类型」
+            page.click('#view .kb-nav-fold summary:has-text("按资源类型")')
+            page.wait_for_timeout(500)
+            assert not page.locator(
+                '#view button[data-act="toolbox.toggleCategory"]'
+            ).first.is_visible(), "工具类别不应出现在「按资源类型」折叠区"
+            page.click('#view .kb-nav-fold summary:has-text("工具目录")')
+            page.wait_for_timeout(500)
+            assert page.locator(
+                '#view button[data-act="toolbox.toggleCategory"]'
+            ).first.is_visible(), "「工具目录」折叠区缺少工具类别筛选"
+            # 四象限是辅助筛选，不是主入口
             page.click('#view button[data-act="toolbox.toggleCategory"][data-category="DIAGNOSE"]')
             page.wait_for_timeout(1200)
             assert "方法论工具箱" in page.inner_text("#view")
