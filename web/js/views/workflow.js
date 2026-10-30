@@ -34,6 +34,10 @@ on('workflow.editCondition', ({ id }) => openConditionModal(Number(id)));
 on('workflow.saveCondition', ({ id }) => saveCondition(Number(id)));
 on('workflow.newCondition', () => openNewConditionModal());
 on('workflow.createCondition', () => createCondition());
+on('workflow.newClaim', () => openClaimModal());
+on('workflow.createClaim', () => createClaim());
+on('workflow.decideClaim', ({ id }) => openClaimDecision(Number(id)));
+on('workflow.saveClaimDecision', ({ id }) => saveClaimDecision(Number(id)));
 on('workflow.advance', () => advanceStage());
 on('workflow.tenLayer', () => go('pilot', {
   params: { project: state.workflow.projectId || '', stage: state.workflow.stage || '' },
@@ -256,6 +260,26 @@ function paintWorkbench(d, wf) {
       ${!readOnly && canWrite() ? `<button class="btn-sm" data-act="workflow.editCondition"
         data-id="${row.id}">更新</button>` : ''}
     </li>`).join('') || '<li class="tiny muted">本阶段还没有配置门槛条件。</li>';
+  const claimRows = (data.claims || []).map((claim) => `
+    <details class="wb-fold">
+      <summary><b>${esc(claim.claim)}</b>
+        <span class="tag ${claim.verdict === 'CONFIRMED' ? 't-grn'
+    : claim.verdict === 'PENDING' ? 't-yel' : 't-gry'}">
+          ${esc(claim.verdict_label)}</span>
+        <span class="tiny">${esc(claim.evidence_level_label)} · ${esc(claim.evidence_type)}</span>
+      </summary>
+      <div class="wb-fold-body">
+        <div><b>反证：</b>${esc(claim.counterevidence)}</div>
+        <div><b>来源与样本：</b>${esc(claim.source_description)} · ${esc(claim.sample_scope)}</div>
+        <div><b>发现：</b>${esc(claim.finding)}</div>
+        ${claim.source_url ? `<div><b>来源链接：</b>${esc(claim.source_url)}</div>` : ''}
+        <div><b>裁决：</b>${esc(claim.decision_note || '尚未裁决')}
+          · ${esc(claim.decided_by || '待复核')}</div>
+        ${claim.verdict === 'PENDING' && !readOnly && canWrite()
+    ? `<button class="btn-sm mt" data-act="workflow.decideClaim" data-id="${claim.id}">独立裁决</button>`
+    : ''}
+      </div>
+    </details>`).join('') || '<div class="tiny muted">暂无判断证据。只有 L1-L3 证据经独立复核后，才能支撑根因裁决。</div>';
 
   const gateReasons = gate.conditions
     .filter((row) => row.is_critical && !row.is_met)
@@ -325,6 +349,14 @@ function paintWorkbench(d, wf) {
           <p class="wb-gate-status" aria-live="polite">
             ${gate.met_count}/${gate.total} 项门槛已满足${gate.can_advance ? '，可以进入下一阶段。' : '；仍有未关闭条件。'}
           </p>
+        </section>
+        <section class="card wb-gate">
+          <div class="between">
+            <div class="wb-eyebrow">主张 → 反证 → 证据 → 裁决</div>
+            ${!readOnly && canWrite()
+    ? '<button class="btn-sm" data-act="workflow.newClaim">+ 登记判断</button>' : ''}
+          </div>
+          <div class="stack">${claimRows}</div>
         </section>
         <section class="card wb-gate">
           <div class="wb-eyebrow">阻塞与操作</div>
@@ -514,6 +546,88 @@ async function advanceStage() {
   } catch (e) {
     toast(e.message, true);
     RENDERERS.workflow();
+  }
+}
+
+function openClaimModal() {
+  const data = state.wfWorkbench;
+  const levelOptions = Object.entries(data?.evidence_level_labels || {}).map(
+    ([code, label]) => `<option value="${esc(code)}">${esc(code)} · ${esc(label)}</option>`,
+  ).join('');
+  openModal('登记主张与证据', `
+    <div class="note mb">先记录可被反驳的主张、反证及证据范围；新记录默认待验证，裁决需由非创建人完成。</div>
+    <div class="field"><label>主张 *</label><textarea id="ecClaim" rows="2"></textarea></div>
+    <div class="field"><label>反证 / 可能推翻主张的情况 *</label>
+      <textarea id="ecCounter" rows="2"></textarea></div>
+    <div class="row2">
+      <div class="field"><label>证据等级 *</label><select id="ecLevel">${levelOptions}</select></div>
+      <div class="field"><label>证据类型 *</label><input id="ecType" placeholder="现场观测 / 系统日志 / 业务结果"></div>
+    </div>
+    <div class="field"><label>来源说明 *</label><textarea id="ecSource" rows="2"></textarea></div>
+    <div class="field"><label>来源链接</label><input id="ecUrl" placeholder="报告、系统查询或原始记录链接"></div>
+    <div class="field"><label>样本与时间范围 *</label><textarea id="ecScope" rows="2"></textarea></div>
+    <div class="field"><label>观察发现 *</label><textarea id="ecFinding" rows="2"></textarea></div>`,
+  `<button class="btn btn-g" data-act="workflow.close">取消</button>
+   <button class="btn btn-p" data-act="workflow.createClaim">登记为待验证</button>`);
+}
+
+async function createClaim() {
+  const val = (id) => document.getElementById(id)?.value.trim() || '';
+  const payload = {
+    claim: val('ecClaim'),
+    counterevidence: val('ecCounter'),
+    evidence_level: val('ecLevel'),
+    evidence_type: val('ecType'),
+    source_description: val('ecSource'),
+    source_url: val('ecUrl') || null,
+    sample_scope: val('ecScope'),
+    finding: val('ecFinding'),
+  };
+  if (Object.entries(payload).some(([key, value]) => key !== 'source_url' && !value)) {
+    return toast('请填写主张、反证、证据来源、样本范围与发现', true);
+  }
+  try {
+    await POST(`/projects/${state.workflow.projectId}/claims`, payload);
+    toast('判断已登记为待验证');
+    closeModal();
+    RENDERERS.workflow();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openClaimDecision(claimId) {
+  const data = state.wfWorkbench;
+  const claim = data?.claims?.find((row) => row.id === claimId);
+  if (!claim) return;
+  const verdicts = Object.entries(data.evidence_verdict_labels || {})
+    .filter(([code]) => code !== 'PENDING')
+    .map(([code, label]) => `<option value="${esc(code)}">${esc(label)}</option>`).join('');
+  openModal('独立裁决 · ' + claim.evidence_type, `
+    <div class="note mb">主张创建人不能裁决自己的记录；只有 L1-L3 可被裁决为支持。</div>
+    <div><b>主张：</b>${esc(claim.claim)}</div>
+    <div class="mt"><b>反证：</b>${esc(claim.counterevidence)}</div>
+    <div class="mt"><b>观察发现：</b>${esc(claim.finding)}</div>
+    <div class="field mt"><label>裁决 *</label><select id="ecVerdict">${verdicts}</select></div>
+    <div class="field"><label>裁决依据 *</label><textarea id="ecDecisionNote" rows="3"></textarea></div>`,
+  `<button class="btn btn-g" data-act="workflow.close">取消</button>
+   <button class="btn btn-p" data-act="workflow.saveClaimDecision" data-id="${claimId}">提交裁决</button>`);
+}
+
+async function saveClaimDecision(claimId) {
+  const verdict = document.getElementById('ecVerdict')?.value || '';
+  const decisionNote = document.getElementById('ecDecisionNote')?.value.trim() || '';
+  if (!decisionNote) return toast('请填写裁决依据', true);
+  try {
+    await PATCH(`/projects/${state.workflow.projectId}/claims/${claimId}`, {
+      verdict,
+      decision_note: decisionNote,
+    });
+    toast('裁决已记录');
+    closeModal();
+    RENDERERS.workflow();
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 

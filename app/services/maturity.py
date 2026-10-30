@@ -132,6 +132,8 @@ def create_gate(db: Session, data: dict, user: User) -> GateAttestation:
     project = db.get(Project, data["project_id"])
     if project is None:
         raise MaturityError("项目不存在")
+    if data["stage_no"] != project.current_stage:
+        raise MaturityError("只能签收项目当前阶段的门禁")
     if not (data.get("evidence_url") or "").strip():
         raise MaturityError("门禁签收必须附证据链接")
     row = GateAttestation(

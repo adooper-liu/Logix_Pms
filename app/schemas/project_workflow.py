@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import UtcDateTime
+from app.schemas.evidence import ProjectEvidenceClaimOut
 
 
 class WorkbenchStepOut(BaseModel):
@@ -41,6 +42,7 @@ class WorkbenchStepOut(BaseModel):
 class GateConditionOut(BaseModel):
     id: int
     stage_no: int
+    condition_code: Optional[str] = None
     text: str
     evidence: Optional[str] = None
     owner: Optional[str] = None
@@ -102,6 +104,9 @@ class WorkbenchOut(BaseModel):
     viewing_stage: int = 1
     read_only: bool = False
     steps: List[WorkbenchStepOut] = []
+    claims: List[ProjectEvidenceClaimOut] = []
+    evidence_level_labels: Dict[str, str] = {}
+    evidence_verdict_labels: Dict[str, str] = {}
     gate: WorkbenchGateOut = WorkbenchGateOut()
     previous: WorkbenchContextOut = WorkbenchContextOut()
     next: WorkbenchContextOut = WorkbenchContextOut()
