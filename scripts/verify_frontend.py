@@ -778,6 +778,27 @@ def main() -> int:
             assert "方法论工具箱" in page.inner_text("#view")
             assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
 
+            # 工具详情 → 按问题/按阶段：必须退出工具详情，不能停留在工具界面
+            # 上一步点工具类别后「工具目录」已经是展开状态，直接点工具项
+            nav_item = page.locator("#view .tb-nav-item").first
+            assert nav_item.count(), "工具目录没有工具项"
+            nav_item.click()
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count(), "点击工具项后没有进入工具详情"
+            page.click('#view .kb-nav-fold summary:has-text("按问题")')
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count() == 0, (
+                "切到「按问题」后仍停留在工具详情"
+            )
+            assert "我遇到了什么问题" in page.inner_text("#view"), (
+                "切到「按问题」后没有回到问题区块"
+            )
+            page.click('#view .kb-nav-fold summary:has-text("按阶段")')
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count() == 0, (
+                "切到「按阶段」后仍停留在工具详情"
+            )
+
         # 项目交付物：把已发布流程模型登记为 2.1 的证据，不复制文件
         def deliverable_model_link() -> None:
             setup = page.evaluate(
