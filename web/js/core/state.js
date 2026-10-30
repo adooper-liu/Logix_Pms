@@ -58,6 +58,7 @@ export const state = {
 };
 
 export const TITLES = {
+  capability: '能力地图',
   map: '企业流程地图',
   workflow: '五阶段标准工作流',
   projects: '流程项目组合',

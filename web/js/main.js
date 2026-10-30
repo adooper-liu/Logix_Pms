@@ -18,6 +18,7 @@ import { actions, registerActions } from './core/actions.js';
 import { openNotifications, refreshNotifications } from './core/notifications.js';
 
 import * as dashboard from './views/dashboard.js';
+import * as capabilityView from './views/capability.js';
 import * as startView from './views/start.js';
 import * as pilotView from './views/pilot.js';
 import * as strategyView from './views/strategy.js';
@@ -38,6 +39,7 @@ import * as orgsView from './views/orgs.js';
 import * as sketchesView from './views/sketches.js';
 
 register('dashboard', dashboard.renderDashboard);
+register('capability', capabilityView.renderCapability);
 register('start', startView.renderStart);
 register('pilot', pilotView.renderPilot);
 register('strategy', strategyView.renderStrategy);
