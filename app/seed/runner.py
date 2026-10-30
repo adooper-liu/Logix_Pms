@@ -70,7 +70,7 @@ from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
-from app.models.tool import Tool, ToolScenarioLink
+from app.models.tool import Tool, ToolScenarioLink, ToolUsage
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.models.workload import CapacityCalendar, WorkMeasurementStandard
@@ -215,9 +215,15 @@ def _seed_knowledge_scenarios(db: Session) -> Dict[str, KnowledgeScenario]:
 def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
     user_ids = user_ids or {}
     scenarios = {row.code: row for row in db.scalars(select(KnowledgeScenario)).all()}
+    guides = {
+        row.get("tool_code"): row
+        for row in corpus_data.KNOWLEDGE
+        if row.get("type") == "BEST_PRACTICE" and row.get("tool_code")
+    }
     verified_at = _parse_dt("2026-09-20 10:00:00") or utcnow()
     for order, row in enumerate(corpus.TOOLS, start=1):
         extra = tool_decision_data.TOOL_DECISION_DATA.get(row["code"], {})
+        guide = guides.get(row["code"], {})
         tool = Tool(
             code=row["code"],
             name=row["name"],
@@ -227,6 +233,7 @@ def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
             purpose=row["purpose"],
             when_to_use=row["when_to_use"],
             steps=list(row["steps"]),
+            content=guide.get("content"),
             template_ref=row.get("template_ref"),
             pitfalls=row.get("pitfalls"),
             difficulty=extra.get("difficulty", "MEDIUM"),
@@ -234,7 +241,7 @@ def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
             prerequisites=extra.get("prerequisites"),
             not_applicable_when=extra.get("not_applicable_when"),
             verification_standard=extra.get("verification_standard"),
-            owner_user_id=_owner_user_id(extra.get("owner"), user_ids),
+            owner_user_id=_owner_user_id(extra.get("owner") or guide.get("author"), user_ids),
             version=1,
             status=ToolStatus.VERIFIED.value if extra else ToolStatus.PUBLISHED.value,
             last_verified_at=verified_at if extra else None,
@@ -244,10 +251,31 @@ def _seed_tools(db: Session, user_ids: Optional[Dict[str, int]] = None) -> None:
         )
         db.add(tool)
         db.flush()
-        for code in extra.get("scenarios", ()):
+        wanted_scenarios = set(extra.get("scenarios", ())) | set(
+            KNOWLEDGE_TOOL_SCENARIOS.get(row["code"], ())
+        )
+        for code in wanted_scenarios:
             scenario = scenarios.get(code)
             if scenario is not None:
                 db.add(ToolScenarioLink(tool_id=tool.id, scenario_id=scenario.id, weight=1.0))
+
+
+def _seed_tool_usage(db: Session, project_ids: Dict[str, int], user_ids: Dict[str, int]) -> None:
+    """把原知识条目的使用证据迁到工具侧（种子库没有历史迁移，直接生成）。"""
+    admin_id = user_ids.get("系统管理员")
+    started = _parse_dt("2026-08-01 09:00:00") or utcnow()
+    for code, rows in KNOWLEDGE_USAGE_SEED.items():
+        for outcome, note, days_ago in rows:
+            db.add(
+                ToolUsage(
+                    tool_code=code,
+                    project_id=project_ids.get("PR-2026-018"),
+                    used_by_user_id=admin_id,
+                    used_at=started + timedelta(days=days_ago),
+                    outcome=outcome,
+                    note=note,
+                )
+            )
 
 
 def _seed_step_contracts(db: Session) -> None:
@@ -1178,8 +1206,12 @@ def _seed_knowledge(db: Session, project_ids: Dict[str, int], user_ids: Dict[str
     verified_at = _parse_dt("2026-09-20 10:00:00") or utcnow()
 
     for row in corpus_data.KNOWLEDGE:
+        # METHOD/TOOL（含旧 BEST_PRACTICE）已并入工具表：正文进 tool.content，
+        # 使用证据进 tool_usage，不再创建知识条目。
+        if row.get("type") in ("METHOD", "TOOL", "BEST_PRACTICE"):
+            continue
         tool_code = row.get("tool_code")
-        item_type = "METHOD" if row["type"] == "BEST_PRACTICE" else row["type"]
+        item_type = row["type"]
         status = (
             KnowledgeStatus.ARCHIVED.value
             if item_type == "STANDARD"
@@ -1512,6 +1544,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_strategy(db, code_to_id, user_ids, kpi_ids)
     _seed_exceptions(db, code_to_id, project_ids, user_ids)
     _seed_knowledge(db, project_ids, user_ids)
+    _seed_tool_usage(db, project_ids, user_ids)
     _seed_design_models(db, code_to_id, position_ids)
     _seed_changes(db, code_to_id, user_ids)
     _seed_forms_rules(db, code_to_id)

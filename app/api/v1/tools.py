@@ -192,7 +192,7 @@ def _visible_knowledge(db: DbSession, code: str, limit: int = 6):
         .where(
             KnowledgeItem.tool_code == code,
             KnowledgeItem.status.in_(VISIBLE_KNOWLEDGE),
-            KnowledgeItem.type != "STANDARD",
+            KnowledgeItem.type.in_(knowledge_match.RESOURCE_TYPES),
         )
         .order_by(KnowledgeItem.is_best_practice.desc(), KnowledgeItem.updated_at.desc())
         .limit(limit)

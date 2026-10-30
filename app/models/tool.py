@@ -42,6 +42,7 @@ class Tool(Base):
     purpose: Mapped[str] = mapped_column(Text)  # 解决什么问题
     when_to_use: Mapped[str] = mapped_column(Text)  # 什么场景选它
     steps: Mapped[Any] = mapped_column(JSON)  # ["步骤1", ...] 5 步
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 使用指南/长正文
     template_ref: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # 模板/表格指引
     pitfalls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 常见误用
 

@@ -47,8 +47,10 @@ on('workflow.openTool', ({ code }) => {
 on('workflow.goProjects', () => go('projects'));
 on('workflow.goKnowledge', ({ step, scenario }) => {
   closeModal();
-  go('knowledge', {
-    params: { step: step || '', scenario: scenario || '', sort: 'match' },
+  go('toolbox', {
+    params: {
+      step: step || '', scenario: scenario || '', sort: 'fit', section: 'reco',
+    },
     push: true,
   });
 });
@@ -715,7 +717,7 @@ function renderStepRecommendations(rec) {
         <div class="tiny">${esc(item.applicable_when || item.summary)} · ${esc(rate)}</div></div>
         <div class="gap"><button class="btn-sm" data-act="knowledge.open" data-id="${item.id}">查看</button>
         <button class="btn-sm" data-act="workflow.goKnowledge"
-          data-step="${esc(rec.step_no)}" data-scenario="${esc(scenario)}">在知识库查看</button></div></div>`;
+          data-step="${esc(rec.step_no)}" data-scenario="${esc(scenario)}">去方法论工具箱</button></div></div>`;
     }).join('')}</div>`
     : '<h3 class="mt">本步骤推荐知识</h3><div class="note">本步骤还没有挂知识，流程管理科可以在知识条目里关联步骤。</div>';
   return `<h3 class="mt">推荐工具与预制模板</h3>

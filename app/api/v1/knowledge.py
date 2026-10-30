@@ -84,15 +84,19 @@ def _is_manager(user: User) -> bool:
     return user.role in (Role.ADMIN.value, Role.MANAGER.value)
 
 
-def _reject_standard(type_: Optional[KnowledgeType]) -> None:
+def _reject_non_resource(type_: Optional[KnowledgeType]) -> None:
+    """知识库只保留案例/模板；制度、方法、工具指南各有归属。"""
     if type_ == KnowledgeType.STANDARD:
         raise HTTPException(status_code=400, detail="标准制度请到「交付物与模板库 → 流程标准文件」")
+    if type_ in (KnowledgeType.METHOD, KnowledgeType.TOOL, KnowledgeType.BEST_PRACTICE):
+        raise HTTPException(
+            status_code=400,
+            detail="方法/工具指南已并入「方法论工具箱」，请在那里维护工具与使用指南",
+        )
 
 
-def _validate_tool_code(db: DbSession, type_: str, tool_code: Optional[str]) -> None:
-    """工具指南必须引用真实工具，避免知识库出现指向不存在工具的条目。"""
-    if type_ == KnowledgeType.TOOL.value and not (tool_code or "").strip():
-        raise HTTPException(status_code=400, detail="工具指南必须填写关联工具编码")
+def _validate_tool_code(db: DbSession, tool_code: Optional[str]) -> None:
+    """知识条目可以关联工具，但编码必须真实存在。"""
     if tool_code and db.scalar(select(Tool.id).where(Tool.code == tool_code)) is None:
         raise HTTPException(status_code=400, detail=f"工具编码 {tool_code} 不存在")
 
@@ -250,7 +254,7 @@ def _base_visible_query(user: User, status_: Optional[KnowledgeStatus]):
             selectinload(KnowledgeItem.workflow_links),
             selectinload(KnowledgeItem.verified_by),
         )
-        .where(KnowledgeItem.type != KnowledgeType.STANDARD.value)
+        .where(KnowledgeItem.type.in_(knowledge_match.RESOURCE_TYPES))
     )
     if status_ is not None:
         if status_.value not in VISIBLE_STATUSES and not _is_manager(user):
@@ -371,7 +375,7 @@ def update_scenario(
 @router.get("/meta", response_model=KnowledgeMetaOut, summary="知识库标签与统计")
 def knowledge_meta(db: DbSession):
     items = db.scalars(
-        select(KnowledgeItem).where(KnowledgeItem.type != KnowledgeType.STANDARD.value)
+        select(KnowledgeItem).where(KnowledgeItem.type.in_(knowledge_match.RESOURCE_TYPES))
     ).all()
     today = date.today()
     stats = KnowledgeStatsOut(
@@ -404,6 +408,11 @@ def knowledge_meta(db: DbSession):
 def list_tags(db: DbSession, limit: int = Query(default=40, ge=1, le=200)):
     rows = db.execute(
         select(KnowledgeTag.tag, func.count(KnowledgeTag.id).label("n"))
+        .join(KnowledgeItem, KnowledgeItem.id == KnowledgeTag.knowledge_id)
+        .where(
+            KnowledgeItem.status.in_(knowledge_match.VISIBLE_STATUSES),
+            KnowledgeItem.type.in_(knowledge_match.RESOURCE_TYPES),
+        )
         .group_by(KnowledgeTag.tag)
         .order_by(func.count(KnowledgeTag.id).desc(), KnowledgeTag.tag)
         .limit(limit)
@@ -534,10 +543,7 @@ def list_knowledge(
 ):
     stmt = _base_visible_query(user, status_)
     if type_ is not None:
-        if type_ == KnowledgeType.STANDARD:
-            raise HTTPException(
-                status_code=400, detail="标准制度请到「交付物与模板库 → 流程标准文件」"
-            )
+        _reject_non_resource(type_)
         stmt = stmt.where(KnowledgeItem.type == type_.value)
     if methodology is not None:
         stmt = stmt.where(KnowledgeItem.methodology == methodology.value)
@@ -608,8 +614,8 @@ def list_knowledge(
     "", response_model=KnowledgeOut, status_code=status.HTTP_201_CREATED, summary="新增知识草稿"
 )
 def create_knowledge(payload: KnowledgeCreate, db: DbSession, user: WriteUser):
-    _reject_standard(payload.type)
-    _validate_tool_code(db, payload.type.value, payload.tool_code)
+    _reject_non_resource(payload.type)
+    _validate_tool_code(db, payload.tool_code)
     data = as_columns(
         payload.model_dump(exclude={"tags", "scenario_codes", "stage_no", "step_no", "is_primary"})
     )
@@ -658,7 +664,7 @@ def list_usage(item_id: int, db: DbSession, user: CurrentUser):
 
 @router.patch("/{item_id}", response_model=KnowledgeOut, summary="更新知识条目")
 def update_knowledge(item_id: int, payload: KnowledgeUpdate, db: DbSession, user: WriteUser):
-    _reject_standard(payload.type)
+    _reject_non_resource(payload.type)
     obj = _load_item(db, item_id)
     ensure_can_edit_owned(user, obj.owner_user_id, obj.author)
 
@@ -680,7 +686,7 @@ def update_knowledge(item_id: int, payload: KnowledgeUpdate, db: DbSession, user
         # 只切换首选标记时保留现有阶段/步骤关联
         for row in obj.workflow_links:
             row.is_primary = bool(is_primary) and bool(row.step_no)
-    _validate_tool_code(db, obj.type, obj.tool_code)
+    _validate_tool_code(db, obj.tool_code)
 
     # 内容变更后旧验证结论不再成立，退回「待复核」
     if obj.status == KnowledgeStatus.VERIFIED.value:

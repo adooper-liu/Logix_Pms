@@ -35,7 +35,6 @@ VIEWS = [
     ("designer", "流程设计器"),
     ("monitor", "运营驾驶舱"),
     ("data", "数据治理"),
-    ("knowledge", "流程知识库"),
     ("execution", "流程执行"),
     ("deliverables", "交付物与模板库"),
     ("orgs", "组织与人员"),
@@ -710,8 +709,18 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "我遇到了什么问题" in view, "工具箱首屏没有问题入口"
-            assert "快捷痛点" in view and "全部工具" in view, "工具箱缺少快捷痛点或全部工具区"
-            assert "新建工具" in view, "管理员工具箱缺少新建工具入口"
+            assert "按问题" in view and "全部资源" in view, "工具箱缺少问题导航或全部资源区"
+            assert "新建工具" in view and "新建案例/模板" in view, "管理员工具箱缺少新建入口"
+
+            # 左栏四个折叠区共用一套互斥手风琴：点开一个，其他必须收起
+            for label in ("按阶段", "按类型", "工具目录", "按问题"):
+                page.click(f'#view .kb-nav-fold summary:has-text("{label}")')
+                page.wait_for_timeout(1200)
+                opened = page.eval_on_selector_all(
+                    "#view .kb-nav-fold",
+                    "els => els.filter((el) => el.open).length",
+                )
+                assert opened == 1, f"左栏「{label}」展开后同时有 {opened} 个折叠区打开"
 
             page.click('#view button[data-act="toolbox.newTool"]')
             page.wait_for_selector("#mask.show")
@@ -721,11 +730,12 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
-            page.click("#view .tb-qchip >> nth=0")
+            page.click('#view .kb-pain[data-scenario="RACI"]')
             page.wait_for_timeout(1600)
             res = page.inner_text("#view")
             assert "匹配结果" in res and "验证标准" in res, f"快捷痛点未出结果：{res[:200]!r}"
             assert "适配" in res, "匹配结果缺少适配度"
+            assert "配套案例 / 模板" in res, "问题匹配后没有带出配套案例/模板"
 
             page.click('#view .tb-card button[data-act="toolbox.open"] >> nth=0')
             page.wait_for_selector("#mask.show")
@@ -751,7 +761,9 @@ def main() -> int:
             res2 = page.inner_text("#view")
             assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:240]!r}"
 
-            # 四象限是辅助筛选，不是主入口
+            # 四象限是辅助筛选，不是主入口（先展开左栏「按类型」）
+            page.click('#view .kb-nav-fold summary:has-text("按类型")')
+            page.wait_for_timeout(300)
             page.click('#view button[data-act="toolbox.toggleCategory"][data-category="DIAGNOSE"]')
             page.wait_for_timeout(1200)
             assert "方法论工具箱" in page.inner_text("#view")
@@ -2052,17 +2064,17 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
-        # 知识库：打开条目（会写入查阅次数）+ 快速找工具
+        # 资源中心：知识库已并入工具箱的「全部资源」，验证管理入口、推荐与详情
         def knowledge() -> None:
-            goto("knowledge")
+            goto("toolbox")
             page.wait_for_timeout(900)
+            page.click('#view button[data-act="toolbox.section"][data-section="resources"]')
+            page.wait_for_timeout(1400)
             view = page.inner_text("#view")
-            assert "我先想解决什么" in view, "知识库首屏没有场景入口"
-            assert "按痛点匹配" in view, "知识库缺少匹配按钮"
-            assert "标准制度：已独立为制度中心" in view, "知识库没有制度中心说明"
-            assert "归档候选" in view, "管理员知识库缺少归档候选区"
-            assert "使用效果" in view, "管理员知识库缺少使用效果统计"
-            assert "场景管理" in view and "推荐日志" in view, "管理员知识库缺少运营入口"
+            assert "全部资源" in view and "资源类型" in view, "全部资源区块没有展开"
+            assert "归档候选" in view, "管理员资源区缺少归档候选"
+            assert "使用效果" in view, "管理员资源区缺少使用效果统计"
+            assert "场景管理" in view and "推荐日志" in view, "管理员缺少运营入口"
 
             page.click('#view button[data-act="knowledge.manageScenarios"]')
             page.wait_for_selector("#mask.show", timeout=5000)
@@ -2080,12 +2092,13 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
-            # 场景 → 推荐：点「责任不清」应出现按证据排序的推荐
-            page.click('#view button[data-act="knowledge.scenario"][data-code="RACI"]')
-            page.wait_for_timeout(1500)
-            assert "为你推荐" in page.inner_text("#view"), "场景匹配没有推荐结果"
-            assert "RACI" in page.inner_text("#view"), "责任不清场景没有推荐 RACI"
-            assert "查看工具" in page.inner_text("#view"), "统一推荐没有返回工具卡"
+            # 场景 → ① 推荐：点「责任不清」应切回问题匹配并带出案例/模板
+            page.click('#view .kb-pain[data-scenario="RACI"]')
+            page.wait_for_timeout(1600)
+            view = page.inner_text("#view")
+            assert "匹配结果" in view, "场景匹配没有切回 ①"
+            assert "RACI" in view, "责任不清场景没有推荐 RACI"
+            assert "配套案例 / 模板" in view, "场景匹配没有带出配套资源"
 
             page.click('#view .kb-reco-item button[data-act="knowledge.open"] >> nth=0')
             page.wait_for_selector("#mask.show")
@@ -2094,24 +2107,24 @@ def main() -> int:
             assert "使用证据" in body, f"知识详情缺少证据区：{body[:160]!r}"
             assert "适用条件" in body and "不适用" in body, "知识详情缺少适用/反证条件"
             close_modal()
-            page.wait_for_timeout(900)
+            page.wait_for_timeout(700)
 
-            page.fill("#kbQ", "跨部门互相推诿、权责不清")
-            page.click('#view button[data-act="knowledge.match"]')
+            page.fill("#toolQ", "跨部门互相推诿、权责不清")
+            page.click('#view button[data-act="toolbox.match"]')
             page.wait_for_timeout(1500)
-            assert "为你推荐" in page.inner_text("#view"), "快速匹配没有推荐结果"
+            assert "匹配结果" in page.inner_text("#view"), "快速匹配没有推荐结果"
 
             page.click('#view button[data-act="knowledge.new"]')
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(600)
             modal = page.inner_text("#mask")
-            assert "入库前自检" in modal and "提交审核" in modal, "新建知识缺少求真审核门槛"
-            assert "适用场景" in modal and "反证" in modal, "新建知识缺少场景/反证字段"
+            assert "入库前自检" in modal and "提交审核" in modal, "新建资源缺少求真审核门槛"
+            assert "适用场景" in modal and "反证" in modal, "新建资源缺少场景/反证字段"
             close_modal()
             page.wait_for_timeout(600)
 
-            # 制度中心深链：知识库 → deliverables?tab=document，刷新后仍停在标准文件页签
-            page.click('#view button[data-act="knowledge.goDocuments"] >> nth=0')
+            # 制度中心深链：工具箱 → deliverables?tab=document，刷新后仍停在标准文件页签
+            page.click('#view [data-act="knowledge.goDocuments"] >> nth=0')
             page.wait_for_timeout(1000)
             assert page.inner_text("#pageTitle") == "交付物与模板库", "制度中心跳转失败"
             assert "tab=document" in page.url, f"制度中心没有写入 tab URL：{page.url}"
@@ -2121,21 +2134,24 @@ def main() -> int:
             assert "流程标准文件" in page.inner_text("#view .tabs button.on"), "刷新后页签丢失"
 
         # 知识库：按阶段选择后，左侧折叠互斥，中间推荐只保留该阶段命中项
+        # 工具箱：按阶段筛选后互斥展开 ②，① 折叠
         def knowledge_stage_filter() -> None:
-            goto("knowledge")
+            goto("toolbox")
+            page.wait_for_timeout(700)
             page.click('#view .kb-nav-fold summary:has-text("按阶段")')
             page.wait_for_timeout(200)
             page.click("#view .kb-stage-link >> nth=1")
-            page.wait_for_timeout(1200)
-            assert "stage=2" in page.url, f"阶段选择没有写入 URL：{page.url}"
+            page.wait_for_timeout(1400)
+            assert "stage=" in page.url, f"阶段选择没有写入 URL：{page.url}"
             details = page.locator("#view .kb-nav-fold")
-            assert details.count() == 3, "左侧导航不是三个折叠区"
+            assert details.count() == 4, "左侧导航不是四个折叠区"
             assert not details.nth(0).evaluate("el => el.open"), "选择阶段后「按问题」应折叠"
             assert details.nth(1).evaluate("el => el.open"), "选择阶段后「按阶段」应展开"
             view = page.inner_text("#view")
-            assert "仅显示命中阶段2" in view or "阶段2没有匹配到知识" in view, (
-                f"中间推荐没有跟随阶段筛选：{view[:200]}"
+            assert "资源类型" in view and "案例 / 模板" in view, (
+                f"阶段筛选没有展开全部资源：{view[:200]}"
             )
+            assert page.locator("#toolQ").count() == 0, "选择阶段后 ① 应折叠"
 
         # 项目组合：阶段筛选下拉必须显示阶段名称
         def projects_stage_names() -> None:
@@ -2148,40 +2164,32 @@ def main() -> int:
             )
             assert any("立项定界" in item for item in labels), f"体系落地阶段名缺失：{labels}"
 
-        # 知识库 → 工具箱：详情里的「查看关联工具」应真正跳转并打开工具详情
+        # 工具箱：工具卡的「相关案例/模板」应切到 ② 并按工具过滤
         def knowledge_tool_jump() -> None:
-            goto("knowledge")
+            goto("toolbox")
             page.wait_for_timeout(900)
-            page.click('#view button[data-act="knowledge.scenario"][data-code="RACI"]')
+            page.click('#view .kb-pain[data-scenario="RACI"]')
             page.wait_for_timeout(1500)
-            page.click('#view .kb-reco-item button[data-act="knowledge.open"] >> nth=0')
-            page.wait_for_selector("#mask.show")
-            page.wait_for_timeout(900)
-            btn = page.locator('#mFoot button:has-text("查看关联工具")')
-            assert btn.count(), "知识详情缺少「查看关联工具」入口"
+            btn = page.locator('#view .tb-card button[data-act="toolbox.goKnowledge"]').first
+            assert btn.count(), "工具卡缺少「相关案例/模板」入口"
             btn.click()
-            page.wait_for_timeout(1200)
-            assert page.inner_text("#pageTitle") == "方法论工具箱", "知识库→工具箱没有跳转"
-            assert "open=" in page.url, f"工具详情没有写入 URL：{page.url}"
-            page.wait_for_selector("#view .tb-detail-card", timeout=8000)
-            body = page.inner_text("#view .tb-detail-card")
-            assert "验证标准" in body, "工具详情缺少验证标准"
-            assert "不适用" in body, "工具详情缺少反证条件"
-            page.click('#view button[data-act="toolbox.clearSelected"]')
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(1400)
+            assert "资源类型" in page.inner_text("#view"), "没有切到全部资源"
+            assert "rtool=" in page.url, f"关联工具筛选没有写入 URL：{page.url}"
+            assert "只显示关联工具" in page.inner_text("#view"), "没有显示关联工具筛选提示"
 
-        # 工作流步骤 → 知识库：保留 step 上下文并可直接记录使用证据
+        # 工作流步骤 → 工具箱：保留 step 上下文并可直接记录使用证据
         def knowledge_step_context() -> None:
             goto_workflow_tab("五阶段步骤")
             page.click("#view .step >> nth=0")
             page.wait_for_selector("#wfRec h3", timeout=8000)
-            link = page.locator('#wfRec .kb-step-item button:has-text("在知识库查看")')
-            assert link.count(), "步骤推荐知识缺少「在知识库查看」入口"
+            link = page.locator('#wfRec .kb-step-item button:has-text("去方法论工具箱")')
+            assert link.count(), "步骤推荐知识缺少「去方法论工具箱」入口"
             link.first.click()
             page.wait_for_timeout(1600)
-            assert page.inner_text("#pageTitle") == "流程知识库", "没有跳转到知识库"
+            assert page.inner_text("#pageTitle") == "方法论工具箱", "没有跳转到工具箱"
             view = page.inner_text("#view")
-            assert "用到 1.1" in view, f"知识库没有步骤上下文按钮：{view[:200]}"
+            assert "用到 1.1" in view, f"工具箱没有步骤上下文按钮：{view[:200]}"
             page.click('#view .kb-reco-item button[data-act="knowledge.applyStep"] >> nth=0')
             page.wait_for_selector("#mask.show")
             body = page.inner_text("#mBody")
@@ -2189,7 +2197,6 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
-        # 甘特图与里程碑
         def project_gantt() -> None:
             goto("projects")
             page.click("#view .project-open >> nth=0")
@@ -3032,11 +3039,25 @@ def main() -> int:
         check("监控异常处理弹窗", monitor)
         check("标准工时观测与评审", time_study_workflow)
         check("数据治理数据域与数据流", data_governance_view)
-        check("知识库阶段筛选", knowledge_stage_filter)
+
+        def legacy_knowledge_redirect() -> None:
+            page.evaluate(
+                "() => go('knowledge', {params: {type: 'CASE', scenario: 'RACI'}, skipOrigin: true})"
+            )
+            page.wait_for_timeout(1400)
+            assert page.inner_text("#pageTitle") == "方法论工具箱", "旧知识库链接没有重定向"
+            assert page.url.split("#")[-1].startswith("toolbox"), (
+                f"URL 没有切到 toolbox：{page.url}"
+            )
+            view = page.inner_text("#view")
+            assert "匹配结果" in view or "全部资源" in view, "重定向后页面没有内容"
+
+        check("旧知识库链接重定向", legacy_knowledge_redirect)
+        check("工具箱阶段筛选（互斥展开）", knowledge_stage_filter)
         check("项目组合阶段名称", projects_stage_names)
-        check("知识库详情 + 快速找工具", knowledge)
-        check("知识库 → 工具箱双向跳转", knowledge_tool_jump)
-        check("工作流 → 知识库步骤上下文", knowledge_step_context)
+        check("全部资源 + 详情 + 快速匹配", knowledge)
+        check("工具卡 → 关联案例/模板", knowledge_tool_jump)
+        check("工作流 → 工具箱步骤上下文", knowledge_step_context)
         check("项目甘特图与里程碑", project_gantt)
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)

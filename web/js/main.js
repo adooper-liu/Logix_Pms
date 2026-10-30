@@ -121,23 +121,24 @@ function wireChrome() {
     const label = a.querySelector('.lbl');
     if (label) a.title = label.textContent.trim();
     a.onclick = () => {
-      // 侧栏进入工具箱应看全部工具；步骤页的「只看推荐」是临时状态
+      // 侧栏进入工具箱应看全部资源；步骤页的「只看推荐」是临时状态
       if (a.dataset.view === 'toolbox') {
         state.toolboxFilter = null;
+        state.toolbox.q = '';
+        state.toolbox.scenario = '';
+        state.toolbox.categories = [];
         state.toolbox.step = '';
         state.toolbox.stage = null;
         state.toolbox.status = '';
         state.toolbox.selected = '';
-      }
-      if (a.dataset.view === 'knowledge') {
-        // 侧栏进入是顶层入口：回到“按问题”，并清空上一轮的筛选
-        state.knowledge.navSection = 'problem';
-        state.knowledge.stage = null;
-        state.knowledge.scenario = '';
-        state.knowledge.keyword = '';
-        state.knowledge.step = '';
-        state.knowledge.tool = '';
+        state.toolbox.section = 'reco';
+        state.toolbox.navSection = 'problem';
+        state.knowledge.type = '';
+        state.knowledge.sort = 'recent';
+        state.knowledge.status = '';
         state.knowledge.page = 1;
+        state.knowledge.tag = '';
+        state.knowledge.tool = '';
       }
       closeModal();
       go(a.dataset.view, { skipOrigin: true });

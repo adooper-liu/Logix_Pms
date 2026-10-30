@@ -219,11 +219,23 @@ def test_knowledge_view_wires_pagination():
     """知识库标题写「N 条」，就必须把 page 传下去并提供翻页入口。
 
     回归背景：page_size 固定 50 且不传 page，第 51 条以后永远看不到。
+    分页组件在合并后移到了 views/shared/knowledge_resources.js。
     """
     src = (JS_ROOT / "views" / "knowledge.js").read_text(encoding="utf-8")
-    assert "'page=' +" in src, "knowledge.js 没有把 page 传给后端"
+    shared = (JS_ROOT / "views" / "shared" / "knowledge_resources.js").read_text(encoding="utf-8")
+    assert "'page=' +" in shared, "资源查询没有把 page 传给后端"
+    assert "上一页" in shared and "下一页" in shared, "资源区块没有渲染翻页按钮"
     assert "setKPage" in src, "knowledge.js 没有翻页动作"
-    assert "上一页" in src and "下一页" in src, "knowledge.js 没有渲染翻页按钮"
+
+
+def test_knowledge_resources_are_merged_into_toolbox():
+    """知识库已并入工具箱：资源卡片、管理侧栏和 ①/② 手风琴都要在 toolbox 里出现。"""
+    toolbox = (JS_ROOT / "views" / "toolbox.js").read_text(encoding="utf-8")
+    assert "resourceCard" in toolbox, "工具箱没有复用知识资源卡片"
+    assert "resourceManagerCards" in toolbox, "工具箱没有保留知识管理侧栏"
+    assert 'data-act="toolbox.section"' in toolbox, "工具箱没有 ①/② 手风琴"
+    assert 'data-section="resources"' in toolbox, "工具箱没有「全部资源」区块"
+    assert "knowledge.setType" in toolbox, "工具箱没有复用资源类型筛选"
 
 
 def test_actions_registry_is_a_leaf():

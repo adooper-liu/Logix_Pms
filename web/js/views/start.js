@@ -537,7 +537,6 @@ function paint(data) {
         <button class="btn-sm" data-act="start.go" data-view="authorization">授权矩阵</button>
         <button class="btn-sm" data-act="start.go" data-view="designer">流程设计器</button>
         <button class="btn-sm" data-act="start.go" data-view="monitor">运营驾驶舱</button>
-        <button class="btn-sm" data-act="start.go" data-view="knowledge">知识库</button>
       </div>
       <div class="tiny muted mt">按问题取用，不预设绑定。</div>
     </div>
