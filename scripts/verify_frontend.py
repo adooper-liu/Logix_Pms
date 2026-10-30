@@ -713,7 +713,7 @@ def main() -> int:
             assert "新建工具" in view and "新建案例/模板" in view, "管理员工具箱缺少新建入口"
 
             # 左栏四个折叠区共用一套互斥手风琴：点开一个，其他必须收起
-            for label in ("按阶段", "按类型", "工具目录", "按问题"):
+            for label in ("按阶段", "按资源类型", "工具目录", "按问题"):
                 page.click(f'#view .kb-nav-fold summary:has-text("{label}")')
                 page.wait_for_timeout(1200)
                 opened = page.eval_on_selector_all(
@@ -761,13 +761,43 @@ def main() -> int:
             res2 = page.inner_text("#view")
             assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:240]!r}"
 
-            # 四象限是辅助筛选，不是主入口（先展开左栏「按类型」）
-            page.click('#view .kb-nav-fold summary:has-text("按类型")')
-            page.wait_for_timeout(300)
+            # 工具类别属于「工具目录」，不属于「按资源类型」
+            page.click('#view .kb-nav-fold summary:has-text("按资源类型")')
+            page.wait_for_timeout(500)
+            assert not page.locator(
+                '#view button[data-act="toolbox.toggleCategory"]'
+            ).first.is_visible(), "工具类别不应出现在「按资源类型」折叠区"
+            page.click('#view .kb-nav-fold summary:has-text("工具目录")')
+            page.wait_for_timeout(500)
+            assert page.locator(
+                '#view button[data-act="toolbox.toggleCategory"]'
+            ).first.is_visible(), "「工具目录」折叠区缺少工具类别筛选"
+            # 四象限是辅助筛选，不是主入口
             page.click('#view button[data-act="toolbox.toggleCategory"][data-category="DIAGNOSE"]')
             page.wait_for_timeout(1200)
             assert "方法论工具箱" in page.inner_text("#view")
             assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
+
+            # 工具详情 → 按问题/按阶段：必须退出工具详情，不能停留在工具界面
+            # 上一步点工具类别后「工具目录」已经是展开状态，直接点工具项
+            nav_item = page.locator("#view .tb-nav-item").first
+            assert nav_item.count(), "工具目录没有工具项"
+            nav_item.click()
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count(), "点击工具项后没有进入工具详情"
+            page.click('#view .kb-nav-fold summary:has-text("按问题")')
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count() == 0, (
+                "切到「按问题」后仍停留在工具详情"
+            )
+            assert "我遇到了什么问题" in page.inner_text("#view"), (
+                "切到「按问题」后没有回到问题区块"
+            )
+            page.click('#view .kb-nav-fold summary:has-text("按阶段")')
+            page.wait_for_timeout(1200)
+            assert page.locator("#view .tb-detail-card").count() == 0, (
+                "切到「按阶段」后仍停留在工具详情"
+            )
 
         # 项目交付物：把已发布流程模型登记为 2.1 的证据，不复制文件
         def deliverable_model_link() -> None:

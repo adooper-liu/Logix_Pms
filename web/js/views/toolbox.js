@@ -20,7 +20,16 @@ import {
 
 const NAV_SECTIONS = new Set(['problem', 'stage', 'type', 'tools']);
 
-on('toolbox.match', () => matchTools());
+/** 离开工具详情，回到 ①/② 的区块视图。 */
+function leaveToolDetail() {
+  state.toolbox.selected = '';
+  state.toolbox.open = '';
+}
+
+on('toolbox.match', () => {
+  leaveToolDetail();
+  matchTools();
+});
 on('toolbox.navSection', ({ section }) => {
   // 左栏四个折叠区共用一套受控手风琴：点击展开自己并收起其他，
   // 再点一次全部收起。不要依赖 <details> 的原生 toggle，否则状态不会
@@ -28,6 +37,9 @@ on('toolbox.navSection', ({ section }) => {
   if (!NAV_SECTIONS.has(section)) return;
   const tb = state.toolbox;
   tb.navSection = tb.navSection === section ? '' : section;
+  if (tb.navSection === 'problem') tb.section = 'reco';
+  else if (tb.navSection) tb.section = 'resources';
+  if (tb.navSection !== 'tools') leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -35,6 +47,7 @@ on('toolbox.section', ({ section }) => {
   const tb = state.toolbox;
   tb.section = tb.section === section ? '' : section;
   if (tb.section === 'reco') tb.navSection = 'problem';
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -44,11 +57,13 @@ on('toolbox.quick', ({ scenario, query }) => {
   state.toolbox.scenario = state.toolbox.scenario === scenario ? '' : scenario;
   state.toolbox.q = state.toolbox.scenario ? (query || '') : '';
   state.toolbox.sort = 'fit';
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
 on('toolbox.setSort', (_data, el) => {
   state.toolbox.sort = el.value;
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -58,8 +73,9 @@ on('toolbox.toggleCategory', ({ category }) => {
   else current.add(category);
   state.toolbox.categories = [...current];
   state.toolbox.section = 'resources';
-  state.toolbox.navSection = 'type';
+  state.toolbox.navSection = 'tools';
   state.knowledge.type = 'TOOL';
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -68,6 +84,7 @@ on('toolbox.stageLink', ({ stage }) => {
   state.toolbox.sort = 'fit';
   state.toolbox.section = 'resources';
   state.toolbox.navSection = 'stage';
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -93,6 +110,7 @@ on('toolbox.applyStep', ({ code }) => openToolApply(code));
 on('toolbox.applyStepSubmit', ({ code }) => submitToolApply(code));
 on('toolbox.setStatus', (_data, el) => {
   state.toolbox.status = el.value;
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -112,6 +130,7 @@ on('toolbox.goKnowledge', ({ code }) => {
   state.knowledge.type = '';
   state.knowledge.tool = code;
   state.knowledge.page = 1;
+  leaveToolDetail();
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
@@ -173,7 +192,8 @@ const renderToolbox = () => {
   }
   if (tb.section === 'reco') tb.navSection = 'problem';
   else if (params.stage) tb.navSection = 'stage';
-  else if (params.category || params.rtype || params.rtool) tb.navSection = 'type';
+  else if (params.category) tb.navSection = 'tools';
+  else if (params.rtype || params.rtool) tb.navSection = 'type';
   // nav 是用户点击折叠区后的显式选择（none = 全部收起），优先级最高；
   // 深链打开工具详情时默认展开工具目录，与其他折叠区的上下文保持一致。
   if ('nav' in params) {
@@ -500,13 +520,14 @@ function paint(d) {
             <div class="kb-stage-list">${stageLinks}</div>
           </details>
           <details class="kb-nav-fold"${tb.navSection === 'type' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="type">按类型</summary>
+            <summary data-act="toolbox.navSection" data-section="type">按资源类型</summary>
             <div class="kb-chips">${resourceTypeChips}</div>
-            <div class="tb-quads mt">${categoryRows}</div>
           </details>
           <details class="kb-nav-fold"${tb.navSection === 'tools' ? ' open' : ''}>
             <summary data-act="toolbox.navSection" data-section="tools">工具目录（${catalogHits.length}）</summary>
-            <div class="tb-tool-nav">${toolNav}</div>
+            <div class="tiny muted mb">按工具类别筛选</div>
+            <div class="tb-quads">${categoryRows}</div>
+            <div class="tb-tool-nav mt">${toolNav}</div>
           </details>
         </div>
       </aside>
