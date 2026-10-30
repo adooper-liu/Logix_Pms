@@ -779,8 +779,7 @@ def main() -> int:
             assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
 
             # 工具详情 → 按问题/按阶段：必须退出工具详情，不能停留在工具界面
-            page.click('#view .kb-nav-fold summary:has-text("工具目录")')
-            page.wait_for_timeout(400)
+            # 上一步点工具类别后「工具目录」已经是展开状态，直接点工具项
             nav_item = page.locator("#view .tb-nav-item").first
             assert nav_item.count(), "工具目录没有工具项"
             nav_item.click()
