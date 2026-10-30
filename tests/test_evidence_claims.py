@@ -7,17 +7,52 @@ import uuid
 API = "/api/v1"
 
 
-def _project(client) -> dict:
+def _project(client, process_id: int | None = None) -> dict:
+    payload = {
+        "name": "证据链测试 " + uuid.uuid4().hex[:6],
+        "methodology": "BPI",
+        "owner": "流程管理科",
+    }
+    if process_id is not None:
+        payload["process_id"] = process_id
     response = client.post(
         f"{API}/projects",
-        json={
-            "name": "证据链测试 " + uuid.uuid4().hex[:6],
-            "methodology": "BPI",
-            "owner": "流程管理科",
-        },
+        json=payload,
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _link_two_strategy_kpis(client, process_id: int) -> int:
+    objective = client.post(
+        f"{API}/strategy/objectives",
+        json={
+            "name": "证据链阶段门目标-" + uuid.uuid4().hex[:8],
+            "year": 2026,
+            "target_value": 5.0,
+            "status": "ACTIVE",
+        },
+    )
+    assert objective.status_code == 201, objective.text
+    objective_id = objective.json()["id"]
+    for index, target in enumerate((0.0, 10.0), start=1):
+        kpi = client.post(
+            f"{API}/monitor/kpis",
+            json={
+                "code": "EV-GATE-" + uuid.uuid4().hex[:8].upper(),
+                "name": f"证据链阶段门指标{index}",
+                "dimension": "EFFICIENCY",
+                "formula": "证据链测试计算口径",
+                "target_value": target,
+            },
+        )
+        assert kpi.status_code == 201, kpi.text
+        link = client.post(
+            f"{API}/strategy/objectives/{objective_id}/links",
+            json={"process_id": process_id, "kpi_id": kpi.json()["id"]},
+        )
+        assert link.status_code == 201, link.text
+    return objective_id
 
 
 def _claim(client, project_id: int, evidence_type: str, level: str = "L1") -> dict:
@@ -87,7 +122,11 @@ def test_l4_or_l5_evidence_cannot_confirm_a_claim(client, manager_client):
 
 
 def test_diagnosis_gate_requires_two_confirmed_evidence_types(client, manager_client):
-    project = _project(client)
+    process = next(
+        row for row in client.get(f"{API}/process-map/flat").json() if row["code"] == "L3-032"
+    )
+    objective_id = _link_two_strategy_kpis(client, process["id"])
+    project = _project(client, process["id"])
     project_id = project["id"]
     try:
         workbench = client.get(f"{API}/projects/{project_id}/workflow").json()
@@ -136,3 +175,4 @@ def test_diagnosis_gate_requires_two_confirmed_evidence_types(client, manager_cl
         assert accepted.status_code == 200, accepted.text
     finally:
         client.delete(f"{API}/projects/{project_id}")
+        assert client.delete(f"{API}/strategy/objectives/{objective_id}").status_code == 200
