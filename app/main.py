@@ -30,6 +30,7 @@ SAMPLE_HTML = PROJECT_ROOT / "index-sample.html"
 SPA_VIEWS = {
     "start",
     "dashboard",
+    "capability",
     "strategy",
     "map",
     "process_card",

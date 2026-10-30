@@ -23,6 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 VIEWS = [
     ("dashboard", "运营驾驶舱"),
+    ("capability", "能力地图"),
     ("start", "开始使用"),
     ("strategy", "战略目标"),
     ("map", "企业流程地图"),
@@ -103,14 +104,14 @@ def main() -> int:
             assert page.inner_text("#pageTitle") == "开始使用", (
                 f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
             )
-            assert page.locator('.nav a[data-view="workflow"]').is_hidden(), "专家工具默认应收起"
+            assert page.locator('.nav a[data-view="pcf"]').is_hidden(), "专家工具默认应收起"
             page.click("#expertToggle")
             page.wait_for_timeout(250)
-            assert page.locator('.nav a[data-view="workflow"]').is_visible(), "专家模式未展开"
+            assert page.locator('.nav a[data-view="pcf"]').is_visible(), "专家模式未展开"
             assert page.evaluate("localStorage.getItem('pms_expert_mode')") == "1"
             page.reload(wait_until="networkidle")
             page.wait_for_timeout(800)
-            assert page.locator('.nav a[data-view="workflow"]').is_visible(), "刷新后专家模式未保持"
+            assert page.locator('.nav a[data-view="pcf"]').is_visible(), "刷新后专家模式未保持"
 
         check("默认入口与专家模式", default_entry_and_expert_mode)
 

@@ -379,6 +379,7 @@ docs/           使用指南、行业对标、信息架构、指标口径、BPMN
                 APQC 中文参考译文的约定见 docs/pcf-chinese-translation.md
                 九阶段启动证据的实际口径与实例见 docs/startup-evidence-example.md
                 三层 / Q1–Q8 与页面的依赖关系见 docs/three-layers-and-page-dependencies.md
+                简历能力 → 系统支持力对照见 docs/resume-capability-map.md
 alembic/        数据库迁移脚本（env.py + versions/）
 alembic.ini     迁移配置（不含数据库地址，纯 ASCII）
 docker-compose.yml  PostgreSQL（可选整栈）+ 应用容器
