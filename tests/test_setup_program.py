@@ -24,6 +24,17 @@ def _payload(client, **overrides) -> dict:
     return payload
 
 
+def _evidence_stage(client) -> int:
+    """与启动页同一个当前阶段：第一个未就绪且未跳过的阶段。"""
+    status = client.get(f"{API}/start/status").json()
+    if status["next_step"] is None:
+        return len(status["steps"])
+    for index, step in enumerate(status["steps"], start=1):
+        if step["key"] == status["next_step"]:
+            return index
+    return len(status["steps"])
+
+
 def test_create_setup_program_with_nine_stages(client):
     created = client.post(f"{API}/projects/setup-program", json=_payload(client))
     assert created.status_code == 201, created.text
@@ -44,22 +55,23 @@ def test_create_setup_program_with_nine_stages(client):
     assert len(steps) == 27
     assert sum(1 for step in steps if step["is_milestone"]) == 9
 
-    # 完成第 1 阶段的 3 个步骤后，当前阶段应自动推进到 2
+    expected = _evidence_stage(client)
+    # 勾完第 1 阶段也不会另开一套进度，阶段仍等于启动页证据
     for step in [item for item in steps if item["stage_no"] == 1]:
         updated = client.patch(f"{API}/projects/steps/{step['id']}", json={"status": "DONE"})
         assert updated.status_code == 200, updated.text
     after = client.get(f"{API}/projects/{pid}").json()["project"]
-    assert after["current_stage"] == 2
-    assert abs(after["progress"] - 11.1) < 0.2
+    assert after["current_stage"] == expected
+    assert 1 <= after["current_stage"] <= 9
 
-    # 第 6–9 阶段同样可编辑/筛选（校验上限必须是 9，而不是改善项目的 5）
     patched = client.patch(f"{API}/projects/{pid}", json={"current_stage": 9})
     assert patched.status_code == 200, patched.text
-    assert patched.json()["stage_name"] == "改善与复制"
+    assert patched.json()["current_stage"] == expected
     late_steps = client.get(f"{API}/projects/{pid}/steps", params={"stage_no": 9}).json()
     assert len(late_steps) == 3
     late_rows = client.get(
-        f"{API}/projects", params={"project_type": "GOVERNANCE_SETUP", "stage": 9}
+        f"{API}/projects",
+        params={"project_type": "GOVERNANCE_SETUP", "stage": expected},
     ).json()
     assert pid in {row["id"] for row in late_rows["items"]}
 

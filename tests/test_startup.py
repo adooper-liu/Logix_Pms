@@ -107,6 +107,40 @@ def test_policy_requires_structured_authorization(client):
         assert policy["status"] != "READY"
 
 
+def test_every_evidence_count_opens_its_page(client):
+    """每条计数都带落点页面，和证据定义是同一份。"""
+    from app.services.startup import EVIDENCE_DESTINATIONS, EVIDENCE_ITEMS, EVIDENCE_LABELS
+
+    assert set(EVIDENCE_DESTINATIONS) == set(EVIDENCE_LABELS)
+    used = {item_key for items in EVIDENCE_ITEMS.values() for item_key, _required in items}
+    assert used <= set(EVIDENCE_DESTINATIONS)
+    allowed = {
+        "map",
+        "orgs",
+        "projects",
+        "strategy",
+        "designer",
+        "deliverables",
+        "authorization",
+        "execution",
+        "monitor",
+        "toolbox",
+    }
+    assert {view for view, _params in EVIDENCE_DESTINATIONS.values()} <= allowed
+
+    data = client.get(f"{API}/start/status").json()
+    for step in data["steps"]:
+        for item in step["evidence_items"]:
+            view, params = EVIDENCE_DESTINATIONS[item["key"]]
+            assert item["view"] == view
+            assert item["view_params"] == params
+    scope = {item["key"]: item for item in _step(data, "scope")["evidence_items"]}
+    assert scope["l3_with_owner"]["view"] == "map"
+    assert scope["l3_with_owner"]["view_params"] == {"owners": "l3"}
+    assert scope["governance_roles"]["view_params"]["tab"] == "governance"
+    assert scope["sponsor_projects"]["view"] == "projects"
+
+
 def test_startup_status_for_owner(owner_client):
     data = owner_client.get(f"{API}/start/status").json()
     assert data["total"] == 9

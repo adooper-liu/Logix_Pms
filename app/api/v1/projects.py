@@ -63,9 +63,11 @@ from app.services import audit as audit_service
 from app.services import deliverable as deliverable_service
 from app.services import evidence as evidence_service
 from app.services import improvement as improvement_service
+from app.services import kpi as kpi_service
 from app.services import methodology as methodology_service
 from app.services import project_workflow as workbench_service
 from app.services import setup_program as setup_service
+from app.services import startup as startup_service
 from app.services import storage as storage_service
 from app.services.workflow import STAGE_NAMES, recompute_progress, seed_project_steps
 
@@ -186,6 +188,13 @@ def summary(db: DbSession):
 # ------------------------------------------------------------------ 列表 / 新建
 
 
+def _refresh_shared_measures(db: DbSession) -> None:
+    """项目当前值与治理阶段在读之前对齐到唯一口径，并写回。"""
+    kpi_service.align_open_projects(db)
+    startup_service.apply_governance_stages(db)
+    db.commit()
+
+
 @router.get("", response_model=Page[ProjectOut], summary="项目列表（多维筛选）")
 def list_projects(
     db: DbSession,
@@ -200,6 +209,7 @@ def list_projects(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
 ):
+    _refresh_shared_measures(db)
     stmt = select(Project).options(joinedload(Project.source_kpi))
     if methodology is not None:
         stmt = stmt.where(Project.methodology == methodology.value)
@@ -419,6 +429,7 @@ def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: Manag
     db.add(project)
     db.flush()
     setup_service.seed_setup_steps(db, project)
+    recompute_progress(db, project, auto_advance=False)
     audit_service.record(
         db,
         user,
@@ -439,6 +450,7 @@ def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: Manag
     "/{project_id}", response_model=ProjectDetail, summary="项目详情（含五阶段进度与下一步）"
 )
 def get_project(project_id: int, db: DbSession):
+    _refresh_shared_measures(db)
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -541,6 +553,8 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
                 status_code=403,
                 detail="严格门禁开关只能由流程管理科或系统管理员变更",
             )
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        data.pop("current_stage", None)
     target_stage = data.get("current_stage")
     if target_stage is not None and target_stage > previous_stage:
         # 用本次请求合并后的有效状态校验，避免“同一次 PATCH 里先关/开门禁再推进”
@@ -558,6 +572,9 @@ def update_project(project_id: int, payload: ProjectUpdate, db: DbSession, user:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     for field, value in data.items():
         setattr(project, field, value)
+    kpi_service.align_project(db, project)
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        recompute_progress(db, project, auto_advance=False)
     audit_service.record(
         db,
         user,

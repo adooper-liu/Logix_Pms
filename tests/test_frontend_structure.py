@@ -139,7 +139,6 @@ def test_view_modules_are_registered():
     """main.js 必须注册全部业务视图，否则对应页面会是空白。"""
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     for view in (
-        "capability",
         "dashboard",
         "start",
         "strategy",
@@ -201,6 +200,41 @@ def test_navigation_origin_and_mainline_exist():
     html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
     assert 'id="originBar"' in html
     assert 'data-act="shell.mainline"' in html
+
+
+def test_start_page_follows_nine_stages_only():
+    """开始页只按 9 个阶段展开，不再用八问另切同一批证据。"""
+    src = (JS_ROOT / "views" / "start.js").read_text(encoding="utf-8")
+    assert "start.selectStage" in src
+    assert 'data-act="start.evidence"' in src
+    assert "item.view" in src
+    assert "Q1 要什么" not in src
+    assert "地图层" not in src
+    assert "activeQ" not in src
+
+
+def test_nav_follows_what_each_page_writes():
+    """侧栏按页面真正读写的数分组，不按菜单标题。"""
+    html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    assert "专家模式" not in html
+    assert "expert-only" not in html
+    views = re.findall(r'<a[^>]*data-view="([^"]+)"', html)
+    assert views == [
+        "start",
+        "pilot",
+        "orgs",
+        "map",
+        "authorization",
+        "strategy",
+        "projects",
+        "designer",
+        "execution",
+        "dashboard",
+    ]
+    assert "把公司这套办法建起来" in html
+    assert "把一条流程改好" in html
+    assert "能力地图" not in html
+    assert "capability" not in views
 
 
 def test_workload_page_consumes_boundary_note():
@@ -562,25 +596,3 @@ def test_workflow_claim_form_uses_backend_labels_and_root_gate():
     assert '<select id="ecType">' in src, "证据类型不是受控下拉框"
     assert "ecRootGate" in src and "gate_condition_id" in src, "证据登记没有绑定根因门条件"
     assert "evidence_type_label" in src, "主张列表没有展示后端证据类型标签"
-
-
-def test_nav_exposes_capability_and_value_streams():
-    """侧栏按能力主线组织：能力地图 + 建体系 / 改流程 / 方法与资产。"""
-    html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
-    views = re.findall(r'<a[^>]*data-view="([^"]+)"', html)
-    for view in (
-        "capability",
-        "workflow",
-        "toolbox",
-        "deliverables",
-        "data",
-        "projects",
-        "dashboard",
-    ):
-        assert view in views, f"侧栏缺少关键视图 {view}"
-    assert "建体系" in html and "改流程" in html and "方法与资产" in html
-    # 这几块是能力主线的强证据，不能继续藏在专家模式里
-    for view in ("workflow", "toolbox", "deliverables", "data"):
-        assert f'class="expert-only" data-view="{view}"' not in html, (
-            f"{view} 不应只出现在专家工具里"
-        )

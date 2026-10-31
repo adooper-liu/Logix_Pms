@@ -268,8 +268,6 @@ def _stage_blocking_reasons(db: Session, project: Project, stage_no: int) -> Lis
 def ensure_advance_allowed(db: Session, project: Project, target_stage: int) -> None:
     if target_stage <= project.current_stage:
         return
-    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
-        return
     if target_stage != project.current_stage + 1:
         raise WorkbenchError("一次只能通过当前阶段退出门进入紧邻的下一阶段")
     if project.gate_required:
@@ -516,6 +514,8 @@ def add_condition(db: Session, project: Project, data: dict) -> ProjectGateCondi
 
 
 def advance(db: Session, project: Project) -> AdvanceResultOut:
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        raise WorkbenchError("治理体系落地项目的阶段与启动页同一套证据，不能单独推进")
     if project.current_stage >= 5:
         raise WorkbenchError("已经是最后一个阶段，不能继续推进")
     ensure_advance_allowed(db, project, project.current_stage + 1)

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
-from app.models.enums import ProjectStatus, StepStatus
+from app.models.enums import ProjectStatus, ProjectType, StepStatus
 from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 
 STAGE_NAMES: Dict[int, str] = {
@@ -138,9 +138,19 @@ def seed_project_steps(db: Session, project: Project) -> int:
 def recompute_progress(db: Session, project: Project, *, auto_advance: bool = True) -> float:
     """按已完成步骤占比回算项目整体进度，并处理阶段推进与结项。
 
+    治理体系落地项目的阶段不看步骤勾选，直接采用启动页的证据阶段。
     `auto_advance=False` 用于五阶段工作台：阶段推进必须走证据门槛，
     不能因为步骤都被勾成 DONE 就自动解锁。
     """
+    if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
+        from app.services.startup import governance_position
+
+        stage, progress = governance_position(db)
+        project.current_stage = stage
+        project.progress = progress
+        db.flush()
+        return progress
+
     steps: List[ProjectStep] = db.scalars(
         select(ProjectStep).where(ProjectStep.project_id == project.id)
     ).all()

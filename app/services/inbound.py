@@ -38,6 +38,7 @@ from app.schemas.integration import (
 from app.services import audit as audit_service
 from app.services import execution as execution_service
 from app.services import execution_flow as flow_service
+from app.services import kpi as kpi_service
 
 ACTIONS = {
     "start_instance": "启动流程",
@@ -240,31 +241,29 @@ def _dispatch(
         kpi = db.get(KpiDefinition, payload.kpi_id)
         if kpi is None:
             raise HTTPException(status_code=404, detail="KPI 不存在")
-        existing = db.scalar(
-            select(KpiRecord).where(
+        existed = db.scalar(
+            select(KpiRecord.id).where(
                 KpiRecord.kpi_id == payload.kpi_id,
                 KpiRecord.period == payload.period,
-                KpiRecord.project_id == payload.project_id,
+                (
+                    KpiRecord.project_id.is_(None)
+                    if payload.project_id is None
+                    else KpiRecord.project_id == payload.project_id
+                ),
             )
         )
-        if existing is not None:
-            existing.value = payload.value
-            existing.note = payload.comment
-            row = existing
-        else:
-            row = KpiRecord(
-                kpi_id=payload.kpi_id,
-                period=payload.period,
-                value=payload.value,
-                project_id=payload.project_id,
-                note=payload.comment,
-            )
-            db.add(row)
-        db.flush()
+        row = kpi_service.save_record(
+            db,
+            kpi,
+            period=payload.period,
+            value=payload.value,
+            project_id=payload.project_id,
+            note=payload.comment,
+        )
         audit_service.record(
             db,
             run_as,
-            "UPDATE" if existing is not None else "CREATE",
+            "UPDATE" if existed is not None else "CREATE",
             "kpi_record",
             row.id,
             f"入站 Webhook {hook.code} 回传 {kpi.code} {payload.period} 数据点 {payload.value}",

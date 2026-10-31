@@ -17,13 +17,15 @@ class StartupActionOut(BaseModel):
 
 
 class StartupEvidenceOut(BaseModel):
-    """一条出门证据：值是多少、是否必需、当前是否满足。"""
+    """一条出门证据：值是多少、是否必需、当前是否满足、点开落到哪一页。"""
 
     key: str
     label: str
     value: int
     required: bool
     met: bool
+    view: str
+    view_params: Dict[str, str] = Field(default_factory=dict)
 
 
 class StartupStepOut(BaseModel):

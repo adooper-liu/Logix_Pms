@@ -23,7 +23,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 VIEWS = [
     ("dashboard", "运营驾驶舱"),
-    ("capability", "能力地图"),
     ("start", "开始使用"),
     ("strategy", "战略目标"),
     ("map", "企业流程地图"),
@@ -97,23 +96,20 @@ def main() -> int:
 
         skipped_keys: list[str] = []
 
-        # 默认入口与专家模式：登录后应落在「开始使用」（除非首次上线 S0–S7 已 8/8），
-        # 专家工具默认收起；开启后再跑后面的 16 个视图巡检。
-        def default_entry_and_expert_mode() -> None:
-            # 固定唯一主入口：无论试点是否上线，都落在「开始使用」
+        # 侧栏按两件事分组，入口都露在外面。流程卡、五阶段、工具箱、交付物从页面里进入。
+        def default_entry_and_nav() -> None:
             assert page.inner_text("#pageTitle") == "开始使用", (
                 f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
             )
-            assert page.locator('.nav a[data-view="pcf"]').is_hidden(), "专家工具默认应收起"
-            page.click("#expertToggle")
-            page.wait_for_timeout(250)
-            assert page.locator('.nav a[data-view="pcf"]').is_visible(), "专家模式未展开"
-            assert page.evaluate("localStorage.getItem('pms_expert_mode')") == "1"
-            page.reload(wait_until="networkidle")
-            page.wait_for_timeout(800)
-            assert page.locator('.nav a[data-view="pcf"]').is_visible(), "刷新后专家模式未保持"
+            groups = [text.strip() for text in page.locator(".nav .grp").all_inner_texts()]
+            assert groups == ["把公司这套办法建起来", "把一条流程改好"], groups
+            assert page.locator("#expertToggle").count() == 0
+            assert page.locator('.nav a[data-view="map"]').is_visible()
+            assert page.locator('.nav a[data-view="execution"]').is_visible()
+            assert page.locator('.nav a[data-view="workflow"]').count() == 0
+            assert page.locator('.nav a[data-view="pcf"]').count() == 0
 
-        check("默认入口与专家模式", default_entry_and_expert_mode)
+        check("默认入口与两侧栏分组", default_entry_and_nav)
 
         # ---------------------------------------------------- 第一段：视图渲染
         print("── 视图渲染 ──")
@@ -121,6 +117,9 @@ def main() -> int:
             if view == "monitor":
                 # 合并后侧栏只有一个「运营驾驶舱」，monitor 从 KPI 页签进入
                 page.evaluate("() => go('monitor', {params: {tab: 'kpi'}, skipOrigin: true})")
+            elif page.locator(f'.nav a[data-view="{view}"]').count() == 0:
+                # 流程卡、五阶段、工具箱、交付物、PCF、草图、数据治理不占侧栏
+                page.evaluate(f"() => go('{view}', {{skipOrigin: true}})")
             else:
                 page.click(f'.nav a[data-view="{view}"]')
             try:
@@ -2426,42 +2425,19 @@ def main() -> int:
             view = page.inner_text("#view")
             assert "开始使用" in view and "唯一主入口" in view, "启动向导未渲染"
             assert page.locator("#view .tl-step").count() == 9, "九阶段时间轴不完整"
-            assert page.locator("#view .tl-step.current").count() == 1, "时间轴没有当前全局证据阶段"
+            assert page.locator("#view .tl-step.current").count() == 1, "时间轴没有当前阶段"
             assert page.locator("#view .tl-step.done").count() >= 1, "时间轴没有已完成阶段"
             assert "当前" in page.inner_text("#view .start-timeline")
             assert page.locator("#view .start-shell").count() == 1, "开始页没有三栏布局"
-            assert page.locator("#view .start-q").count() == 1, "开始页应一次只展示一个 Q 详情"
-            assert page.locator("#view .start-nav-item.on").count() == 1, (
-                "左侧 Q 导航没有唯一选中项"
-            )
-            for marker in ("地图层", "骨架层", "执行层", "Q1 要什么", "Q4 做什么", "Q8 下一步"):
-                assert marker in view, f"开始页缺少「{marker}」"
-            assert "全局证据进度" in view, "右侧缺少全局证据进度"
-
-            # 点 Q7 才展示 Q7 详情与当前阶段
-            page.click('#view .start-nav-item:has-text("Q7 输出什么")')
-            page.wait_for_timeout(300)
-            assert page.locator("#view .start-q").count() == 1, "切换到 Q7 后不应铺开其他 Q"
-            assert "Q7" in page.inner_text("#view .start-q")
-            q7_tip = page.locator("#q7 .start-q-answer .metric-help.has-tip")
-            assert q7_tip.count() == 1, "Q7 没有把全局口径收进 toptip"
-            q7_tip_text = q7_tip.first.get_attribute("data-tip") or ""
-            assert "不限定某一条试点路径" in q7_tip_text, "Q7 toptip 缺少全局口径"
-            assert "这里不是项目当前层" in q7_tip_text, "Q7 toptip 没有区分项目当前层"
-
-            # 点 Q8 才展示下一步与上线口径
-            page.click('#view .start-nav-item:has-text("Q8 下一步")')
-            page.wait_for_timeout(300)
-            assert page.locator("#view .start-q").count() == 1
-            assert "Q8" in page.inner_text("#view .start-q")
-            q8_tip = page.locator("#q8 .start-q-answer .metric-help.has-tip")
-            if q8_tip.count():
-                assert "全局证据阶段退出门" in (q8_tip.first.get_attribute("data-tip") or ""), (
-                    "Q8 没有把退出门口径收进 toptip"
-                )
-            assert "前 8 个阶段" in page.inner_text("#view") and "评审与固化" in page.inner_text(
-                "#view"
-            ), "启动页缺少上线范围"
+            assert page.locator("#view .start-nav-item").count() == 9, "左侧应是 9 个阶段"
+            assert page.locator("#view .start-nav-item.on").count() == 1, "左侧没有唯一选中阶段"
+            assert "Q1 要什么" not in view and "地图层" not in view, "八问不该再出现在开始页"
+            assert "当前位置" in view, "右侧缺少当前位置"
+            assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
+            tip = page.locator("#view .page-head .metric-help.has-tip")
+            assert tip.count() == 1, "开始页没有把计数口径收进说明"
+            tip_text = tip.first.get_attribute("data-tip") or ""
+            assert "全公司计数" in tip_text and "这次先不做" in tip_text, tip_text
             gate = page.evaluate(
                 """async () => {
                     const token = localStorage.getItem('psm_token');
@@ -2479,11 +2455,7 @@ def main() -> int:
             else:
                 assert "还差 " in view and "个阶段" in view, "启动页缺少上线缺口说明"
 
-            # 回 Q7，验证当前步与证据面板
-            page.click('#view .start-nav-item:has-text("Q7 输出什么")')
-            page.wait_for_timeout(300)
             view = page.inner_text("#view")
-            assert "前置" in view and "下一步" in view, "Q 卡缺少依赖关系提示"
             has_current = page.locator("#view .start-current").count() == 1
             assert has_current or "九个阶段都齐了" in view or "能做的都做了" in view, (
                 "启动页没有当前步"
@@ -2491,13 +2463,11 @@ def main() -> int:
             assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
 
             if has_current:
-                page.click('#view button[data-act="start.openCurrentStage"]')
-                page.wait_for_timeout(300)
-                assert page.locator("#view details#pilot-current-stage").evaluate(
-                    "el => el.open"
-                ), "右侧「展开当前阶段」没有打开 Q7 工作区"
                 view = page.inner_text("#view")
                 assert "这一步要留下什么" in view, "启动向导缺少证据面板"
+                jumps = page.locator("#view .start-current button.ev-jump")
+                assert jumps.count() >= 1, "证据计数不能打开记录"
+                assert jumps.first.get_attribute("data-view"), "证据计数没有落点页面"
                 assert "已经有的" in view and ("还缺的" in view or "有更好" in view), (
                     "证据面板缺少缺项"
                 )

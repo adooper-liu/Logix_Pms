@@ -89,6 +89,9 @@ export function renderDesigner() {
   const load = async () => {
     const params = urlParams();
     if (params.process) state.designer.processId = Number(params.process);
+    if (['model', 'analysis', 'change', 'raci'].includes(params.tab)) {
+      state.designer.tab = params.tab;
+    }
     if (!state.designer.processes) {
       const rows = await GET('/process-map/flat');
       state.designer.processes = rows.filter((r) => r.level >= 3);
@@ -100,7 +103,9 @@ export function renderDesigner() {
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
-      setUrlState('designer', { process: id }, { push: false });
+      const url = { process: id };
+      if (state.designer.tab && state.designer.tab !== 'model') url.tab = state.designer.tab;
+      setUrlState('designer', url, { push: false });
       const [model, analysis, positions, tools, toolMeta, docMeta, changes, changeMeta,
         raciMatrix, governanceRoles, raciMeta] =
         await Promise.all([
@@ -414,7 +419,12 @@ async function reloadDesign() {
 }
 
 function setDesignerTab(tab) {
-  state.designer.tab = tab;
+  const next = ['model', 'analysis', 'change', 'raci'].includes(tab) ? tab : 'model';
+  state.designer.tab = next;
+  const params = {};
+  if (state.designer.processId) params.process = state.designer.processId;
+  if (next !== 'model') params.tab = next;
+  setUrlState('designer', params, { push: false });
   RENDERERS.designer();
 }
 

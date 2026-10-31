@@ -127,7 +127,7 @@ def candidates(db: Session) -> list[ImprovementCandidateOut]:
     for kpi in kpis:
         if kpi.id in active_project_kpi_ids:
             continue
-        records = sorted(kpi.records, key=lambda item: item.period)
+        records = kpi_service.ordered_records(kpi.records)
         latest = records[-1].value if records else None
         status = kpi_service.status_for(
             latest,
@@ -165,7 +165,7 @@ def candidates(db: Session) -> list[ImprovementCandidateOut]:
 
 def draft_from_kpi(db: Session, kpi: KpiDefinition, user: User) -> Project:
     """把红/黄 KPI 转成一张改善项目草稿；同一 KPI 不允许并行多张。"""
-    records = sorted(kpi.records, key=lambda row: row.period)
+    records = kpi_service.ordered_records(kpi.records)
     latest = records[-1].value if records else None
     if latest is None:
         raise ImprovementError("该 KPI 还没有数据点，无法判断是否越线")

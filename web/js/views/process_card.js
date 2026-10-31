@@ -364,6 +364,7 @@ const renderProcessCard = () => {
                 · ${esc(c.process.org_unit_name || c.process.department || '—')}</span></div>
             <div class="gap">
               <span class="tag t-blu">模块就绪 ${readyCount}/${readyTotal}</span>
+              <button class="btn-sm" data-act="process_card.go" data-view="data">数据治理</button>
               <button class="btn-sm" data-act="process_card.findings">治理待办 ${c.findings.length}</button>
             </div>
           </div>
