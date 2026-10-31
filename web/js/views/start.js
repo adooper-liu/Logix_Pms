@@ -249,6 +249,22 @@ function goLiveCard(data) {
     </div>`;
 }
 
+function pathRollupCard(data) {
+  const count = data.path_count || 0;
+  const done = data.path_completed_count || 0;
+  const avg = data.path_avg_layer || 0;
+  return `
+    <div class="card start-aside-card">
+      <div class="tiny muted">单流程落地（汇总）</div>
+      <h3>${count ? `${count} 条十层路径` : '还没有十层路径'}</h3>
+      <div class="tiny muted mt">${count
+        ? `已完成 ${done} 条 · 平均到第 ${avg} 层。能力门在左侧九阶段；某条流程会不会跑，进十层核对。`
+        : '公司能力用九阶段衡量。选一条 L3/L4 建十层核对，才按本流程关门。'}</div>
+      <button class="btn-sm mt" data-act="start.go" data-view="pilot">${
+        count ? '打开十层核对' : '去建第一条路径'}</button>
+    </div>`;
+}
+
 function paint(data) {
   const current = openStage(data);
   const viewed = viewedStage(data);
@@ -257,10 +273,11 @@ function paint(data) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">唯一主入口 · 公司流程体系</span>${tipHelp(
-            '证据按全公司计数。多数项大于 0 就算具备；权责冲突、未闭环治理待办、未关闭的授权例外要等于 0。'
-            + '当前位置是第一个还没就绪、也没标成这次先不做的阶段。'
-            + '确认上线只认前 8 个阶段都已具备。这次先不做的阶段，时间线会跳过，上线确认仍把它当成还没具备。')}</h2>
+          <h2>开始使用<span class="module-badge">唯一主入口 · 公司会不会做</span>${tipHelp(
+            '证据按全公司计数：九阶段只量公司能力（框架、主数据、方法是否存在）。'
+            + '多数项大于 0 就算具备；权责冲突、未闭环治理待办、未关闭的授权例外要等于 0。'
+            + '某条流程会不会跑，不在这里量——进「十层核对」按本流程关门。'
+            + '确认上线只认前 8 个阶段都已具备。这次先不做不算已具备。')}</h2>
         </div>
         <div class="gap">
           <span class="tag t-blu">${current
@@ -290,6 +307,7 @@ function paint(data) {
             : ''}
         </div>
         ${goLiveCard(data)}
+        ${pathRollupCard(data)}
         ${skippedFold(data)}
       </aside>
     </div>`;

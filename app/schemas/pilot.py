@@ -33,6 +33,8 @@ class PilotLayerEvidenceOut(BaseModel):
     value: int
     required: bool
     met: bool
+    view: str = ""
+    view_params: Dict[str, str] = Field(default_factory=dict)
 
 
 class PilotActionOut(BaseModel):
@@ -173,8 +175,8 @@ class PilotPathSummaryOut(ORMModel):
 
 
 class PilotPathCreate(BaseModel):
-    name: str = Field(max_length=160)
     process_id: int
+    name: Optional[str] = Field(default=None, max_length=160)
     owner_user_id: Optional[int] = None
     owner: Optional[str] = Field(default=None, max_length=64)
 

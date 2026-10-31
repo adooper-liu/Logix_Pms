@@ -364,7 +364,10 @@ def _met(key: str, value: int) -> bool:
 
 
 def evidence_snapshot(db: Session) -> Dict[str, int]:
-    """供启动页和十层单页复用的证据快照，避免两套口径。"""
+    """开始使用专用：全公司能力计数（公司会不会做）。
+
+    单流程落地计数见 process_evidence.collect，二者不得混用。
+    """
     return _collect_evidence(db)
 
 
@@ -718,6 +721,18 @@ def status(db: Session) -> StartupStatusOut:
         if confirm and confirm.confirmed_by_user_id
         else None
     )
+    from app.models.enums import PilotPathStatus
+    from app.models.pilot import PilotPath
+
+    path_rows = db.scalars(select(PilotPath)).all()
+    path_count = len(path_rows)
+    path_completed_count = sum(
+        1 for row in path_rows if row.status == PilotPathStatus.COMPLETED.value
+    )
+    path_avg_layer = (
+        round(sum(row.current_layer for row in path_rows) / path_count, 1) if path_count else 0.0
+    )
+
     return StartupStatusOut(
         total=len(steps),
         ready_count=ready_count,
@@ -737,6 +752,9 @@ def status(db: Session) -> StartupStatusOut:
         pilot_confirm_note=confirm.note if confirm else None,
         pilot_stale=confirm is not None and not pilot_gate_open,
         pilot_missing_steps=pilot_missing_steps,
+        path_count=path_count,
+        path_completed_count=path_completed_count,
+        path_avg_layer=path_avg_layer,
         steps=steps,
     )
 

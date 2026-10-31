@@ -1,7 +1,8 @@
 /* 视图：十层单页
  *
- * 一条试点路径 = 10 个层状态；一次只展开一层。
- * 退出门由现有 evidence 自动计算；待办和异常是人工维护的补充。
+ * 一条 L3/L4 路径上的十层核对单；一次只展开一层。
+ * 退出门复用开始使用的证据口径（第 4 层制度/授权按本流程范围计）；
+ * 待办和异常是这条路径上的人工补充。新建路径不造证据、不推动公司阶段。
  */
 
 import { esc, num } from '../core/format.js';
@@ -52,6 +53,15 @@ function userOptions(users, selectedId) {
 
 on('pilot.go', ({ view }) => go(view));
 
+on('pilot.evidence', ({ view, params }) => {
+  if (!view) return;
+  const parsed = {};
+  new URLSearchParams(params || '').forEach((value, key) => {
+    parsed[key] = value;
+  });
+  go(view, { params: parsed, push: true });
+});
+
 on('pilot.selectPath', (_data, el) => {
   const pathId = Number(el.value) || null;
   if (!pathId) return;
@@ -93,13 +103,13 @@ on('pilot.deletePath', async () => {
   const detail = state.pilot.data;
   if (!detail) return;
   const ok = await confirmDialog(`删除「${detail.name}」会同时删除十层备注、待办和异常，确定继续？`,
-    { title: '删除试点路径', okText: '删除', danger: true });
+    { title: '删除十层路径', okText: '删除', danger: true });
   if (!ok) return;
   try {
     await DEL(`/pilot/paths/${detail.id}`);
     state.pilot.pathId = null;
     state.pilot.layerNo = null;
-    toast('试点路径已删除');
+    toast('路径已删除');
     go('pilot', { params: {}, push: false });
   } catch (e) {
     toast(e.message, true);
@@ -123,14 +133,12 @@ async function openPathModal() {
     .map((row) => `<option value="${row.id}"${row.id === preferred ? ' selected' : ''}>L${
       row.level} ${esc(row.code)} ${esc(row.name)}</option>`)
     .join('');
-  openModal('新建试点路径', `
-    <div class="field"><label>路径名称 *</label>
-      <input id="plName" placeholder="如 采购到付款试点"></div>
+  openModal('新建十层路径', `
     <div class="field"><label>关联流程 *</label>
       <select id="plProcess"><option value="">请选择 L3/L4 流程</option>${options}</select></div>
     <div class="field"><label>负责人</label>
       <select id="plOwner"><option value="">当前用户</option>${userOptions(users)}</select></div>
-    <div class="note">创建后会生成 10 层状态；退出门由系统里已有的证据自动判定。</div>`,
+    <div class="note">路径名就是流程名。一条流程只建一条十层路径。退出门读已有证据，不会新建证据，也不会推动「开始使用」的公司阶段。</div>`,
   `<button class="btn btn-g" data-act="ui.close">取消</button>
    <button class="btn btn-p" data-act="pilot.savePath">创建</button>`);
 }
@@ -140,13 +148,10 @@ on('pilot.savePath', async () => {
     const el = document.getElementById(id);
     return el ? el.value.trim() : '';
   };
-  const name = val('plName');
   const processId = val('plProcess');
-  if (!name) return toast('请填写路径名称', true);
   if (!processId) return toast('请选择关联流程', true);
   try {
     const detail = await POST('/pilot/paths', {
-      name,
       process_id: Number(processId),
       owner_user_id: val('plOwner') ? Number(val('plOwner')) : null,
     });
@@ -154,7 +159,7 @@ on('pilot.savePath', async () => {
     state.pilot.pathId = detail.id;
     state.pilot.layerNo = detail.current_layer;
     state.pilot.pendingProcess = null;
-    toast('试点路径已创建');
+    toast('路径已创建');
     go('pilot', {
       params: { path: detail.id, layer: detail.current_layer },
       push: true,
@@ -407,10 +412,17 @@ function evidenceList(layer) {
   return layer.evidence_items.map((item) => {
     const tone = item.met ? 'ok' : item.required ? 'miss' : 'opt';
     const suffix = item.met ? '' : item.required ? ' · 还缺' : ' · 建议关注';
+    const params = new URLSearchParams(item.view_params || {}).toString();
+    const title = item.view ? `打开证据：${item.label}` : item.label;
+    const value = item.view
+      ? `<button type="button" class="ev-jump" data-act="pilot.evidence"
+           data-view="${esc(item.view)}"${params ? ` data-params="${esc(params)}"` : ''}
+           title="${esc(title)}">${item.value}</button>`
+      : `<b>${item.value}</b>`;
     return `
       <div class="between pilot-line ${tone}">
-        <span>${item.met ? '✓' : '○'} ${esc(item.label)}</span>
-        <b>${item.value}${suffix}</b>
+        <span>${item.met ? '✓' : '○'} ${esc(item.label)}${suffix}</span>
+        ${value}
       </div>`;
   }).join('') || '<div class="tiny muted">本层没有必需证据</div>';
 }
@@ -585,12 +597,12 @@ function paint(payload) {
   if (!detail) {
     viewEl().innerHTML = `
       <div class="card page-head">
-        <h2>十层单页<span class="module-badge">一条流程、十层状态</span></h2>
-        <div class="desc">一次只展开一层；当前层退出门满足后才能进入下一层。</div>
+        <h2>十层核对<span class="module-badge">这条会不会跑</span></h2>
+        <div class="desc">退出门按本流程计数，与「开始使用」的公司能力门拆开。新建路径不造证据、不推公司阶段。</div>
       </div>
       <div class="card">
-        <div class="empty">还没有试点路径。先选一条 L3/L4 流程，建立第一条十层路径。</div>
-        <div class="gap mt"><button class="btn btn-p" data-act="pilot.newPath">+ 新建试点路径</button></div>
+        <div class="empty">还没有路径。选一条 L3/L4，按本流程建十层核对。</div>
+        <div class="gap mt"><button class="btn btn-p" data-act="pilot.newPath">+ 新建路径</button></div>
       </div>`;
     return;
   }
@@ -605,28 +617,31 @@ function paint(payload) {
   state.pilot.layerNo = layer.layer_no;
   // 默认路径/当前层也写进 URL，复制出去的链接能直接落到同一条路径的同一层
   setUrlState('pilot', { path: detail.id, layer: layer.layer_no }, { push: false });
+  const pathLabel = (path) => {
+    const process = [path.process_code, path.process_name].filter(Boolean).join(' ');
+    return process || path.name;
+  };
   const options = paths.map((path) =>
     `<option value="${path.id}"${path.id === detail.id ? ' selected' : ''}>${
-      esc(path.name)} · 第${path.current_layer}层</option>`).join('');
+      esc(pathLabel(path))} · 第${path.current_layer}层</option>`).join('');
 
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>十层单页<span class="module-badge">一条流程、十层状态</span></h2>
-          <div class="desc">一次只展开一层；当前层退出门满足后才能进入下一层。</div>
+          <h2>十层核对<span class="module-badge">这条会不会跑</span></h2>
+          <div class="desc">一次只看一层。退出门按本流程（及祖先链）计数；点数字打开记录。公司能力齐不齐，看「开始使用」。</div>
         </div>
         <div class="gap">
           <select class="sel sel-sm" data-act="pilot.selectPath">${options}</select>
           <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
-          <button class="btn btn-p" data-act="pilot.newPath">+ 新建试点路径</button>
+          <button class="btn btn-p" data-act="pilot.newPath">+ 新建路径</button>
         </div>
       </div>
       <div class="between mt">
         <div>
-          <b>${esc(detail.name)}</b>
-          <span class="tiny muted">${esc(detail.process_code || '')} ${esc(detail.process_name || '')}
-            · Owner：${esc(detail.owner || '—')}</span>
+          <b>${esc(pathLabel(detail))}</b>
+          <span class="tiny muted">Owner：${esc(detail.owner || '—')}</span>
         </div>
         <div class="gap">
           ${statusTag('t-blu', detail.status_label)}

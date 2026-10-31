@@ -1,6 +1,7 @@
-"""十层单页服务：路径、层状态、待办与异常改善卡。
+"""十层单页服务：一条流程的落地核对单。
 
-层的退出条件直接复用启动页的证据口径，不新增第二套判定。
+退出门按「本流程会不会跑」计数（process_evidence），与开始使用的
+「公司会不会做」全公司能力计数拆开。待办/异常是这条路径上的人工补充。
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from app.schemas.pilot import (
 from app.services import authorization as authorization_service
 from app.services import deliverable as deliverable_service
 from app.services import process_document as document_service
+from app.services import process_evidence
 from app.services import startup as startup_service
 
 
@@ -99,9 +101,9 @@ LAYER_DEFINITIONS: List[Dict] = [
         "title": "战略与目标",
         "goal": "说清楚为什么做、为谁创造什么价值、不做什么。",
         "inputs": ["年度经营计划", "客户/质量/成本目标", "现状数据"],
-        "process": ["选 1 条试点流程", "建 1 条年度目标", "把目标挂到流程"],
-        "outputs": ["目标卡", "现状基线", "目标—流程—指标映射"],
-        "exit_criteria": "目标可测、边界明确、有责任人；目标已挂到试点流程。",
+        "process": ["为本流程挂年度目标", "补责任人与目标值", "补现状基线"],
+        "outputs": ["目标卡", "现状基线", "目标—本流程映射"],
+        "exit_criteria": "本流程已挂可测目标，有责任人与基线。",
         "evidence": [
             "objectives",
             "linked_objectives",
@@ -458,8 +460,11 @@ def _layer4_resources(db: Session, path: PilotPath):
 
 
 def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
-    base_evidence = startup_service.evidence_snapshot(db)
-    layer4_evidence, layer4_resources = _layer4_resources(db, path)
+    if not path.process_id:
+        raise PilotError("十层路径必须关联流程")
+    process_counts = process_evidence.collect(db, path.process_id)
+    _layer4_counts, layer4_resources = _layer4_resources(db, path)
+    # 第 4 层制度/授权以本流程范围清单为准（与 collect 同源口径，展示用资源明细）
     layer_rows = _ensure_layers(db, path)
     tasks = db.scalars(select(PilotTask).where(PilotTask.path_id == path.id)).all()
     issues = db.scalars(select(PilotIssue).where(PilotIssue.path_id == path.id)).all()
@@ -474,14 +479,18 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
     done_count = 0
     for definition in LAYER_DEFINITIONS:
         layer_no = definition["layer_no"]
-        layer_evidence = {**base_evidence, **layer4_evidence} if layer_no == 4 else base_evidence
+        layer_evidence = process_counts
         items = [
             PilotLayerEvidenceOut(
                 key=key,
-                label=startup_service.EVIDENCE_LABELS[key],
+                label=process_evidence.PROCESS_EVIDENCE_LABELS.get(
+                    key, startup_service.EVIDENCE_LABELS.get(key, key)
+                ),
                 value=layer_evidence.get(key, 0),
                 required=key != "open_authorization_exceptions",
                 met=startup_service.evidence_met(key, layer_evidence.get(key, 0)),
+                view=startup_service.EVIDENCE_DESTINATIONS[key][0],
+                view_params=startup_service.EVIDENCE_DESTINATIONS[key][1],
             )
             for key in definition["evidence"]
         ]
@@ -584,7 +593,7 @@ def list_paths(db: Session) -> List[PilotPathSummaryOut]:
 
 def create_path(
     db: Session,
-    name: str,
+    name: Optional[str],
     process_id: int,
     owner_user_id: Optional[int],
     owner: Optional[str],
@@ -592,10 +601,17 @@ def create_path(
     process = db.get(ProcessArch, process_id)
     if process is None:
         raise PilotError("关联流程不存在")
-    if not (name or "").strip():
-        raise PilotError("试点路径名称不能为空")
+    if process.level not in (3, 4):
+        raise PilotError("十层路径只能挂在 L3 或 L4 流程上")
+    existing = db.scalar(select(PilotPath.id).where(PilotPath.process_id == process_id).limit(1))
+    if existing is not None:
+        raise PilotError("该流程已有十层路径，请直接打开")
+    # 路径名就是流程名；库里仍留 name 字段，方便列表展示，不再让人另起名字
+    path_name = (name or "").strip() or (process.name or "").strip()
+    if not path_name:
+        raise PilotError("流程名称不能为空")
     path = PilotPath(
-        name=name.strip(),
+        name=path_name,
         process_id=process_id,
         owner_user_id=owner_user_id,
         owner=owner,

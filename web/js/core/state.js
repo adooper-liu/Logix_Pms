@@ -68,7 +68,7 @@ export const TITLES = {
   strategy: '战略目标',
   data: '数据治理',
   start: '开始使用',
-  pilot: '十层单页',
+  pilot: '十层核对',
   process_card: '流程卡',
   authorization: '授权矩阵',
   dashboard: '运营驾驶舱',

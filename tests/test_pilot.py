@@ -11,11 +11,22 @@ def _l3(client) -> dict:
 
 
 def _create_path(client, **overrides) -> dict:
-    payload = {"name": "采购到付款十层试点", "process_id": _l3(client)["id"]}
+    payload = {"process_id": _l3(client)["id"]}
     payload.update(overrides)
     created = client.post(f"{API}/pilot/paths", json=payload)
     assert created.status_code == 201, created.text
     return created.json()
+
+
+def test_create_path_uses_process_name(client):
+    process = _l3(client)
+    path = _create_path(client)
+    assert path["name"] == process["name"]
+    assert path["process_id"] == process["id"]
+    again = client.post(f"{API}/pilot/paths", json={"process_id": process["id"]})
+    assert again.status_code == 400, again.text
+    assert "已有十层路径" in again.json()["detail"]
+    client.delete(f"{API}/pilot/paths/{path['id']}")
 
 
 def test_create_path_has_ten_layers(client):
@@ -31,8 +42,14 @@ def test_create_path_has_ten_layers(client):
     assert [layer["layer_no"] for layer in path["layers"]] == list(range(1, 11))
     assert path["layers"][0]["title"] == "战略与目标"
     assert path["layers"][3]["title"] == "制度与授权设计"
-    assert path["layers"][0]["gate_open"] is True
     assert 0 <= path["progress"] <= 100
+    # 退出门按本流程计数，标签应是本流程口径
+    sample = path["layers"][0]["evidence_items"][0]
+    assert "本流程" in sample["label"] or sample["key"] in {"l1", "l2", "l3"}
+    for layer in path["layers"]:
+        for item in layer["evidence_items"]:
+            assert item["view"], f"{layer['title']} · {item['key']} 缺少证据落点"
+            assert "view_params" in item
     layer4 = path["layers"][3]
     assert layer4["resources"] is not None
     assert layer4["resources"]["rules"], "第4层没有返回授权规则"
@@ -152,9 +169,7 @@ def test_layer_notes_and_path_update(client):
 def test_permissions(client, owner_client, viewer_client):
     process = _l3(viewer_client)
     assert (
-        viewer_client.post(
-            f"{API}/pilot/paths", json={"name": "只读创建", "process_id": process["id"]}
-        ).status_code
+        viewer_client.post(f"{API}/pilot/paths", json={"process_id": process["id"]}).status_code
         == 403
     )
 

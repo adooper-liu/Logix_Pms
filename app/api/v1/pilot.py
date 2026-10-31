@@ -60,7 +60,7 @@ def list_paths(db: DbSession, user: CurrentUser):
     "/paths",
     response_model=PilotPathOut,
     status_code=status.HTTP_201_CREATED,
-    summary="新建试点路径（MANAGER+）",
+    summary="新建十层路径（MANAGER+）",
 )
 def create_path(payload: PilotPathCreate, db: DbSession, user: ManagerUser):
     owner_user_id, owner = resolve_owner(db, payload.owner_user_id, payload.owner)
@@ -72,7 +72,7 @@ def create_path(payload: PilotPathCreate, db: DbSession, user: ManagerUser):
         )
     except pilot_service.PilotError as exc:
         _error(exc)
-    audit_service.record(db, user, "CREATE", "pilot_path", detail.id, f"新建试点路径 {detail.name}")
+    audit_service.record(db, user, "CREATE", "pilot_path", detail.id, f"新建十层路径 {detail.name}")
     db.commit()
     return detail
 

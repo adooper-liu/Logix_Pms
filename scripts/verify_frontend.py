@@ -28,7 +28,7 @@ VIEWS = [
     ("map", "企业流程地图"),
     ("process_card", "流程卡"),
     ("authorization", "授权矩阵"),
-    ("pilot", "十层单页"),
+    ("pilot", "十层核对"),
     ("workflow", "五阶段标准工作流"),
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
@@ -2550,17 +2550,17 @@ def main() -> int:
                 '#view button[data-act="process_card.goPilot"], '
                 '#view button[data-act="process_card.go"][data-view="pilot"]'
             ).first
-            assert entry.count(), "流程卡没有进入十层单页的入口"
+            assert entry.count(), "流程卡没有进入十层核对的入口"
             entry.click()
             page.wait_for_timeout(1200)
-            assert page.inner_text("#pageTitle") == "十层单页"
+            assert page.inner_text("#pageTitle") == "十层核对"
             assert page.is_visible("#originBack"), "跨页跳转后没有返回来源"
             assert "返回 流程卡" in page.inner_text("#originBack")
             if "process=" in page.url:
                 process_id = page.url.split("process=")[1].split("&")[0]
                 page.click('#view button[data-act="pilot.newPath"]')
                 page.wait_for_selector("#plProcess")
-                assert page.input_value("#plProcess") == process_id, "十层单页没有带入来源流程"
+                assert page.input_value("#plProcess") == process_id, "十层核对没有带入来源流程"
                 close_modal()
             page.click("#originBack")
             page.wait_for_timeout(1200)
@@ -2634,20 +2634,30 @@ def main() -> int:
         def pilot_view() -> None:
             goto("pilot")
             page.wait_for_timeout(1200)
-            assert "十层单页" in page.inner_text("#view"), "十层单页未渲染"
+            assert "十层核对" in page.inner_text("#view"), "十层核对未渲染"
 
-            page.click('#view button:has-text("+ 新建试点路径")')
-            page.wait_for_selector("#mask.show")
-            page.fill("#plName", "自检用十层路径")
-            options = page.eval_on_selector_all(
-                "#plProcess option", "els => els.map(e => e.value).filter(Boolean)"
+            if page.locator("#view .pilot-layer").count() == 0:
+                page.click('#view button:has-text("+ 新建路径")')
+                page.wait_for_selector("#mask.show")
+                assert page.locator("#plName").count() == 0, "不应再要求另起路径名"
+                options = page.eval_on_selector_all(
+                    "#plProcess option",
+                    "els => els.map(e => ({value: e.value, text: e.textContent}))"
+                    ".filter(e => e.value)",
+                )
+                assert options, "没有可选的 L3/L4 流程"
+                page.select_option("#plProcess", value=options[0]["value"])
+                page.click('#mFoot button:has-text("创建")')
+                page.wait_for_timeout(1400)
+                view = page.inner_text("#view")
+                # 选项文案形如「L3 CODE 名称」
+                process_name = options[0]["text"].split(" ", 2)[-1].strip()
+                assert process_name and process_name in view, (
+                    f"十层路径未按流程名展示：{options[0]['text']!r}"
+                )
+            assert page.locator("#view .pilot-workspace button.ev-jump").count() >= 1, (
+                "十层退出门计数不能打开证据"
             )
-            assert options, "没有可选的 L3/L4 流程"
-            page.select_option("#plProcess", value=options[0])
-            page.click('#mFoot button:has-text("创建")')
-            page.wait_for_timeout(1400)
-            view = page.inner_text("#view")
-            assert "自检用十层路径" in view, "试点路径未创建"
             assert page.locator("#view .pilot-layer").count() == 10, "十层导航不完整"
             assert page.locator("#view .pilot-side .pilot-layer").count() == 10, (
                 "十层导航没有落在左侧栏"
@@ -3011,7 +3021,7 @@ def main() -> int:
         check("返回来源与固定主线", navigation_origin_and_mainline)
         check("下拉选择稳定", select_click_stable)
         check("授权矩阵与例外台账", authorization_view)
-        check("十层单页与第4层工作区", pilot_view)
+        check("十层核对与第4层工作区", pilot_view)
         check("指标口径提示", metric_help)
         check("通知中心", notifications)
         check("工作流项目工作台", workflow_workbench)

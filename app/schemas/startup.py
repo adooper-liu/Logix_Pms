@@ -66,6 +66,10 @@ class StartupStatusOut(BaseModel):
     pilot_confirm_note: Optional[str] = None
     pilot_stale: bool = False
     pilot_missing_steps: List[str] = []
+    # 单流程落地汇总（B）：不替代九阶段能力门，只回答「有多少条路径在跑」
+    path_count: int = 0
+    path_completed_count: int = 0
+    path_avg_layer: float = 0.0
     steps: List[StartupStepOut] = []
 
 

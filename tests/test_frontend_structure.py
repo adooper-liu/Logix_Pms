@@ -216,6 +216,15 @@ def test_start_page_follows_nine_stages_only():
     assert "activeQ" not in src
 
 
+def test_pilot_page_evidence_jumps_like_start():
+    """十层按本流程关门，数字仍要能打开对应记录。"""
+    src = (JS_ROOT / "views" / "pilot.js").read_text(encoding="utf-8")
+    assert 'data-act="pilot.evidence"' in src
+    assert "item.view" in src
+    assert "这条会不会跑" in src
+    assert "本流程" in src
+
+
 def test_nav_follows_what_each_page_writes():
     """侧栏按页面真正读写的数分组，不按菜单标题。"""
     html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
@@ -224,18 +233,21 @@ def test_nav_follows_what_each_page_writes():
     views = re.findall(r'<a[^>]*data-view="([^"]+)"', html)
     assert views == [
         "start",
-        "pilot",
         "orgs",
         "map",
         "authorization",
         "strategy",
         "projects",
+        "pilot",
         "designer",
         "execution",
         "dashboard",
     ]
     assert "把公司流程体系立起来" in html
     assert "把一条流程改好" in html
+    assert "十层核对" in html
+    build = html.split("把一条流程改好")[0]
+    assert 'data-view="pilot"' not in build
     assert "能力地图" not in html
     assert "capability" not in views
 
