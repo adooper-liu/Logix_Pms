@@ -37,7 +37,7 @@ class StartupStepOut(BaseModel):
     output: str
     exit_criteria: str
     estimated: str = ""
-    pilot: bool = True  # 是否属于「首次上线」范围（S0–S7）；S8 不阻塞首次上线
+    pilot: bool = True  # 是否属于「首次上线」范围（前 8 阶段）；第 9 阶段不阻塞首次上线
     status: str
     status_label: str
     skipped: bool = False

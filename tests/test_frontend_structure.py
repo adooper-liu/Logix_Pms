@@ -208,6 +208,9 @@ def test_start_page_follows_nine_stages_only():
     assert "start.selectStage" in src
     assert 'data-act="start.evidence"' in src
     assert "item.view" in src
+    assert "next_hint" in src
+    assert "首次上线已确认" in src
+    assert "第一条流程已确认上线" not in src
     assert "Q1 要什么" not in src
     assert "地图层" not in src
     assert "activeQ" not in src

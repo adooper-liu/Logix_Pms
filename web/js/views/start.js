@@ -1,12 +1,12 @@
 /* 视图：开始使用
  *
- * 九步启动路径：默认只展开当前一步，其余步骤折叠。
- * readiness 由后端按真实证据计算；人工“跳过”只表示本轮不验证，不计入就绪。
+ * 公司流程体系的唯一主入口：九个阶段、全公司计数。
+ * 点非当前阶段只是查看证据；就绪由后端按证据算；「这次先不做」不计入就绪。
  */
 
 import { esc, dtShort, tipHelp } from '../core/format.js';
 import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
-import { renderAsync, go, RENDERERS } from '../core/router.js';
+import { renderAsync, go } from '../core/router.js';
 import { GET, POST, DEL } from '../core/api.js';
 import { state, TITLES } from '../core/state.js';
 
@@ -55,8 +55,8 @@ function evidencePanel(step) {
       <h4>这一步要留下什么</h4>
       ${group('已经有的', have, 'ok')}
       ${group('还缺的', missing, 'miss')}
-      ${suggest.length ? group('有更好，没有也能先跑', suggest, 'opt') : ''}
-      ${step.skipped ? `<div class="note mt">这次先不做：时间线会跳过，确认上线仍要它变成已具备${
+      ${suggest.length ? group('建议补上', suggest, 'opt') : ''}
+      ${step.skipped ? `<div class="note mt">这次先不做：时间线会跳过；确认上线仍要它变成已具备${
         step.skip_reason ? '；原因：' + esc(step.skip_reason) : ''}${
         step.skipped_by ? ' · ' + esc(step.skipped_by) : ''}</div>` : ''}
       <div class="gap mt">
@@ -64,7 +64,7 @@ function evidencePanel(step) {
           ? `<button class="btn-sm" data-act="start.unskip" data-key="${esc(step.key)}">
                恢复这一阶段</button>`
           : `<button class="btn-sm" data-act="start.skip" data-key="${esc(step.key)}">
-               这次先不做（标记未验证）</button>`}
+               这次先不做</button>`}
       </div>
     </aside>`;
 }
@@ -78,7 +78,9 @@ function actionAttrs(action) {
 function stepBody(step) {
   return `
     <div class="start-main">
-      <div class="note mb">这一阶段是否就绪，只看下面这些数。全公司达到门槛就算具备。</div>
+      ${step.next_hint
+        ? `<p class="start-hint">${esc(step.next_hint)}</p>`
+        : ''}
       <div class="gap">
         ${step.actions.map((action) => `<button class="btn btn-g"
           ${actionAttrs(action)} data-view="${esc(action.view)}"
@@ -98,7 +100,7 @@ function currentCard(step, flat = false) {
       <div class="start-current-hd">
         <div>
           <h3>${esc(step.title)}</h3>
-          <div class="desc">必需项全部达到门槛，这一阶段才是已具备。</div>
+          <div class="desc">只看右侧计数。全公司达到门槛，这一阶段才算已具备。</div>
         </div>
         <div class="gap">
           ${step.estimated ? `<span class="tag t-blu">预计 ${esc(step.estimated)}</span>` : ''}
@@ -135,7 +137,7 @@ function pilotGateCard(data) {
       : '';
     return `
       <div class="card start-complete">
-        <h3>第一条流程已确认上线</h3>
+        <h3>首次上线已确认</h3>
         <div class="desc">确认人：${esc(data.pilot_confirmed_by || '—')} · ${
           dtShort(data.pilot_confirmed_at)}${
           data.pilot_confirm_note ? ' · ' + esc(data.pilot_confirm_note) : ''}</div>
@@ -150,8 +152,8 @@ function pilotGateCard(data) {
   return `
     <div class="card start-complete">
       <h3>前 8 个阶段已齐，可以确认上线</h3>
-      <div class="desc">从“立项定界”到“评审与固化”都齐了；确认后默认首页切到驾驶舱，
-        第 9 阶段“改善与复制”在运营中继续。</div>
+      <div class="desc">从「立项定界」到「评审与固化」都齐了；确认后默认首页切到驾驶舱。
+        第 9 阶段「改善与复制」在运营中继续。</div>
       <div class="gap">
         <button class="btn btn-p" data-act="start.confirmPilot">确认首次上线</button>
         <button class="btn btn-g" data-act="start.setupProjects">体系落地项目</button>
@@ -174,7 +176,7 @@ function viewedStage(data) {
 function stageNav(data, viewed, current) {
   return `
     <div class="card start-nav">
-      <div class="start-nav-layer">9 个阶段</div>
+      <div class="start-nav-layer">阶段</div>
       ${data.steps.map((step) => `
         <button type="button" class="start-nav-item${step.key === viewed.key ? ' on' : ''}"
           data-act="start.selectStage" data-key="${esc(step.key)}">
@@ -212,7 +214,7 @@ function timeline(data, viewed, current) {
   return `
     <div class="card start-rail-card">
       <div class="between mb"><h3>9 个阶段</h3>
-        <span class="tiny muted">当前位置是第一个还没就绪、也没标成这次先不做的阶段</span></div>
+        <span class="tiny muted">点阶段可查看证据；公司停在「当前」那一步</span></div>
       <div class="start-timeline">${parts.join('')}</div>
     </div>`;
 }
@@ -255,7 +257,7 @@ function paint(data) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">唯一主入口 · 9 个阶段</span>${tipHelp(
+          <h2>开始使用<span class="module-badge">唯一主入口 · 公司流程体系</span>${tipHelp(
             '证据按全公司计数。多数项大于 0 就算具备；权责冲突、未闭环治理待办、未关闭的授权例外要等于 0。'
             + '当前位置是第一个还没就绪、也没标成这次先不做的阶段。'
             + '确认上线只认前 8 个阶段都已具备。这次先不做的阶段，时间线会跳过，上线确认仍把它当成还没具备。')}</h2>
@@ -283,7 +285,6 @@ function paint(data) {
         <div class="card start-aside-card">
           <div class="tiny muted">当前位置</div>
           <h3>${current ? esc(shortTitle(current)) : '时间线已走完'}</h3>
-          <div class="tiny muted mt">和左边时间线上标着「当前」的是同一步。</div>
           ${current
             ? `<button class="btn-sm mt" data-act="start.selectStage" data-key="${esc(current.key)}">看当前阶段</button>`
             : ''}

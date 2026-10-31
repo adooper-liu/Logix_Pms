@@ -343,7 +343,7 @@ def main() -> int:
         def pcf_guided_wizard() -> None:
             goto("start")
             page.wait_for_timeout(700)
-            page.click('#view .start-nav-item:has-text("Q4 做什么")')
+            page.click('#view .start-nav-item:has-text("流程架构设计")')
             page.wait_for_timeout(300)
             page.click('#view button:has-text("1+3+10 建架构")')
             page.wait_for_selector("#mask.show", timeout=8000)
@@ -2468,7 +2468,7 @@ def main() -> int:
                 jumps = page.locator("#view .start-current button.ev-jump")
                 assert jumps.count() >= 1, "证据计数不能打开记录"
                 assert jumps.first.get_attribute("data-view"), "证据计数没有落点页面"
-                assert "已经有的" in view and ("还缺的" in view or "有更好" in view), (
+                assert "已经有的" in view and ("还缺的" in view or "建议补上" in view), (
                     "证据面板缺少缺项"
                 )
                 # 跳过 = 未验证，且可以取消
