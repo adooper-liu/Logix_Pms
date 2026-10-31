@@ -94,7 +94,7 @@
 
 | 证据 | 数据来源 |
 |---|---|
-| 试点流程有负责人 | `process_arch`：`level=3 AND owner_user_id IS NOT NULL` |
+| L3 已绑定负责人 | `process_arch`：`level=3 AND owner_user_id IS NOT NULL` |
 | 治理角色 | `governance_role`：`is_active=true` |
 | 目标 / 已挂流程 / 有责任人 / 有基线 | `strategy_objective`、`objective_process_link` |
 | L1/L2/L3、已发布模型 | `process_arch` 按 `level` 计数、`published_model_version>0` |

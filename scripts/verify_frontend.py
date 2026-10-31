@@ -102,7 +102,7 @@ def main() -> int:
                 f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
             )
             groups = [text.strip() for text in page.locator(".nav .grp").all_inner_texts()]
-            assert groups == ["把公司这套办法建起来", "把一条流程改好"], groups
+            assert groups == ["把公司流程体系立起来", "把一条流程改好"], groups
             assert page.locator("#expertToggle").count() == 0
             assert page.locator('.nav a[data-view="map"]').is_visible()
             assert page.locator('.nav a[data-view="execution"]').is_visible()

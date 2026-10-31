@@ -1,9 +1,16 @@
 # 三层、Q1–Q8 与页面依赖
 
+> **现行口径（以代码为准）**  
+> 开始使用已经不再用 Q1–Q8 切证据。页面只按九个阶段展开；点非当前阶段只是查看证据。  
+> 侧栏是「把公司流程体系立起来 / 把一条流程改好」，没有专家模式。  
+> 过硬演示与简历主张见 [resume-capability-map.md](resume-capability-map.md)；  
+> 九阶段证据实例见 [startup-evidence-example.md](startup-evidence-example.md)。  
+> 下文关于 Q1–Q8 的映射是历史结构说明，**与现行开始页不一致处以上述现行口径为准**。
+
 本文回答三个问题：
 
 1. 开始页说的“全局”是什么，9 个阶段依据什么判定；
-2. 三层 / Q1–Q8 分别映射到哪些页面；
+2. 三层 / Q1–Q8 分别映射到哪些页面（历史结构）；
 3. 页面之间谁是谁的前置、输入、输出，谁触发谁。
 
 > 当前数据的具体数值见 [startup-evidence-example.md](startup-evidence-example.md)；

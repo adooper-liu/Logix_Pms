@@ -231,7 +231,7 @@ def test_nav_follows_what_each_page_writes():
         "execution",
         "dashboard",
     ]
-    assert "把公司这套办法建起来" in html
+    assert "把公司流程体系立起来" in html
     assert "把一条流程改好" in html
     assert "能力地图" not in html
     assert "capability" not in views
