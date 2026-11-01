@@ -34,7 +34,11 @@ def _published_model(client, process_id: int) -> int:
         },
     )
     assert saved.status_code == 200, saved.text
-    published = client.post(f"{API}/processes/{process_id}/design/publish", json={})
+    client.patch(f"{API}/process-map/{process_id}", json={"publish_policy": "direct"})
+    published = client.post(
+        f"{API}/processes/{process_id}/design/publish",
+        json={"change_note": "交付物模型来源测试", "self_publish_reason": "自动化测试豁免四人复核"},
+    )
     assert published.status_code == 200, published.text
     return published.json()["version_id"]
 

@@ -60,15 +60,18 @@ function validationHtml(model) {
 
 export function createVersions(ctx) {
   async function submitReview() {
-    const note = await promptDialog('评审说明（可选；取消则不提交）', {
-      title: '提交评审', okText: '提交', placeholder: '说明本次变更',
-    });
+    const note = await promptDialog(
+      '提交后草稿锁定，运行时仍用旧已发布版。请简述本次变更（可选；取消则不提交）',
+      {
+        title: '提交评审', okText: '提交评审', placeholder: '例：调整审批分支与出边匹配',
+      },
+    );
     if (note === null) return;
     try {
       await POST('/processes/' + state.designer.processId + '/design/submit-review', {
         note: note.trim() || null,
       });
-      toast('已提交评审');
+      toast('已提交评审：画布只读，请等发布或驳回');
       await ctx.reload();
     } catch (e) {
       toast(e.message, true);
@@ -76,25 +79,25 @@ export function createVersions(ctx) {
   }
 
   async function rejectReview() {
-    const note = await promptDialog('驳回原因（可选）', {
-      title: '驳回评审', okText: '驳回', placeholder: '说明需要修改的地方',
+    const note = await promptDialog('驳回后恢复为可编辑草稿，运行时不变。驳回原因（可选）', {
+      title: '驳回改草稿', okText: '驳回', placeholder: '说明需要修改的地方',
     });
     if (note === null) return;
     try {
       await POST('/processes/' + state.designer.processId + '/design/reject', {
         note: note.trim() || null,
       });
-      toast('已驳回，草稿可继续修改');
+      toast('已驳回：草稿可继续修改');
       await ctx.reload();
     } catch (e) {
       toast(e.message, true);
     }
   }
 
+
   async function publishDesign() {
     const model = state.designer.model || {};
     let changeRequestId = null;
-    let gateNote = '';
     try {
       const current = state.designer.model || model;
       const check = await POST('/design/validate', {
@@ -107,7 +110,6 @@ export function createVersions(ctx) {
         toast('发布被阻止：' + check.errors.join('；'), true);
         return;
       }
-      // 待评审的草稿不能再保存（后端会拒绝），发布直接用已评审的版本
       if (model.status !== 'IN_REVIEW') {
         const saved = await ctx.saveNow();
         if (!saved) return;
@@ -115,31 +117,122 @@ export function createVersions(ctx) {
     } catch (e) {
       return toast('发布前校验失败：' + e.message, true);
     }
-    if (model.requires_change_request) {
+
+    // 变更门禁：未批准的变更单不能发布（先拦，避免点了发布才发现）
+    const modelGate = state.designer.model || model;
+    if (modelGate.requires_change_request) {
       const change = await ctx.approvedChangeRequest();
       if (!change) {
-        toast('该流程启用了变更门禁：请先在「变更」页创建并批准变更申请', true);
+        toast('该流程启用了变更门禁：请先在「变更」页把申请提交并批准，再发布', true);
         state.designer.tab = 'change';
         RENDERERS.designer();
         return;
       }
       changeRequestId = change.id;
-      gateNote = `\n本次发布将引用变更单 ${change.code}。`;
     }
-    const ok = await confirmDialog(
-      '发布后，新启动的流程实例将使用这个模型；运行中的实例仍用启动时快照。确定发布？'
-      + gateNote,
-      { title: '发布到运行时', okText: '发布' });
-    if (!ok) return;
+
+    let preview;
+    try {
+      preview = await GET(
+        '/processes/' + state.designer.processId + '/design/publish-preview',
+      );
+    } catch (e) {
+      // 旧 Docker 镜像可能没有预览路由；有 /design/publish 时降级为无 diff 确认
+      if (e.status === 404) {
+        const m = state.designer.model || model;
+        preview = {
+          publish_policy: m.publish_policy || 'review_required',
+          publish_policy_label: m.publish_policy_label || '须先评审',
+          draft_version: m.draft_version || m.version,
+          published_version: m.published_version || 0,
+          active_instance_count: 0,
+          requires_change_request: !!m.requires_change_request,
+          blockers: [],
+          warnings: [
+            '后端缺少发布预览接口（请用本地 uvicorn 或重建 api 镜像）；已跳过差异对比。',
+          ],
+          diff: {},
+          can_publish: true,
+          self_publish_reason_required: false,
+        };
+      } else {
+        return toast(e.message, true);
+      }
+    }
+
+    if (preview.requires_change_request && !changeRequestId) {
+      const change = await ctx.approvedChangeRequest();
+      if (!change) {
+        toast('该流程启用了变更门禁：请先在「变更」页把申请提交并批准，再发布', true);
+        state.designer.tab = 'change';
+        RENDERERS.designer();
+        return;
+      }
+      changeRequestId = change.id;
+    }
+
+    const diff = preview.diff || {};
+    const diffLine = (label, items, format) => (items && items.length
+      ? '<div class="tiny mt"><b>' + esc(label) + '</b>（' + items.length + '）'
+        + items.slice(0, 8).map((item) => '<div>' + esc(format(item)) + '</div>').join('')
+        + (items.length > 8 ? '<div>…共 ' + items.length + ' 项</div>' : '')
+        + '</div>'
+      : '');
+    const blockers = (preview.blockers || []).map(
+      (msg) => '<div class="designer-issue error">✕ ' + esc(msg) + '</div>',
+    ).join('');
+    const warnings = (preview.warnings || []).map(
+      (msg) => '<div class="designer-issue warn">! ' + esc(msg) + '</div>',
+    ).join('');
+    const selfField = preview.self_publish_reason_required
+      ? '<div class="field"><label>自评自发豁免原因 *'
+        + '<div class="hint">不少于 8 字；生产环境建议换人发布</div></label>'
+        + '<textarea id="pubSelfReason" rows="2" placeholder="例：试点环境紧急修复"></textarea></div>'
+      : '';
+
+    openModal(
+      '发布到运行时',
+      '<div class="form-compact">'
+        + '<div class="note mb">策略：<b>' + esc(preview.publish_policy_label || preview.publish_policy) + '</b>'
+        + ' · 草稿 v' + (preview.draft_version || '—')
+        + ' · 运行时 v' + (preview.published_version || '尚未发布')
+        + ' · 在途 ' + (preview.active_instance_count || 0) + ' 例</div>'
+        + blockers + warnings
+        + diffLine('新增节点', diff.nodes_added, (x) => (x.node_key || '') + ' ' + (x.name || ''))
+        + diffLine('删除节点', diff.nodes_removed, (x) => (x.node_key || '') + ' ' + (x.name || ''))
+        + diffLine('修改节点', diff.nodes_changed, (x) => (x.node_key || '') + '：' + (x.fields || []).join('、'))
+        + diffLine('新增连线', diff.edges_added, (x) => (x.source_key || '') + ' → ' + (x.target_key || ''))
+        + diffLine('删除连线', diff.edges_removed, (x) => (x.source_key || '') + ' → ' + (x.target_key || ''))
+        + '<div class="field mt"><label>发布说明 * <span class="hint">至少 4 字</span></label>'
+        + '<textarea id="pubChangeNote" rows="2" placeholder="例：首次发布试点"></textarea></div>'
+        + selfField
+        + '<div class="hint">发布后新启动的实例使用此模型；运行中实例仍用启动时快照。</div>'
+      + '</div>',
+      '<button class="btn btn-g" data-act="designer.close">取消</button>'
+      + '<button class="btn btn-p" data-act="designer.confirmPublish" data-change="'
+      + (changeRequestId || '') + '"'
+      + (preview.can_publish ? '' : ' disabled')
+      + '>确认发布</button>',
+    );
+  }
+
+  async function confirmPublish(changeRequestId) {
+    const note = (document.getElementById('pubChangeNote') || {}).value || '';
+    const reasonEl = document.getElementById('pubSelfReason');
+    const selfReason = reasonEl ? reasonEl.value : null;
+    if (!String(note).trim() || String(note).trim().length < 4) {
+      return toast('请填写至少 4 字的发布说明', true);
+    }
     try {
       await POST('/processes/' + state.designer.processId + '/design/publish', {
         expected_version: state.designer.model.version,
-        change_note: null,
-        change_request_id: changeRequestId,
+        change_note: String(note).trim(),
+        change_request_id: changeRequestId ? Number(changeRequestId) : null,
+        self_publish_reason: selfReason ? String(selfReason).trim() : null,
       });
+      closeModal();
       const pid = state.designer.processId;
       toast('模型已发布，正在打开执行启动页');
-      // 发布后的下一步就是启动一个新实例，直接把上下文带进执行页并拉起启动弹窗
       go('execution', {
         params: { process: pid, tab: 'config', start: 1 },
         push: true,
@@ -148,6 +241,7 @@ export function createVersions(ctx) {
       toast(e.message, true);
     }
   }
+
 
   async function openVersionHistory() {
     const pid = state.designer.processId;
@@ -255,6 +349,7 @@ export function createVersions(ctx) {
     submitReview,
     rejectReview,
     publishDesign,
+    confirmPublish,
     openVersionHistory,
     diffVersion,
     rollbackVersion,

@@ -5,7 +5,7 @@
  * 统一通过 ctx 访问画布与彼此的服务。
  */
 
-import { esc, num, dur } from '../../core/format.js';
+import { esc, num, dur, tipHelp } from '../../core/format.js';
 import { toast, closeModal, openModal, viewEl, on } from '../../core/ui.js';
 import { state } from '../../core/state.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../../core/router.js';
@@ -92,14 +92,17 @@ export function renderDesigner() {
     if (['model', 'analysis', 'change', 'raci'].includes(params.tab)) {
       state.designer.tab = params.tab;
     }
-    if (!state.designer.processes) {
-      const rows = await GET('/process-map/flat');
-      state.designer.processes = rows.filter((r) => r.level >= 3);
-    }
+    // 每次进入都拉清单：seed --reset 后 id 会变，缓存会指向已删除流程
+    const rows = await GET('/process-map/flat');
+    state.designer.processes = rows.filter((r) => r.level >= 3);
     const list = state.designer.processes;
-    if (!state.designer.processId && list.length) {
-      const preferred = list.find((r) => r.code === 'L3-032') || list[0];
-      state.designer.processId = preferred.id;
+    const preferred = () => list.find((r) => r.code === 'L3-032') || list[0] || null;
+    const inList = list.some((r) => r.id === state.designer.processId);
+    if (!state.designer.processId || !inList) {
+      // URL/状态里的旧 process（常见于重灌后）自动落到演示流程
+      const pick = preferred();
+      state.designer.processId = pick ? pick.id : null;
+      state.designer.model = null;
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
@@ -159,43 +162,66 @@ function paintDesigner() {
   st.editable = editable;
 
   const tab = st.tab || 'model';
+  // 页签 = 看哪里（内容切换）；与下方「对流程做什么」动作条分离
   const tabBar = `
-    <div class="seg">
-      <button class="${tab === 'model' ? 'on' : ''}" data-act="designer.tab" data-tab="model">流程模型</button>
-      <button class="${tab === 'analysis' ? 'on' : ''}" data-act="designer.tab" data-tab="analysis">
-        指标与建议${st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
-      <button class="${tab === 'change' ? 'on' : ''}" data-act="designer.tab" data-tab="change">
-        变更${(st.changes || []).length ? ' · ' + st.changes.length : ''}</button>
-      <button class="${tab === 'raci' ? 'on' : ''}" data-act="designer.tab" data-tab="raci">
-        权责${st.raci && st.raci.matters ? ' · ' + st.raci.matters.length : ''}</button>
-    </div>`;
+    <nav class="designer-tabs" aria-label="设计器页签">
+      <button type="button" class="${tab === 'model' ? 'on' : ''}"
+        data-act="designer.tab" data-tab="model">流程模型</button>
+      <button type="button" class="${tab === 'analysis' ? 'on' : ''}"
+        data-act="designer.tab" data-tab="analysis">测算分析${
+          st.analysis ? ' · ' + st.analysis.suggestions.length : ''}</button>
+      <button type="button" class="${tab === 'raci' ? 'on' : ''}"
+        data-act="designer.tab" data-tab="raci">权责${
+          st.raci && st.raci.matters ? ' · ' + st.raci.matters.length : ''}</button>
+      <button type="button" class="${tab === 'change' ? 'on' : ''}"
+        data-act="designer.tab" data-tab="change">变更${
+          (st.changes || []).length ? ' · ' + st.changes.length : ''}</button>
+    </nav>`;
 
   const bpmnPane = `
     <div class="card designer-card" id="bpmnCard">
-      <div class="mb designer-toolbar bpmn-toolbar">
-        <div class="gap bpmn-toolbar-left">
-          <span class="tiny">专业 BPMN 2.0 画布（bpmn-js）</span>
-          <button class="btn-sm" data-act="designer.lint">运行校验</button>
-          <button class="btn-sm" data-act="designer.autoLayout">自动布局</button>
+      <div class="bpmn-toolbar" role="toolbar" aria-label="画布工具">
+        <div class="designer-act-group" data-group="view">
+          <button class="btn-sm" data-act="designer.autoLayout" title="按泳道重排节点与连线">自动布局</button>
+          <button class="btn-sm bpmn-fit-btn" data-act="designer.fit" title="缩放到可见区域">适应画布</button>
           <button class="btn-sm" data-act="designer.fullscreen">全屏</button>
-          <button class="btn-sm" data-act="designer.shortcuts">快捷键</button>
-          <button class="btn-sm" data-act="designer.comments">评论</button>
-          <button class="btn-sm" data-act="designer.simulate">路径模拟</button>
-          <button class="btn-sm" data-act="designer.compensation">补偿动作</button>
-          <button class="btn-sm" data-act="designer.decisions">决策表</button>
-          ${editable ? '<button class="btn-sm" data-act="designer.addLane">+ 泳道</button>' : ''}
-          <button class="btn-sm" id="bpmnPropsToggle"
-            data-act="designer.sidebar" data-tab="props">属性</button>
+        </div>
+        <div class="designer-act-group" data-group="lint">
+          <button class="btn-sm" data-act="designer.lint">运行校验</button>
           <button class="btn-sm bpmn-lint-toggle" id="bpmnLintToggle"
-            data-act="designer.sidebar" data-tab="lint">校验问题</button>
+            data-act="designer.sidebar" data-tab="lint" title="打开校验结果">校验问题</button>
+        </div>
+        <div class="designer-act-group" data-group="analyze">
+          <button class="btn-sm" data-act="designer.simulate">路径模拟</button>
+          <button class="btn-sm" data-act="designer.decisions">决策表</button>
+          <button class="btn-sm" data-act="designer.compensation">补偿动作</button>
+          <button class="btn-sm" data-act="designer.comments">评论</button>
+        </div>
+        ${editable
+          ? `<div class="designer-act-group" data-group="edit">
+              <button class="btn-sm" data-act="designer.addLane">+ 泳道</button>
+            </div>`
+          : ''}
+        <div class="designer-act-group" data-group="help">
+          <button class="btn-sm" data-act="designer.shortcuts">快捷键</button>
+          ${tipHelp(
+            '单击选中 · 双击改名。右侧「属性」按主题编辑（基本 / 责任 / 测算 / 文件 / 执行）；方法工具挂五阶段步骤。',
+            '画布操作说明')}
+        </div>
+        <div class="bpmn-toolbar-status">
           <span class="tiny" id="bpmnSaveState">${
-            model.status_label ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
+            model.status_label
+              ? esc(model.status_label) + ' · v' + (model.draft_version || model.version)
               : '编辑后自动保存草稿'}</span>
         </div>
-        <button class="btn-sm bpmn-fit-btn" data-act="designer.fit">适应画布</button>
-        <div class="tiny bpmn-toolbar-hint">单击选中 · 双击改名 · 点「属性」查看/编辑指标与执行配置</div>
       </div>
       <div id="bpmnCanvas" class="bpmn-canvas${editable ? '' : ' readonly'}"></div>
+      <button type="button" class="bpmn-drawer-rail" id="bpmnPropsToggle"
+        data-act="designer.sidebar" data-tab="props"
+        aria-expanded="false" aria-controls="bpmnSidebar" title="展开属性栏">
+        <span class="bpmn-drawer-rail-mark" aria-hidden="true">‹</span>
+        <span class="bpmn-drawer-rail-text">属性</span>
+      </button>
       <div id="bpmnSidebar" class="bpmn-drawer" aria-hidden="true">
         <div class="bpmn-drawer-head">
           <div class="seg bpmn-drawer-tabs">
@@ -227,7 +253,7 @@ function paintDesigner() {
     <div class="grid g2">
       <div class="card">
         <h3>流程指标测算</h3>
-        <div class="desc">全部由当前节点数据算出，不是拍脑袋</div>
+        <div class="desc">设计态估计（来自节点「测算」），用于 PCE/瓶颈诊断；不是运营实测 KPI</div>
         ${paintMetrics(st.analysis)}
       </div>
       <div class="card">
@@ -242,48 +268,131 @@ function paintDesigner() {
   const statusTone = {
     DRAFT: 't-gry', IN_REVIEW: 't-yel', PUBLISHED: 't-grn', SUPERSEDED: 't-gry',
   };
-  const statusBadge = model.status
-    ? `<span class="tag ${statusTone[model.status] || 't-blu'}">${
-      esc(model.status_label || model.status)} · v${model.draft_version || model.version}</span>`
-    : '';
+  const draftVer = model.draft_version || model.version;
+  const liveVer = model.published_version
+    ? 'v' + model.published_version
+    : '尚未发布';
   const publishable = canManage() && (model.status === 'DRAFT' || model.status === 'IN_REVIEW');
+  const approvedChange = model.requires_change_request
+    ? (st.changes || []).find((row) => row.status === 'APPROVED')
+    : null;
+  const gateBlocksPublish = !!(model.requires_change_request && !approvedChange);
+  // 生命周期按钮只出现在动作条一次：草稿→提交/发布，待评审→发布/驳回
+  const lifecycleHtml = [
+    model.status === 'DRAFT' && editable
+      ? `<button class="btn-sm btn-g" data-act="designer.submitReview">提交评审</button>${
+        tipHelp(
+          '锁定草稿为待评审，不改运行时；通过后由管理科「发布到运行时」。',
+          '提交评审')}`
+      : '',
+    publishable
+      ? `<button class="btn-sm btn-p" data-act="designer.publish"${
+        gateBlocksPublish
+          ? ' title="变更门禁未通过：请先在「变更」页提交并批准变更申请"'
+          : ''
+      }>发布到运行时</button>${
+        tipHelp(
+          gateBlocksPublish
+            ? '该流程启用了变更门禁：须有「已批准」的变更申请后才能发布。'
+            : inReview
+              ? '评审通过后的上线：本草稿成为运行时版本，新实例按此启动。'
+              : '将当前草稿发布为运行时模型；策略为「须先评审」时需先提交评审。',
+          '发布说明')}`
+      : '',
+    model.status === 'IN_REVIEW' && canManage()
+      ? `<button class="btn-sm btn-g" data-act="designer.rejectReview">驳回改草稿</button>${
+        tipHelp('退回可编辑草稿；运行时不变。', '驳回')}`
+      : '',
+  ].filter(Boolean).join('');
+
+  // 一条状态条说清三件事：当前草稿 / 运行时 / 下一步（取代标签堆 + 长说明条）
+  let nextLine = '';
+  if (inReview) {
+    if (gateBlocksPublish) {
+      nextLine = '先在「变更」批准变更单，再发布上线或驳回';
+    } else if (canManage()) {
+      nextLine = '发布上线，或驳回继续改';
+    } else {
+      nextLine = '等待管理科发布或驳回';
+    }
+  } else if (model.status === 'DRAFT' && editable) {
+    if (model.publish_policy === 'direct') {
+      nextLine = gateBlocksPublish
+        ? '直接发布策略；发布前须先批准变更单'
+        : '可提交评审，或直接发布到运行时';
+    } else {
+      nextLine = gateBlocksPublish
+        ? '须先评审；发布前还须批准变更单'
+        : '先提交评审，通过后再发布到运行时';
+    }
+  } else if (!editable) {
+    nextLine = '只读（非 Owner）；可查看版本历史';
+  }
+  const modeBit = inReview
+    ? '画布只读'
+    : editable
+      ? '可编辑'
+      : '只读';
+  const stateStrip = `
+    <div class="designer-state" role="status">
+      <div class="designer-state-cell">
+        <span class="designer-state-lab">当前草稿</span>
+        <span class="tag ${statusTone[model.status] || 't-blu'}">${
+          esc(model.status_label || model.status || '—')} · v${draftVer}</span>
+        <span class="tiny">${modeBit}</span>
+      </div>
+      <div class="designer-state-cell">
+        <span class="designer-state-lab">运行时</span>
+        <b>${esc(liveVer)}</b>
+        ${inReview && model.published_version
+          ? '<span class="tiny">未切换</span>' : ''}
+      </div>
+      <div class="designer-state-cell designer-state-next">
+        <span class="designer-state-lab">下一步</span>
+        <span>${esc(nextLine)}</span>
+        ${tipHelp(
+          '提交评审只锁定草稿，不等于上线；发布后新实例才用新版本，在途实例仍钉旧版。'
+            + (model.change_note ? ' 本轮说明：' + model.change_note : ''),
+          '版本与发布说明')}
+      </div>
+    </div>`;
 
   viewEl().innerHTML = `
     <div class="card page-head designer-head">
-      <div class="designer-head-top">
-        <div class="designer-head-main">
-          <div class="designer-head-title">
-            <h2>流程设计器<span class="module-badge">建模与测算</span> · ${esc(model.process_name || '')}
-              ${statusBadge}
-              ${model.requires_change_request
-                ? '<span class="tag t-yel">变更门禁</span>' : ''}
-              <span class="tiny">运行时版本 ${
-                model.published_version ? 'v' + model.published_version : '尚未发布'}</span></h2>
-          </div>
-          ${tabBar}
+      <div class="designer-head-row">
+        <div class="designer-head-left">
+          <h2>流程设计器<span class="module-badge">建模与测算</span>
+            · ${esc(model.process_name || '')}</h2>
         </div>
-        <div class="designer-head-primary">
-          <select class="sel sel-sm" data-act="designer.process">${opts}</select>
-          ${publishable
-            ? '<button class="btn-sm btn-p" data-act="designer.publish">发布到运行时</button>' : ''}
-          <button class="btn-sm btn-p" data-act="designer.reanalyze">重新测算</button>
+        <div class="designer-head-right">
+          <select class="sel sel-sm" data-act="designer.process"
+            title="切换当前流程">${opts}</select>
+          <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
         </div>
       </div>
-      <div class="designer-head-bar">
-        <div class="designer-head-actions">
-          <button class="btn-sm btn-g" data-act="designer.versions">版本历史</button>
-          ${model.status === 'DRAFT' && editable
-            ? '<button class="btn-sm btn-g" data-act="designer.submitReview">提交评审</button>' : ''}
-          ${model.status === 'IN_REVIEW' && canManage()
-            ? '<button class="btn-sm btn-g" data-act="designer.rejectReview">驳回</button>' : ''}
-          <button class="btn-sm btn-g" data-act="designer.export">导出 BPMN</button>
-          ${editable ? '<button class="btn-sm btn-g" data-act="designer.import">导入 BPMN</button>' : ''}
-          ${inReview
-            ? '<span class="tiny">评审中，暂不可编辑</span>'
-            : editable
-              ? ''
-              : '<span class="tiny">只读（你不是这条流程的 Owner）</span>'}
-          <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
+      ${stateStrip}
+      <div class="designer-head-nav">
+        ${tabBar}
+        <div class="designer-head-actions" role="toolbar" aria-label="流程操作">
+          ${lifecycleHtml
+            ? `<div class="designer-act-group" data-group="lifecycle">${lifecycleHtml}</div>`
+            : ''}
+          <div class="designer-act-group" data-group="governance">
+            <button class="btn-sm btn-g" data-act="designer.versions">版本历史</button>
+            ${gateBlocksPublish
+              ? `<button class="btn-sm btn-g" data-act="designer.tab" data-tab="change"
+                  title="发布前须有已批准变更单">去批准变更</button>`
+              : ''}
+          </div>
+          <div class="designer-act-group" data-group="io">
+            <button class="btn-sm btn-g" data-act="designer.export">导出 BPMN</button>
+            ${editable
+              ? '<button class="btn-sm btn-g" data-act="designer.import">导入 BPMN</button>'
+              : ''}
+            ${tab === 'analysis'
+              ? '<button class="btn-sm btn-g" data-act="designer.reanalyze">重新测算</button>'
+              : ''}
+          </div>
         </div>
       </div>
     </div>
@@ -297,20 +406,18 @@ function paintMetrics(a) {
   if (!a) return '<div class="empty">暂无测算结果</div>';
   const m = a.metrics;
 
-  // ratio 为 null 时不画进度条 —— 没有目标值的指标（周期、成本、移交次数）
-  // 画条只能是编出来的百分比，那是误导，不如老实显示数字。
+  // ratio 为 null 时不画进度条 —— 没有目标值的指标画条只能是编造百分比。
   const row = (label, value, hint, ratio, color) => {
     const hasBar = ratio !== null && ratio !== undefined && isFinite(ratio);
     const w = hasBar ? Math.max(0, Math.min(100, ratio)) : 0;
     return `
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <span style="width:112px;font-size:12.5px">${label}</span>
+      <div class="designer-metric-row">
+        <span class="designer-metric-label">${label}</span>
         ${hasBar
-          ? '<span style="flex:1;height:7px;background:var(--line-soft);border-radius:4px;overflow:hidden">' +
-            '<i style="display:block;height:100%;border-radius:4px;width:' + w + '%;background:' + color + '"></i></span>'
-          : '<span style="flex:1"></span>'}
-        <span style="width:118px;font-size:12.5px;font-weight:600;text-align:right">${value}
-          <span class="tiny" style="display:block;font-weight:400;line-height:1.4">${hint}</span></span>
+          ? '<span class="designer-metric-bar"><i style="width:' + w + '%;background:' + color + '"></i></span>'
+          : '<span class="designer-metric-bar spacer"></span>'}
+        <span class="designer-metric-value">${value}
+          <span class="tiny">${hint}</span></span>
       </div>`;
   };
 
@@ -325,28 +432,42 @@ function paintMetrics(a) {
       + '结果不可信。请检查连线与开始节点。</div>'
     : '';
 
-  // 期望值 vs 线性合计：有分支/回路时两者会明显不同，必须让用户看见差别
   const cycleHint = m.has_branch_or_loop
     ? '线性合计 ' + dur(m.linear_lead_time_minutes) + '（旧口径，未计回路）'
     : '无分支回路，与线性合计一致';
 
-  return warn +
-    row(metricHelp('pce', '流程周期效率'), num(pce, 1) + '%', '增值 / 期望端到端',
-      pce, pce >= 35 ? 'var(--ok)' : pce >= 15 ? 'var(--warn)' : 'var(--bad)') +
-    row(metricHelp('wait_ratio', '等待占比'), num(waitShare, 1) + '%', num(m.wait_minutes, 0) + ' 分钟等待',
-      waitShare, waitShare >= 50 ? 'var(--bad)' : waitShare >= 30 ? 'var(--warn)' : 'var(--ok)') +
-    row(metricHelp('work_share', '作业时间占比'), num(workShare, 1) + '%', num(m.process_time_minutes, 0) + ' 分钟作业',
-      workShare, 'var(--brand)') +
-    row(metricHelp('rework_loss', '返工损失'), dur(m.rework_loss_minutes),
-      '额外作业 ' + dur(m.rework_work_minutes) + ' · 占作业 ' + num(reworkShare, 1) + '%',
-      reworkShare, reworkShare >= 15 ? 'var(--bad)' : reworkShare > 0 ? 'var(--warn)' : 'var(--ok)') +
-    row(metricHelp('lead_time', '期望端到端周期'), dur(m.lead_time_minutes), cycleHint, null, '') +
-    row(metricHelp('handoff_count', '跨泳道移交'), m.handoff_count + ' 次', m.lane_count + ' 个部门/角色', null, '') +
-    row(metricHelp('approval_levels', '累计审批层级'), m.total_approval_levels + ' 层',
-      m.approval_node_count + ' 个审批节点', null, '') +
-    row(metricHelp('unit_cost', '单次执行成本'), num(m.unit_cost, 1) + ' 元', '全部节点的期望成本合计', null, '') +
-    '<div class="note" style="margin-top:4px">按月 1000 单估算，' + metricHelp('fte_saved', '可释放人天/月') + '约 <b>' +
-      num(m.fte_days_saved_per_month, 0) + ' 人天/月</b>（仅计返工带来的额外作业时间）。</div>';
+  const waitWorkHint = '等待 ' + num(m.wait_minutes, 0) + ' 分 · 作业 '
+    + num(m.process_time_minutes, 0) + ' 分（二者对同一期望周期）';
+
+  return warn + `
+    <div class="designer-metric-block">
+      <div class="tiny muted mb">重点（结构诊断）</div>
+      ${row(metricHelp('pce'), num(pce, 1) + '%',
+        '增值 / 期望端到端 · 锚点 &lt;15% 偏低（可校准）',
+        pce, pce >= 35 ? 'var(--ok)' : pce >= 15 ? 'var(--warn)' : 'var(--bad)')}
+      ${row(metricHelp('wait_ratio', '等待 / 作业'),
+        num(waitShare, 1) + '% / ' + num(workShare, 1) + '%', waitWorkHint,
+        waitShare, waitShare >= 50 ? 'var(--bad)' : waitShare >= 30 ? 'var(--warn)' : 'var(--ok)')}
+      ${row(metricHelp('lead_time', '期望端到端周期'), dur(m.lead_time_minutes), cycleHint, null, '')}
+      ${row(metricHelp('rework_loss', '返工损失'), dur(m.rework_loss_minutes),
+        '额外作业 ' + dur(m.rework_work_minutes) + ' · 占作业 ' + num(reworkShare, 1) + '%',
+        reworkShare, reworkShare >= 15 ? 'var(--bad)' : reworkShare > 0 ? 'var(--warn)' : 'var(--ok)')}
+    </div>
+    <div class="designer-metric-block secondary">
+      <div class="tiny muted mb">辅助</div>
+      ${row(metricHelp('handoff_count', '跨泳道移交'), m.handoff_count + ' 次',
+        m.lane_count + ' 个部门/角色', null, '')}
+      ${row(metricHelp('approval_levels', '累计审批层级'), m.total_approval_levels + ' 层',
+        m.approval_node_count + ' 个审批节点 · 未填层级按 1', null, '')}
+      ${row(metricHelp('unit_cost', '单次执行成本'), num(m.unit_cost, 1) + ' 元',
+        '期望成本合计（设计估计）', null, '')}
+    </div>
+    <details class="designer-metric-fte">
+      <summary class="tiny">管理层换算（假设，非财务核算）</summary>
+      <div class="note mt">按月均 <b>1000</b> 单、人天 <b>480</b> 分钟估算，
+        ${metricHelp('fte_saved', '可释放人天/月')}约 <b>${num(m.fte_days_saved_per_month, 0)}</b>
+        （仅计返工额外作业，阈值在服务端常量，可按企业校准）。</div>
+    </details>`;
 }
 
 function paintSuggestions(a) {
@@ -437,10 +558,12 @@ on('designer.fullscreen', () => canvas.toggleFullscreen());
 on('designer.addLane', () => panels.addLane());
 on('designer.sidebar', ({ tab }) => panels.toggleSidebar(tab));
 on('designer.sidebarTab', ({ tab }) => panels.showSidebarTab(tab));
+on('designer.propSection', ({ section }) => panels.setPropSection(section));
 on('designer.closeSidebar', () => panels.closeSidebar());
 on('designer.fit', () => canvas.fit());
 on('designer.process', (_data, el) => switchProcess(el.value));
 on('designer.publish', () => versions.publishDesign());
+on('designer.confirmPublish', ({ change }) => versions.confirmPublish(change || null));
 on('designer.reanalyze', () => reanalyze());
 on('designer.versions', () => versions.openVersionHistory());
 on('designer.submitReview', () => versions.submitReview());
@@ -466,6 +589,8 @@ on('designer.simulate', () => simulation.open());
 on('designer.compensation', () => compensation.open());
 on('designer.saveCompensation', () => compensation.save());
 on('designer.decisions', () => decisions.open());
+on('designer.createDecision', () => decisions.openCreate());
+on('designer.submitDecision', () => decisions.submitCreate());
 on('designer.evaluateDecision', () => decisions.evaluate());
 on('designer.addComment', ({ element, name, type }) => comments.add(element, name, type));
 on('designer.resolveComment', ({ id }) => comments.resolve(Number(id)));
@@ -489,18 +614,29 @@ on('designer.shortcuts', () => {  openModal('画布快捷键', `
 on('designer.changeType', ({ id }) => panels.changeNodeType(id));
 on('designer.moveLane', ({ id }) => panels.moveNodeToLane(id));
 on('designer.saveActivity', ({ node }) => assignment.saveBpmnNodeActivity(node));
+on('designer.savePosition', ({ node }) => panels.savePosition(node));
 on('designer.saveMetrics', ({ node }) => panels.saveMetrics(node));
 on('designer.deleteFlow', ({ id }) => panels.deleteFlow(id));
 on('designer.saveFlow', ({ id }) => panels.saveFlow(id));
+on('designer.addFlowMatch', () => panels.addFlowMatch());
+on('designer.removeFlowMatch', (_data, el) => panels.removeFlowMatch(el));
+on('designer.flowMatchOp', (_data, el) => panels.flowMatchOp(el));
 on('designer.saveLaneName', ({ id }) => panels.saveLaneName(id));
 on('designer.saveAssignment', ({ node }) => assignment.saveBpmnAssignment(node));
 on('designer.addNodeTool', ({ node }) => assignment.addBpmnNodeTool(node));
 on('designer.removeNodeTool', ({ node, code }) => assignment.removeBpmnNodeTool(node, code));
 on('designer.openNodeDoc', ({ node }) => assignment.openNodeDocumentModal(node));
-on('designer.goDeliverables', () => go('deliverables'));
+on('designer.goDeliverables', () => {
+  const pid = state.designer.processId;
+  go('deliverables', {
+    params: { tab: 'document', ...(pid ? { process: String(pid) } : {}) },
+    push: true,
+  });
+});
+on('designer.goToolbox', () => go('toolbox'));
 on('designer.close', () => closeModal());
 on('designer.submitNodeDoc', ({ node }) => assignment.submitNodeDocument(node));
-on('designer.executionConfig', () => assignment.openExecutionConfig());
+on('designer.executionConfig', ({ focus }) => assignment.openExecutionConfig(focus || 'forms'));
 on('designer.openTool', ({ code }) => appActions['toolbox.openTool'](code));
 on('designer.lintIssue', ({ index }) => lint.selectIssue(Number(index)));
 on('designer.diffVersion', ({ id }) => versions.diffVersion(Number(id)));

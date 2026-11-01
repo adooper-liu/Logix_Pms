@@ -70,22 +70,57 @@ function evidencePanel(step) {
 }
 
 function actionAttrs(action) {
-  return action.action === 'start.guidedPcf'
-    ? 'data-act="start.guidedPcf"'
-    : 'data-act="start.go"';
+  if (action.action === 'start.guidedPcf') return 'data-act="start.guidedPcf"';
+  const params = new URLSearchParams(action.view_params || {}).toString();
+  return `data-act="start.go"${params ? ` data-params="${esc(params)}"` : ''}`;
+}
+
+/** 主按钮跟「第一条未满足的必需证据」走同一去向，避免文案路径与门槛脱节。 */
+function primaryActionIndex(step) {
+  const actions = step.actions || [];
+  if (!actions.length) return -1;
+  const missing = (step.evidence_items || []).find((item) => !item.met && item.required);
+  if (!missing) return -1;
+  const hit = actions.findIndex((action) => {
+    if (action.view !== missing.view) return false;
+    const want = missing.view_params || {};
+    const got = action.view_params || {};
+    return Object.keys(want).every((key) => String(got[key] || '') === String(want[key]));
+  });
+  if (hit >= 0) return hit;
+  return actions.findIndex((action) => action.view === missing.view);
+}
+
+function stepActionsHtml(step) {
+  const actions = step.actions || [];
+  const primary = primaryActionIndex(step);
+  if (!actions.length) return '';
+  if (primary < 0) {
+    return `<div class="note mb">本阶段必需证据已齐。可做建议项，或看下一阶段。</div>
+      <div class="gap">${actions.map((action) => `<button class="btn btn-g"
+        ${actionAttrs(action)} data-view="${esc(action.view)}"
+        title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}</div>`;
+  }
+  return `<div class="gap">${actions.map((action, index) => {
+    const cls = index === primary ? 'btn btn-p' : 'btn btn-g';
+    return `<button class="${cls}" ${actionAttrs(action)} data-view="${esc(action.view)}"
+      title="${esc(action.hint || '')}">${esc(action.label)}</button>`;
+  }).join('')}</div>`;
 }
 
 function stepBody(step) {
   return `
     <div class="start-main">
+      ${step.goal
+        ? `<p class="start-goal"><b>这一步只回答</b>：${esc(step.goal)}</p>`
+        : ''}
+      ${step.exit_criteria
+        ? `<p class="start-exit"><b>怎样算出门</b>：${esc(step.exit_criteria)}</p>`
+        : ''}
       ${step.next_hint
         ? `<p class="start-hint">${esc(step.next_hint)}</p>`
         : ''}
-      <div class="gap">
-        ${step.actions.map((action) => `<button class="btn btn-g"
-          ${actionAttrs(action)} data-view="${esc(action.view)}"
-          title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}
-      </div>
+      ${stepActionsHtml(step)}
     </div>
     ${evidencePanel(step)}`;
 }
@@ -100,7 +135,7 @@ function currentCard(step, flat = false) {
       <div class="start-current-hd">
         <div>
           <h3>${esc(step.title)}</h3>
-          <div class="desc">只看右侧计数。全公司达到门槛，这一阶段才算已具备。</div>
+          <div class="desc">左侧按缺口去补；右侧必需证据齐了，这一阶段才算已具备。</div>
         </div>
         <div class="gap">
           ${step.estimated ? `<span class="tag t-blu">预计 ${esc(step.estimated)}</span>` : ''}
@@ -315,7 +350,14 @@ function paint(data) {
 
 /* -------------------------------------------------- 交互 */
 
-on('start.go', ({ view }) => go(view));
+on('start.go', ({ view, params }) => {
+  if (!view) return;
+  const parsed = {};
+  new URLSearchParams(params || '').forEach((value, key) => {
+    parsed[key] = value;
+  });
+  go(view, Object.keys(parsed).length ? { params: parsed, push: true } : undefined);
+});
 
 on('start.evidence', ({ view, params }) => {
   if (!view) return;

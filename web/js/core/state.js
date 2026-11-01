@@ -48,7 +48,7 @@ export const state = {
   start: { data: null, stageKey: null },
   pilot: { pathId: null, layerNo: null, data: null, paths: null, meta: null, users: null,
     pendingProcess: null },
-  execution: { tab: 'tasks', filter: 'open' },
+  execution: { tab: 'tasks', filter: 'open', configStep: 'process' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
     documentProcessId: null, documentCategory: '', documentOrgUnitId: null,

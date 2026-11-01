@@ -54,19 +54,29 @@ STEP_DEFINITIONS: List[Dict] = [
         "key": "scope",
         "title": "1. 立项定界",
         "goal": "先别铺开：选一条痛点明确、跨岗位或跨组织、能算清结果的流程，"
-        "定一个负责人和一个发起人。",
-        "input": "痛点、战略、法人/工厂范围、可用的人和时间。",
-        "output": "一页试点章程、负责人/发起人名单、范围与非范围、停止条件。",
-        "exit_criteria": "至少一条 L3 已绑定负责人；至少一个治理角色；有发起人。",
+        "定清流程负责人与治理角色；发起人建议补齐，但不挡本阶段出门。",
+        "input": "痛点、战略方向、法人/工厂范围、可用的人和时间。",
+        "output": "试点范围（哪条 L3）、负责人、治理角色；建议有发起人的试点项目。",
+        "exit_criteria": "至少一条 L3 已绑定负责人；至少一个治理角色。"
+        "（有发起人的试点项目为建议项，不计入本阶段必需门槛。）",
         "estimated": "1–2 周",
         "pilot": True,
         "actions": [
-            {"label": "去定目标", "view": "strategy"},
-            {"label": "去任命角色", "view": "orgs"},
+            {
+                "label": "去指定 L3 负责人",
+                "view": "map",
+                "view_params": {"owners": "l3"},
+            },
+            {
+                "label": "去任命治理角色",
+                "view": "orgs",
+                "view_params": {"tab": "governance"},
+            },
             {"label": "去建试点项目", "view": "projects"},
         ],
-        "next_hint": "先在「流程地图」选一条 L3，给它指定负责人；"
-        "再到「组织与人员 → 治理角色」确认谁对结果负责。",
+        "next_hint": "先在「流程地图」给试点 L3 指定负责人，"
+        "再到「组织与人员 → 治理角色」确认谁对结果负责；"
+        "年度目标与基线放到下一阶段，不要在这里提前做。",
     },
     {
         "key": "strategy",
@@ -95,10 +105,15 @@ STEP_DEFINITIONS: List[Dict] = [
             {"label": "去建流程地图", "view": "map"},
             {"label": "1+3+10 建架构", "view": "map", "action": "start.guidedPcf"},
             {"label": "去看 PCF", "view": "pcf"},
+            {
+                "label": "去建岗位",
+                "view": "orgs",
+                "view_params": {"tab": "position"},
+            },
             {"label": "去配权责", "view": "designer"},
         ],
         "next_hint": "在「企业流程地图」补 L1–L3，在「PCF 分类框架」做对标映射，"
-        "在「流程设计器 → 权责」保证每个事项唯一 A。",
+        "在「组织与人员 → 岗位」补岗位，在「流程设计器 → 权责」保证每个事项唯一 A。",
     },
     {
         "key": "policy",
@@ -221,10 +236,10 @@ EVIDENCE_LABELS: Dict[str, str] = {
     "effective_authorization_rules": "已生效的授权规则",
     "open_authorization_exceptions": "未闭环的授权例外",
     "l3_published": "已发布的流程模型",
-    "bindings": "表单/规则/工具绑定",
+    "bindings": "表单/规则/工具绑定（方法工具可选）",
     "forms": "表单",
     "rules": "规则",
-    "node_tools": "工具绑定",
+    "node_tools": "方法工具绑定（设计证据，可选）",
     "verified_standards": "已验证的标准工时",
     "capacity_rows": "当月产能记录",
     "actual_worklogs": "实际工时记录",

@@ -78,7 +78,111 @@ on('projects.replication', ({ id }) => openReplicationModal(Number(id)));
 on('projects.submitReplication', ({ id }) => submitReplication(Number(id)));
 on('projects.publishPack', ({ id, project }) => publishPack(Number(id), Number(project)));
 on('projects.wizardRecommend', () => wizardRecommend());
+on('projects.wizardOrg', (_data, el) => onWizardOrgChanged(el.value));
+on('projects.wizardProcess', (_data, el) => onWizardProcessChanged(el.value));
 on('projects.submit', () => submitProject());
+
+/* 立项向导消费组织与人员主数据（与流程地图同一来源） */
+const wizardPeople = { orgs: null, users: null, processes: null };
+
+async function ensureWizardPeople() {
+  const jobs = [];
+  if (!wizardPeople.orgs) jobs.push(GET('/org-units').then((rows) => { wizardPeople.orgs = rows; }));
+  if (!wizardPeople.users) {
+    jobs.push(GET('/execution/assignees').then((rows) => { wizardPeople.users = rows; }));
+  }
+  if (jobs.length) await Promise.all(jobs);
+}
+
+function wizardOrgLineageIds(orgId) {
+  if (!orgId) return null;
+  const orgs = wizardPeople.orgs || [];
+  const selected = orgs.find((org) => String(org.id) === String(orgId));
+  if (!selected) return new Set([Number(orgId)]);
+  const ids = new Set([selected.id]);
+  const selPath = selected.path || '';
+  orgs.forEach((org) => {
+    const path = org.path || '';
+    if (!selPath || selPath === '/') return;
+    if (path.startsWith(selPath)) ids.add(org.id);
+    if (path !== '/' && selPath.startsWith(path)) ids.add(org.id);
+  });
+  return ids;
+}
+
+function wizardOrgOptions(selected) {
+  return (wizardPeople.orgs || []).map((org) =>
+    `<option value="${org.id}"${String(selected) === String(org.id) ? ' selected' : ''}>${
+      esc(org.code)} · ${esc(org.name)}</option>`).join('');
+}
+
+function wizardUserOptions(selected, orgId) {
+  const scope = wizardOrgLineageIds(orgId);
+  return (wizardPeople.users || []).filter((user) => {
+    if (user.is_active === false) return false;
+    if (!scope) return true;
+    if (user.org_unit_id == null) return false;
+    return scope.has(user.org_unit_id);
+  }).map((user) =>
+    `<option value="${user.id}"${String(selected) === String(user.id) ? ' selected' : ''}>${
+      esc(user.display_name)} · ${esc(user.role_label || user.role)}${
+      user.org_unit_name ? ' · ' + esc(user.org_unit_name) : ''}</option>`).join('');
+}
+
+function paintWizardUserSelect(selectId, selected, orgId, emptyLabel) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const keep = selected != null && selected !== '' ? String(selected) : sel.value;
+  sel.innerHTML = `<option value="">${esc(emptyLabel)}</option>`
+    + wizardUserOptions(null, orgId || null);
+  if (keep && [...sel.options].some((opt) => opt.value === keep)) sel.value = keep;
+  else sel.value = '';
+}
+
+function onWizardOrgChanged(orgId) {
+  paintWizardUserSelect('npOwner', null, orgId, '请选择 Owner');
+  paintWizardUserSelect('npSponsor', null, orgId, '未指定');
+}
+
+function findUserIdByName(name) {
+  if (!name) return '';
+  const hit = (wizardPeople.users || []).find((user) => user.display_name === name);
+  return hit ? String(hit.id) : '';
+}
+
+function findOrgIdByDepartment(department, orgUnitId) {
+  if (orgUnitId) return String(orgUnitId);
+  if (!department) return '';
+  const hit = (wizardPeople.orgs || []).find((org) =>
+    org.name === department || `${org.code} · ${org.name}` === department);
+  return hit ? String(hit.id) : '';
+}
+
+function applyWizardProcessPrefill(processId) {
+  const row = (wizardPeople.processes || []).find((p) => String(p.id) === String(processId));
+  if (!row) return;
+  const orgSel = document.getElementById('npDept');
+  const orgId = findOrgIdByDepartment(row.department, row.org_unit_id);
+  if (orgSel && orgId) orgSel.value = orgId;
+  paintWizardUserSelect('npOwner', row.owner_user_id || findUserIdByName(row.owner),
+    orgSel ? orgSel.value : '', '请选择 Owner');
+  paintWizardUserSelect('npSponsor', null, orgSel ? orgSel.value : '', '未指定');
+}
+
+function onWizardProcessChanged(processId) {
+  if (!processId) return;
+  applyWizardProcessPrefill(processId);
+}
+
+function userLabelById(userId) {
+  const user = (wizardPeople.users || []).find((row) => String(row.id) === String(userId));
+  return user ? user.display_name : '';
+}
+
+function orgNameById(orgId) {
+  const org = (wizardPeople.orgs || []).find((row) => String(row.id) === String(orgId));
+  return org ? org.name : '';
+}
 
 function applyProjectParams() {
   const params = urlParams();
@@ -1201,7 +1305,6 @@ function newProjectWizard(prefill) {
       先描述流程现状与目标，点「匹配方法论」让后端引擎给出推荐（含判断依据与风险提示），
       再确认基本信息提交立项。
     </div>
-
     <h3>① 匹配方法论</h3>
     <div class="row3">
       <div class="field"><label>流程现状</label>
@@ -1230,7 +1333,6 @@ function newProjectWizard(prefill) {
     </div>
     <button class="btn btn-g" id="npRecBtn" data-act="projects.wizardRecommend">匹配方法论</button>
     <div id="npResult" class="mt"></div>
-
     <h3 class="mt">② 基本信息</h3>
     <div class="row2">
       <div class="field"><label>项目名称 *</label>
@@ -1243,18 +1345,19 @@ function newProjectWizard(prefill) {
           <option value="HYBRID">混合模式</option>
         </select></div>
     </div>
-    <div class="row2">
+    <div class="row3">
+      <div class="field"><label>责任部门</label>
+        <select class="sel" id="npDept" data-act="projects.wizardOrg">
+          <option value="">未指定</option></select>
+        <div class="hint">来自组织主数据；选定后过滤下方人员</div></div>
       <div class="field"><label>流程 Owner *</label>
-        <input id="npOwner" value="${esc(goal && goal.owner ? goal.owner : '')}"
-          placeholder="如：陈经理"></div>
-      <div class="field"><label>发起人</label><input id="npSponsor" placeholder="如：采购总监-刘总"></div>
+        <select class="sel" id="npOwner"><option value="">加载中…</option></select></div>
+      <div class="field"><label>发起人</label>
+        <select class="sel" id="npSponsor"><option value="">加载中…</option></select></div>
     </div>
-    <div class="row2">
-      <div class="field"><label>责任部门</label><input id="npDept" placeholder="如：采购部"></div>
-      <div class="field"><label>关联流程</label>
-        <select id="npProcess"><option value="">不关联</option></select>
-        <div class="hint">关联后可到「流程设计器」做泳道建模与测算</div></div>
-    </div>
+    <div class="field"><label>关联流程</label>
+      <select id="npProcess" data-act="projects.wizardProcess"><option value="">不关联</option></select>
+      <div class="hint">关联后可到「流程设计器」做泳道建模与测算；选中可带出组织/Owner</div></div>
     <div class="field"><label>改善目标</label>
       <textarea id="npObjective" placeholder="如：端到端周期从 14 天压到 5 天，取消 3 层冗余审批">${esc(objectiveValue)}</textarea></div>
     <div class="row3">
@@ -1282,22 +1385,44 @@ function newProjectWizard(prefill) {
       <div class="field"><label>计划结束</label><input id="npEnd" type="date"></div>
     </div>`,
     `<button class="btn btn-g" data-act="projects.close">取消</button>
-     <button class="btn btn-p" data-act="projects.submit">立项</button>`, true);
+     <button class="btn btn-p" data-act="projects.submit">立项</button>`,
+    'sheet');
 
-  // 关联流程下拉：取 L3 / L4 流程（项目通常落在这一层）
-  GET('/process-map/flat').then((rows) => {
+  fillWizardSelects(pre, goal);
+}
+
+async function fillWizardSelects(pre, goal) {
+  try {
+    await ensureWizardPeople();
+  } catch (e) {
+    toast(e.message || '组织/人员加载失败', true);
+  }
+  const deptSel = document.getElementById('npDept');
+  if (deptSel) {
+    deptSel.innerHTML = '<option value="">未指定</option>' + wizardOrgOptions(null);
+  }
+  let orgId = '';
+  let ownerId = goal && goal.owner ? findUserIdByName(goal.owner) : '';
+  paintWizardUserSelect('npOwner', ownerId, orgId, '请选择 Owner');
+  paintWizardUserSelect('npSponsor', '', orgId, '未指定');
+
+  try {
+    const rows = await GET('/process-map/flat');
+    wizardPeople.processes = rows;
     const sel = document.getElementById('npProcess');
-    if (!sel) return;
-    rows.filter((r) => r.level >= 3).forEach((r) => {
-      const o = document.createElement('option');
-      o.value = String(r.id);
-      o.textContent = 'L' + r.level + ' ' + r.code + ' ' + r.name;
-      sel.appendChild(o);
-    });
-    if (pre.processId) {
-      sel.value = String(pre.processId);
+    if (sel) {
+      rows.filter((r) => r.level >= 3).forEach((r) => {
+        const o = document.createElement('option');
+        o.value = String(r.id);
+        o.textContent = 'L' + r.level + ' ' + r.code + ' ' + r.name;
+        sel.appendChild(o);
+      });
+      if (pre.processId) {
+        sel.value = String(pre.processId);
+        applyWizardProcessPrefill(pre.processId);
+      }
     }
-  }).catch(() => { /* 下拉拿不到不影响立项 */ });
+  } catch (_) { /* 下拉拿不到不影响立项 */ }
 }
 
 async function wizardRecommend() {
@@ -1324,25 +1449,29 @@ async function wizardRecommend() {
 
 async function submitProject() {
   const name = document.getElementById('npName').value.trim();
-  const owner = document.getElementById('npOwner').value.trim();
+  const ownerUserId = document.getElementById('npOwner').value;
   if (!name) return toast('请填写项目名称', true);
-  if (!owner) return toast('请填写流程 Owner', true);
+  if (!ownerUserId) return toast('请选择流程 Owner', true);
 
   const val = (id) => document.getElementById(id).value;
   const numOrNull = (id) => {
     const v = val(id);
     return v === '' ? null : Number(v);
   };
+  const ownerName = userLabelById(ownerUserId);
+  const sponsorId = val('npSponsor');
+  const deptOrgId = val('npDept');
   const payload = {
     name,
-    owner,
+    owner: ownerName,
+    owner_user_id: Number(ownerUserId),
     methodology: val('npMethod'),
     status: 'PLANNING',
     current_stage: 1,
     priority: Number(val('npPriority')),
     process_id: val('npProcess') ? Number(val('npProcess')) : null,
-    sponsor: val('npSponsor') || null,
-    department: val('npDept') || null,
+    sponsor: sponsorId ? userLabelById(sponsorId) : null,
+    department: deptOrgId ? orgNameById(deptOrgId) : null,
     objective: val('npObjective') || null,
     metric_name: val('npMetric') || null,
     baseline_value: numOrNull('npBase'),

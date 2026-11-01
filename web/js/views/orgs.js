@@ -2,7 +2,7 @@
  *
  * 组织树与人员都从接口读取，不在前端写死；写操作只对系统管理员开放。
  */
-import { esc, dtShort, emptyRow, skeleton } from '../core/format.js';
+import { esc, dtShort, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, urlParams, setUrlState } from '../core/router.js';
@@ -59,9 +59,11 @@ const renderOrgs = () => {
   if (ORG_TABS.includes(params.tab)) adminState().tab = params.tab;
   if (role() !== 'ADMIN') {
     viewEl().innerHTML = `
-      <div class="card">
-        <h2>组织与人员</h2>
-        <div class="note">该页面用于维护组织架构与人员账号，仅系统管理员可操作。</div>
+      <div class="card page-head">
+        <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span></h2>
+        <div class="desc">组织树、岗位、账号与治理角色供「开始使用」九阶段计数，
+          也是标准文件继承范围的来源。</div>
+        <div class="note mt">仅系统管理员可维护。需要建组织或任命角色时，请管理员处理。</div>
       </div>`;
     return;
   }
@@ -91,21 +93,37 @@ const renderOrgs = () => {
 
 function paintShell() {
   const a = adminState();
+  const orgCount = (state.adminOrgs || []).length;
+  const userCount = (state.adminUsers || []).length;
+  const positionCount = (state.adminPositions || []).length;
+  const roleCount = (state.adminRoles || []).length;
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
-        <div><h2>组织与人员<span class="module-badge">主数据 · 权限</span></h2>
-          <div class="desc">组织编码与人员账号由系统管理员维护；人员归属组织用于标准文件/模板的继承范围</div></div>
+        <div>
+          <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span>${tipHelp(
+            '阶段1「立项定界」数治理角色；阶段3「流程架构」数岗位。'
+            + '组织编码决定标准文件/模板的继承范围。'
+            + '系统角色管能不能改系统；治理角色管对流程/事项承担什么责任——两套不要混。'
+            + '先建试点相关组织与岗位，不用一次建全集团。')}</h2>
+          <div class="desc">给九阶段和标准文件继承一个可信来源；编码与启停先对，再谈账号。</div>
+        </div>
+        <div class="gap">
+          <span class="tag t-blu">治理角色 ${roleCount}</span>
+          <span class="tag t-blu">岗位 ${positionCount}</span>
+          <span class="tag t-gry">组织 ${orgCount}</span>
+          <span class="tag t-gry">人员 ${userCount}</span>
+        </div>
       </div>
       <div class="tabs" style="margin-bottom:0">
         <button class="${a.tab === 'org' ? 'on' : ''}" data-act="orgs.tab" data-tab="org">
-          组织架构（${(state.adminOrgs || []).length}）</button>
+          组织架构（${orgCount}）</button>
         <button class="${a.tab === 'user' ? 'on' : ''}" data-act="orgs.tab" data-tab="user">
-          人员与角色（${(state.adminUsers || []).length}）</button>
+          人员与角色（${userCount}）</button>
         <button class="${a.tab === 'position' ? 'on' : ''}" data-act="orgs.tab" data-tab="position">
-          岗位（${(state.adminPositions || []).length}）</button>
+          岗位（${positionCount}）</button>
         <button class="${a.tab === 'governance' ? 'on' : ''}" data-act="orgs.tab"
-          data-tab="governance">治理角色（${(state.adminRoles || []).length}）</button>
+          data-tab="governance">治理角色（${roleCount}）</button>
       </div>
     </div>
     <div id="adminBody"></div>`;
@@ -149,14 +167,15 @@ function paintOrgTab() {
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <h3 style="margin:0">组织树</h3>
+        <div><h3 style="margin:0">组织树</h3>
+          <div class="tiny">先建试点相关组织；编码全局唯一，决定标准文件/模板继承到哪一级</div></div>
         <button class="btn btn-p" data-act="orgs.createOrg">+ 新建组织</button>
       </div>
       <table class="tbl">
         <thead><tr><th>组织</th><th>路径</th><th>下级</th><th>状态</th><th>说明</th><th>操作</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="note mt">组织编码一旦使用不建议修改；有下级、标准文件或模板引用时只能停用，不能删除。</div>
+      <div class="note mt">编码一旦使用不建议改；有下级、标准文件或模板引用时只能停用，不能删除。</div>
     </div>`;
 }
 
@@ -300,7 +319,7 @@ function paintPositionTab() {
     <div class="card">
       <div class="between mb">
         <div><h3 style="margin:0">岗位主数据</h3>
-          <div class="tiny">岗位连接人员与流程活动；被引用时只能停用，不能删除</div></div>
+          <div class="tiny">阶段3出门证据之一；岗位连接人员与流程节点，被引用时只能停用</div></div>
         <button class="btn btn-p" data-act="orgs.createPosition">+ 新建岗位</button>
       </div>
       <table class="tbl">
@@ -420,9 +439,8 @@ function paintGovernanceTab() {
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <div><h3>治理角色（${(state.adminRoles || []).length}）</h3>
-          <div class="desc">治理角色与系统权限分离：系统角色决定“能不能改”，
-            治理角色决定“对流程/事项承担什么责任”</div></div>
+        <div><h3 style="margin:0">治理角色（${(state.adminRoles || []).length}）</h3>
+          <div class="tiny">阶段1出门证据；系统角色管“能不能改”，治理角色管“对流程/事项承担什么责任”</div></div>
         <button class="btn btn-p" data-act="orgs.newRole">+ 新建治理角色</button>
       </div>
       <table class="tbl">
@@ -591,7 +609,8 @@ function paintUserTab() {
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <h3 style="margin:0">人员与角色</h3>
+        <div><h3 style="margin:0">人员与角色</h3>
+          <div class="tiny">系统登录与权限；归属组织影响标准文件可见范围，不是治理责任</div></div>
         <button class="btn btn-p" data-act="orgs.createUser">+ 新建人员</button>
       </div>
       <div class="gap mb" style="flex-wrap:wrap">
@@ -619,7 +638,8 @@ function paintUserTab() {
         <thead><tr><th>人员</th><th>角色</th><th>组织</th><th>岗位</th><th>部门</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="note mt">停用账号不会删除历史审计；最后一个启用的管理员不能被停用或降级。</div>
+      <div class="note mt">停用账号不会删除历史审计；最后一个启用的管理员不能被停用或降级。
+        流程责任请到「治理角色」页签任命。</div>
     </div>`;
 }
 

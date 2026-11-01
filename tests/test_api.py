@@ -504,7 +504,10 @@ def test_design_get_and_analyze(client):
 
     codes = {s["code"] for s in data["suggestions"]}
     assert "LOW_PCE" in codes
-    assert "WAIT_DOMINANT" in codes
+    # PCE 过低且等待主导时合并为一条 LOW_PCE，不再重复刷 WAIT_DOMINANT
+    assert "WAIT_DOMINANT" not in codes
+    low_pce = next(s for s in data["suggestions"] if s["code"] == "LOW_PCE")
+    assert "等待" in low_pce["title"] or "等待" in low_pce["detail"]
     assert "TOO_MANY_APPROVALS" in codes
     assert "MANY_HANDOFFS" in codes
     assert "REWORK_LOSS" in codes

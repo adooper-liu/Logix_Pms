@@ -17,7 +17,8 @@ export const METRICS = {
   improvement_targets: {
     name: '待改善流程',
     formula: '流程架构中 is_improvement_target = true 的节点数',
-    note: '由流程地图的“待改善项”标记决定',
+    note: '人工「改善组合」标记：决定本轮是否进改善池（三维评分答值不值得改，本项答要不要改）。'
+      + '影响地图标签/「只看待改善」过滤与驾驶舱本指标；不改优先级/热度/健康度，也不自动立项',
   },
   open_exceptions: {
     name: '未闭环异常',
@@ -181,9 +182,9 @@ export const METRICS = {
 
   /* ---- 流程设计器 ---- */
   pce: {
-    name: '流程周期效率 PCE',
+    name: 'PCE（Process Cycle Efficiency，流程周期效率）',
     formula: '增值作业时间 ÷ 期望端到端周期',
-    note: '增值时间只算一次通过，返工不计入',
+    note: '增值时间只算一次通过，返工不计入；设计态估计，非运营实测 KPI',
   },
   wait_ratio: {
     name: '等待占比',

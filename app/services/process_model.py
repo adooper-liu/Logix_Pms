@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
@@ -32,6 +32,15 @@ STATUS_LABELS = {
     PUBLISHED: "已发布",
     SUPERSEDED: "已被替代",
 }
+
+PUBLISH_DIRECT = "direct"
+PUBLISH_REVIEW_REQUIRED = "review_required"
+PUBLISH_POLICY_LABELS = {
+    PUBLISH_DIRECT: "直接发布（草稿可发）",
+    PUBLISH_REVIEW_REQUIRED: "须先评审",
+}
+SELF_PUBLISH_REASON_MIN = 8
+CHANGE_NOTE_MIN = 4
 
 NODE_FIELDS = (
     "node_key",
@@ -57,6 +66,7 @@ EDGE_FIELDS = (
     "target_key",
     "label",
     "condition",
+    "match_conditions",
     "probability",
     "description",
     "is_default",
@@ -85,15 +95,26 @@ def snapshot_from_live(db: Session, process_id: int) -> dict:
 
 
 def snapshot_from_payload(payload: ProcessModelIn) -> dict:
+    from app.services import forms as forms_service
+
     nodes = []
     for index, node in enumerate(payload.nodes, start=1):
         data = node.model_dump(mode="json")
         if not data.get("sequence_order"):
             data["sequence_order"] = index
         nodes.append(data)
+    edges = []
+    for edge in payload.edges:
+        data = edge.model_dump(mode="json")
+        raw_match = data.get("match_conditions")
+        if raw_match:
+            data["match_conditions"] = forms_service.normalize_conditions(list(raw_match))
+        elif raw_match is not None:
+            data["match_conditions"] = []
+        edges.append(data)
     return {
         "nodes": nodes,
-        "edges": [edge.model_dump(mode="json") for edge in payload.edges],
+        "edges": edges,
     }
 
 
@@ -267,12 +288,129 @@ def _apply_snapshot(db: Session, process_id: int, snapshot: dict) -> None:
     db.flush()
 
 
+def resolve_publish_policy(process: ProcessArch) -> str:
+    policy = (process.publish_policy or PUBLISH_REVIEW_REQUIRED).strip()
+    if policy not in PUBLISH_POLICY_LABELS:
+        return PUBLISH_REVIEW_REQUIRED
+    return policy
+
+
+def _published_version_row(db: Session, process_id: int) -> Optional[ProcessModelVersion]:
+    return db.scalar(
+        select(ProcessModelVersion)
+        .where(
+            ProcessModelVersion.process_id == process_id,
+            ProcessModelVersion.status == PUBLISHED,
+        )
+        .order_by(ProcessModelVersion.version.desc())
+    )
+
+
+def count_active_instances(db: Session, process_id: int) -> int:
+    from app.models.enums import InstanceStatus
+    from app.models.execution import ProcessInstance
+
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(ProcessInstance)
+            .where(
+                ProcessInstance.process_id == process_id,
+                ProcessInstance.status.in_(
+                    (
+                        InstanceStatus.RUNNING.value,
+                        InstanceStatus.SUSPENDED.value,
+                    )
+                ),
+            )
+        )
+        or 0
+    )
+
+
+def build_publish_preview(db: Session, process: ProcessArch, user: User) -> dict:
+    """Publish confirmation payload: policy, blockers, diff, active instances."""
+    version = latest_version(db, process.id)
+    policy = resolve_publish_policy(process)
+    blockers: List[str] = []
+    warnings: List[str] = []
+    if version is None:
+        blockers.append("还没有可发布的模型版本")
+    else:
+        if version.status not in (DRAFT, IN_REVIEW):
+            blockers.append("当前版本不是草稿或待评审，无法发布")
+        if policy == PUBLISH_REVIEW_REQUIRED and version.status == DRAFT:
+            blockers.append("当前发布策略要求先「提交评审」，待评审后再发布")
+        same_author = version.created_by_id is not None and version.created_by_id == user.id
+        if same_author:
+            warnings.append(
+                "你是本草稿创建人：禁止自评自发，请换人发布，"
+                "或填写豁免原因（不少于 " + str(SELF_PUBLISH_REASON_MIN) + " 字）"
+            )
+    active = count_active_instances(db, process.id)
+    if active:
+        warnings.append(
+            f"当前有 {active} 个在途实例（运行中/已挂起）；发布只影响新实例，在途仍钉旧版快照"
+        )
+    published = _published_version_row(db, process.id)
+    diff = {
+        "nodes_added": [],
+        "nodes_removed": [],
+        "nodes_changed": [],
+        "edges_added": [],
+        "edges_removed": [],
+        "edges_changed": [],
+    }
+    from_version = 0
+    to_version = version.version if version else 0
+    if version is not None and published is not None:
+        from_version = published.version
+        diff = diff_snapshots(published.snapshot or {}, version.snapshot or {})
+    elif version is not None:
+        diff = diff_snapshots({}, version.snapshot or {})
+
+    return {
+        "process_id": process.id,
+        "process_code": process.code,
+        "process_name": process.name,
+        "publish_policy": policy,
+        "publish_policy_label": PUBLISH_POLICY_LABELS[policy],
+        "requires_change_request": bool(process.requires_change_request),
+        "status": version.status if version else None,
+        "status_label": (STATUS_LABELS.get(version.status, version.status) if version else None),
+        "draft_version": version.version if version else 0,
+        "version_id": version.id if version else None,
+        "published_version": process.published_model_version or 0,
+        "created_by_name": version.created_by_name if version else None,
+        "same_author": bool(
+            version and version.created_by_id is not None and version.created_by_id == user.id
+        ),
+        "active_instance_count": active,
+        "change_note_required": True,
+        "self_publish_reason_required": bool(
+            version and version.created_by_id is not None and version.created_by_id == user.id
+        ),
+        "blockers": blockers,
+        "warnings": warnings,
+        "can_publish": not blockers,
+        "diff": {
+            "from_version": from_version,
+            "to_version": to_version,
+            **diff,
+        },
+    }
+
+
 def publish(
     db: Session,
     process: ProcessArch,
     user: User,
     version_id: Optional[int] = None,
     note: Optional[str] = None,
+    self_publish_reason: Optional[str] = None,
+    *,
+    bypass_policy: bool = False,
+    bypass_author_check: bool = False,
 ) -> ProcessModelVersion:
     version = (
         db.get(ProcessModelVersion, version_id)
@@ -282,7 +420,39 @@ def publish(
     if version is None or version.process_id != process.id:
         raise HTTPException(status_code=404, detail="模型版本不存在")
     if version.status not in (DRAFT, IN_REVIEW):
-        raise HTTPException(status_code=409, detail="只有草稿或待评审版本可以发布")
+        raise HTTPException(
+            status_code=409,
+            detail="只有草稿或待评审版本可以发布",
+        )
+
+    policy = resolve_publish_policy(process)
+    if not bypass_policy and policy == PUBLISH_REVIEW_REQUIRED and version.status != IN_REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail=("当前发布策略要求先提交评审；待评审后再由他人发布"),
+        )
+
+    note_text = (note or "").strip()
+    if len(note_text) < CHANGE_NOTE_MIN:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"发布说明至少 {CHANGE_NOTE_MIN} 个字，便于审计追溯"),
+        )
+
+    same_author = version.created_by_id is not None and version.created_by_id == user.id
+    if same_author and not bypass_author_check:
+        reason = (self_publish_reason or "").strip()
+        if len(reason) < SELF_PUBLISH_REASON_MIN:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "禁止同一人既创建草稿又发布。"
+                    "请换评审人发布，"
+                    f"或填写不少于 {SELF_PUBLISH_REASON_MIN} "
+                    "字的豁免原因"
+                ),
+            )
+        note_text = f"{note_text}｜自评自发豁免：{reason}"
 
     _apply_snapshot(db, process.id, version.snapshot or {})
     db.expire(process, ["nodes", "edges"])
@@ -293,13 +463,13 @@ def publish(
         )
     ).all():
         row.status = SUPERSEDED
+    had_review = version.reviewed_at is not None
     version.status = PUBLISHED
-    if note:
-        version.change_note = note
+    version.change_note = note_text
     version.published_by_id = user.id
     version.published_by_name = user.display_name
     version.published_at = utcnow()
-    if version.reviewed_at is None:
+    if not had_review and not same_author:
         version.reviewed_by_id = user.id
         version.reviewed_by_name = user.display_name
         version.reviewed_at = utcnow()

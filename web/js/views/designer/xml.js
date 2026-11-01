@@ -197,6 +197,276 @@ export function orthogonalizePath(points) {
   return result;
 }
 
+/**
+ * 水平泳道自动布局：按拓扑列从左到右、按泳道分行。
+ * bpmn-auto-layout 默认纵向排布，和横向泳道冲突，故有泳道时用本算法。
+ */
+export function layoutHorizontalSwimlanes(xml) {
+  const doc = bpmnXmlDoc(xml);
+  const processEl = doc.getElementsByTagNameNS(BPMN_NS, 'process')[0];
+  const plane = doc.getElementsByTagNameNS(BPMNDI_NS, 'BPMNPlane')[0];
+  if (!processEl || !plane) return xml;
+  const laneSet = directChildren(processEl, 'laneSet')[0];
+  if (!laneSet || !directChildren(laneSet, 'lane').length) return xml;
+
+  const ORIGIN_X = 180;
+  const COL_GAP = 70;
+  const LANE_PAD_TOP = 52; // 给回边「上绕」留走廊，避免贴底重叠
+  const LANE_PAD_BOTTOM = 28;
+  const LANE_GAP = 20;
+  const MIN_LANE_H = 120;
+  const LANE_LEFT = 100;
+
+  const shapeById = new Map();
+  directChildren(plane, 'BPMNShape').forEach((shape) => {
+    const id = shape.getAttribute('bpmnElement');
+    const bounds = directChildren(shape, 'Bounds')[0];
+    if (!id || !bounds) return;
+    shapeById.set(id, {
+      shape,
+      bounds,
+      w: Number(bounds.getAttribute('width')) || 100,
+      h: Number(bounds.getAttribute('height')) || 80,
+    });
+  });
+
+  const laneOf = new Map();
+  const lanes = directChildren(laneSet, 'lane').map((lane) => {
+    const id = lane.getAttribute('id');
+    const members = directChildren(lane, 'flowNodeRef')
+      .map((ref) => (ref.textContent || '').trim())
+      .filter((nid) => shapeById.has(nid));
+    members.forEach((nid) => laneOf.set(nid, id));
+    return { id, lane, members };
+  });
+
+  const flows = [];
+  directChildren(processEl, 'sequenceFlow').forEach((flow) => {
+    flows.push({
+      id: flow.getAttribute('id'),
+      source: flow.getAttribute('sourceRef'),
+      target: flow.getAttribute('targetRef'),
+    });
+  });
+
+  const nodeIds = [...shapeById.keys()].filter((id) =>
+    !lanes.some((l) => l.id === id));
+  const outgoing = new Map();
+  const incoming = new Map();
+  nodeIds.forEach((id) => {
+    outgoing.set(id, []);
+    incoming.set(id, []);
+  });
+  flows.forEach((f) => {
+    if (outgoing.has(f.source)) outgoing.get(f.source).push(f.target);
+    if (incoming.has(f.target)) incoming.get(f.target).push(f.source);
+  });
+
+  // 列号：从开始节点 BFS；已访问不再更新（回边保持原列，走外侧绕线）
+  const rank = new Map();
+  const starts = nodeIds.filter((id) => {
+    const el = Array.from(processEl.children).find((c) => c.getAttribute('id') === id);
+    return (el && el.localName === 'startEvent') || !(incoming.get(id) || []).length;
+  });
+  const queue = (starts.length ? starts : nodeIds.slice(0, 1)).slice();
+  queue.forEach((id) => rank.set(id, 0));
+  while (queue.length) {
+    const cur = queue.shift();
+    const base = rank.get(cur) || 0;
+    (outgoing.get(cur) || []).forEach((nxt) => {
+      if (rank.has(nxt)) return;
+      rank.set(nxt, base + 1);
+      queue.push(nxt);
+    });
+  }
+  nodeIds.forEach((id) => {
+    if (!rank.has(id)) rank.set(id, 0);
+  });
+
+  const maxRank = Math.max(0, ...nodeIds.map((id) => rank.get(id) || 0));
+  const colWidth = [];
+  for (let r = 0; r <= maxRank; r += 1) {
+    const widths = nodeIds.filter((id) => rank.get(id) === r).map((id) => shapeById.get(id).w);
+    colWidth[r] = widths.length ? Math.max(...widths) : 100;
+  }
+  const colX = [];
+  let xCursor = ORIGIN_X;
+  for (let r = 0; r <= maxRank; r += 1) {
+    colX[r] = xCursor;
+    xCursor += colWidth[r] + COL_GAP;
+  }
+  const contentRight = xCursor - COL_GAP + 40;
+
+  // 每泳道内同列多节点纵向错开
+  const pos = new Map();
+  let laneTop = 40;
+  const laneBoxes = [];
+  lanes.forEach(({ id, members }) => {
+    const byRank = new Map();
+    members.forEach((nid) => {
+      const r = rank.get(nid) || 0;
+      if (!byRank.has(r)) byRank.set(r, []);
+      byRank.get(r).push(nid);
+    });
+    let maxStack = 1;
+    byRank.forEach((list) => {
+      maxStack = Math.max(maxStack, list.length);
+    });
+    const stackH = Math.max(
+      ...members.map((nid) => shapeById.get(nid).h),
+      80,
+    );
+    const innerH = LANE_PAD_TOP + LANE_PAD_BOTTOM
+      + maxStack * stackH + Math.max(0, maxStack - 1) * 16;
+    const laneH = Math.max(MIN_LANE_H, innerH);
+    laneBoxes.push({
+      id,
+      x: LANE_LEFT,
+      y: laneTop,
+      width: contentRight - LANE_LEFT,
+      height: laneH,
+    });
+    byRank.forEach((list, r) => {
+      list.sort((a, b) => a.localeCompare(b));
+      // 节点偏下，上沿留给「重新提交」类回边
+      let y0 = laneTop + LANE_PAD_TOP;
+      list.forEach((nid) => {
+        const sh = shapeById.get(nid);
+        const px = colX[r] + (colWidth[r] - sh.w) / 2;
+        pos.set(nid, { x: px, y: y0, w: sh.w, h: sh.h });
+        y0 += stackH + 16;
+      });
+    });
+    laneTop += laneH + LANE_GAP;
+  });
+
+  // 无泳道归属的节点（少见）排在最底
+  nodeIds.filter((id) => !laneOf.has(id)).forEach((nid, index) => {
+    const sh = shapeById.get(nid);
+    const r = rank.get(nid) || 0;
+    pos.set(nid, {
+      x: colX[r],
+      y: laneTop + 20 + index * (sh.h + 20),
+      w: sh.w,
+      h: sh.h,
+    });
+  });
+
+  // 写回节点 Bounds；清掉旧泳道 Shape 后重建
+  directChildren(plane, 'BPMNShape').forEach((shape) => {
+    const id = shape.getAttribute('bpmnElement');
+    if (lanes.some((l) => l.id === id)) {
+      plane.removeChild(shape);
+      return;
+    }
+    const p = pos.get(id);
+    const bounds = directChildren(shape, 'Bounds')[0];
+    if (!p || !bounds) return;
+    bounds.setAttribute('x', String(roundCoord(p.x)));
+    bounds.setAttribute('y', String(roundCoord(p.y)));
+  });
+
+  const firstNodeShape = directChildren(plane, 'BPMNShape')[0] || null;
+  laneBoxes.forEach((box) => {
+    const shape = doc.createElementNS(BPMNDI_NS, 'bpmndi:BPMNShape');
+    shape.setAttribute('id', 'Shape_' + box.id);
+    shape.setAttribute('bpmnElement', box.id);
+    shape.setAttribute('isHorizontal', 'true');
+    const bounds = doc.createElementNS(DC_NS, 'dc:Bounds');
+    bounds.setAttribute('x', String(roundCoord(box.x)));
+    bounds.setAttribute('y', String(roundCoord(box.y)));
+    bounds.setAttribute('width', String(roundCoord(box.width)));
+    bounds.setAttribute('height', String(roundCoord(box.height)));
+    shape.appendChild(bounds);
+    plane.insertBefore(shape, firstNodeShape);
+  });
+
+  // 正交连线：前向右→竖→右；回边从节点顶侧向上绕行再落到目标顶侧（错开正向竖线）
+  const edgeByFlow = new Map();
+  directChildren(plane, 'BPMNEdge').forEach((edge) => {
+    edgeByFlow.set(edge.getAttribute('bpmnElement'), edge);
+  });
+  const forwardEdges = [];
+  const backEdges = [];
+  flows.forEach((f) => {
+    const sRank = rank.get(f.source) || 0;
+    const tRank = rank.get(f.target) || 0;
+    if (tRank >= sRank) forwardEdges.push(f);
+    else backEdges.push(f);
+  });
+  // 同起点多条前向边错开竖走廊，避免「驳回」与主干重叠
+  const forwardFrom = new Map();
+  forwardEdges.forEach((f) => {
+    if (!forwardFrom.has(f.source)) forwardFrom.set(f.source, []);
+    forwardFrom.get(f.source).push(f);
+  });
+
+  const routeEdge = (f, opts) => {
+    const edge = edgeByFlow.get(f.id);
+    const s = pos.get(f.source);
+    const t = pos.get(f.target);
+    if (!edge || !s || !t) return;
+    let coords;
+    if (!opts.back) {
+      const sx = s.x + s.w;
+      const sy = s.y + s.h / 2;
+      const tx = t.x;
+      const ty = t.y + t.h / 2;
+      const siblings = forwardFrom.get(f.source) || [f];
+      const idx = Math.max(0, siblings.findIndex((item) => item.id === f.id));
+      const stagger = (idx - (siblings.length - 1) / 2) * 18;
+      if (Math.abs(sy - ty) < 1 && Math.abs(stagger) < 1) {
+        coords = [{ x: sx, y: sy }, { x: tx, y: ty }];
+      } else {
+        const midX = roundCoord((sx + tx) / 2 + stagger);
+        coords = [
+          { x: sx, y: sy },
+          { x: midX, y: sy },
+          { x: midX, y: ty },
+          { x: tx, y: ty },
+        ];
+      }
+    } else {
+      // 回边：源顶心 → 上绕水平走廊 → 目标顶心（类似「重新提交」佳例）
+      const sx = s.x + s.w / 2;
+      const sy = s.y;
+      const tx = t.x + t.w / 2;
+      const ty = t.y;
+      const laneId = laneOf.get(f.source) || laneOf.get(f.target);
+      const laneBox = laneBoxes.find((b) => b.id === laneId);
+      const stack = opts.backIndex || 0;
+      // 优先走泳道内上沿走廊（节点已偏下），多条回边逐级再抬高
+      let detourY = (laneBox ? laneBox.y + 16 : Math.min(s.y, t.y) - 36) - stack * 18;
+      if (detourY >= Math.min(s.y, t.y) - 12) {
+        detourY = Math.min(s.y, t.y) - 28 - stack * 18;
+      }
+      coords = [
+        { x: sx, y: sy },
+        { x: sx, y: detourY },
+        { x: tx, y: detourY },
+        { x: tx, y: ty },
+      ];
+    }
+    coords = orthogonalizePath(coords);
+    directChildren(edge, 'waypoint').forEach((wp) => edge.removeChild(wp));
+    coords.forEach((point) => {
+      const waypoint = doc.createElementNS(DI_NS, 'di:waypoint');
+      waypoint.setAttribute('x', String(roundCoord(point.x)));
+      waypoint.setAttribute('y', String(roundCoord(point.y)));
+      edge.appendChild(waypoint);
+    });
+  };
+
+  forwardEdges.forEach((f) => routeEdge(f, { back: false }));
+  // 同泳道回边按目标列排序，走廊高度逐条抬高
+  backEdges
+    .slice()
+    .sort((a, b) => (rank.get(a.target) || 0) - (rank.get(b.target) || 0))
+    .forEach((f, index) => routeEdge(f, { back: true, backIndex: index }));
+
+  return new XMLSerializer().serializeToString(doc);
+}
+
 /** bpmn-moddle 不会从 sequenceFlow 反推 incoming/outgoing。
  *  缺少这两个引用时，bpmn-auto-layout 会把所有节点排成一列。 */
 export function ensureFlowRefs(xml) {

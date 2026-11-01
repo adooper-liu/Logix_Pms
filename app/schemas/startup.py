@@ -14,6 +14,7 @@ class StartupActionOut(BaseModel):
     view: str
     hint: Optional[str] = None
     action: Optional[str] = None
+    view_params: Dict[str, str] = Field(default_factory=dict)
 
 
 class StartupEvidenceOut(BaseModel):

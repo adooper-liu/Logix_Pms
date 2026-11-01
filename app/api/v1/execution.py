@@ -296,6 +296,7 @@ def list_assignees(db: DbSession, user: CurrentUser):
             role=row.role,
             role_label=ROLE_LABELS.get(row.role, row.role),
             department=row.department,
+            org_unit_id=row.org_unit_id,
             org_unit_name=row.org_unit_name,
         )
         for row in rows
@@ -693,15 +694,11 @@ def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
 @router.delete(
     "/instances/{instance_id}",
     response_model=DeleteResult,
-    summary="删除实例及其任务（流程管理科及以上，用于清理测试数据）",
+    summary="删除终态实例（已完成/已取消；运行中请先取消。优先用归档）",
 )
 def delete_instance(instance_id: int, db: DbSession, user: ManagerUser):
     instance = execution_service.get_instance(db, instance_id)
-    code = instance.code
-    audit_service.record(
-        db, user, "DELETE", "process_instance", instance.id, f"删除流程实例 {code}"
-    )
-    db.delete(instance)
+    execution_service.delete_instance(db, instance, user)
     db.commit()
     return DeleteResult(deleted=1)
 

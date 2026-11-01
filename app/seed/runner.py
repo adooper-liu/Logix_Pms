@@ -1347,9 +1347,17 @@ def _seed_design_models(
                     target_key=edge["dst"],
                     label=edge.get("label"),
                     condition=edge.get("condition"),
+                    match_conditions=edge.get("match"),
                     probability=float(edge.get("p", 1.0)),
+                    is_default=bool(edge.get("default", False)),
                 )
             )
+        # 演示模型视为已发布到运行时，与「启动须基于已发布快照」主路径一致
+        process = db.get(ProcessArch, process_id)
+        if process is not None:
+            ver = max(int(process.model_version or 0), int(process.published_model_version or 0), 1)
+            process.model_version = ver
+            process.published_model_version = ver
 
 
 # ------------------------------------------------------------------ 入口

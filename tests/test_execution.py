@@ -43,6 +43,11 @@ def test_executable_processes(client):
     by_code = {r["code"]: r for r in rows}
     assert by_code["L3-032"]["node_count"] == 6
     assert by_code["L3-033"]["node_count"] >= 5
+    sample = by_code["L3-032"]
+    assert "is_published" in sample and "can_start" in sample
+    assert "readiness" in sample and isinstance(sample["readiness"], list)
+    assert sample["can_start"] is True
+    assert sample["published_version"] >= 1
 
 
 def test_start_requires_login(anon_client):
@@ -57,6 +62,13 @@ def test_seeded_instances_and_queue(client):
     instances = client.get(f"{API}/execution/instances").json()
     assert len(instances) >= 2
     assert all(i["status"] in ("RUNNING", "COMPLETED") for i in instances)
+    running = [i for i in instances if i["status"] == "RUNNING"]
+    assert running, "种子应有运行中实例"
+    assert "definition_version" in running[0]
+    assert "current_assignee_name" in running[0]
+    assert "overdue" in running[0]
+    assert running[0]["open_task_count"] >= 1
+    assert running[0]["current_assignee_name"]  # 指派人或「公共队列」
 
     tasks = client.get(f"{API}/execution/tasks", params={"only_open": True}).json()
     assert len(tasks) >= 2
@@ -95,12 +107,7 @@ def test_start_complete_branch_and_finish(client):
         missing = _complete(client, n4["id"])
         assert missing.status_code == 400
         assert "是否通过" in missing.json()["detail"]
-        # 审批不通过没有匹配规则 → 多分支必须显式选择
-        rejected = _complete(client, n4["id"], form_data={"approved": "否"})
-        assert rejected.status_code == 400
-        assert "多个分支" in rejected.json()["detail"]
-
-        # 审批通过命中规则 → 自动进入 n5；n5 无出边 → 实例完成
+        # 审批通过命中出边 match（设计定语义）→ 自动进入 n5；n5 无出边 → 实例完成
         assert _complete(client, n4["id"], form_data={"approved": "是"}).status_code == 200
         n5 = _open_task(client, iid)
         assert n5["node_key"] == "n5"
@@ -126,12 +133,8 @@ def test_branch_back_to_previous_step_creates_new_task(client):
             assert _complete(client, task["id"], form_data=data).status_code == 200
         n4 = _open_task(client, iid)
         assert n4["node_key"] == "n4"
-        assert (
-            _complete(
-                client, n4["id"], form_data={"approved": "否"}, next_node_key="n6"
-            ).status_code
-            == 200
-        )
+        # 驳回命中出边 match → n6，无需再传 next_node_key
+        assert _complete(client, n4["id"], form_data={"approved": "否"}).status_code == 200
 
         n6 = _open_task(client, iid)
         assert n6["node_key"] == "n6"
@@ -288,6 +291,7 @@ def test_assignees_endpoint_excludes_readonly(client, viewer_client):
     rows = client.get(f"{API}/execution/assignees").json()
     assert rows
     assert all(row["role"] != "VIEWER" for row in rows)
+    assert "org_unit_id" in rows[0]
     assert any(row["display_name"] == "系统管理员" for row in rows)
     # 只读用户可读取候选人员，但自己不会出现在可指派列表里
     assert viewer_client.get(f"{API}/execution/assignees").status_code == 200

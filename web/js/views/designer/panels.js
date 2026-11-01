@@ -4,12 +4,17 @@
  * designer 子模块（assignment 的渲染同样走 ctx）。
  */
 
-import { esc, NODE_LABEL } from '../../core/format.js';
+import { esc, NODE_LABEL, tipHelp } from '../../core/format.js';
 import { toast, promptDialog, confirmDialog } from '../../core/ui.js';
 import { canManage } from '../../core/auth.js';
 import { state } from '../../core/state.js';
 import { PATCH, POST } from '../../core/api.js';
 import { appendBpmnLane, setPmsNodeType } from './xml.js';
+import {
+  parseFlowMatch,
+  flowMatchRowHtml,
+  collectFlowMatchFromDom,
+} from './flow-match.js';
 
 /** PMS 节点类型 ↔ 标准 BPMN 元素类型。 */
 const PMS_TO_BPMN_TYPE = {
@@ -80,6 +85,30 @@ export function createPanels(ctx) {
         : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`;
   }
 
+  // 方法工具挂五阶段步骤；节点侧只保留作业支撑（文件/执行）与测算。
+  // 旧「工具/配套」状态落到执行页的可选设计证据区。
+  const NODE_PROP_SECTIONS = [
+    { id: 'basic', label: '基本' },
+    { id: 'duty', label: '责任' },
+    { id: 'metrics', label: '测算' },
+    { id: 'docs', label: '文件' },
+    { id: 'exec', label: '执行' },
+  ];
+  const NODE_PROP_SECTION_ALIAS = { runtime: 'exec', tools: 'exec' };
+
+  function nodePropSection() {
+    const raw = NODE_PROP_SECTION_ALIAS[state.designer.propSection]
+      || state.designer.propSection
+      || 'basic';
+    return NODE_PROP_SECTIONS.some((item) => item.id === raw) ? raw : 'basic';
+  }
+
+  function setNodePropSection(section) {
+    if (!NODE_PROP_SECTIONS.some((item) => item.id === section)) return;
+    state.designer.propSection = section;
+    renderBpmnSelection(state.designer.bpmnSelection || []);
+  }
+
   function renderBpmnNodePanel(panel, element) {
     const st = state.designer;
     const bo = element.businessObject;
@@ -94,6 +123,7 @@ export function createPanels(ctx) {
     const currentLane = bpmnLaneOf(element);
     const currentLaneName = currentLane ? (currentLane.businessObject.name || currentLane.id) : '';
     const pmsType = bpmnNodeTypeOf(bo, node);
+    const section = nodePropSection();
     const typeOpts = Object.keys(PMS_TO_BPMN_TYPE).map((key) =>
       `<option value="${key}"${key === pmsType ? ' selected' : ''}>${
         esc(NODE_LABEL[key] || key)}</option>`).join('');
@@ -114,53 +144,72 @@ export function createPanels(ctx) {
         ? ' selected' : ''}>${esc(item.code)} · ${esc(item.name)}</option>`).join('');
     const legacyPosition = node && node.owner_role && !node.owner_position_id
       ? `<option value="" selected>${esc(node.owner_role)}（未关联岗位）</option>` : '';
-    panel.innerHTML = `
-      ${bpmnPanelHeader(bo)}
-      ${bpmnNameEditor(bo, '双击画布元素也可直接改名')}
-      ${bpmnDocEditor(bo)}
-      ${isFlowNode ? `
-        <div class="row2">
-          <div class="field"><label>节点类型</label>
-            <div class="gap">
-              <select id="bpNodeType"${editable ? '' : ' disabled'}>${typeOpts}</select>
-              ${editable
-                ? `<button class="btn-sm" data-act="designer.changeType"
-                  data-id="${esc(bo.id)}">应用类型</button>`
-                : ''}
-            </div></div>
-          <div class="field"><label>所属泳道</label>
-            <div class="gap">
-              <select id="bpNodeLane"${editable && lanes.length ? '' : ' disabled'}>
-                ${lanes.length ? laneOpts : '<option value="">没有泳道</option>'}
-              </select>
-              ${editable && lanes.length
-                ? `<button class="btn-sm" data-act="designer.moveLane"
-                  data-id="${esc(bo.id)}">移动</button>`
-                : ''}
-            </div></div>
-        </div>` : ''}
-      ${node ? `
-        <div class="row2">
-          <div class="field"><label>L4 活动（统一活动 ID）</label>
-            <div class="gap">
-              <select id="bpActivity"${pmsEditable ? '' : ' disabled'}>
-                <option value="">未关联</option>${activityOpts}
-              </select>
-              ${pmsEditable
-                ? `<button class="btn-sm" data-act="designer.saveActivity"
-                  data-node="${esc(node.node_key)}">关联</button>`
-                : ''}
-            </div>
-            ${node.process_arch_id
-              ? '' : '<div class="hint">未关联活动：工作量/绩效无法按活动汇总</div>'}
-          </div>
-          <div class="field"><label>负责人岗位</label>
-            <select id="bpPosition"${pmsEditable ? '' : ' disabled'}>
-              <option value="">未分配</option>${legacyPosition}${positionOpts}
+    const sectionTabs = `<div class="seg bpmn-prop-tabs" role="tablist">
+      ${NODE_PROP_SECTIONS.map((item) =>
+        `<button type="button" role="tab" class="${item.id === section ? 'on' : ''}"
+          data-act="designer.propSection" data-section="${item.id}"
+          aria-selected="${item.id === section ? 'true' : 'false'}">${item.label}</button>`
+      ).join('')}
+    </div>`;
+    const noPms = '<div class="tiny muted">该元素没有 PMS 测算数据</div>';
+    let body = '';
+    if (section === 'basic') {
+      body = `
+        ${bpmnNameEditor(bo, '双击画布元素也可直接改名')}
+        ${bpmnDocEditor(bo)}
+        ${isFlowNode ? `
+          <div class="row2">
+            <div class="field"><label>节点类型</label>
+              <div class="gap">
+                <select id="bpNodeType"${editable ? '' : ' disabled'}>${typeOpts}</select>
+                ${editable
+                  ? `<button class="btn-sm" data-act="designer.changeType"
+                    data-id="${esc(bo.id)}">应用类型</button>`
+                  : ''}
+              </div></div>
+            <div class="field"><label>所属泳道</label>
+              <div class="gap">
+                <select id="bpNodeLane"${editable && lanes.length ? '' : ' disabled'}>
+                  ${lanes.length ? laneOpts : '<option value="">没有泳道</option>'}
+                </select>
+                ${editable && lanes.length
+                  ? `<button class="btn-sm" data-act="designer.moveLane"
+                    data-id="${esc(bo.id)}">移动</button>`
+                  : ''}
+              </div></div>
+          </div>` : ''}`;
+    } else if (section === 'duty') {
+      body = node ? `
+        <div class="hint mb">活动归属与岗位（汇总/治理用）。运行谁处理任务见「执行」；
+          关键事项 RACI 见顶栏「权责」。</div>
+        <div class="field"><label>L4 活动（统一活动 ID）</label>
+          <div class="gap">
+            <select id="bpActivity"${pmsEditable ? '' : ' disabled'}>
+              <option value="">未关联</option>${activityOpts}
             </select>
-            ${positions.length ? '' : '<div class="hint">请先在「组织与人员 → 岗位」维护岗位</div>'}
+            ${pmsEditable
+              ? `<button class="btn-sm" data-act="designer.saveActivity"
+                data-node="${esc(node.node_key)}">关联</button>`
+              : ''}
           </div>
+          ${node.process_arch_id
+            ? '' : '<div class="hint">未关联活动：工作量/绩效无法按活动汇总</div>'}
         </div>
+        <div class="field"><label>负责人岗位</label>
+          <select id="bpPosition"${pmsEditable ? '' : ' disabled'}>
+            <option value="">未分配</option>${legacyPosition}${positionOpts}
+          </select>
+          ${positions.length ? '' : '<div class="hint">请先在「组织与人员 → 岗位」维护岗位</div>'}
+        </div>
+        ${pmsEditable
+          ? `<div class="between mt"><div class="hint">岗位与活动各自单独保存。</div>
+              <button class="btn-sm btn-p" data-act="designer.savePosition"
+                data-node="${esc(node.node_key)}">保存岗位</button></div>`
+          : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}` : noPms;
+    } else if (section === 'metrics') {
+      body = node ? `
+        <div class="hint mb">设计估计值，供 PCE/瓶颈分析；不是运营实测 KPI
+          （实测见工作量测量与 KPI）。</div>
         <div class="grid g3">
           <div class="field"><label>作业时间（分钟）</label>
             <input id="bpDur" type="number" min="0" value="${node.duration_minutes}"${ro}></div>
@@ -178,22 +227,48 @@ export function createPanels(ctx) {
               <option value="false"${!node.is_value_added ? ' selected' : ''}>否</option>
             </select></div>
         </div>
-        <div id="bpToolsSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载工具绑定…</div></div>
-        <div id="bpDocsSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载标准文件…</div></div>
-        <div id="bpMetaSlot" class="bpmn-node-extra"><div class="tiny muted">正在加载表单与规则…</div></div>
         ${pmsEditable
-          ? `<div class="between mt"><div class="hint">指标保存后不影响图形；发布后才影响运行时。</div>
+          ? `<div class="between mt"><div class="hint">保存后重算分析；不改 BPMN 图形。</div>
               <button class="btn-sm btn-p" data-act="designer.saveMetrics"
                 data-node="${esc(node.node_key)}">保存指标</button></div>`
-          : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}`
-        : '<div class="tiny muted">该元素没有 PMS 测算数据</div>'}
-      ${canConfigExec
-        ? '<div id="bpmnAssignSlot" class="bpmn-assign-slot">'
-          + '<div class="tiny muted">正在加载执行配置…</div></div>'
-        : ''}
+          : '<div class="hint">只读：需要 Owner 或流程管理科权限才能修改。</div>'}` : noPms;
+    } else if (section === 'docs') {
+      body = node ? `
+        <div class="hint mb">作业支撑：SOP/标准文件挂本活动，执行点可查阅。
+          方法论工具（SIPOC/FMEA 等）请在五阶段步骤或工具箱挂接。</div>
+        <div id="bpDocsSlot" class="bpmn-node-extra first"><div class="tiny muted">正在加载标准文件…</div></div>`
+        : noPms;
+    } else if (section === 'exec') {
+      body = node ? `
+        <div class="hint mb">与「流程执行 → 运行配置」同口径：本页可就地改
+          <b>节点分派 / 时限</b>；<b>任务表单</b>在运行配置维护；
+          <b>分支路由</b>在连线「运行匹配条件」（设计定语义）。岗位归属见「责任」。</div>
+        <div id="bpMetaSlot" class="bpmn-node-extra first"><div class="tiny muted">正在加载任务表单与出口…</div></div>
+        ${canConfigExec
+          ? '<div id="bpmnAssignSlot" class="bpmn-assign-slot">'
+            + '<div class="tiny muted">正在加载节点分派…</div></div>'
+          : '<div class="hint">节点分派需 MANAGER 及以上权限。</div>'}
+        <details class="bpmn-design-tools mt">
+          <summary class="tiny">设计证据：方法工具绑定（可选）</summary>
+          <div class="hint mt">计入阶段 5 绑定计数；不进待办作业指导。
+            日常请优先任务表单与标准文件。
+            <a class="link-btn link-btn-sm" data-act="designer.goToolbox">去方法论工具箱</a>
+          </div>
+          <div id="bpToolsSlot" class="bpmn-node-extra first">
+            <div class="tiny muted">正在加载工具绑定…</div></div>
+        </details>` : noPms;
+    } else {
+      body = noPms;
+    }
+    panel.innerHTML = `
+      ${bpmnPanelHeader(bo)}
+      ${sectionTabs}
+      ${body}
       <div class="hint">BPMN 图形修改会自动保存草稿；PMS 指标、执行配置与活动绑定各自单独保存。</div>`;
-    if (canConfigExec) ctx.renderBpmnAssignment(bo.id);
-    if (node) ctx.hydrateBpmnNodeExtras(bo.id);
+    if (node && (section === 'docs' || section === 'exec')) {
+      if (section === 'exec' && canConfigExec) ctx.renderBpmnAssignment(bo.id);
+      ctx.hydrateBpmnNodeExtras(bo.id);
+    }
   }
 
   function renderBpmnFlowPanel(panel, element) {
@@ -209,16 +284,40 @@ export function createPanels(ctx) {
     const isDefault = !!(bo.sourceRef && bo.sourceRef.default === bo);
     const sourceIsGateway = !!(bo.sourceRef && String(bo.sourceRef.$type || '').includes('Gateway'));
     const disabled = editable ? '' : ' readonly';
+    const matchRows = parseFlowMatch(bo);
+    const matchHtml = matchRows.length
+      ? matchRows.map(flowMatchRowHtml).join('')
+      : '';
     panel.innerHTML = `
       ${bpmnPanelHeader(bo)}
       <div class="tiny muted mb">${esc(source)} → ${esc(target)}</div>
+      <div class="note mb">路由语义在<strong>出边</strong>配置；发布后执行引擎按匹配条件分支。
+        任务表单/分派/SLA 仍在流程执行补绑定。${tipHelp(
+          '匹配条件读任务表单字段（引用名）。无匹配且非默认时，多出边需办理人显式选下一步。',
+          '出边路由')}</div>
       <div class="field"><label>标签</label>
         <input id="bpFlowLabel" value="${esc(bo.name || '')}" placeholder="通过 / 驳回"${disabled}></div>
+      <div class="field mb">
+        <div class="between mb">
+          <label style="margin:0">运行匹配条件${tipHelp(
+            '全部满足才走本边；留空表示不自动命中（可作默认流或人工选择）。',
+            '运行匹配')}</label>
+          ${editable
+            ? '<button type="button" class="btn-sm" data-act="designer.addFlowMatch">+ 条件</button>'
+            : ''}
+        </div>
+        <div class="ef-fields-wrap">
+          <table class="tbl ef-fields er-conds">
+            <thead><tr><th>字段</th><th>运算</th><th>值</th><th></th></tr></thead>
+            <tbody id="bpMatchBody">${matchHtml}</tbody>
+          </table>
+        </div>
+      </div>
       <div class="row2">
-        <div class="field"><label>条件说明</label>
+        <div class="field"><label>条件说明（给人看）</label>
           <input id="bpFlowCondition" value="${esc(condition)}"
             placeholder="预算与需求均合规"${disabled}></div>
-        <div class="field"><label>概率（0–1）</label>
+        <div class="field"><label>概率（0–1，测算用）</label>
           <input id="bpFlowProb" type="number" min="0" max="1" step="0.05"
             value="${esc(probability)}"${disabled}></div>
       </div>
@@ -229,7 +328,7 @@ export function createPanels(ctx) {
         设为网关的默认分支${sourceIsGateway ? '' : '（只有网关出边可以设置）'}
       </label>
       <div class="between mt">
-        <div class="hint">条件与概率写入 BPMN，发布后参与运行时分支。</div>
+        <div class="hint">匹配条件写入 pms:match，发布后优先于执行页旧规则。</div>
         ${editable
           ? `<div class="gap">
               <button class="btn-sm btn-g" data-act="designer.deleteFlow"
@@ -299,6 +398,21 @@ export function createPanels(ctx) {
     }
   }
 
+  function syncDrawerRail() {
+    const card = document.getElementById('bpmnCard');
+    const rail = document.getElementById('bpmnPropsToggle');
+    const sidebar = document.getElementById('bpmnSidebar');
+    if (!rail || !sidebar) return;
+    const open = sidebar.classList.contains('open');
+    card?.classList.toggle('sidebar-open', open);
+    rail.setAttribute('aria-expanded', open ? 'true' : 'false');
+    rail.title = open ? '收起属性栏' : '展开属性栏';
+    const mark = rail.querySelector('.bpmn-drawer-rail-mark');
+    const text = rail.querySelector('.bpmn-drawer-rail-text');
+    if (mark) mark.textContent = open ? '›' : '‹';
+    if (text) text.textContent = open ? '收起' : '属性';
+  }
+
   function showBpmnSidebarTab(tab) {
     const sidebar = document.getElementById('bpmnSidebar');
     if (!sidebar) return;
@@ -314,6 +428,7 @@ export function createPanels(ctx) {
     if (lintPanel) lintPanel.classList.toggle('hide', props);
     if (propsTab) propsTab.classList.toggle('on', props);
     if (lintTab) lintTab.classList.toggle('on', !props);
+    syncDrawerRail();
   }
 
   function closeBpmnSidebar() {
@@ -321,6 +436,7 @@ export function createPanels(ctx) {
     if (!sidebar) return;
     sidebar.classList.remove('open');
     sidebar.setAttribute('aria-hidden', 'true');
+    syncDrawerRail();
   }
 
   function toggleBpmnSidebar(tab) {
@@ -358,44 +474,50 @@ export function createPanels(ctx) {
     }
   }
 
-  async function saveBpmnMetrics(nodeKey) {
+  async function patchBpmnNode(nodeKey, payload, okMessage) {
     const st = state.designer;
     if (!st.model.nodes.some((node) => node.node_key === nodeKey)) {
       toast('画布还在保存，请稍后再试', true);
       return;
     }
-    const value = (id) => Number(document.getElementById(id).value);
-    const positionSelect = document.getElementById('bpPosition');
     try {
-      const payload = {
-        duration_minutes: value('bpDur'),
-        wait_minutes: value('bpWait'),
-        cost: value('bpCost'),
-        rework_rate: value('bpRework'),
-        approval_levels: value('bpApproval'),
-        is_value_added: document.getElementById('bpVa').value === 'true',
-        expected_version: st.model.version,
-      };
-      if (positionSelect) {
-        const positionId = positionSelect.value ? Number(positionSelect.value) : null;
-        const selected = (st.positions || []).find((item) => item.id === positionId);
-        payload.owner_position_id = positionId;
-        // owner_role 保留为展示兼容字段；选岗位时同步成岗位名称
-        if (selected) payload.owner_role = selected.name;
-      }
       const response = await PATCH(
         '/processes/' + st.processId + '/design/nodes/' + nodeKey,
-        payload,
+        { ...payload, expected_version: st.model.version },
       );
       st.model = response;
       st.savedModel = ctx.cloneModel(response);
       st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
       ctx.setSaveState('属性已保存 · v' + (response.draft_version || response.version));
       ctx.renderSelection(st.bpmnSelection || []);
-      toast('节点属性已保存');
+      toast(okMessage);
     } catch (e) {
       toast(e.message, true);
     }
+  }
+
+  async function saveBpmnPosition(nodeKey) {
+    const st = state.designer;
+    const positionSelect = document.getElementById('bpPosition');
+    if (!positionSelect) return;
+    const positionId = positionSelect.value ? Number(positionSelect.value) : null;
+    const selected = (st.positions || []).find((item) => item.id === positionId);
+    const payload = { owner_position_id: positionId };
+    // owner_role 保留为展示兼容字段；选岗位时同步成岗位名称
+    if (selected) payload.owner_role = selected.name;
+    await patchBpmnNode(nodeKey, payload, '负责人岗位已保存');
+  }
+
+  async function saveBpmnMetrics(nodeKey) {
+    const value = (id) => Number(document.getElementById(id).value);
+    await patchBpmnNode(nodeKey, {
+      duration_minutes: value('bpDur'),
+      wait_minutes: value('bpWait'),
+      cost: value('bpCost'),
+      rework_rate: value('bpRework'),
+      approval_levels: value('bpApproval'),
+      is_value_added: document.getElementById('bpVa').value === 'true',
+    }, '节点属性已保存');
   }
 
   async function saveDescription(elementId) {
@@ -418,6 +540,26 @@ export function createPanels(ctx) {
     }
   }
 
+  function addFlowMatchRow() {
+    const body = document.getElementById('bpMatchBody');
+    if (!body) return;
+    body.insertAdjacentHTML('beforeend', flowMatchRowHtml({ field: '', op: 'eq', value: '' }));
+  }
+
+  function removeFlowMatchRow(el) {
+    const row = el.closest('tr');
+    if (row) row.remove();
+  }
+
+  function syncFlowMatchOp(opEl) {
+    const row = opEl.closest('tr');
+    const val = row && row.querySelector('.bp-match-value');
+    if (!val) return;
+    const needs = opEl.value !== 'truthy' && opEl.value !== 'falsy';
+    val.disabled = !needs;
+    if (!needs) val.value = '';
+  }
+
   async function saveBpmnFlow(flowId) {
     const modeler = ctx.getModeler();
     const element = ctx.getElement(flowId);
@@ -429,6 +571,8 @@ export function createPanels(ctx) {
       toast('概率必须在 0–1 之间', true);
       return;
     }
+    const collected = collectFlowMatchFromDom();
+    if (collected.error) return toast(collected.error, true);
     try {
       const modeling = modeler.get('modeling');
       const bpmnFactory = modeler.get('bpmnFactory');
@@ -444,12 +588,16 @@ export function createPanels(ctx) {
           default: asDefault ? element.businessObject : undefined,
         });
       }
-      // pms:probability 是 PMS 扩展属性，bpmn-moddle 放在只读 getter 返回的
-      // $attrs 对象里；直接改对象内容，保存时由序列化器输出为属性。
-      // 不能整体赋值 $attrs（会报 getter-only），也不能走 updateProperties
-      //（会把 $attrs 本身序列化成 "[object Object]"）。
+      // pms:probability / pms:match 是 PMS 扩展属性，写在 $attrs 里由序列化器输出。
       const attrs = element.businessObject.$attrs;
-      if (attrs) attrs['pms:probability'] = String(probability);
+      if (attrs) {
+        attrs['pms:probability'] = String(probability);
+        if (collected.conditions && collected.conditions.length) {
+          attrs['pms:match'] = JSON.stringify(collected.conditions);
+        } else {
+          delete attrs['pms:match'];
+        }
+      }
       ctx.clearSaveTimer();
       const saved = await ctx.saveNow();
       if (saved) toast('连线属性已保存');
@@ -589,14 +737,19 @@ export function createPanels(ctx) {
 
   return {
     renderSelection: renderBpmnSelection,
+    setPropSection: setNodePropSection,
     showSidebarTab: showBpmnSidebarTab,
     toggleSidebar: toggleBpmnSidebar,
     closeSidebar: closeBpmnSidebar,
     saveName: saveBpmnName,
     saveDescription: saveDescription,
+    savePosition: saveBpmnPosition,
     saveMetrics: saveBpmnMetrics,
     saveFlow: saveBpmnFlow,
     deleteFlow: deleteBpmnFlow,
+    addFlowMatch: addFlowMatchRow,
+    removeFlowMatch: removeFlowMatchRow,
+    flowMatchOp: syncFlowMatchOp,
     changeNodeType: changeBpmnNodeType,
     moveNodeToLane: moveBpmnNodeToLane,
     saveLaneName: saveBpmnLaneName,

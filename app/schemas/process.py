@@ -32,6 +32,10 @@ class ProcessArchBase(BaseModel):
     health_score: Optional[float] = Field(default=None, ge=0, le=100)
     is_improvement_target: bool = False
     requires_change_request: bool = False
+    publish_policy: str = Field(
+        default="review_required",
+        description="direct=draft may publish; review_required=must submit review first",
+    )
 
 
 class ProcessArchCreate(ProcessArchBase):
@@ -51,6 +55,7 @@ class ProcessArchUpdate(BaseModel):
     health_score: Optional[float] = Field(default=None, ge=0, le=100)
     is_improvement_target: Optional[bool] = None
     requires_change_request: Optional[bool] = None
+    publish_policy: Optional[str] = Field(default=None, description="direct | review_required")
 
 
 class ProcessArchOut(ORMModel):
@@ -71,6 +76,7 @@ class ProcessArchOut(ORMModel):
     health_score: Optional[float] = None
     is_improvement_target: bool
     requires_change_request: bool = False
+    publish_policy: str = "review_required"
     is_draft: bool = False
     source_framework_code: Optional[str] = None
     source_external_id: Optional[str] = None
@@ -199,6 +205,7 @@ class ProcessEdgeIn(BaseModel):
     target_key: str = Field(max_length=64)
     label: Optional[str] = Field(default=None, max_length=64)
     condition: Optional[str] = Field(default=None, max_length=128)
+    match_conditions: Optional[List[Dict]] = None
     probability: float = Field(default=1.0, ge=0, le=1)
     description: Optional[str] = None
     is_default: bool = False
@@ -210,6 +217,7 @@ class ProcessEdgeOut(ORMModel):
     target_key: str
     label: Optional[str] = None
     condition: Optional[str] = None
+    match_conditions: Optional[List[Dict]] = None
     probability: float
     description: Optional[str] = None
     is_default: bool = False
@@ -234,9 +242,12 @@ class ProcessModelOut(BaseModel):
     status: Optional[str] = None
     status_label: Optional[str] = None
     version_id: Optional[int] = None
+    change_note: Optional[str] = None
     published_version: int = 0
     updated_at: Optional[UtcDateTime] = None
     requires_change_request: bool = False
+    publish_policy: str = "review_required"
+    publish_policy_label: Optional[str] = None
     nodes: List[ProcessNodeOut] = []
     edges: List[ProcessEdgeOut] = []
 
@@ -265,12 +276,42 @@ class ProcessModelVersionDetail(ProcessModelVersionOut):
 
 class PublishModelRequest(BaseModel):
     expected_version: Optional[int] = Field(
-        default=None, description="客户端看到的版本；不一致时拒绝发布"
+        default=None, description="client version; reject on mismatch"
     )
-    change_note: Optional[str] = Field(default=None, max_length=200)
+    change_note: str = Field(
+        ..., min_length=4, max_length=200, description="required publish note for audit"
+    )
     change_request_id: Optional[int] = Field(
-        default=None, description="启用变更门禁的流程必须引用一张已批准的变更申请"
+        default=None, description="approved change request id when gate enabled"
     )
+    self_publish_reason: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="required (>=8 chars) when publisher is draft author",
+    )
+
+
+class PublishPreviewOut(BaseModel):
+    process_id: int
+    process_code: str
+    process_name: str
+    publish_policy: str
+    publish_policy_label: str
+    requires_change_request: bool = False
+    status: Optional[str] = None
+    status_label: Optional[str] = None
+    draft_version: int = 0
+    version_id: Optional[int] = None
+    published_version: int = 0
+    created_by_name: Optional[str] = None
+    same_author: bool = False
+    active_instance_count: int = 0
+    change_note_required: bool = True
+    self_publish_reason_required: bool = False
+    blockers: List[str] = []
+    warnings: List[str] = []
+    can_publish: bool = False
+    diff: Dict = Field(default_factory=dict)
 
 
 class ReviewModelRequest(BaseModel):
