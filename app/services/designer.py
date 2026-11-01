@@ -520,8 +520,27 @@ def _build_suggestions(
             )
         )
 
-    # 1. 周期效率过低
-    if m.pce < PCE_LOW:
+    # 1. PCE 过低与等待主导常同因：合并为一条，避免双 HIGH 刷屏
+    wait_nodes = sorted(node_metrics, key=lambda n: n.weighted_minutes, reverse=True)[:3]
+    low_pce = m.pce < PCE_LOW
+    wait_dominant = m.wait_ratio >= WAIT_RATIO_HIGH
+    if low_pce and wait_dominant:
+        out.append(
+            Suggestion(
+                code="LOW_PCE",
+                severity="HIGH",
+                title=f"流程周期效率仅 {m.pce:.1%}，等待占周期 {m.wait_ratio:.0%}",
+                detail=(
+                    f"期望端到端 {m.lead_time_minutes:.0f} 分钟中，增值作业仅 "
+                    f"{m.value_added_minutes:.0f} 分钟，期望等待 {m.wait_minutes:.0f} 分钟。"
+                    "PCE 低于 15% 且等待过半，属典型「等待型流程」：压缩局部作业收益有限，"
+                    "应优先改串行为并行、推式为拉动，并重设流转路径（阈值可按企业校准）。"
+                ),
+                related_nodes=[n.node_key for n in wait_nodes],
+                suggested_tool="BPR6",
+            )
+        )
+    elif low_pce:
         out.append(
             Suggestion(
                 code="LOW_PCE",
@@ -529,16 +548,13 @@ def _build_suggestions(
                 title=f"流程周期效率仅 {m.pce:.1%}",
                 detail=(
                     f"期望端到端周期 {m.lead_time_minutes:.0f} 分钟中，真正的增值作业只有 "
-                    f"{m.value_added_minutes:.0f} 分钟。行业基准里 PCE 低于 15% 属于典型"
-                    "「等待型流程」，压缩局部作业时间收益有限，应优先重设流转路径。"
+                    f"{m.value_added_minutes:.0f} 分钟。行业常用锚点：PCE 低于 15% 偏低"
+                    "（可按企业校准），压缩局部作业时间收益有限，应优先重设流转路径。"
                 ),
                 suggested_tool="BPR6",
             )
         )
-
-    # 2. 等待主导
-    if m.wait_ratio >= WAIT_RATIO_HIGH:
-        wait_nodes = sorted(node_metrics, key=lambda n: n.weighted_minutes, reverse=True)[:3]
+    elif wait_dominant:
         out.append(
             Suggestion(
                 code="WAIT_DOMINANT",
@@ -553,7 +569,7 @@ def _build_suggestions(
             )
         )
 
-    # 3. 审批层级过多
+    # 2. 审批层级过多（未填层级的审批节点按 1 层计）
     if m.total_approval_levels > APPROVAL_LEVELS_HIGH:
         approval_keys = [n.node_key for n in ordered if _effective_levels(n) > 0]
         out.append(
@@ -562,15 +578,16 @@ def _build_suggestions(
                 severity="HIGH",
                 title=f"全流程累计 {m.total_approval_levels} 层审批",
                 detail=(
-                    "审批层级是纯非增值活动。建议按金额/风险分级授权：低风险事项决策点下沉到一线，"
-                    "高风险事项保留但合并层级，同时用 RACI 明确「谁批准」而不是「谁都知道一下」。"
+                    "审批多为非增值。未填写「审批层级」的审批节点按 1 层计入。"
+                    "建议按金额/风险分级授权：低风险下沉一线，高风险合并层级，"
+                    "并用 RACI 明确「谁批准」而不是「谁都知道一下」。"
                 ),
                 related_nodes=approval_keys,
                 suggested_tool="RACI",
             )
         )
 
-    # 4. 返工（节点级返工率 + 路径回路，统一口径）
+    # 3. 返工（节点级返工率 + 路径回路，统一口径）
     if m.rework_loss_minutes > 0:
         rework_nodes = [n for n in ordered if n.rework_rate >= REWORK_HIGH]
         loop_desc = ""
@@ -600,7 +617,7 @@ def _build_suggestions(
             )
         )
 
-    # 5. 跨部门移交过多
+    # 4. 跨部门移交过多
     if m.handoff_count > HANDOFF_HIGH:
         out.append(
             Suggestion(

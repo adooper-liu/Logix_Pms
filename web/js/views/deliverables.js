@@ -1,9 +1,9 @@
 /* 视图：交付物与模板库
  *
- * 三个页签：
- *   1) 项目交付物：按标准步骤登记版本、上传文件、审批流转、下载；
- *   2) 流程标准文件：挂在 L1–L4 节点上的 SOP/表单，作为唯一标准源；
- *   3) 工具模板库：按工具浏览预制模板、上传版本、审批、复制到项目。
+ * 页签主路径：
+ *   1) 项目交付物（as-built）→ 2) 流程标准文件（as-designed，先选流程）
+ *   → 3) 工具模板库（方法资产）→ 4) 基线与审计（治理）
+ * 方法手册（24 步）只从「项目交付物」弱链进入；标准文件链到地图；模板链到工具箱。
  *
  * 枚举中文标签全部来自后端（status_label / type_label / format_label / mode_label），
  * 这里只维护颜色映射。
@@ -23,6 +23,7 @@ import { openPreview } from '../core/preview.js';
 const MODEL_LINK_STEPS = new Set(['2.1', '3.2']);
 
 on('dlv.goWorkflow', () => go('workflow'));
+on('dlv.goMap', () => go('map'));
 on('dlv.tab', ({ tab }) => setDlvTab(tab));
 on('dlv.project', (_data, el) => setDlvProject(el.value));
 on('dlv.clearStep', () => {
@@ -39,7 +40,11 @@ on('dlv.createFromTemplate', ({ instance, template, title }) =>
 on('dlv.createBlank', ({ instance }) => createBlankVersion(Number(instance)));
 on('dlv.goToolbox', ({ step }) => {
   closeModal();
-  go('toolbox', { params: { step, sort: 'fit' }, push: true });
+  if (step) {
+    go('toolbox', { params: { step, sort: 'fit' }, push: true });
+    return;
+  }
+  go('toolbox', { push: true });
 });
 on('dlv.openDeliverable', ({ id }) => openDeliverable(Number(id)));
 on('dlv.linkModel', ({ id }) => openLinkModel(Number(id)));
@@ -152,6 +157,7 @@ const renderDeliverables = () => {
   const params = urlParams();
   if (params.tab) state.deliverables.tab = params.tab;
   if (params.project) state.deliverables.projectId = Number(params.project);
+  if (params.process) state.deliverables.documentProcessId = Number(params.process);
   if ('step' in params) state.deliverables.stepFilter = params.step || '';
   return renderAsync('deliverables',
   () => Promise.all([
@@ -181,14 +187,27 @@ const renderDeliverables = () => {
   });
 };
 
+function pageHeadLink(tab) {
+  if (tab === 'project') {
+    return '<a class="link-btn link-btn-sm" data-act="dlv.goWorkflow">查看 24 步标准工作流 →</a>';
+  }
+  if (tab === 'document') {
+    return '<a class="link-btn link-btn-sm" data-act="dlv.goMap">企业流程地图 →</a>';
+  }
+  if (tab === 'template') {
+    return '<a class="link-btn link-btn-sm" data-act="dlv.goToolbox">方法论工具箱 →</a>';
+  }
+  return '';
+}
+
 function paintShell() {
-  const tab = state.deliverables.tab;
+  const tab = state.deliverables.tab || 'project';
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
-        <div><h2>交付物与模板库<span class="module-badge">可追溯 · 版本化</span></h2>
-          <div class="desc">流程标准文件是唯一源；项目交付物保存实例与来源版本；模板库按工具维护预制模板</div></div>
-        <a class="link-btn" data-act="dlv.goWorkflow">查看 24 步标准工作流 →</a>
+        <div><h2>交付物与模板库</h2>
+          <div class="desc">项目实例 · 流程标准 · 工具模板；版本只追加，晋升才进标准</div></div>
+        ${pageHeadLink(tab)}
       </div>
       <div class="tabs" style="margin-bottom:0">
         <button class="${tab === 'project' ? 'on' : ''}" data-act="dlv.tab" data-tab="project">项目交付物</button>
@@ -206,7 +225,14 @@ function paintShell() {
 
 function setDlvTab(tab) {
   state.deliverables.tab = tab;
-  setUrlState('deliverables', { tab }, { push: false });
+  const params = { tab };
+  if (tab === 'document' && state.deliverables.documentProcessId) {
+    params.process = state.deliverables.documentProcessId;
+  }
+  if (tab === 'project' && state.deliverables.projectId) {
+    params.project = state.deliverables.projectId;
+  }
+  setUrlState('deliverables', params, { push: false });
   paintShell();
 }
 
@@ -227,8 +253,8 @@ function paintProjectTab() {
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <div><h2>项目交付物</h2>
-          <div class="desc" style="margin:0">每个标准步骤要产出什么、谁负责、当前是哪一版，都在这里</div></div>
+        <div class="desc" style="margin:0">选项目 → 看步骤交付物 → 上传/从模板新建 → 审批；
+          成果固化用「晋升」进流程标准。</div>
         <div class="gap">
           <select class="sel" data-act="dlv.project">
             ${projects.map((p) => `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>
@@ -708,36 +734,55 @@ function paintDocumentTab() {
   const d = state.deliverables;
   const processes = state.processes || [];
   const cats = (state.docMeta && state.docMeta.category_labels) || {};
+  const hasProcess = !!d.documentProcessId;
+  const newBtn = canManage()
+    ? (hasProcess
+      ? '<button class="btn btn-p" data-act="dlv.newDocument">+ 新建标准文件</button>'
+      : '<button class="btn btn-p" disabled title="请先选择流程">+ 新建标准文件</button>')
+    : '';
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <div><h2>流程标准文件</h2>
-          <div class="desc" style="margin:0">挂在 L1–L4 节点上的 SOP / 表单，是项目复制时的唯一来源；集团通用对全部组织可见</div></div>
-        ${canManage() ? '<button class="btn btn-p" data-act="dlv.newDocument">+ 新建标准文件</button>' : ''}
+        <div class="desc" style="margin:0">挂在流程节点上的 SOP / 表单；项目复制时锁定来源版本。
+          <b>先选流程</b>，再维护文件；看现行有效版请再选组织。</div>
+        ${newBtn}
       </div>
-      <div class="gap" style="flex-wrap:wrap">
-        <select class="sel" data-act="dlv.docProcess">
-          <option value="">全部流程</option>
-          ${processes.map((p) => `<option value="${p.id}"
-            ${String(d.documentProcessId) === String(p.id) ? 'selected' : ''}>
-            ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
-        </select>
-        <select class="sel" data-act="dlv.docCategory">
-          <option value="">全部类型</option>
-          ${Object.entries(cats).map(([code, label]) => `<option value="${code}"
-            ${d.documentCategory === code ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-        <select class="sel" data-act="dlv.docLevel">
-          <option value="">全部层级</option>
-          ${Object.entries((state.docMeta && state.docMeta.level_labels) || {}).map(([code, label]) =>
-            `<option value="${code}" ${d.documentLevel === code ? 'selected' : ''}>${
-              esc(label)}</option>`).join('')}
-        </select>
-        <select class="sel" data-act="dlv.docOrg">
-          <option value="">全部组织</option>${orgOptions(d.documentOrgUnitId)}
-        </select>
+      <div class="gap" style="flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0;min-width:240px">
+          <label>流程（必选）</label>
+          <select class="sel" data-act="dlv.docProcess">
+            <option value="">请选择 L2–L4 流程</option>
+            ${processes.map((p) => `<option value="${p.id}"
+              ${String(d.documentProcessId) === String(p.id) ? 'selected' : ''}>
+              ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0;min-width:200px">
+          <label>组织（解析有效版）</label>
+          <select class="sel" data-act="dlv.docOrg">
+            <option value="">先不解析 · 全部组织</option>${orgOptions(d.documentOrgUnitId)}
+          </select>
+        </div>
+        <div class="field" style="margin:0;min-width:140px">
+          <label>类型</label>
+          <select class="sel" data-act="dlv.docCategory">
+            <option value="">全部类型</option>
+            ${Object.entries(cats).map(([code, label]) => `<option value="${code}"
+              ${d.documentCategory === code ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+          </select>
+        </div>
       </div>
-      <div class="tiny mt">选择组织后，同时显示集团通用与本级、上级继承的标准文件，并解析当前有效版本。</div>
+      <details class="tiny mt">
+        <summary>更多筛选（制度层级）</summary>
+        <div class="gap mt" style="flex-wrap:wrap">
+          <select class="sel" data-act="dlv.docLevel">
+            <option value="">全部层级</option>
+            ${Object.entries((state.docMeta && state.docMeta.level_labels) || {}).map(([code, label]) =>
+              `<option value="${code}" ${d.documentLevel === code ? 'selected' : ''}>${
+                esc(label)}</option>`).join('')}
+          </select>
+        </div>
+      </details>
     </div>
     <div id="docEffective"></div>
     <div id="docGrid">${skeleton(3)}</div>`;
@@ -746,7 +791,12 @@ function paintDocumentTab() {
 
 function setDocProcess(value) {
   state.deliverables.documentProcessId = value ? Number(value) : null;
-  loadDocuments();
+  setUrlState('deliverables', {
+    tab: 'document',
+    process: state.deliverables.documentProcessId || '',
+  }, { push: false });
+  // 重建工具条：未选流程时「新建」禁用
+  paintDocumentTab();
 }
 
 function setDocCategory(value) {
@@ -763,23 +813,40 @@ async function loadDocuments() {
   const grid = document.getElementById('docGrid');
   if (!grid) return;
   const d = state.deliverables;
+  const eff = document.getElementById('docEffective');
+  if (!d.documentProcessId) {
+    if (eff) eff.innerHTML = '';
+    grid.innerHTML = `<div class="card"><div class="empty">
+      请先选择 L2–L4 流程，再查看或新建标准文件。
+      <div class="gap mt" style="justify-content:center">
+        <a class="link-btn" data-act="dlv.goMap">去企业流程地图选流程</a>
+      </div>
+    </div></div>`;
+    return;
+  }
   if (!d.documentOrgUnitId) {
-    const box = document.getElementById('docEffective');
-    if (box) box.innerHTML = '';
+    if (eff) {
+      eff.innerHTML = `<div class="card"><div class="hint" style="margin:0">
+        要查看现行有效版：请在上方选择组织（将解析集团通用 + 本级 + 上级继承）。
+      </div></div>`;
+    }
   } else {
     loadEffectiveDocuments();
   }
-  const qs = [];
-  if (d.documentProcessId) qs.push('process_id=' + d.documentProcessId);
+  const qs = ['process_id=' + d.documentProcessId];
   if (d.documentCategory) qs.push('category=' + encodeURIComponent(d.documentCategory));
   if (d.documentLevel) qs.push('level=' + encodeURIComponent(d.documentLevel));
   if (d.documentOrgUnitId) qs.push('org_unit_id=' + d.documentOrgUnitId);
   try {
-    const rows = await GET('/process-documents' + (qs.length ? '?' + qs.join('&') : ''));
+    const rows = await GET('/process-documents?' + qs.join('&'));
     if (!rows.length) {
       grid.innerHTML = `<div class="card"><div class="empty">
-        还没有标准文件。流程管理科可以从某个 L2–L4 流程开始建立 SOP / 表单，
-        项目里复制后会自动记录来源版本。</div></div>`;
+        还没有标准文件。可为当前流程建立 SOP / 表单；项目复制后会锁定来源版本。
+        ${canManage()
+          ? `<div class="gap mt" style="justify-content:center">
+              <button class="btn btn-p" data-act="dlv.newDocument">+ 为当前流程新建</button>
+            </div>` : ''}
+      </div></div>`;
       return;
     }
     grid.innerHTML = '<div class="grid g3">' + rows.map((doc) => `
@@ -1026,13 +1093,19 @@ async function submitRebase(variantId, baseVersionId, baseDocId, major) {
 }
 
 function openNewDocument() {
-  const processes = state.processes || [];  const cats = (state.docMeta && state.docMeta.category_labels) || {};
+  const processId = state.deliverables.documentProcessId;
+  if (!processId) {
+    toast('请先选择要挂接的 L2–L4 流程', true);
+    return;
+  }
+  const processes = state.processes || [];
+  const cats = (state.docMeta && state.docMeta.category_labels) || {};
   const levels = (state.docMeta && state.docMeta.level_labels) || {};
   openModal('新建流程标准文件', `
     <div class="field"><label>所属流程</label><select class="sel" id="ndProcess"
       data-act="dlv.refreshVariant">
       ${processes.map((p) => `<option value="${p.id}"
-        ${String(state.deliverables.documentProcessId) === String(p.id) ? 'selected' : ''}>
+        ${String(processId) === String(p.id) ? 'selected' : ''}>
         ${esc(p.code)} · ${esc(p.name)}（L${p.level}）</option>`).join('')}
     </select></div>
     <div class="field"><label>关联活动（可选）</label><select class="sel" id="ndNode">
@@ -1594,8 +1667,8 @@ function paintTemplateTab() {
   body.innerHTML = `
     <div class="card">
       <div class="between mb">
-        <div><h2>工具模板库</h2>
-          <div class="desc" style="margin:0">模板是受控的方法资产：版本只追加不覆盖，使用与复制都会留痕</div></div>
+        <div class="desc" style="margin:0">方法资产模板（按工具）；项目步骤复制后变成交付物实例。
+          选工具维护，不要与流程标准文件混用。</div>
         ${canManage() ? '<button class="btn btn-p" data-act="dlv.newTemplate">+ 新建模板</button>' : ''}
       </div>
       <div class="gap" style="flex-wrap:wrap">

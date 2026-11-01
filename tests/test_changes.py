@@ -7,6 +7,32 @@ import uuid
 API = "/api/v1"
 
 
+def _enable_direct_publish(client, pid: int) -> None:
+    """Test helper: allow draft publish + same-author with explicit reason."""
+    patched = client.patch(f"{API}/process-map/{pid}", json={"publish_policy": "direct"})
+    assert patched.status_code == 200, patched.text
+
+
+def _publish(
+    client,
+    pid: int,
+    *,
+    expected_version: int | None = None,
+    change_note: str = "测试发布说明",
+    change_request_id: int | None = None,
+    self_publish_reason: str = "自动化测试豁免四人复核",
+):
+    body = {
+        "change_note": change_note,
+        "self_publish_reason": self_publish_reason,
+    }
+    if expected_version is not None:
+        body["expected_version"] = expected_version
+    if change_request_id is not None:
+        body["change_request_id"] = change_request_id
+    return client.post(f"{API}/processes/{pid}/design/publish", json=body)
+
+
 def _process(client, code: str) -> dict:
     rows = client.get(f"{API}/process-map/flat").json()
     return next(row for row in rows if row["code"] == code)
@@ -125,9 +151,13 @@ def test_gate_blocks_publish_until_approved(client):
         client.patch(f"{API}/process-map/{pid}", json={"requires_change_request": True}).status_code
         == 200
     )
+    _enable_direct_publish(client, pid)
     _save_design(client, pid)
 
-    blocked = client.post(f"{API}/processes/{pid}/design/publish", json={})
+    blocked = client.post(
+        f"{API}/processes/{pid}/design/publish",
+        json={"change_note": "缺变更单也应失败", "self_publish_reason": "自动化测试豁免四人复核"},
+    )
     assert blocked.status_code == 409
     assert "变更门禁" in blocked.json()["detail"]
 
@@ -135,7 +165,11 @@ def test_gate_blocks_publish_until_approved(client):
     other_change = _approved(client, other)
     wrong = client.post(
         f"{API}/processes/{pid}/design/publish",
-        json={"change_request_id": other_change["id"]},
+        json={
+            "change_request_id": other_change["id"],
+            "change_note": "错单发布",
+            "self_publish_reason": "自动化测试豁免四人复核",
+        },
     )
     assert wrong.status_code == 409
     assert "不属于" in wrong.json()["detail"]
@@ -143,7 +177,11 @@ def test_gate_blocks_publish_until_approved(client):
     change = _approved(client, pid)
     published = client.post(
         f"{API}/processes/{pid}/design/publish",
-        json={"change_request_id": change["id"]},
+        json={
+            "change_request_id": change["id"],
+            "change_note": "门禁通过后发布",
+            "self_publish_reason": "自动化测试豁免四人复核",
+        },
     )
     assert published.status_code == 200, published.text
     version_id = published.json()["version_id"]

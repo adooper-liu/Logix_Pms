@@ -70,7 +70,7 @@ SKIPPED（这次先不做） 人工标记，不计入就绪
 | 2 战略与现状基线 | 目标；目标已挂流程；目标有责任人和目标值；目标有现状基线 | `strategy_objective`、`objective_process_link` |
 | 3 流程架构设计 | L1/L2/L3 节点；已对应 PCF 的 L3；岗位；RACI 事项；权责冲突=0 | `process_arch`、`process_benchmark_map`、`position`、`raci_assignment` |
 | 4 制度与授权设计 | 已生效制度/SOP；已生效授权规则 | `process_document` + `process_document_version`、`authorization_rule` |
-| 5 流程/表单/工具设计 | 表单；表单/规则/工具绑定 | `form_definition`、`process_rule`、`node_tool` |
+| 5 流程/表单/工具设计 | 表单；表单/规则/工具绑定（方法工具可选） | `form_definition`、`process_rule`、可选 `node_tool` |
 | 6 工作量测量 | 已验证标准工时；当月产能记录 | `work_measurement_standard`、`capacity_calendar` |
 | 7 试运行与绩效监测 | 完整 KPI 卡；KPI 数据点 | `kpi_definition`、`kpi_record` |
 | 8 评审与固化 | 已发布模型；已生效制度/SOP | `process_arch.published_model_version`、`process_document` |
@@ -99,7 +99,7 @@ SKIPPED（这次先不做） 人工标记，不计入就绪
 | 地图层 | Q3 还缺什么 | 由证据派生，无独立页面 | `/start/status` | 全部必需证据 | 缺口清单 | Q4 / Q7 |
 | 骨架层 | Q4 做什么 | 企业流程地图 `map`、PCF 分类框架 `pcf`、1+3+10 引导 | `/process-map`、`/benchmark` | PCF、流程清单、组织边界 | L1–L3 架构、PCF 映射 | Q5 / 项目组合 |
 | 骨架层 | Q5 输入什么 | 组织与人员 `orgs`、流程设计器权责 | `/org-units`、`/governance` | 组织树、岗位、关键决策事项 | RACI、岗位边界 | Q6 |
-| 执行层 | Q6 用什么 | 流程设计器 `designer`、方法工具箱 `toolbox`、交付物 `deliverables` | `/process-map/nodes`、`/tools`、`/tool-templates` | 控制点、表单字段、工具模板 | 表单/规则/工具绑定 | Q7 |
+| 执行层 | Q6 用什么 | 流程设计器 `designer`（文件/执行）、方法工具箱 `toolbox`（步骤方法）、交付物 | `/process-map/nodes`、`/tools`、`/tool-templates` | 控制点、表单、SOP；方法在步骤选 | 表单/规则必挂；`node_tool` 仅设计证据可选 | Q7 |
 | 执行层 | Q7 输出什么 | 当前阶段工作区（证据面板） | `/start/status` | 当前阶段真实证据 | 证据清单、缺口 | Q8 |
 | 执行层 | Q8 下一步 | 十层单页 `pilot`、项目详情、首次上线确认 | `/pilot`、`/projects/{id}`、`/start/pilot/confirm` | 退出门 | 下一阶段 / 上线确认 | 运营监控、改善 |
 

@@ -139,6 +139,19 @@ def test_every_evidence_count_opens_its_page(client):
     assert scope["l3_with_owner"]["view_params"] == {"owners": "l3"}
     assert scope["governance_roles"]["view_params"]["tab"] == "governance"
     assert scope["sponsor_projects"]["view"] == "projects"
+    scope_step = _step(data, "scope")
+    assert scope_step["actions"][0]["label"] == "去指定 L3 负责人"
+    assert scope_step["actions"][0]["view"] == "map"
+    assert scope_step["actions"][0]["view_params"] == {"owners": "l3"}
+    assert not any(a["label"] == "去定目标" for a in scope_step["actions"]), (
+        "阶段1不应再放「去定目标」（属阶段2）"
+    )
+    appoint = next(a for a in scope_step["actions"] if a["label"] == "去任命治理角色")
+    assert appoint["view"] == "orgs"
+    assert appoint["view_params"] == {"tab": "governance"}
+    assert "有发起人的试点项目为建议项" in scope_step["exit_criteria"]
+    arch = next(a for a in _step(data, "architecture")["actions"] if a["label"] == "去建岗位")
+    assert arch["view_params"] == {"tab": "position"}
 
 
 def test_startup_status_for_owner(owner_client):

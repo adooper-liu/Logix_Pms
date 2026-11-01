@@ -675,7 +675,17 @@ def main() -> int:
             assert "置信度" in result, f"未渲染推荐结果：{result[:160]!r}"
 
             page.fill("#npName", "自检用临时项目")
-            page.fill("#npOwner", "自检员")
+            page.wait_for_function(
+                """() => {
+                  const sel = document.querySelector('#npOwner');
+                  return sel && [...sel.options].some((o) => o.value);
+                }""",
+                timeout=8000,
+            )
+            page.select_option(
+                "#npOwner",
+                index=1,
+            )
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(2200)
             assert not page.is_visible("#mask.show"), "提交后弹窗未关闭，可能是接口报错"
@@ -881,10 +891,26 @@ def main() -> int:
 
             page.click('#view .tabs button:has-text("流程标准文件")')
             page.wait_for_timeout(900)
-            assert "还没有标准文件" in page.inner_text("#view"), "标准文件空态未渲染"
-            assert "全部组织" in page.inner_text("#view"), "标准文件缺少组织筛选"
+            assert "请先选择" in page.inner_text("#view"), "未选流程时应提示先选流程"
+            assert "企业流程地图" in page.inner_text("#view .page-head"), "标准文件页头应链到地图"
+            assert page.locator('#view button[data-act="dlv.newDocument"]').evaluate_all(
+                "els => els.length > 0 && els.every(e => e.disabled)"
+            ), "未选流程时新建应禁用"
+            # 先选流程，再允许新建与空态
+            proc = page.locator('#view select[data-act="dlv.docProcess"]')
+            options = proc.evaluate(
+                "el => [...el.options].filter(o => o.value).map(o => ({v:o.value,t:o.text}))"
+            )
+            assert options, "标准文件流程下拉为空"
+            pick = next((o for o in options if "L4" in o["t"] or "L3" in o["t"]), options[0])
+            proc.select_option(pick["v"])
+            page.wait_for_timeout(900)
+            assert "还没有标准文件" in page.inner_text("#view") or "标准文件" in page.inner_text(
+                "#view"
+            ), "选流程后应加载列表或空态"
+            assert "全部组织" in page.inner_text("#view") or "先不解析" in page.inner_text("#view")
             assert "集团总部" in page.inner_text("#view"), "组织下拉未加载"
-            page.click('#view button:has-text("新建标准文件")')
+            page.locator('#view button[data-act="dlv.newDocument"]:not([disabled])').first.click()
             page.wait_for_selector("#mask.show")
             body = page.inner_text("#mBody")
             assert "所属流程" in body, "新建标准文件弹窗缺少流程选择"
@@ -1197,6 +1223,61 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert page.locator(".map-tree").is_visible(), "架构导航没有展开"
 
+            # 各层可就地新增下级；名称可手填，并对标同级标准分类
+            assert page.locator('#view button:has-text("+ L1 价值链")').count() >= 1, (
+                "根层没有「+ L1 价值链」入口"
+            )
+            page.click('#view button:has-text("+ L1 价值链")')
+            page.wait_for_selector("#mask.show")
+            l1_body = page.inner_text("#mBody")
+            assert "流程名称" in l1_body and "对标" in l1_body and "标准 L1" in l1_body, l1_body[
+                :220
+            ]
+            assert page.input_value("#pfLevel") == "1"
+            close_modal()
+            page.click('#view .tree-item:has-text("采购需求提报")')
+            page.wait_for_timeout(700)
+            assert page.locator('#view button:has-text("+ L4 活动")').count() >= 1, (
+                "进入 L3 后没有「+ L4 活动」入口"
+            )
+            page.click('#view button:has-text("+ L4 活动")')
+            page.wait_for_selector("#mask.show")
+            body = page.inner_text("#mBody")
+            assert "活动编码" in body and "标准 L4" in body, body[:200]
+            assert page.input_value("#pfLevel") == "4"
+            assert page.input_value("#pfParent"), "未预填当前 L3 作为上级"
+            page.wait_for_function(
+                """() => {
+                  const h = document.getElementById('pfBenchTip');
+                  const tip = h && h.getAttribute('data-tip');
+                  return tip && !tip.includes('加载');
+                }"""
+            )
+            hint = page.get_attribute("#pfBenchTip", "data-tip") or ""
+            assert any(
+                key in hint for key in ("收窄", "尚未对标", "没有同级子分类", "匹配到", "未匹配")
+            ), "L4 对标提示异常: " + hint
+            assert page.locator("#pfBenchTree").count() == 1, "标准分类树应直接展示"
+            assert page.locator("#pfBenchPanelToggle").count() == 0, (
+                "不应再有外层「展开选择标准分类」折叠条"
+            )
+            group_count = page.locator(
+                "#pfBenchTree button[data-act='map.benchTreeToggle']"
+            ).count()
+            leaf_count = page.locator(
+                "#pfBenchTree button[data-act='map.activityBenchPick']"
+            ).count()
+            # 默认：组节点折叠（有分组时只见组头，叶子未展开）
+            if group_count >= 1:
+                assert leaf_count == 0, "默认应折叠组内子项，不应直接铺开叶子: " + str(leaf_count)
+            else:
+                assert leaf_count >= 1, "无分组时应至少有可选分类: " + hint
+            if "收窄" in hint or "匹配到" in hint:
+                assert group_count + leaf_count <= 80, "收窄/名称匹配后仍像全量: " + str(
+                    group_count + leaf_count
+                )
+            close_modal()
+
         # 设计器：打开节点编辑，改等待时间，指标应变化
         # 评审中的流程为只读：调色板必须保留可见、可折叠，但创建工具不可用
         def designer_xml_pure_functions() -> None:
@@ -1301,6 +1382,10 @@ def main() -> int:
             page.wait_for_timeout(300)
             assert page.locator(".djs-palette").evaluate("e => e.classList.contains('open')")
 
+        def open_prop_section(label: str) -> None:
+            page.click(f'#bpmnPropsPanel .bpmn-prop-tabs button:has-text("{label}")')
+            page.wait_for_timeout(200)
+
         def designer_edit_node() -> None:
             goto("designer")
             pick_editable_design()
@@ -1310,6 +1395,8 @@ def main() -> int:
             select_bpmn_node("n3")
             if not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"):
                 page.click("#bpmnPropsToggle")
+            page.wait_for_selector("#bpmnSidebar.open .bpmn-prop-tabs", timeout=8000)
+            open_prop_section("测算")
             page.wait_for_selector("#bpmnSidebar.open #bpWait", timeout=8000)
             original_wait = page.input_value("#bpWait")
             page.fill("#bpWait", "0")
@@ -1321,7 +1408,7 @@ def main() -> int:
             page.fill("#bpWait", original_wait)
             page.click('#bpmnSidebar button:has-text("保存指标")')
             page.wait_for_timeout(1500)
-            page.click('#view .seg button:has-text("指标与建议")')
+            page.click('#view .designer-tabs button:has-text("测算分析")')
             page.wait_for_timeout(800)
             assert "流程周期效率" in page.inner_text("#view")
             page.screenshot(path=str(out_dir / "interaction-designer.png"), full_page=True)
@@ -1330,8 +1417,8 @@ def main() -> int:
         def designer_bpmn_spike() -> None:
             goto("designer")
             pick_editable_design()
-            if page.locator('#view .seg button:has-text("流程模型")').count():
-                page.click('#view .seg button:has-text("流程模型")')
+            if page.locator('#view .designer-tabs button:has-text("流程模型")').count():
+                page.click('#view .designer-tabs button:has-text("流程模型")')
                 page.wait_for_timeout(300)
             page.wait_for_selector("#bpmnCanvas .djs-palette", timeout=8000)
             page.wait_for_selector("#bpmnCanvas .djs-element", timeout=8000)
@@ -1403,10 +1490,14 @@ def main() -> int:
             )
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
-            # 属性栏由工具栏按钮显式打开；选中只更新内容
+            # 属性栏由右侧折叠条显式打开；选中只更新内容
             page.click("#bpmnPropsToggle")
-            page.wait_for_selector("#bpmnSidebar.open #bpmnPropsPanel #baRole", timeout=8000)
+            page.wait_for_selector("#bpmnSidebar.open .bpmn-prop-tabs", timeout=8000)
+            open_prop_section("基本")
+            page.wait_for_selector("#bpmnSidebar.open #bpName", timeout=5000)
             assert page.input_value("#bpName").strip(), "属性栏缺少可编辑的名称"
+            open_prop_section("执行")
+            page.wait_for_selector("#bpmnSidebar.open #bpmnPropsPanel #baRole", timeout=8000)
             # 适应画布必须避开调色板和右侧属性栏
             page.click('#view button:has-text("适应画布")')
             page.wait_for_timeout(500)
@@ -1442,13 +1533,16 @@ def main() -> int:
             page.fill("#baDue", "")
             page.click('#bpmnSidebar button:has-text("保存执行配置")')
             page.wait_for_timeout(1200)
-            # 属性栏可收起，并可从工具栏重新打开
+            # 属性栏可收起，并可从右侧折叠条重新打开
             page.click('#bpmnSidebar button:has-text("收起")')
             page.wait_for_timeout(300)
             assert not page.locator("#bpmnSidebar").evaluate("e => e.classList.contains('open')"), (
                 "属性栏没有收起"
             )
+            assert page.locator("#bpmnPropsToggle").is_visible(), "收起后应保留属性折叠条"
             page.click("#bpmnPropsToggle")
+            page.wait_for_selector("#bpmnSidebar.open .bpmn-prop-tabs", timeout=5000)
+            open_prop_section("执行")
             page.wait_for_selector("#bpmnSidebar.open #baRole", timeout=5000)
             page.click('#view button:has-text("运行校验")')
             page.click("#bpmnLintToggle")
@@ -1467,14 +1561,19 @@ def main() -> int:
                 )
             ), lint_text[:300]
             assert "Process is missing" not in lint_text, "校验结果仍在显示原始英文规则消息"
-            # 适应画布按钮应在工具栏水平居中
+            # 适应画布在「视图」分组，与自动布局、全屏同组（不再居中占一整列）
             fit_box = page.locator(".bpmn-fit-btn").bounding_box()
-            bar_box = page.locator(".bpmn-toolbar").bounding_box()
-            assert fit_box and bar_box
+            view_group = page.locator('.bpmn-toolbar [data-group="view"]').bounding_box()
+            assert fit_box and view_group
             assert (
-                abs((fit_box["x"] + fit_box["width"] / 2) - (bar_box["x"] + bar_box["width"] / 2))
-                <= 4
-            ), (fit_box, bar_box)
+                fit_box["x"] >= view_group["x"] - 1
+                and fit_box["x"] + fit_box["width"] <= view_group["x"] + view_group["width"] + 1
+            ), (fit_box, view_group)
+            assert page.locator('.bpmn-toolbar [data-group="lint"]').count() == 1
+            assert page.locator('.bpmn-toolbar [data-group="analyze"]').count() == 1
+            assert page.locator(".bpmn-toolbar-hint").count() == 0, (
+                "长说明应收进 ? 提示，不占工具条"
+            )
             page.click('#view button:has-text("全屏")')
             page.wait_for_timeout(400)
             assert page.locator("#bpmnCard").evaluate("e => e.classList.contains('fullscreen')")
@@ -1561,6 +1660,7 @@ def main() -> int:
             )
             page.wait_for_timeout(300)
             ensure_sidebar()
+            open_prop_section("责任")
             page.wait_for_selector("#bpPosition", timeout=5000)
 
             # 负责人岗位（主数据）
@@ -1573,17 +1673,19 @@ def main() -> int:
             )
             assert target_position, position_options
             page.select_option("#bpPosition", target_position)
-            page.click('#bpmnSidebar button:has-text("保存指标")')
+            page.click('#bpmnSidebar button:has-text("保存岗位")')
             page.wait_for_timeout(1200)
             node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
             assert str(node["owner_position_id"]) == target_position, node
             ensure_sidebar()
+            open_prop_section("责任")
             page.select_option("#bpPosition", original_position)
-            page.click('#bpmnSidebar button:has-text("保存指标")')
+            page.click('#bpmnSidebar button:has-text("保存岗位")')
             page.wait_for_timeout(1200)
 
             # L4 活动关联
             ensure_sidebar()
+            open_prop_section("责任")
             original_activity = page.input_value("#bpActivity")
             activity_options = page.eval_on_selector_all(
                 "#bpActivity option", "els => els.map(e => e.value).filter(Boolean)"
@@ -1598,19 +1700,22 @@ def main() -> int:
             node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
             assert str(node["process_arch_id"]) == target_activity, node
             ensure_sidebar()
+            open_prop_section("责任")
             page.select_option("#bpActivity", original_activity)
             page.click('#bpmnSidebar button:has-text("关联")')
             page.wait_for_timeout(1200)
 
-            # 活动级工具绑定（新增后通过 API 清理）
+            # 活动级工具绑定（设计证据，收在执行 Tab；新增后通过 API 清理）
             ensure_sidebar()
+            open_prop_section("执行")
+            page.click("#bpmnPropsPanel .bpmn-design-tools summary")
             page.wait_for_selector("#bpToolCode", timeout=5000)
             tool_options = page.eval_on_selector_all(
                 "#bpToolCode option", "els => els.map(e => e.value).filter(Boolean)"
             )
             tool_code = tool_options[0]
             page.select_option("#bpToolCode", tool_code)
-            page.click('#bpmnSidebar button:has-text("绑定")')
+            page.click('#bpmnSidebar button:has-text("绑定证据")')
             page.wait_for_timeout(1200)
             bound_tools = page.evaluate(
                 """async ({pid, nodeKey}) => {
@@ -1634,6 +1739,7 @@ def main() -> int:
 
             # 活动级标准文件（创建后通过 API 清理）
             ensure_sidebar()
+            open_prop_section("文件")
             page.click('#bpmnSidebar button:has-text("+ 新增标准文件")')
             page.wait_for_selector("#ndTitle", timeout=5000)
             page.fill("#ndTitle", "E2E 活动标准文件")
@@ -1660,10 +1766,15 @@ def main() -> int:
             )
 
             # 表单/规则状态区应已渲染
-            assert "表单与分支规则" in page.inner_text("#bpmnSidebar")
+            ensure_sidebar()
+            open_prop_section("执行")
+            assert "任务表单" in page.inner_text("#bpmnSidebar")
+            assert "本节点出口" in page.inner_text("#bpmnSidebar")
+            assert "节点分派与时限" in page.inner_text("#bpmnSidebar")
 
             # 类型（TASK ↔ APPROVAL）
             ensure_sidebar()
+            open_prop_section("基本")
             original_type = page.input_value("#bpNodeType")
             target_type = "APPROVAL" if original_type != "APPROVAL" else "TASK"
             page.select_option("#bpNodeType", target_type)
@@ -1672,12 +1783,14 @@ def main() -> int:
             node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
             assert node["node_type"] == target_type, node
             ensure_sidebar()
+            open_prop_section("基本")
             page.select_option("#bpNodeType", original_type)
             page.click('#bpmnSidebar button:has-text("应用类型")')
             page.wait_for_timeout(1600)
 
             # 跨泳道移动
             ensure_sidebar()
+            open_prop_section("基本")
             lane_options = page.eval_on_selector_all(
                 "#bpNodeLane option", "els => els.map(e => e.value)"
             )
@@ -1690,6 +1803,7 @@ def main() -> int:
             node = next(item for item in design_model()["nodes"] if item["node_key"] == node_key)
             assert node["lane"] == target_lane, node
             ensure_sidebar()
+            open_prop_section("基本")
             page.select_option("#bpNodeLane", original_lane)
             page.click('#bpmnSidebar button:has-text("移动")')
             page.wait_for_timeout(1600)
@@ -1747,6 +1861,13 @@ def main() -> int:
             assert "路径模拟" in page.inner_text("#view"), "设计器缺少路径模拟入口"
             assert "补偿动作" in page.inner_text("#view"), "设计器缺少补偿动作入口"
             assert "决策表" in page.inner_text("#view"), "设计器缺少决策表入口"
+            page.click('#view button[data-act="designer.decisions"]')
+            page.wait_for_selector("#mBody", timeout=5000)
+            assert "新建决策表" in page.inner_text("#mFoot"), "决策表弹窗缺少新建入口"
+            body = page.inner_text("#mBody")
+            assert "操作说明" in body, "决策表弹窗缺少操作说明"
+            assert "采购审批分级" in body, "决策表操作说明缺少完整示例"
+            close_modal()
             page.fill("#bpFlowLabel", "E2E标签")
             page.fill("#bpFlowCondition", "E2E条件")
             page.fill("#bpFlowProb", "0.55")
@@ -1885,7 +2006,7 @@ def main() -> int:
         def designer_change_tab() -> None:
             goto("designer")
             pick_editable_design()
-            page.click('#view .seg button:has-text("变更")')
+            page.click('#view .designer-tabs button:has-text("变更")')
             page.wait_for_timeout(700)
             view = page.inner_text("#view")
             assert "变更申请" in view, "设计器变更页未渲染"
@@ -1900,7 +2021,7 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(300)
 
-            page.click('#view .seg button:has-text("权责")')
+            page.click('#view .designer-tabs button:has-text("权责")')
             page.wait_for_timeout(600)
             raci_view = page.inner_text("#view")
             assert "权责矩阵" in raci_view, "设计器权责页未渲染"
@@ -2243,10 +2364,10 @@ def main() -> int:
             page.screenshot(path=str(out_dir / "interaction-gantt.png"), full_page=True)
             close_modal()
 
-        # 新建流程（写入口）
+        # 新建流程（写入口：跨层新建仍保留；主路径是当前层「+ 下级」）
         def process_create() -> None:
             goto("map")
-            page.click("text=+ 新建流程")
+            page.click("text=跨层新建")
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(400)
             page.fill("#pfCode", "L3-E2E")
@@ -2722,21 +2843,29 @@ def main() -> int:
         # 流程执行：启动实例、认领任务、完成并推进
         def execution_flow() -> None:
             goto("execution")
+            assert page.locator("#view .exec-tabs").count() == 1, "执行页缺少单层页签导航"
             page.click("#execStartBtn")
             page.wait_for_selector("#exProcess")
+            assert page.locator("#mBody .exec-path").count() == 1, "启动弹窗缺少路径引导"
+            assert page.locator("#mBody .exec-path .metric-help").count() >= 1, (
+                "路径步骤缺少 tip 说明"
+            )
             page.wait_for_selector("#exAssign select", timeout=8000)
             assert "节点处理人" in page.inner_text("#mBody"), "启动弹窗缺少节点处理人配置"
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(1500)
             assert "流程已启动" in page.inner_text("#toast"), page.inner_text("#toast")
 
+            assert page.locator("#view .exec-task-filters").count() == 1, "待办缺少范围 seg"
+            page.click('#view .exec-task-filters button[data-filter="open"]')
+            page.wait_for_timeout(400)
             row = page.locator("#view .exec-task-row").first
             iid = row.get_attribute("data-instance-id")
             try:
                 assert iid, "任务行缺少 instance id"
 
                 # 挂起 / 恢复：挂起后任务操作应被阻断
-                page.click('#view .seg button:has-text("流程实例")')
+                page.click('#view .exec-tabs button:has-text("流程实例")')
                 page.wait_for_timeout(600)
                 inst_row = page.locator(f'#view tr.exec-instance-row[data-instance-id="{iid}"]')
                 inst_row.locator('button:has-text("详情")').click()
@@ -2756,13 +2885,12 @@ def main() -> int:
                 page.wait_for_timeout(900)
                 assert "已恢复" in page.inner_text("#toast"), page.inner_text("#toast")
 
-                page.click('#view .seg button:has-text("待办任务")')
-                page.wait_for_timeout(600)
-                page.click("#view .exec-task-row >> nth=0 >> button")
-                page.wait_for_timeout(900)
-                assert "已认领" in page.inner_text("#toast"), page.inner_text("#toast")
-
-                page.click("#view .exec-task-row >> nth=0 >> button")
+                page.click('#view .exec-tabs button:has-text("待办任务")')
+                page.wait_for_timeout(400)
+                page.click('#view .exec-task-filters button[data-filter="open"]')
+                page.wait_for_timeout(400)
+                # 公共队列点「处理」即自动接办并打开表单，不再单独认领
+                page.click("#view .exec-task-row >> nth=0 >> button:has-text('处理')")
                 page.wait_for_selector("#exf_applicant")
                 assert "任务历史" in page.inner_text("#mBody"), "任务弹窗缺少任务历史"
                 page.fill("#exf_applicant", "自检用户")
@@ -2772,21 +2900,34 @@ def main() -> int:
                 assert "任务已完成" in page.inner_text("#toast"), page.inner_text("#toast")
                 assert "需求汇总与归并" in page.inner_text("#view"), "下一节点任务未生成"
 
-                page.click('#view .seg button:has-text("表单与规则")')
+                assert page.locator("#view .exec-tabs").count() == 1, "执行页缺少单层页签"
+                page.click('#view .exec-tabs button:has-text("运行配置")')
                 page.wait_for_timeout(1000)
-                config_text = page.inner_text("#view")
-                assert "任务时限与升级" in config_text and page.locator("#exDueHours").count() == 1
+                assert page.locator("#view .cfg-layout").count() == 1, "运行配置缺少三列布局"
+                assert page.locator("#view .cfg-steps").count() == 1, "运行配置缺少左侧步骤"
+                assert page.locator("#exConfigProcess").count() == 1, "运行配置缺少流程选择器"
+                assert "选流程" in page.inner_text("#view .cfg-steps")
+
+                page.click('#view .cfg-step:has-text("节点分派")')
+                page.wait_for_timeout(400)
+                assert "节点分派" in page.inner_text("#view .cfg-mid")
+
+                page.click('#view .cfg-step:has-text("任务表单")')
+                page.wait_for_timeout(400)
+                mid = page.inner_text("#view .cfg-mid")
+                assert "任务表单" in mid and "需求发起" in mid
+                assert "模型出口" in mid
+
+                page.click('#view .cfg-step:has-text("时限与升级")')
+                page.wait_for_timeout(400)
+                assert page.locator("#exDueHours").count() == 1
                 assert page.locator("#exEscHours").count() == 1
                 assert page.locator("#exEscUser").count() == 1
-                assert "运行升级扫描" in config_text
-                assert "节点分派" in config_text, "执行配置缺少节点分派"
-                assert "表单定义" in config_text and "需求发起" in config_text
-                assert "分支规则" in config_text and "审批通过" in config_text
+                assert "运行升级扫描" in page.inner_text("#view .cfg-mid")
 
-                # 节点分派弹窗：角色 / 组织 / 默认处理人 / 节点时限 / 升级
-                page.locator("#view .card", has_text="节点分派").locator(
-                    "button:has-text('配置')"
-                ).first.click()
+                page.click('#view .cfg-step:has-text("节点分派")')
+                page.wait_for_timeout(400)
+                page.locator("#view .cfg-mid").locator("button:has-text('配置')").first.click()
                 page.wait_for_selector("#naRole")
                 modal_text = page.inner_text("#mBody")
                 assert "候选角色" in modal_text and "限定组织" in modal_text
@@ -2855,9 +2996,9 @@ def main() -> int:
             )
             try:
                 goto("execution")
-                page.click('#view button:has-text("待办任务")')
+                page.click('#view .exec-tabs button:has-text("待办任务")')
                 page.wait_for_timeout(400)
-                page.click('#view button:has-text("全部待办")')
+                page.click('#view .exec-task-filters button[data-filter="open"]')
                 page.wait_for_timeout(600)
                 row = page.locator(f'#view tr.exec-task-row[data-instance-id="{iid}"]')
                 row.locator('button:has-text("处理")').first.click()
@@ -2980,7 +3121,9 @@ def main() -> int:
             page.click('#view a:has-text("去流程执行")')
             page.wait_for_timeout(1600)
             assert page.inner_text("#pageTitle") == "流程执行"
-            assert "任务时限" in page.inner_text("#view"), "设计器没有把流程带进执行配置"
+            assert page.locator("#view .cfg-layout").count() == 1 or (
+                "选流程" in page.inner_text("#view")
+            ), "设计器没有把流程带进执行配置"
 
         def project_to_execution() -> None:
             goto("projects")
@@ -2998,7 +3141,9 @@ def main() -> int:
             btn.first.click()
             page.wait_for_timeout(1600)
             assert page.inner_text("#pageTitle") == "流程执行"
-            assert "任务时限" in page.inner_text("#view"), "执行页没有落到当前流程的配置页签"
+            assert page.locator("#exConfigProcess").count() == 1 or (
+                page.locator("#view .cfg-layout").count() == 1
+            ), "执行页没有落到当前流程的配置页签"
 
         check("战略目标→看流程", strategy_open_process)
         check("设计器→流程执行", designer_to_execution)
@@ -3072,7 +3217,7 @@ def main() -> int:
         check("项目甘特图与里程碑", project_gantt)
         check("新建流程架构", process_create)
         check("登记异常事件", exception_create)
-        check("流程执行：启动→认领→完成", execution_flow)
+        check("流程执行：启动→处理→完成", execution_flow)
         check("流程执行：分支规则自动路由", branch_mode_rule)
         check("地图→立项", map_to_project)
         check("BPMN 导入导出", bpmn_roundtrip)

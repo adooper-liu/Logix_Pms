@@ -51,10 +51,21 @@ function snapshotModal() {
     title: document.getElementById('mTitle').textContent,
     body: document.getElementById('mBody').innerHTML,
     foot: document.getElementById('mFoot').innerHTML,
-    wide: m.classList.contains('wide'),
-    scrollTop: m.scrollTop,
+    size: modalSizeClass(m),
+    scrollTop: document.getElementById('mBody').scrollTop || m.scrollTop,
     fields,
   };
+}
+
+function modalSizeClass(m) {
+  if (m.classList.contains('sheet')) return 'sheet';
+  if (m.classList.contains('wide')) return 'wide';
+  return '';
+}
+
+function applyModalSize(m, size) {
+  m.classList.remove('wide', 'sheet');
+  if (size === 'sheet' || size === 'wide') m.classList.add(size);
 }
 
 function restoreModal(saved) {
@@ -62,7 +73,7 @@ function restoreModal(saved) {
   document.getElementById('mBody').innerHTML = saved.body;
   document.getElementById('mFoot').innerHTML = saved.foot;
   const m = document.getElementById('modal');
-  m.classList.toggle('wide', saved.wide);
+  applyModalSize(m, saved.size || (saved.wide ? 'wide' : ''));
   const elements = document.querySelectorAll(MODAL_FIELDS);
   saved.fields.forEach((field) => {
     const el = (field.key && document.getElementById(field.key)) || elements[field.index];
@@ -70,11 +81,14 @@ function restoreModal(saved) {
     if (field.type === 'checkbox' || field.type === 'radio') el.checked = field.checked;
     else el.value = field.value;
   });
-  m.scrollTop = saved.scrollTop;
+  document.getElementById('mBody').scrollTop = saved.scrollTop || 0;
 }
 
 /**
- * 打开模态框。
+ * 打开模态框。外壳一律同立项向导：头固定 / 身滚动 / 脚固定，高度随内容。
+ * 尺寸只两档（wide 与 sheet 同宽，兼容旧调用）：
+ *   '' / 默认  ≤560 —— 确认框、短提示
+ *   'wide'|true|'sheet' ≤920 —— 表单与详情
  * options.keepPrevious：保留当前弹窗，关闭新弹窗后原样恢复（含输入值）。
  * options.replace：只替换当前层内容，不改变弹窗栈（用于「加载中 → 内容」）。
  */
@@ -94,8 +108,10 @@ export function openModal(title, body, foot, wide, options = {}) {
   document.getElementById('mFoot').innerHTML = foot ||
     '<button class="btn btn-g" data-act="ui.close">关闭</button>';
   const m = document.getElementById('modal');
-  m.classList.toggle('wide', !!wide);
+  const size = options.size || (wide === 'sheet' ? 'sheet' : (wide ? 'wide' : ''));
+  applyModalSize(m, size);
   m.scrollTop = 0;
+  document.getElementById('mBody').scrollTop = 0;
   mask.classList.add('show');
   return ++modalGen;
 }

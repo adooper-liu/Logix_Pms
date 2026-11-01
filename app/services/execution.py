@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.timeutil import utcnow
 from app.models.enums import InstanceStatus, NodeType, Role, TaskStatus
 from app.models.execution import (
+    FormDefinition,
     NodeAssignment,
     ProcessExecutionConfig,
     ProcessInstance,
@@ -197,7 +198,10 @@ def _snapshot(db: Session, process: ProcessArch) -> dict:
                 "dst": e.target_key,
                 "label": e.label,
                 "condition": e.condition,
+                "match": e.match_conditions,
+                "match_conditions": e.match_conditions,
                 "probability": e.probability,
+                "is_default": bool(e.is_default),
             }
             for e in edges
         ],
@@ -692,19 +696,23 @@ def complete_task(
             )
         next_key = payload.next_node_key
     else:
-        rule_target = forms_service.evaluate_rules(
-            (instance.snapshot.get("rules") or {}).get(task.node_key, []), context
-        )
-        if rule_target:
-            targets = {e["dst"] for e in outgoing}
-            if rule_target not in targets:
-                raise HTTPException(
-                    status_code=400, detail=f"规则目标 {rule_target} 不是该节点的出边目标"
-                )
-            next_key = rule_target
-        elif len(outgoing) == 1:
+        # 设计定语义：出边 match / 默认流优先；process_rule 仅过渡兜底
+        next_key = forms_service.pick_target_from_edges(outgoing, context)
+        if not next_key:
+            rule_target = forms_service.evaluate_rules(
+                (instance.snapshot.get("rules") or {}).get(task.node_key, []), context
+            )
+            if rule_target:
+                targets = {e["dst"] for e in outgoing}
+                if rule_target not in targets:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"规则目标 {rule_target} 不是该节点的出边目标",
+                    )
+                next_key = rule_target
+        if not next_key and len(outgoing) == 1:
             next_key = outgoing[0]["dst"]
-        elif len(outgoing) > 1:
+        elif not next_key and len(outgoing) > 1:
             options = "、".join(f"{e['dst']}" for e in outgoing)
             raise HTTPException(
                 status_code=400,
@@ -813,6 +821,28 @@ def assign_task(
         },
     )
     return task
+
+
+def delete_instance(db: Session, instance: ProcessInstance, actor: Optional[User] = None) -> str:
+    """物理删除终态实例。运行中/挂起须先取消；日常清理优先走归档。"""
+    from app.services import audit as audit_service
+
+    if instance.status not in (
+        InstanceStatus.COMPLETED.value,
+        InstanceStatus.CANCELLED.value,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="只能删除已完成或已取消的实例；运行中/挂起请先取消，长期保留请用归档",
+        )
+    code = instance.code
+    if actor is not None:
+        audit_service.record(
+            db, actor, "DELETE", "process_instance", instance.id, f"删除流程实例 {code}"
+        )
+    db.delete(instance)
+    db.flush()
+    return code
 
 
 def cancel_instance(
@@ -970,20 +1000,58 @@ def executable_processes(db: Session) -> List[ExecutableProcessOut]:
             )
         ).all()
     )
+    if not counts:
+        return []
+    assignment_counts = dict(
+        db.execute(
+            select(NodeAssignment.process_id, func.count(NodeAssignment.id)).group_by(
+                NodeAssignment.process_id
+            )
+        ).all()
+    )
+    form_counts = dict(
+        db.execute(
+            select(FormDefinition.process_id, func.count(FormDefinition.id))
+            .where(FormDefinition.is_active.is_(True))
+            .group_by(FormDefinition.process_id)
+        ).all()
+    )
     rows = db.scalars(
         select(ProcessArch).where(ProcessArch.id.in_(counts.keys())).order_by(ProcessArch.code)
     ).all()
-    return [
-        ExecutableProcessOut(
-            id=p.id,
-            code=p.code,
-            name=p.name,
-            level=p.level,
-            node_count=counts.get(p.id, 0),
-            model_version=p.published_model_version or p.model_version,
+    out: List[ExecutableProcessOut] = []
+    for p in rows:
+        node_count = counts.get(p.id, 0)
+        published = int(p.published_model_version or 0)
+        assignment_count = int(assignment_counts.get(p.id, 0) or 0)
+        form_count = int(form_counts.get(p.id, 0) or 0)
+        readiness: List[str] = []
+        if published <= 0:
+            readiness.append("尚未发布到运行时（设计器需先「发布」）")
+        if node_count <= 0:
+            readiness.append("没有可执行节点")
+        if assignment_count <= 0:
+            readiness.append("未配节点分派（任务将进公共队列）")
+        if form_count <= 0:
+            readiness.append("未配表单（完成任务时无结构化字段）")
+        can_start = published > 0 and node_count > 0
+        out.append(
+            ExecutableProcessOut(
+                id=p.id,
+                code=p.code,
+                name=p.name,
+                level=p.level,
+                node_count=node_count,
+                model_version=published or p.model_version,
+                published_version=published,
+                is_published=published > 0,
+                assignment_count=assignment_count,
+                form_count=form_count,
+                can_start=can_start,
+                readiness=readiness,
+            )
         )
-        for p in rows
-    ]
+    return out
 
 
 def task_out(task: ProcessTask) -> TaskOut:
@@ -1068,6 +1136,21 @@ def list_task_events(db: Session, task_id: int) -> List[TaskEventOut]:
 
 def instance_out(instance: ProcessInstance) -> InstanceOut:
     tasks = instance.tasks
+    open_tasks = [t for t in tasks if t.status in OPEN_STATUSES]
+    named = sorted({t.assignee_name for t in open_tasks if t.assignee_name})
+    if named:
+        current_assignee = "、".join(named)
+    elif open_tasks:
+        current_assignee = "公共队列"
+    else:
+        current_assignee = None
+    due_times = [t.due_at for t in open_tasks if t.due_at is not None]
+    earliest_due = min(due_times) if due_times else None
+    overdue = bool(
+        earliest_due is not None
+        and instance.status == InstanceStatus.RUNNING.value
+        and earliest_due < utcnow()
+    )
     return InstanceOut(
         id=instance.id,
         code=instance.code,
@@ -1086,7 +1169,11 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
         completed_at=instance.completed_at,
         archived_at=instance.archived_at,
         task_count=len(tasks),
-        open_task_count=sum(1 for t in tasks if t.status in OPEN_STATUSES),
+        open_task_count=len(open_tasks),
+        current_assignee_name=current_assignee,
+        due_at=earliest_due,
+        overdue=overdue,
+        escalated=any(t.escalated_at for t in open_tasks),
     )
 
 

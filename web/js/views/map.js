@@ -1,5 +1,5 @@
 /* 视图：map */
-import { esc, num, bar, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
+import { esc, num, bar, tipHelp, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
@@ -24,6 +24,18 @@ on('map.pcfWizard', () => openPcfDraftWizard());
 on('map.promoteAll', () => promoteAllDrafts());
 on('map.promoteOne', ({ id }) => promoteDrafts([Number(id)]));
 on('map.newProcess', () => newProcessModal());
+on('map.newChild', ({ parent }) => newChildModal(parent ? Number(parent) : null));
+on('map.activityFramework', (_data, el) => loadActivityBenchmarkCategories(el.value));
+on('map.activityBenchPick', ({ id }, el) => applyActivityBenchmarkPick(id || el.value));
+on('map.benchTreeToggle', ({ id }) => toggleBenchTreeGroup(id));
+on('map.benchFilter', (_data, el) => {
+  activityCreate.benchFilter = el.value || '';
+  paintActivityBenchmarkOptions();
+});
+on('map.benchClear', () => applyActivityBenchmarkPick(''));
+on('map.scoreChanged', () => syncScorePreview());
+on('map.inheritParentScores', (_data, el) => applyInheritParentScores(!!el.checked));
+on('map.orgChanged', (_data, el) => onProcessOrgChanged(el.value));
 on('map.toggleImprovement', () => toggleImprovement());
 on('map.toggleNav', () => toggleMapNav());
 on('map.close', () => closeModal());
@@ -291,7 +303,7 @@ const renderMap = () => {
                   ? `<button class="btn-sm" data-act="map.promoteAll">确认全部草稿（${
                     draftCount}）</button>`
                   : '')
-                + '<button class="btn btn-p" data-act="map.newProcess">+ 新建流程</button>'
+                + '<button class="btn-sm" data-act="map.newProcess" title="跨层新建，需自选层级与上级">跨层新建</button>'
               : '<span class="tiny">当前角色只读</span>'}
           </div>
         </div>
@@ -329,8 +341,16 @@ const renderMap = () => {
                 <h2 style="margin:0">${esc(title)}</h2>
                 <div class="desc" style="margin:4px 0 0">${esc(desc)}</div>
               </div>
-              <button class="btn-sm${improvementOnly ? ' on' : ''}" data-act="map.toggleImprovement">
-                ${improvementOnly ? '显示全部' : '只看待改善'}</button>
+              <div class="gap">
+                ${!ownerList && canManage() && (!current || current.level < 4)
+                  ? `<button class="btn btn-p" data-act="map.newChild"
+                      data-parent="${current ? current.id : ''}">+ ${
+                      esc(LEVEL_LABELS[(current ? current.level : 0) + 1])}</button>`
+                  : ''}
+                <button class="btn-sm${improvementOnly ? ' on' : ''}"
+                  data-act="map.toggleImprovement">
+                  ${improvementOnly ? '显示全部' : '只看待改善'}</button>
+              </div>
             </div>
             <div class="legend mb">
               <span><i style="background:var(--bad)"></i>紧急</span>
@@ -387,6 +407,9 @@ const renderMap = () => {
     if (!state.map.orgs) {
       state.map.orgs = await GET('/org-units');
     }
+    if (!state.map.users) {
+      state.map.users = await GET('/execution/assignees');
+    }
     if (state.map.benchmarkFramework && !state.map.benchmark) {
       state.map.benchmark = await GET(
         '/benchmark/frameworks/' + state.map.benchmarkFramework + '/coverage?process_level=3');
@@ -440,26 +463,67 @@ function mapClick(code, hasKids) {
     if (!node) return;
     state.map.openCode = code;
     setUrlState('map', { process: code }, { push: true });
+    const orgRow = (state.map.orgs || []).find(
+      (org) => String(org.id) === String(node.org_unit_id),
+    );
+    const orgName = node.org_unit_name
+      || (orgRow ? `${orgRow.code} · ${orgRow.name}` : '')
+      || '未指定';
     openModal(node.name + ' · ' + node.code, `
-      <div class="row2">
-        <div class="field"><label>流程层级</label><input value="L${node.level}" readonly></div>
-        <div class="field"><label>流程 Owner</label><input value="${esc(node.owner || '未指定')}" readonly></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label>责任部门</label><input value="${esc(node.department || '—')}" readonly></div>
-        <div class="field"><label>综合优先级得分</label><input value="${num(node.priority_score, 1)}" readonly></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label>战略重要性</label><input value="${num(node.strategic_importance, 1)} / 5" readonly></div>
-        <div class="field"><label>痛点严重度</label><input value="${num(node.pain_score, 1)} / 5" readonly></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label>改善空间</label><input value="${num(node.improvement_space, 1)} / 5" readonly></div>
-        <div class="field"><label>流程健康度</label><input value="${node.health_score === null ? '未评估' : num(node.health_score, 0) + ' 分'}" readonly></div>
-      </div>
-      ${node.description ? '<div class="field"><label>流程说明</label><textarea readonly>' + esc(node.description) + '</textarea></div>' : ''}
-      <div id="mapDocs"></div>
-      <div class="note">在「流程设计器」里可以对这条流程做泳道建模与周期效率测算。</div>`,
+      <div class="form-compact">
+        <section class="form-block">
+          <h4 class="form-block-hd">1. 基本信息</h4>
+          <div class="row3">
+            <div class="field"><label>流程编码</label>
+              <input value="${esc(node.code)}" readonly></div>
+            <div class="field"><label>流程层级</label>
+              <input value="L${node.level}" readonly></div>
+            <div class="field"><label>待改善项 ${
+              tipHelp(IMPROVEMENT_TARGET_TIP, '待改善项说明')}</label>
+              <input value="${node.is_improvement_target ? '是' : '否'}" readonly></div>
+          </div>
+        </section>
+        <section class="form-block">
+          <h4 class="form-block-hd">2. 组织与责任</h4>
+          <div class="row3">
+            <div class="field"><label>归属组织</label>
+              <input value="${esc(orgName)}" readonly></div>
+            <div class="field"><label>流程 Owner</label>
+              <input value="${esc(node.owner || '未指定')}" readonly></div>
+            <div class="field"><label>责任部门</label>
+              <input value="${esc(node.department || '—')}" readonly></div>
+          </div>
+        </section>
+        <section class="form-block">
+          <h4 class="form-block-hd">3. 说明与评估</h4>
+          <div class="field"><label>流程说明</label>
+            <textarea readonly>${esc(node.description || '')}</textarea></div>
+          <div class="row2">
+            <div class="field"><label>${metricHelp('priority_score', '综合优先级得分')}</label>
+              <input value="${num(node.priority_score, 1)}" readonly>
+              <div class="hint">重要性 × 痛点 × 改善空间</div></div>
+            <div class="field"><label>${metricHelp('health_score', '流程健康度')}</label>
+              <input value="${node.health_score === null
+                ? '未评估' : num(node.health_score, 0) + ' 分'}" readonly></div>
+          </div>
+          <div class="row3">
+            <div class="field"><label>战略重要性</label>
+              <input value="${num(node.strategic_importance, 1)} / 5" readonly></div>
+            <div class="field"><label>痛点严重度</label>
+              <input value="${num(node.pain_score, 1)} / 5" readonly></div>
+            <div class="field"><label>改善空间</label>
+              <input value="${num(node.improvement_space, 1)} / 5" readonly></div>
+          </div>
+        </section>
+        <section class="form-block">
+          <h4 class="form-block-hd">4. 对标映射</h4>
+          <div id="mapBenchMaps"><div class="tiny">加载对标映射…</div></div>
+        </section>
+        <section class="form-block">
+          <div id="mapDocs"></div>
+          <div class="note" style="margin-top:10px;margin-bottom:0">在「流程设计器」里可以对这条流程做泳道建模与周期效率测算。</div>
+        </section>
+      </div>`,
       `${canManage()
         ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
           + ` data-act="map.deleteProcess" data-id="${node.id}" data-code="${esc(node.code)}">删除</button>`
@@ -468,8 +532,34 @@ function mapClick(code, hasKids) {
        ${canManage() ? `<button class="btn btn-g" data-act="map.editProcess" data-id="${node.id}">编辑</button>` : ''}
        ${canWrite() ? `<button class="btn btn-g" data-act="map.startProject" data-id="${node.id}"
          data-name="${esc(node.name)}">以此流程立项</button>` : ''}
-       <button class="btn btn-p" data-act="map.openDesigner" data-process="${node.id}">去设计器分析</button>`);
+       <button class="btn btn-p" data-act="map.openDesigner" data-process="${node.id}">去设计器分析</button>`,
+      'sheet');
+    loadProcessBenchmarkMaps(node.id);
     loadProcessDocs(node.id);
+  }
+}
+
+/** 详情弹窗里的对标映射（只读）；新建时可写，创建后在这里回看。 */
+async function loadProcessBenchmarkMaps(processId) {
+  const box = document.getElementById('mapBenchMaps');
+  if (!box) return;
+  try {
+    const data = await GET('/benchmark/processes/' + processId + '/mappings');
+    if (!box.isConnected) return;
+    const rows = data.mappings || [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="note" style="margin:0">尚未关联对标分类；可在编辑或重建下级时选择标准分类。</div>';
+      return;
+    }
+    box.innerHTML = `<div class="bench-pick" style="max-height:140px">${rows.map((row) =>
+      `<div class="bench-pick-leaf" style="cursor:default">
+        <span class="bench-code">${esc(row.framework_code || '')}</span>
+        <span class="bench-name">${esc(row.category_code || '')} · ${
+          esc(row.category_name || '')}</span>
+      </div>`).join('')}</div>`;
+  } catch (e) {
+    if (!box.isConnected) return;
+    box.innerHTML = `<div class="note">${esc(e.message || '对标映射加载失败')}</div>`;
   }
 }
 
@@ -1096,6 +1186,67 @@ function mapOrgOptions(selected) {
       esc(org.code)} · ${esc(org.name)}</option>`).join('');
 }
 
+/** 选中组织及其上级、下级（集团→分公司→部门继承范围）。 */
+function orgLineageIds(orgId) {
+  if (!orgId) return null;
+  const orgs = state.map.orgs || [];
+  const selected = orgs.find((org) => String(org.id) === String(orgId));
+  if (!selected) return new Set([Number(orgId)]);
+  const ids = new Set([selected.id]);
+  const selPath = selected.path || '';
+  orgs.forEach((org) => {
+    const path = org.path || '';
+    if (!selPath || selPath === '/') return;
+    if (path.startsWith(selPath)) ids.add(org.id);
+    if (path !== '/' && selPath.startsWith(path)) ids.add(org.id);
+  });
+  return ids;
+}
+
+function mapOwnerOptions(selected, orgId) {
+  const scope = orgLineageIds(orgId);
+  return (state.map.users || []).filter((user) => {
+    if (user.is_active === false) return false;
+    if (!scope) return true;
+    if (user.org_unit_id == null) return false;
+    return scope.has(user.org_unit_id);
+  }).map((user) =>
+    `<option value="${user.id}"${String(selected) === String(user.id) ? ' selected' : ''}>${
+      esc(user.display_name)} · ${esc(user.role_label || user.role)}${
+      user.org_unit_name ? ' · ' + esc(user.org_unit_name) : ''}</option>`).join('');
+}
+
+function paintProcessOwnerSelect(selected, orgId) {
+  const sel = document.getElementById('pfOwnerUser');
+  if (!sel) return;
+  const keep = selected != null ? selected : sel.value;
+  const options = mapOwnerOptions(null, orgId);
+  sel.innerHTML = '<option value="">未指定</option>' + options;
+  if (keep && [...sel.options].some((opt) => opt.value === String(keep))) {
+    sel.value = String(keep);
+  } else {
+    sel.value = '';
+  }
+  setFieldTip(
+    'pfOwnerTip',
+    orgId
+      ? '仅列出该组织及其上下级中的账号（集团→分公司→部门）'
+      : '先选归属组织，再选 Owner；未选组织时列出全部可指派账号',
+  );
+}
+
+function onProcessOrgChanged(orgId) {
+  const org = (state.map.orgs || []).find((row) => String(row.id) === String(orgId));
+  const dept = document.getElementById('pfDepartment');
+  if (dept && org && !dept.value.trim()) dept.value = org.name;
+  paintProcessOwnerSelect(null, orgId || null);
+}
+
+async function ensureMapUsers() {
+  if (state.map.users) return;
+  state.map.users = await GET('/execution/assignees');
+}
+
 function processParentOptions(level) {
   const all = flattenTree(state.map.tree || [])
     .filter((n) => n.level < level)
@@ -1112,87 +1263,841 @@ function refreshParentOptions(level, keepId) {
   if (keepId) sel.value = String(keepId);
 }
 
-function newProcessModal() {
-  openModal('新建流程', `
-    <div class="row2">
-      <div class="field"><label>流程编码 *</label>
-        <input id="pfCode" placeholder="如 L3-090"><div class="hint">全局唯一，建议沿用 L层级-序号 规则</div></div>
-      <div class="field"><label>流程名称 *</label><input id="pfName" placeholder="如：供应商对账"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>层级 *</label>
-        <select id="pfLevel" data-act="map.refreshParents">
-          <option value="1">L1 价值链</option>
-          <option value="2">L2 流程类别</option>
-          <option value="3" selected>L3 流程</option>
-          <option value="4">L4 活动</option>
-        </select></div>
-      <div class="field"><label>上级流程</label>
-        <select id="pfParent">${processParentOptions(3)}</select></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>流程 Owner</label><input id="pfOwner" placeholder="如：采购部-陈经理"></div>
-      <div class="field"><label>归属组织</label>
-        <select class="sel" id="pfOrg"><option value="">未指定</option>${mapOrgOptions(null)}</select></div>
-    </div>
-    <div class="field"><label>责任部门（展示标签）</label>
-      <input id="pfDepartment" placeholder="如：采购部"></div>
-    <div class="field"><label>流程说明</label><textarea id="pfDesc" placeholder="这条流程从哪开始、到哪结束"></textarea></div>
-    <div class="row3">
-      <div class="field"><label>战略重要性（0–5）</label>
-        <input id="pfSi" type="number" min="0" max="5" step="0.1" value="3"></div>
-      <div class="field"><label>痛点严重度（0–5）</label>
-        <input id="pfPain" type="number" min="0" max="5" step="0.1" value="3"></div>
-      <div class="field"><label>改善空间（0–5）</label>
-        <input id="pfSpace" type="number" min="0" max="5" step="0.1" value="3"></div>
-    </div>
-    <div class="field"><label>是否为待改善项</label>
-      <select id="pfTarget"><option value="false">否</option><option value="true">是</option></select>
-      <div class="hint">勾选后会出现在驾驶舱的「待改善流程」统计里</div></div>`,
-    `<button class="btn btn-g" data-act="map.close">取消</button>
-     <button class="btn btn-p" data-act="map.saveProcessNew">创建</button>`);
+/* -------------------------------------------------- 当前层下新建下级（L3/L4 可对标） */
+
+const activityCreate = {
+  categories: [],
+  parentId: null,
+  parentName: '',
+  parentLevel: null,
+  childLevel: 4,
+  parentMappings: [],
+  nameSuggestions: [],
+  scopeMode: 'none', // none | mapping | name
+  benchFilter: '',
+  benchExpanded: new Set(),
+  benchExpandedReady: false,
+};
+
+function resetBenchPickerState() {
+  activityCreate.benchFilter = '';
+  activityCreate.benchExpanded = new Set();
+  activityCreate.benchExpandedReady = false;
+  activityCreate.nameSuggestions = [];
+  activityCreate.scopeMode = 'none';
 }
 
-function editProcessModal(processId) {
-  const node = flattenTree(state.map.tree || []).find((n) => n.id === processId);
-  if (!node) return toast('未找到该流程，请刷新后重试', true);
-  openModal('编辑流程 · ' + node.code, `
-    <div class="row2">
-      <div class="field"><label>流程编码</label><input value="${esc(node.code)}" readonly></div>
-      <div class="field"><label>层级</label><input value="L${node.level}" readonly></div>
+function suggestNextCode(siblings, level) {
+  const re = new RegExp('^L' + level + '-(\\d+)$', 'i');
+  let max = 0;
+  (siblings || []).forEach((child) => {
+    const match = String(child.code || '').match(re);
+    if (match) max = Math.max(max, Number(match[1]));
+  });
+  const width = level >= 4 ? 3 : 3;
+  return 'L' + level + '-' + String(max + 1).padStart(width, '0');
+}
+
+function flattenBenchmarkCategories(nodes, prefix, out) {
+  const acc = out || [];
+  const trail = prefix || [];
+  (nodes || []).forEach((node) => {
+    const label = (node.name_zh || node.name || node.code || '').trim();
+    const path = trail.concat([`${node.code} ${label}`]);
+    acc.push({
+      id: node.id,
+      parent_id: node.parent_id == null ? null : node.parent_id,
+      code: node.code,
+      name: label,
+      level: node.level,
+      label: path.join(' / '),
+    });
+    flattenBenchmarkCategories(node.children, path, acc);
+  });
+  return acc;
+}
+
+function activityFrameworkOptions(selected) {
+  return (state.map.frameworks || []).map((fw) =>
+    `<option value="${esc(fw.code)}"${fw.code === selected ? ' selected' : ''}>${
+      esc(fw.name)}${fw.is_primary ? ' · 主框架' : ''}${
+      fw.version ? ' ' + esc(fw.version) : ''}</option>`).join('');
+}
+
+/** 新建下级默认对标框架：固定优先 APQC 跨行业；上级仅在已有 APQC 族映射时跟随。 */
+function preferredActivityFramework() {
+  const frameworks = state.map.frameworks || [];
+  const byCode = new Map(frameworks.map((fw) => [fw.code, fw]));
+  const isApqcFamily = (code) => {
+    const fw = byCode.get(code);
+    return !!(fw && (fw.code === 'APQC_PCF' || fw.base_framework_code === 'APQC_PCF'));
+  };
+  const parentApqc = (activityCreate.parentMappings || [])
+    .map((row) => row.framework_code)
+    .find((code) => code === 'APQC_PCF' || isApqcFamily(code));
+  if (parentApqc) return parentApqc;
+  if (byCode.has('APQC_PCF')) return 'APQC_PCF';
+  const fallback = frameworks.find((fw) => fw.base_framework_code === 'APQC_PCF')
+    || frameworks.find((fw) => fw.is_primary);
+  return (fallback && fallback.code) || 'APQC_PCF';
+}
+
+/** 沿流程上级查找已有对标；用于把下级选项收窄到上级标准分类之下。 */
+async function resolveParentBenchmarkMappings(parent) {
+  if (!parent) return [];
+  const flat = flattenTree(state.map.tree || []);
+  let current = parent;
+  while (current) {
+    try {
+      const data = await GET('/benchmark/processes/' + current.id + '/mappings');
+      if ((data.mappings || []).length) return data.mappings;
+    } catch (_err) {
+      /* 继续向上找 */
+    }
+    current = current.parent_id
+      ? flat.find((node) => node.id === current.parent_id)
+      : null;
+  }
+  return [];
+}
+
+function normalizeBenchQuery(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[（）()\[\]【】·・•\s\-_/\\．，。、:：]/g, '')
+    .replace(/流程|管理|类别|分类|价值链|活动|与|和|的|及/g, '');
+}
+
+/** 上级名称 ↔ 标准分类名：子串命中 + 汉字重合；只作建议，不代替正式映射。 */
+function scoreBenchmarkName(query, row) {
+  const q = normalizeBenchQuery(query);
+  if (!q || q.length < 2) return 0;
+  const hay = normalizeBenchQuery(row.name || '');
+  if (!hay) return 0;
+  if (hay === q) return 100;
+  if (hay.includes(q) || q.includes(hay)) return 92;
+  const qChars = Array.from(q);
+  const haySet = new Set(Array.from(hay));
+  let hit = 0;
+  qChars.forEach((ch) => {
+    if (haySet.has(ch)) hit += 1;
+  });
+  const overlap = hit / qChars.length;
+  if (overlap < 0.45) return 0;
+  // 短查询（如「战略」）要求更高重合，减少误伤
+  if (q.length <= 2 && overlap < 0.9) return 0;
+  return Math.round(45 + overlap * 45);
+}
+
+/** 用上级流程名在「上级同级」标准分类里找候选锚点。 */
+function suggestScopeByParentName(parentLevel) {
+  const name = activityCreate.parentName;
+  if (!name || parentLevel == null) return [];
+  const scored = activityCreate.categories
+    .filter((row) => row.level === parentLevel)
+    .map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      score: scoreBenchmarkName(name, row),
+    }))
+    .filter((row) => row.score >= 55)
+    .sort((a, b) => b.score - a.score || String(a.code).localeCompare(String(b.code)));
+  if (!scored.length) return [];
+  const best = scored[0].score;
+  return scored.filter((row) => row.score >= best - 12).slice(0, 3);
+}
+
+function resolveBenchmarkScopeIds(frameworkCode) {
+  activityCreate.nameSuggestions = [];
+  activityCreate.scopeMode = 'none';
+  const hard = new Set(
+    (activityCreate.parentMappings || [])
+      .filter((row) => !frameworkCode || row.framework_code === frameworkCode)
+      .map((row) => row.category_id),
+  );
+  if (hard.size) {
+    activityCreate.scopeMode = 'mapping';
+    return hard;
+  }
+  if (!activityCreate.parentId) return hard;
+  const suggested = suggestScopeByParentName(activityCreate.parentLevel);
+  activityCreate.nameSuggestions = suggested;
+  if (suggested.length) {
+    activityCreate.scopeMode = 'name';
+    suggested.forEach((row) => hard.add(row.id));
+  }
+  return hard;
+}
+
+function scopedBenchmarkCategories(level, frameworkCode) {
+  const byId = new Map(activityCreate.categories.map((row) => [row.id, row]));
+  const scopeIds = resolveBenchmarkScopeIds(frameworkCode);
+  const underScope = (row) => {
+    if (!scopeIds.size) return false;
+    let current = row;
+    const seen = new Set();
+    while (current) {
+      if (scopeIds.has(current.id)) return true;
+      if (seen.has(current.id)) break;
+      seen.add(current.id);
+      current = current.parent_id != null ? byId.get(current.parent_id) : null;
+    }
+    return false;
+  };
+  return activityCreate.categories.filter((row) => {
+    if (row.level !== level) return false;
+    // 无上级、无正式映射且名称也匹配不上：同级全量，避免下拉被掏空
+    if (!activityCreate.parentId || !scopeIds.size) return true;
+    return underScope(row);
+  }).slice(0, 400);
+}
+
+function toggleBenchTreeGroup(groupId) {
+  const key = String(groupId);
+  if (!activityCreate.benchExpanded) activityCreate.benchExpanded = new Set();
+  if (activityCreate.benchExpanded.has(key)) activityCreate.benchExpanded.delete(key);
+  else activityCreate.benchExpanded.add(key);
+  paintActivityBenchmarkOptions();
+}
+
+function benchLeafButton(row, selectedId) {
+  const on = selectedId && String(row.id) === String(selectedId);
+  return `<button type="button" class="bench-pick-leaf${on ? ' on' : ''}"
+      data-act="map.activityBenchPick" data-id="${row.id}">
+      <span class="bench-code">${esc(row.code)}</span>
+      <span class="bench-name">${esc(row.name)}</span>
+    </button>`;
+}
+
+/** 同级选项按直接上级分组，树状展开，便于在全量列表里定位。 */
+function renderBenchmarkPickTree(sameLevel, filterText, selectedId) {
+  const byId = new Map(activityCreate.categories.map((row) => [row.id, row]));
+  const raw = String(filterText || '').trim();
+  const q = raw.toLowerCase();
+  let filtered = sameLevel;
+  if (q) {
+    filtered = sameLevel
+      .map((row) => {
+        const codeHit = String(row.code || '').toLowerCase().includes(q);
+        const nameHit = String(row.name || '').toLowerCase().includes(q);
+        const fuzzy = scoreBenchmarkName(raw, row);
+        return { row, score: codeHit ? 100 : (nameHit ? 90 : fuzzy) };
+      })
+      .filter((item) => item.score >= 55)
+      .sort((a, b) => b.score - a.score
+        || String(a.row.code).localeCompare(String(b.row.code), undefined, { numeric: true }))
+      .map((item) => item.row);
+  }
+  if (!filtered.length) {
+    return '<div class="bench-pick-empty">无匹配分类</div>';
+  }
+
+  const clearLabel = '不关联，名称手填'
+    + ((activityCreate.childLevel || 0) >= 4 ? '（可继承上级对标）' : '');
+  const clearBtn = `<button type="button" class="bench-pick-clear${
+    selectedId ? '' : ' on'}" data-act="map.benchClear">${esc(clearLabel)}</button>`;
+
+  const canGroup = filtered.some(
+    (row) => row.parent_id != null && byId.has(row.parent_id),
+  );
+  if (!canGroup) {
+    return clearBtn + filtered.map((row) => benchLeafButton(row, selectedId)).join('');
+  }
+
+  const groups = new Map();
+  filtered.forEach((row) => {
+    const pid = row.parent_id;
+    if (!groups.has(pid)) groups.set(pid, []);
+    groups.get(pid).push(row);
+  });
+  const keys = [...groups.keys()].sort((a, b) => {
+    const ca = String((byId.get(a) || {}).code || '');
+    const cb = String((byId.get(b) || {}).code || '');
+    return ca.localeCompare(cb, undefined, { numeric: true });
+  });
+
+  if (!activityCreate.benchExpanded) activityCreate.benchExpanded = new Set();
+  // 分组默认全部折叠；仅在用户输入筛选词时自动展开匹配组
+  if (!activityCreate.benchExpandedReady) {
+    activityCreate.benchExpandedReady = true;
+  }
+  if (q) keys.forEach((pid) => activityCreate.benchExpanded.add(String(pid)));
+
+  const body = keys.map((pid) => {
+    const parent = byId.get(pid);
+    const kids = groups.get(pid) || [];
+    const open = activityCreate.benchExpanded.has(String(pid));
+    const gLabel = parent
+      ? `${esc(parent.code)} · ${esc(parent.name)}`
+      : '其他';
+    return `<div class="bench-pick-group">
+      <button type="button" class="bench-pick-hd" data-act="map.benchTreeToggle"
+        data-id="${pid}">
+        <span class="bench-caret">${open ? '▼' : '▶'}</span>
+        <span class="bench-hd-label">${gLabel}</span>
+        <i>${kids.length}</i>
+      </button>
+      ${open ? kids.map((row) => benchLeafButton(row, selectedId)).join('') : ''}
+    </div>`;
+  }).join('');
+  return clearBtn + body;
+}
+
+function syncBenchPickedLabel(categoryId) {
+  const picked = document.getElementById('pfBenchPicked');
+  if (!picked) return;
+  if (!categoryId) {
+    picked.textContent = '未关联 · 可手填名称';
+    return;
+  }
+  const row = activityCreate.categories.find(
+    (item) => String(item.id) === String(categoryId),
+  );
+  picked.textContent = row
+    ? `已选 ${row.code} · ${row.name}`
+    : '已选择';
+}
+
+function paintActivityBenchmarkOptions() {
+  const treeEl = document.getElementById('pfBenchTree');
+  const hidden = document.getElementById('pfBenchCat');
+  if (!treeEl || !hidden) return;
+  const level = activityCreate.childLevel || 3;
+  const frameworkCode = (document.getElementById('pfBenchFw') || {}).value || '';
+  const sameLevel = scopedBenchmarkCategories(level, frameworkCode);
+  const filterEl = document.getElementById('pfBenchFilter');
+  if (filterEl && activityCreate.benchFilter != null
+    && filterEl.value !== activityCreate.benchFilter) {
+    filterEl.value = activityCreate.benchFilter;
+  }
+  const previous = hidden.value;
+  const keep = previous && sameLevel.some((row) => String(row.id) === String(previous))
+    ? previous
+    : '';
+  if (!keep) hidden.value = '';
+  // 分类树始终展示；组节点默认折叠（点 ▶ 再展开子项）
+  treeEl.innerHTML = renderBenchmarkPickTree(
+    sameLevel,
+    activityCreate.benchFilter || (filterEl && filterEl.value) || '',
+    hidden.value,
+  );
+  syncBenchPickedLabel(hidden.value);
+
+  let tip = '';
+  if (!activityCreate.parentId) {
+    tip = sameLevel.length
+      ? `${sameLevel.length} 条 L${level}，按上级分类分组；点选后带出名称`
+      : '暂无同级分类';
+  } else if (!frameworkCode) {
+    tip = '请选择对标框架后再匹配标准分类';
+  } else if (activityCreate.scopeMode === 'mapping') {
+    tip = sameLevel.length
+      ? `已按上级对标收窄为 ${sameLevel.length} 条；可不选，选中后带出名称`
+      : '上级对标下没有同级子分类，请手填名称或调整上级映射';
+  } else if (activityCreate.scopeMode === 'name') {
+    const top = (activityCreate.nameSuggestions || [])[0];
+    const label = top ? `${top.code} ${top.name}` : '相近分类';
+    tip = sameLevel.length
+      ? `上级未正式对标；按「${activityCreate.parentName}」匹配到 ${label}，收窄为 ${
+        sameLevel.length} 条（建议稍后给上级建正式映射）`
+      : `按「${activityCreate.parentName}」匹配到 ${label}，但其下暂无 L${level}；可手填或改上级映射`;
+  } else {
+    tip = sameLevel.length
+      ? `上级尚未对标且名称未匹配，显示全部 ${sameLevel.length} 条同级（按上级分类树分组）`
+      : '暂无同级分类，请手填名称';
+  }
+  setFieldTip('pfBenchTip', tip);
+}
+
+function setFieldTip(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.setAttribute('data-tip', text || '');
+  el.setAttribute('aria-label', text || '');
+}
+
+async function loadActivityBenchmarkCategories(frameworkCode) {
+  const treeEl = document.getElementById('pfBenchTree');
+  const hidden = document.getElementById('pfBenchCat');
+  const level = activityCreate.childLevel || 3;
+  resetBenchPickerState();
+  if (!frameworkCode) {
+    activityCreate.categories = [];
+    if (hidden) hidden.value = '';
+    if (treeEl) treeEl.innerHTML = '';
+    syncBenchPickedLabel('');
+    setFieldTip(
+      'pfBenchTip',
+      activityCreate.parentId
+        ? '请选择与上级一致的对标框架'
+        : '先选对标框架，再选同级标准分类。',
+    );
+    return;
+  }
+  setFieldTip('pfBenchTip', '加载标准分类中…');
+  try {
+    const tree = await GET(
+      '/benchmark/frameworks/' + encodeURIComponent(frameworkCode)
+      + '/tree?max_level=' + Math.max(4, level));
+    activityCreate.categories = flattenBenchmarkCategories(tree);
+    paintActivityBenchmarkOptions();
+  } catch (e) {
+    activityCreate.categories = [];
+    if (hidden) hidden.value = '';
+    if (treeEl) {
+      treeEl.innerHTML = `<div class="bench-pick-empty">${esc(e.message || '加载失败')}</div>`;
+    }
+    setFieldTip('pfBenchTip', e.message || '加载标准分类失败');
+  }
+}
+
+function applyActivityBenchmarkPick(categoryId) {
+  const hidden = document.getElementById('pfBenchCat');
+  if (hidden) hidden.value = categoryId ? String(categoryId) : '';
+  if (categoryId) {
+    const row = activityCreate.categories.find(
+      (item) => String(item.id) === String(categoryId),
+    );
+    const nameEl = document.getElementById('pfName');
+    if (row && nameEl) nameEl.value = row.name;
+  }
+  document.querySelectorAll('#pfBenchTree .bench-pick-leaf').forEach((btn) => {
+    btn.classList.toggle('on', !!categoryId && btn.dataset.id === String(categoryId));
+  });
+  const clearBtn = document.querySelector('#pfBenchTree .bench-pick-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !categoryId);
+  syncBenchPickedLabel(categoryId);
+}
+
+/* 与后端 process_map._heat_level 同口径，仅供弹窗预览 */
+const SCORE_HEAT_CRITICAL = 80;
+const SCORE_HEAT_HIGH = 55;
+const SCORE_HEAT_MEDIUM = 30;
+const SCORE_HEALTH_CRITICAL = 50;
+const SCORE_HEALTH_POOR = 65;
+
+function readScoreInput(id, fallback) {
+  const node = document.getElementById(id);
+  if (!node || node.value === '') return fallback;
+  const n = Number(node.value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function predictHeatLevel(priority, health) {
+  if (priority >= SCORE_HEAT_CRITICAL
+    || (health != null && health < SCORE_HEALTH_CRITICAL)) return 'CRITICAL';
+  if (priority >= SCORE_HEAT_HIGH
+    || (health != null && health < SCORE_HEALTH_POOR)) return 'HIGH';
+  if (priority >= SCORE_HEAT_MEDIUM) return 'MEDIUM';
+  return 'LOW';
+}
+
+function syncScorePreview() {
+  const priorityEl = document.getElementById('pfPriority');
+  if (!priorityEl) return;
+  const si = readScoreInput('pfSi', 0);
+  const pain = readScoreInput('pfPain', 0);
+  const space = readScoreInput('pfSpace', 0);
+  const priority = Math.round(si * pain * space * 10) / 10;
+  priorityEl.value = String(priority);
+
+  const healthRaw = document.getElementById('pfHealth');
+  const health = healthRaw && healthRaw.value !== ''
+    ? readScoreInput('pfHealth', null)
+    : null;
+  const heat = predictHeatLevel(priority, health);
+  const badge = document.getElementById('pfHeatPreview');
+  if (badge) {
+    badge.className = 'tag ' + (HEAT_CLASS[heat] || 't-gry');
+    badge.textContent = HEAT_LABEL[heat] || heat;
+  }
+  const parts = [`综合分 ${priority}`];
+  if (priority >= SCORE_HEAT_CRITICAL) parts.push('≥80 → 紧急');
+  else if (priority >= SCORE_HEAT_HIGH) parts.push('≥55 → 高');
+  else if (priority >= SCORE_HEAT_MEDIUM) parts.push('≥30 → 中');
+  else parts.push('<30 → 低');
+  if (health != null && health < SCORE_HEALTH_CRITICAL) {
+    parts.push(`健康度 ${health}<50 也可判紧急`);
+  } else if (health != null && health < SCORE_HEALTH_POOR) {
+    parts.push(`健康度 ${health}<65 至少为高`);
+  }
+  setFieldTip('pfHeatTip', parts.join(' · ') + '（与地图热度同口径预览）');
+}
+
+function applyInheritParentScores(checked) {
+  const src = activityCreate.parentScores;
+  const ids = ['pfSi', 'pfPain', 'pfSpace'];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !!checked && !!src;
+  });
+  if (checked && src) {
+    const si = document.getElementById('pfSi');
+    const pain = document.getElementById('pfPain');
+    const space = document.getElementById('pfSpace');
+    if (si) si.value = String(src.si);
+    if (pain) pain.value = String(src.pain);
+    if (space) space.value = String(src.space);
+  }
+  syncScorePreview();
+}
+
+function scoreGuideHtml() {
+  return `<details class="score-guide">
+    <summary>价值-痛点打分说明 · 知其然与所以然</summary>
+    <div class="score-guide-body">
+      <p><b>三项在算什么</b>：战略重要性看「做错对战略冲击多大」；痛点严重度看「现状多痛」
+        （投诉/延误/成本/风险）；改善空间看「还能挖多少、改不改得动」。
+        综合分 = 三者相乘（0–125）。乘法是故意的：任一维接近 0，整体就掉下去，
+        避免「重要但改不动」被排到最前。</p>
+      <table class="score-anchor-tbl">
+        <thead><tr><th>分</th><th>战略重要性</th><th>痛点严重度</th><th>改善空间</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>边缘支撑</td><td>偶发、可兜底</td><td>几乎无杠杆 / 改不动</td></tr>
+          <tr><td>3</td><td>常规运营必要</td><td>有稳定损耗，尚可维持</td><td>有空间，需一定投入</td></tr>
+          <tr><td>5</td><td>直接绑年度战略/合规生死线</td>
+            <td>持续爆雷或大额损失</td><td>方法清晰、ROI 可见、阻力可控</td></tr>
+        </tbody>
+      </table>
+      <p class="tiny">2 / 4 作过渡。默认 3 只表示「尚未认真评」，不要假装已评估。
+        APQC 不提供这三项官方分表，档位是企业评估纪律。</p>
+      <p><b>热度档位</b>：综合分 ≥80（或健康度&lt;50）紧急；≥55（或健康度&lt;65）高；
+        ≥30 中；其余低。由地图后端统一判定，此处为同口径预览。</p>
+      <p><b>评在哪一层</b>：主评 L3（热力图/立项优先级以 L3 为主）。
+        L4 默认可继承上级；仅当该活动本身是改善切入点时再单独打，
+        避免同流程下几十条 L4 各打各的、热力失真。</p>
     </div>
-    <div class="field"><label>流程名称</label><input id="pfName" value="${esc(node.name)}"></div>
-    <div class="row2">
-      <div class="field"><label>流程 Owner</label>
-        <input id="pfOwner" value="${esc(node.owner || '')}"></div>
-      <div class="field"><label>归属组织</label>
-        <select class="sel" id="pfOrg"><option value="">未指定</option>${
-          mapOrgOptions(node.org_unit_id)}</select></div>
-    </div>
-    <div class="field"><label>责任部门（展示标签）</label>
-      <input id="pfDepartment" value="${esc(node.department || '')}"></div>
-    <div class="field"><label>流程说明</label>
-      <textarea id="pfDesc">${esc(node.description || '')}</textarea></div>
+  </details>`;
+}
+
+/** 待改善项：人工进池标记，与三维评分/热度独立。 */
+const IMPROVEMENT_TARGET_TIP = '人工「改善组合」标记：决定本轮是否进改善池'
+  + '（三维评分答值不值得改，本项答要不要改）。'
+  + '勾「是」→ 地图「待改善」标签与「只看待改善」过滤、驾驶舱「待改善流程」计数。'
+  + '不改优先级/热度/健康度，也不自动立项。';
+
+function scoreAssessmentHtml(opts) {
+  const si = opts.si == null ? 3 : opts.si;
+  const pain = opts.pain == null ? 3 : opts.pain;
+  const space = opts.space == null ? 3 : opts.space;
+  const health = opts.health == null ? '' : opts.health;
+  const targetOn = !!opts.target;
+  const inherit = !!opts.inheritAvailable;
+  const inheritOn = !!opts.inheritDefault;
+  return `${scoreGuideHtml()}
+    ${inherit ? `<label class="score-inherit">
+      <input type="checkbox" id="pfInheritParent" data-act="map.inheritParentScores"${
+        inheritOn ? ' checked' : ''}>
+      L4 继承上级「${esc(opts.parentName || '上级')}」的三项评分（可随时取消后改）
+    </label>` : ''}
     <div class="row3">
-      <div class="field"><label>战略重要性</label>
-        <input id="pfSi" type="number" min="0" max="5" step="0.1" value="${node.strategic_importance}"></div>
-      <div class="field"><label>痛点严重度</label>
-        <input id="pfPain" type="number" min="0" max="5" step="0.1" value="${node.pain_score}"></div>
-      <div class="field"><label>改善空间</label>
-        <input id="pfSpace" type="number" min="0" max="5" step="0.1" value="${node.improvement_space}"></div>
+      <div class="field"><label>战略重要性 ${
+        tipHelp('1 边缘支撑 · 3 常规运营必要 · 5 直接绑年度战略/合规生死线', '战略重要性说明')}</label>
+        <input id="pfSi" type="number" min="0" max="5" step="0.1" value="${si}"
+          data-act="map.scoreChanged"></div>
+      <div class="field"><label>痛点严重度 ${
+        tipHelp('1 偶发可兜底 · 3 稳定损耗尚可维持 · 5 持续爆雷或大额损失', '痛点严重度说明')}</label>
+        <input id="pfPain" type="number" min="0" max="5" step="0.1" value="${pain}"
+          data-act="map.scoreChanged"></div>
+      <div class="field"><label>改善空间 ${
+        tipHelp('1 几乎无杠杆/改不动 · 3 有空间需投入 · 5 方法清晰、ROI 可见', '改善空间说明')}</label>
+        <input id="pfSpace" type="number" min="0" max="5" step="0.1" value="${space}"
+          data-act="map.scoreChanged"></div>
     </div>
-    <div class="row2">
-      <div class="field"><label>流程健康度（0–100）</label>
+    <div class="row3">
+      <div class="field"><label>${metricHelp('priority_score', '综合优先级得分')}</label>
+        <input id="pfPriority" value="" readonly></div>
+      <div class="field"><label>${metricHelp('heat_level', '热度预览')}
+        <span id="pfHeatTip" class="metric-help has-tip tip-inline" data-tip="随三项与健康度即时预览"
+          tabindex="0" aria-label="热度预览说明"><i class="q">?</i></span></label>
+        <div class="score-heat-line">
+          <span id="pfHeatPreview" class="tag t-gry">—</span>
+        </div></div>
+      <div class="field"><label>流程健康度 ${
+        tipHelp('0–100 分；未评估请留空。健康度过低也会拉高热度档。', '流程健康度说明')}</label>
         <input id="pfHealth" type="number" min="0" max="100" step="1"
-          value="${node.health_score === null ? '' : node.health_score}"></div>
-      <div class="field"><label>是否为待改善项</label>
-        <select id="pfTarget">
-          <option value="false"${node.is_improvement_target ? '' : ' selected'}>否</option>
-          <option value="true"${node.is_improvement_target ? ' selected' : ''}>是</option>
-        </select></div>
+          value="${health === '' || health == null ? '' : health}"
+          placeholder="可选" data-act="map.scoreChanged"></div>
+    </div>
+    <div class="field" style="max-width:280px"><label>待改善项 ${
+      tipHelp(IMPROVEMENT_TARGET_TIP, '待改善项说明')}</label>
+      <select id="pfTarget">
+        <option value="false"${targetOn ? '' : ' selected'}>否</option>
+        <option value="true"${targetOn ? ' selected' : ''}>是</option>
+      </select>
+      <div class="hint">进本轮改善池；不影响热度分，不自动建项目</div></div>`;
+}
+
+function childPlaceholders(level) {
+  if (level === 1) {
+    return { code: '如 L1-010', name: '如：采购供应', desc: '这条价值链覆盖哪些主业务' };
+  }
+  if (level === 2) {
+    return { code: '如 L2-031', name: '如：寻源与采购', desc: '这一类流程的边界' };
+  }
+  if (level === 3) {
+    return { code: '如 L3-090', name: '如：供应商对账', desc: '这条流程从哪开始、到哪结束' };
+  }
+  return { code: '如 L4-207', name: '如：需求发起与归集', desc: '这一步做什么、边界到哪' };
+}
+
+async function newChildModal(parentId) {
+  const parent = parentId
+    ? flattenTree(state.map.tree || []).find((node) => node.id === parentId)
+    : null;
+  if (parentId && !parent) return toast('未找到当前节点，请刷新后重试', true);
+  if (parent && parent.level >= 4) return toast('L4 活动下不再新建下级', true);
+
+  const childLevel = parent ? parent.level + 1 : 1;
+  const levelLabel = LEVEL_LABELS[childLevel] || ('L' + childLevel);
+  const noun = childLevel >= 4 ? '活动' : '流程';
+  const siblings = parent ? (parent.children || []) : (state.map.tree || []);
+  const suggested = suggestNextCode(siblings, childLevel);
+  const ph = childPlaceholders(childLevel);
+
+  activityCreate.parentId = parentId;
+  activityCreate.parentName = parent ? (parent.name || '') : '';
+  activityCreate.parentLevel = parent ? parent.level : null;
+  activityCreate.parentScores = parent ? {
+    si: parent.strategic_importance,
+    pain: parent.pain_score,
+    space: parent.improvement_space,
+    health: parent.health_score,
+  } : null;
+  activityCreate.childLevel = childLevel;
+  activityCreate.categories = [];
+  activityCreate.parentMappings = [];
+  resetBenchPickerState();
+  const inheritL4 = childLevel >= 4 && !!parent;
+
+  try {
+    if (!state.map.frameworks) {
+      state.map.frameworks = await GET('/benchmark/frameworks');
+    }
+    await ensureMapUsers();
+    if (parent) {
+      activityCreate.parentMappings = await resolveParentBenchmarkMappings(parent);
+    }
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  const framework = preferredActivityFramework();
+
+  const modalTitle = parent
+    ? `新建${noun} · ${levelLabel} · 挂在 L${parent.level}「${parent.name}」下`
+    : `新建${noun} · ${levelLabel}`;
+  const nameTip = parent
+    ? (activityCreate.parentMappings.length
+      ? '名称可手填，或从下方标准分类带出后改。标准分类已按上级正式对标收窄。'
+      : '上级未对标时，会按上级名称模糊匹配标准分类并建议收窄。名称可手填，或从对标带出后改。')
+    : '名称可手填，或从下方标准分类带出后改。';
+
+  openModal(modalTitle, `
+    <div class="form-compact">
+      <section class="form-block">
+        <h4 class="form-block-hd">1. 基本信息</h4>
+        <div class="row2">
+          <div class="field"><label>${noun}编码 * ${
+            tipHelp('全局唯一，同级顺延建议编码', `${noun}编码说明`)}</label>
+            <input id="pfCode" value="${esc(suggested)}" placeholder="${esc(ph.code)}"></div>
+          <div class="field"><label>${noun}名称 * ${tipHelp(nameTip, `${noun}名称说明`)}</label>
+            <input id="pfName" placeholder="${esc(ph.name)}"></div>
+        </div>
+      </section>
+      <section class="form-block">
+        <h4 class="form-block-hd">2. 对标映射（可选）</h4>
+        <div class="bench-map">
+          <div class="bench-pick-toolbar">
+            <label for="pfBenchFw">对标框架 ${
+              tipHelp('默认 APQC 跨行业主框架；可改选 SCOR 或其他变体', '对标框架说明')}</label>
+            <label for="pfBenchFilter">筛选分类 ${
+              tipHelp('按编码或名称模糊筛选下方分类树', '筛选分类说明')}</label>
+            <select class="sel" id="pfBenchFw" data-act="map.activityFramework">
+              <option value="">不对标</option>${activityFrameworkOptions(framework)}
+            </select>
+            <input id="pfBenchFilter" class="sel" placeholder="编码或名称"
+              data-act="map.benchFilter">
+          </div>
+          <div class="field">
+            <label>标准 L${childLevel} 分类
+              <span id="pfBenchTip" class="metric-help has-tip tip-inline" data-tip="加载中…"
+                tabindex="0" aria-label="标准分类说明"><i class="q">?</i></span>
+              <span class="tiny" id="pfBenchPicked">未关联</span></label>
+            <input type="hidden" id="pfBenchCat" value="">
+            <div id="pfBenchTree" class="bench-pick" role="listbox"></div>
+          </div>
+        </div>
+      </section>
+      <input type="hidden" id="pfLevel" value="${childLevel}">
+      <input type="hidden" id="pfParent" value="${parent ? parent.id : ''}">
+      <section class="form-block">
+        <h4 class="form-block-hd">3. 组织与责任</h4>
+        <div class="row3">
+          <div class="field"><label>归属组织 ${
+            tipHelp('集团 → 分公司 → 部门；Owner 会随组织过滤', '归属组织说明')}</label>
+            <select class="sel" id="pfOrg" data-act="map.orgChanged">
+              <option value="">未指定</option>${
+                mapOrgOptions(parent ? parent.org_unit_id : null)}</select></div>
+          <div class="field"><label>${noun} Owner
+            <span id="pfOwnerTip" class="metric-help has-tip tip-inline"
+              data-tip="随归属组织过滤账号；未指定可稍后补"
+              tabindex="0" aria-label="${noun} Owner 说明"><i class="q">?</i></span></label>
+            <select class="sel" id="pfOwnerUser">
+              <option value="">未指定</option>${
+                mapOwnerOptions(null, parent ? parent.org_unit_id : null)}</select></div>
+          <div class="field"><label>责任部门 ${
+            tipHelp('展示用标签，可与归属组织名称不同', '责任部门说明')}</label>
+            <input id="pfDepartment"
+              value="${esc(parent && parent.department ? parent.department : '')}"
+              placeholder="如：采购部"></div>
+        </div>
+      </section>
+      <section class="form-block">
+        <h4 class="form-block-hd">4. 说明与评估</h4>
+        <div class="field"><label>${noun}说明 ${
+          tipHelp(ph.desc, `${noun}说明`)}</label>
+          <textarea id="pfDesc" rows="2" placeholder="${esc(ph.desc)}"></textarea></div>
+        ${scoreAssessmentHtml({
+          si: inheritL4 ? parent.strategic_importance : 3,
+          pain: inheritL4 ? parent.pain_score : 3,
+          space: inheritL4 ? parent.improvement_space : 3,
+          health: '',
+          target: false,
+          inheritAvailable: inheritL4,
+          inheritDefault: inheritL4,
+          parentName: parent ? parent.name : '',
+        })}
+      </section>
     </div>`,
     `<button class="btn btn-g" data-act="map.close">取消</button>
-     <button class="btn btn-p" data-act="map.saveProcess" data-id="${processId}">保存</button>`);
+     <button class="btn btn-p" data-act="map.saveProcessNew">创建</button>`,
+    'sheet');
+  await loadActivityBenchmarkCategories(framework);
+  if (inheritL4) applyInheritParentScores(true);
+  else syncScorePreview();
+}
+
+async function newProcessModal() {
+  try {
+    await ensureMapUsers();
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  openModal('跨层新建', `
+    <div class="form-compact">
+      <div class="note">日常请用当前层「+ 下级」。这里仅用于自选层级与上级。</div>
+      <div class="form-sec">1. 基本信息</div>
+      <div class="row2">
+        <div class="field"><label>流程编码 *</label>
+          <input id="pfCode" placeholder="如 L3-090">
+          <div class="hint">全局唯一</div></div>
+        <div class="field"><label>流程名称 *</label>
+          <input id="pfName" placeholder="如：供应商对账"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>层级 *</label>
+          <select id="pfLevel" data-act="map.refreshParents">
+            <option value="1">L1 价值链</option>
+            <option value="2">L2 流程类别</option>
+            <option value="3" selected>L3 流程</option>
+            <option value="4">L4 活动</option>
+          </select></div>
+        <div class="field"><label>上级流程</label>
+          <select id="pfParent">${processParentOptions(3)}</select></div>
+      </div>
+      <div class="form-sec">2. 组织与责任</div>
+      <div class="row3">
+        <div class="field"><label>归属组织</label>
+          <select class="sel" id="pfOrg" data-act="map.orgChanged">
+            <option value="">未指定</option>${mapOrgOptions(null)}</select></div>
+        <div class="field"><label>流程 Owner</label>
+          <select class="sel" id="pfOwnerUser">
+            <option value="">未指定</option>${mapOwnerOptions(null, null)}</select>
+          <div class="hint" id="pfOwnerHint">随组织过滤</div></div>
+        <div class="field"><label>责任部门</label>
+          <input id="pfDepartment" placeholder="如：采购部"></div>
+      </div>
+      <div class="form-sec">3. 说明与评估</div>
+      <div class="field"><label>流程说明</label>
+        <textarea id="pfDesc" rows="2" placeholder="这条流程从哪开始、到哪结束"></textarea></div>
+      ${scoreAssessmentHtml({
+        si: 3, pain: 3, space: 3, health: '', target: false,
+        inheritAvailable: false, inheritDefault: false, parentName: '',
+      })}
+    </div>`,
+    `<button class="btn btn-g" data-act="map.close">取消</button>
+     <button class="btn btn-p" data-act="map.saveProcessNew">创建</button>`,
+    'sheet');
+  syncScorePreview();
+}
+
+async function editProcessModal(processId) {
+  const node = flattenTree(state.map.tree || []).find((n) => n.id === processId);
+  if (!node) return toast('未找到该流程，请刷新后重试', true);
+  try {
+    await ensureMapUsers();
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  const parent = node.parent_id
+    ? flattenTree(state.map.tree || []).find((row) => row.id === node.parent_id)
+    : null;
+  activityCreate.parentScores = parent ? {
+    si: parent.strategic_importance,
+    pain: parent.pain_score,
+    space: parent.improvement_space,
+    health: parent.health_score,
+  } : null;
+  activityCreate.parentName = parent ? (parent.name || '') : '';
+  const inheritL4 = node.level >= 4 && !!parent;
+  openModal('编辑流程 · ' + node.code, `
+    <div class="form-compact">
+      <div class="form-sec">1. 基本信息</div>
+      <div class="row3">
+        <div class="field"><label>流程编码</label>
+          <input value="${esc(node.code)}" readonly></div>
+        <div class="field"><label>层级</label>
+          <input value="L${node.level}" readonly></div>
+        <div class="field"><label>流程名称</label>
+          <input id="pfName" value="${esc(node.name)}"></div>
+      </div>
+      <div class="form-sec">2. 组织与责任</div>
+      <div class="row3">
+        <div class="field"><label>归属组织</label>
+          <select class="sel" id="pfOrg" data-act="map.orgChanged">
+            <option value="">未指定</option>${mapOrgOptions(node.org_unit_id)}</select>
+          <div class="hint">集团 → 分公司 → 部门</div></div>
+        <div class="field"><label>流程 Owner</label>
+          <select class="sel" id="pfOwnerUser">
+            <option value="">未指定</option>${
+              mapOwnerOptions(node.owner_user_id, node.org_unit_id)}</select>
+          <div class="hint" id="pfOwnerHint">随组织过滤账号</div></div>
+        <div class="field"><label>责任部门</label>
+          <input id="pfDepartment" value="${esc(node.department || '')}"></div>
+      </div>
+      <div class="form-sec">3. 说明与评估</div>
+      <div class="field"><label>流程说明</label>
+        <textarea id="pfDesc" rows="2">${esc(node.description || '')}</textarea></div>
+      ${scoreAssessmentHtml({
+        si: node.strategic_importance,
+        pain: node.pain_score,
+        space: node.improvement_space,
+        health: node.health_score,
+        target: node.is_improvement_target,
+        inheritAvailable: inheritL4,
+        inheritDefault: false,
+        parentName: parent ? parent.name : '',
+      })}
+    </div>`,
+    `<button class="btn btn-g" data-act="map.close">取消</button>
+     <button class="btn btn-p" data-act="map.saveProcess" data-id="${processId}">保存</button>`,
+    'sheet');
+  syncScorePreview();
 }
 
 async function saveProcess(processId) {
@@ -1205,9 +2110,10 @@ async function saveProcess(processId) {
     return v === '' ? null : Number(v);
   };
 
+  const ownerUser = val('pfOwnerUser');
   const payload = {
     name: val('pfName').trim(),
-    owner: val('pfOwner').trim() || null,
+    owner_user_id: ownerUser ? Number(ownerUser) : null,
     department: val('pfDepartment').trim() || null,
     org_unit_id: val('pfOrg') ? Number(val('pfOrg')) : null,
     description: val('pfDesc').trim() || null,
@@ -1220,16 +2126,29 @@ async function saveProcess(processId) {
     payload.code = val('pfCode').trim();
     payload.level = Number(val('pfLevel'));
     payload.parent_id = val('pfParent') ? Number(val('pfParent')) : null;
-  } else {
+  }
+  if (document.getElementById('pfHealth')) {
     payload.health_score = numOrNull('pfHealth');
   }
 
   if (!payload.name) return toast('请填写流程名称', true);
   if (processId === null && !payload.code) return toast('请填写流程编码', true);
 
+  const categoryId = val('pfBenchCat');
   try {
     if (processId === null) {
       const created = await POST('/process-map', payload);
+      let mapError = '';
+      if (categoryId) {
+        try {
+          await POST('/benchmark/mappings', {
+            process_id: created.id,
+            category_id: Number(categoryId),
+          });
+        } catch (mapErr) {
+          mapError = mapErr.message || '对标映射失败';
+        }
+      }
       // 新建的是顶层流程就回到根层级，否则留在当前层级（用户刚在父节点下创建）
       if (!payload.parent_id) {
         state.map.path = [];
@@ -1239,7 +2158,14 @@ async function saveProcess(processId) {
       }
       closeModal();
       invalidateProcessCaches();
-      toast('流程已创建：' + created.code);
+      const noun = payload.level === 4 ? '活动' : '流程';
+      if (mapError) {
+        toast(`已创建 ${created.code}，但对标未写入：${mapError}`, true);
+      } else if (categoryId) {
+        toast(`${noun}已创建并完成对标：${created.code}`);
+      } else {
+        toast(`${noun}已创建：${created.code}`);
+      }
     } else {
       await PATCH('/process-map/' + processId, payload);
       closeModal();

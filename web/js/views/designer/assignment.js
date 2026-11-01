@@ -1,7 +1,7 @@
-/* 节点执行配置：分派、SLA、工具绑定、标准文件与表单/规则摘要。
+/* 节点执行绑定：与「流程执行 → 运行配置」同口径。
  *
- * 这些接口的写权限比 PMS 指标更窄（MANAGER+），只读用户只看到摘要。
- * 跨模块动作走 index.js 注入的 ctx，本文件不 import 其他 designer 子模块。
+ * 设计定语义：分支在连线出边；执行补绑定：任务表单 / 节点分派 / 时限升级。
+ * 写权限比 PMS 指标更窄（MANAGER+）。跨模块动作走 index.js 注入的 ctx。
  */
 
 import { esc } from '../../core/format.js';
@@ -133,11 +133,13 @@ export function createAssignment(ctx) {
     const assignment = loaded.assignments.get(nodeKey) || {};
     slot.innerHTML = `
       <div class="designer-exec-config bpmn-assign">
-        <div class="between mb"><h3 style="margin:0">执行配置</h3>
+        <div class="between mb"><h3 style="margin:0">节点分派与时限</h3>
           <button class="btn-sm btn-p" data-act="designer.saveAssignment"
-            data-node="${esc(nodeKey)}">保存执行配置</button></div>
-        <div class="desc" style="margin:0 0 8px">候选角色 / 组织 / 默认处理人 / 节点时限 / 升级；
-          只影响发布后的新实例</div>
+            data-node="${esc(nodeKey)}">保存分派</button></div>
+        <div class="desc" style="margin:0 0 8px">对应运行配置「节点分派」「时限与升级」；
+          ≠「责任」岗位归属。只影响发布后的新实例。
+          <a class="link-btn link-btn-sm" data-act="designer.executionConfig"
+            data-focus="assign">打开运行配置</a></div>
         <div class="row2">
           <div class="field"><label>候选角色</label>
             <select id="baRole"><option value="">不限</option>${
@@ -189,14 +191,15 @@ export function createAssignment(ctx) {
         </span>
       </div>`).join('') || '<div class="tiny muted">还没有绑定推荐工具</div>';
     slot.innerHTML = `
-      <div class="between mb"><b>推荐工具</b><span class="tiny muted">${rows.length} 个</span></div>
+      <div class="between mb"><b>方法工具（设计证据）</b>
+        <span class="tiny muted">${rows.length} 个</span></div>
       ${list}
       ${editable ? `
         <div class="gap mt">
           <select id="bpToolCode"><option value="">选择工具</option>${toolOptions}</select>
           <select id="bpToolLevel">${levelOptions}</select>
-          <button class="btn-sm btn-p" data-act="designer.addNodeTool"
-            data-node="${esc(nodeKey)}">绑定</button>
+          <button class="btn-sm" data-act="designer.addNodeTool"
+            data-node="${esc(nodeKey)}">绑定证据</button>
         </div>` : ''}`;
   }
 
@@ -209,46 +212,62 @@ export function createAssignment(ctx) {
         <span class="tag t-gry">${esc(row.category_label || row.category)}</span>
       </div>`).join('') || '<div class="tiny muted">该活动还没有标准文件</div>';
     slot.innerHTML = `
-      <div class="between mb"><b>标准文件</b><span class="tiny muted">${rows.length} 份</span></div>
+      <div class="between mb"><b>标准文件（作业支撑）</b>
+        <span class="tiny muted">${rows.length} 份</span></div>
       ${list}
       <div class="gap mt">
         ${canManage()
-          ? `<button class="btn-sm" data-act="designer.openNodeDoc"
+          ? `<button class="btn-sm btn-p" data-act="designer.openNodeDoc"
               data-node="${esc(nodeKey)}">+ 新增标准文件</button>` : ''}
-        <a class="link-btn link-btn-sm" data-act="designer.goDeliverables">去交付物与模板库</a>
+        <a class="link-btn link-btn-sm" data-act="designer.goDeliverables">去流程标准文件</a>
       </div>`;
   }
 
-  function renderBpmnNodeMeta(forms, rules) {
+  function outgoingEdgeSummary(nodeKey) {
+    const edges = ((state.designer.model || {}).edges || [])
+      .filter((e) => e.source_key === nodeKey);
+    const nameOf = (key) => {
+      const n = ((state.designer.model || {}).nodes || []).find((x) => x.node_key === key);
+      return n ? n.name : key;
+    };
+    if (!edges.length) {
+      return '<div class="tiny muted">无出边（结束或未连线）</div>';
+    }
+    return edges.map((e) => {
+      const match = (e.match_conditions || [])
+        .map((c) => `${c.field} ${c.op} ${c.value}`).join(' 且 ');
+      const how = match || (e.is_default ? '默认流' : (e.label || e.condition || '无匹配（可人工选）'));
+      return `<div class="tiny">→ ${esc(nameOf(e.target_key))}
+        <span class="tag t-gry">${esc(how)}</span></div>`;
+    }).join('');
+  }
+
+  function renderBpmnNodeMeta(forms, nodeKey) {
     const slot = document.getElementById('bpMetaSlot');
     if (!slot) return;
     const formRows = forms.length
       ? forms.map((form) => `<div class="tiny">${esc(form.name)}
-          <span class="tag t-blu">${esc(form.status_label || form.status || '')}</span></div>`).join('')
-      : '<div class="tiny muted">未配置表单</div>';
-    const ruleRows = rules.length
-      ? rules.map((rule) => `<div class="tiny">${esc(rule.name || rule.code || rule.id)}
-          <span class="tag t-gry">${esc(rule.status_label || rule.status || '')}</span></div>`).join('')
-      : '<div class="tiny muted">未配置分支规则</div>';
-    const nodeKey = (state.designer.bpmnSelection || [])[0]?.businessObject?.id || '';
+          <span class="tag t-blu">${(form.fields || []).length} 字段</span></div>`).join('')
+      : '<div class="tiny muted">未配置任务表单</div>';
     slot.innerHTML = `
-      <div class="between mb"><b>表单与分支规则</b>
+      <div class="between mb"><b>任务表单</b>
         ${canManage()
           ? `<button class="btn-sm" data-act="designer.executionConfig"
-              data-node="${esc(nodeKey)}">去执行页配置</button>` : ''}
+              data-focus="forms">去运行配置</button>` : ''}
       </div>
-      <div class="tiny muted">表单（${forms.length}）</div>${formRows}
-      <div class="tiny muted mt">分支规则（${rules.length}）</div>${ruleRows}`;
+      <div class="tiny muted">对应运行配置「任务表单」；本节点 ${forms.length} 份</div>${formRows}
+      <div class="between mb mt"><b>本节点出口（设计语义）</b>
+        <span class="tiny muted">改匹配请选中连线</span></div>
+      ${outgoingEdgeSummary(nodeKey)}`;
   }
 
   async function hydrateBpmnNodeExtras(nodeKey) {
     const st = state.designer;
     const pid = st.processId;
-    const [toolsRes, docsRes, formsRes, rulesRes] = await Promise.allSettled([
+    const [toolsRes, docsRes, formsRes] = await Promise.allSettled([
       GET('/processes/' + pid + '/design/nodes/' + nodeKey + '/tools'),
       GET('/process-documents?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
       GET('/execution/forms?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
-      GET('/execution/rules?process_id=' + pid + '&node_key=' + encodeURIComponent(nodeKey)),
     ]);
     const current = (st.bpmnSelection || [])[0];
     const currentId = current && current.businessObject ? current.businessObject.id : null;
@@ -257,7 +276,7 @@ export function createAssignment(ctx) {
     renderBpmnNodeDocs(nodeKey, docsRes.status === 'fulfilled' ? docsRes.value : []);
     renderBpmnNodeMeta(
       formsRes.status === 'fulfilled' ? formsRes.value : [],
-      rulesRes.status === 'fulfilled' ? rulesRes.value : [],
+      nodeKey,
     );
   }
 
@@ -346,12 +365,14 @@ export function createAssignment(ctx) {
     }
   }
 
-  function openExecutionConfig() {
+  function openExecutionConfig(focus) {
     const nodeKey = (state.designer.bpmnSelection || [])[0]?.businessObject?.id || '';
+    const step = focus || 'forms';
     go('execution', {
       params: {
         process: state.designer.processId || '',
         tab: 'config',
+        focus: step,
         node: nodeKey,
       },
       push: true,
@@ -368,7 +389,7 @@ export function createAssignment(ctx) {
         escalationHours: 'baEscHours',
         escalationUser: 'baEscUser',
       });
-      toast('节点执行配置已保存');
+      toast('节点分派已保存');
     } catch (e) {
       toast(e.message, true);
     }

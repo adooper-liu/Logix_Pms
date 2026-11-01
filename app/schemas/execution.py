@@ -18,6 +18,12 @@ class ExecutableProcessOut(BaseModel):
     level: int
     node_count: int
     model_version: int = 0
+    published_version: int = 0
+    is_published: bool = False
+    assignment_count: int = 0
+    form_count: int = 0
+    can_start: bool = False
+    readiness: List[str] = []
 
 
 class AssigneeOut(BaseModel):
@@ -26,6 +32,7 @@ class AssigneeOut(BaseModel):
     role: str
     role_label: Optional[str] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
     org_unit_name: Optional[str] = None
 
 
@@ -165,6 +172,10 @@ class InstanceOut(BaseModel):
     archived_at: Optional[UtcDateTime] = None
     task_count: int = 0
     open_task_count: int = 0
+    current_assignee_name: Optional[str] = None
+    due_at: Optional[UtcDateTime] = None
+    overdue: bool = False
+    escalated: bool = False
 
 
 class InstanceSuspendRequest(BaseModel):

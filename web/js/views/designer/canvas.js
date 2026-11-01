@@ -10,7 +10,7 @@ import { state } from '../../core/state.js';
 import { API_BASE, GET, POST, getToken } from '../../core/api.js';
 import { PMS_BPMN_GUARDS } from './providers.js';
 import { createTranslateModule } from './i18n.js';
-import { ensureFlowRefs, restoreLanes } from './xml.js';
+import { ensureFlowRefs, layoutHorizontalSwimlanes, restoreLanes } from './xml.js';
 
 const EMPTY_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -66,17 +66,19 @@ export function createCanvas(ctx) {
       canvas.zoom('fit-viewport');
       return;
     }
-    // 调色板和右侧属性栏都浮在画布上：适应画布时要给它们留出空间
+    // 调色板、右侧折叠条与属性栏都浮在画布上：适应画布时要给它们留出空间
     const PAD = 24;
     const palette = container.querySelector('.djs-palette');
     const paletteRect = palette ? palette.getBoundingClientRect() : null;
     const sidebar = document.getElementById('bpmnSidebar');
+    const rail = document.getElementById('bpmnPropsToggle');
     const sidebarOpen = sidebar && sidebar.classList.contains('open');
     // 侧栏有 200ms 滑入动画，此时 getBoundingClientRect().left 还在移动；
     // 用布局宽度计算最终占位，避免动画期间适应画布算少。
     const sidebarWidth = sidebarOpen ? Math.max(sidebar.offsetWidth, 0) : 0;
+    const railWidth = rail ? Math.max(rail.offsetWidth, 0) : 0;
     const leftInset = (paletteRect ? paletteRect.right - rect.left : 48) + PAD;
-    const rightInset = (sidebarWidth ? sidebarWidth + 12 : 0) + PAD;
+    const rightInset = (sidebarOpen ? sidebarWidth + railWidth + 12 : railWidth + 8) + PAD;
     const availW = Math.max(160, rect.width - leftInset - rightInset);
     const availH = Math.max(160, rect.height - PAD * 2);
     const scale = Math.min(1, availW / inner.width, availH / inner.height);
@@ -288,15 +290,21 @@ export function createCanvas(ctx) {
   async function autoLayout() {
     const modeler = state.designer.bpmnModeler;
     if (!modeler) return;
-    const ok = await confirmDialog('自动布局会重新排列节点并覆盖当前画布布局，确定继续？',
+    const ok = await confirmDialog(
+      '自动布局会按「泳道分行、从左到右」重排节点并覆盖当前画布布局，确定继续？',
       { title: '自动布局', okText: '继续' });
     if (!ok) return;
     try {
-      await loadAutoLayout();
       const { xml } = await modeler.saveXML({ format: true });
-      const layouted = await window.BpmnAutoLayout.layoutProcess(ensureFlowRefs(xml));
+      const withRefs = ensureFlowRefs(xml);
+      let layouted = layoutHorizontalSwimlanes(withRefs);
+      // 无泳道时退回通用纵向引擎 + 泳道恢复（兼容旧图）
+      if (layouted === withRefs) {
+        await loadAutoLayout();
+        layouted = restoreLanes(await window.BpmnAutoLayout.layoutProcess(withRefs));
+      }
       state.designer.bpmnImporting = true;
-      await modeler.importXML(restoreLanes(layouted));
+      await modeler.importXML(layouted);
       state.designer.bpmnImporting = false;
       state.designer.bpmnSelection = [];
       ctx.renderSelection([]);
@@ -304,7 +312,7 @@ export function createCanvas(ctx) {
       const saved = await saveNow();
       if (saved) {
         await ctx.runLint();
-        toast('已自动布局并保存');
+        toast('已按泳道横向布局并保存');
       }
     } catch (e) {
       state.designer.bpmnImporting = false;

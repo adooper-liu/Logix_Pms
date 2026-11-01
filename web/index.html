@@ -54,7 +54,11 @@
   <!-- 主区 -->
   <div class="main">
     <div class="topbar">
-      <h1 id="pageTitle">开始使用</h1>
+      <div class="topbar-title">
+        <h1 id="pageTitle">开始使用</h1>
+        <button type="button" class="page-help-btn" id="pageHelpBtn"
+          data-act="shell.pageHelp" title="本页帮助" aria-label="打开本页帮助">?</button>
+      </div>
       <div class="search"><input id="searchInput" placeholder="搜索流程 / 项目 / 工具 / 知识…"></div>
       <button class="notif-btn" id="notifBtn" data-act="shell.notifications" title="通知">
         🔔<span class="notif-badge hide" id="notifBadge">0</span>

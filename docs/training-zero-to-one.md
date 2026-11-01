@@ -4,8 +4,9 @@
 > 目标：用 **一条真实流程** 在系统里走完「定范围 → 接战略 → 建架构 → 定权责 →
 > 立制度 → 画流程 → 配表单/工时 → 盯绩效 → 固化/改善」，并留下可验证证据。
 >
-> 这份文档是**带练脚本**，不是产品设计稿。设计原理见
-> [startup-path.md](startup-path.md)，模块定位见 [usage-guide.md](usage-guide.md)。
+> 这份文档是**带练脚本**，不是产品设计稿。产品内请走「帮助中心」
+> （顶栏 ? / `#help`）；设计原理见 [startup-path.md](startup-path.md)，
+> 模块定位素材见 [usage-guide.md](usage-guide.md)，内容树见 [help/README.md](help/README.md)。
 
 ---
 

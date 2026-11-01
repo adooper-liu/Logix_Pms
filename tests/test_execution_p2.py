@@ -11,6 +11,32 @@ from app.models.execution import ProcessInstance
 API = "/api/v1"
 
 
+def _enable_direct_publish(client, pid: int) -> None:
+    """Test helper: allow draft publish + same-author with explicit reason."""
+    patched = client.patch(f"{API}/process-map/{pid}", json={"publish_policy": "direct"})
+    assert patched.status_code == 200, patched.text
+
+
+def _publish(
+    client,
+    pid: int,
+    *,
+    expected_version: int | None = None,
+    change_note: str = "测试发布说明",
+    change_request_id: int | None = None,
+    self_publish_reason: str = "自动化测试豁免四人复核",
+):
+    body = {
+        "change_note": change_note,
+        "self_publish_reason": self_publish_reason,
+    }
+    if expected_version is not None:
+        body["expected_version"] = expected_version
+    if change_request_id is not None:
+        body["change_request_id"] = change_request_id
+    return client.post(f"{API}/processes/{pid}/design/publish", json=body)
+
+
 def _process_id(client, code: str) -> int:
     rows = client.get(f"{API}/execution/processes").json()
     return next(row["id"] for row in rows if row["code"] == code)
@@ -44,9 +70,9 @@ def _minimal_process(client) -> int:
         },
     )
     assert saved.status_code == 200, saved.text
-    published = client.post(
-        f"{API}/processes/{pid}/design/publish",
-        json={"expected_version": saved.json()["version"], "change_note": "P2 test"},
+    _enable_direct_publish(client, pid)
+    published = _publish(
+        client, pid, expected_version=saved.json()["version"], change_note="P2 test"
     )
     assert published.status_code == 200, published.text
     return pid
@@ -76,9 +102,9 @@ def _linear_process(client) -> int:
         },
     )
     assert saved.status_code == 200, saved.text
-    published = client.post(
-        f"{API}/processes/{pid}/design/publish",
-        json={"expected_version": saved.json()["version"], "change_note": "补偿测试"},
+    _enable_direct_publish(client, pid)
+    published = _publish(
+        client, pid, expected_version=saved.json()["version"], change_note="补偿测试"
     )
     assert published.status_code == 200, published.text
     return pid
@@ -204,9 +230,11 @@ def test_publish_rollback_to_history(client):
         )
         assert saved.status_code == 200, saved.text
         assert (
-            client.post(
-                f"{API}/processes/{pid}/design/publish",
-                json={"expected_version": saved.json()["version"]},
+            _publish(
+                client,
+                pid,
+                expected_version=saved.json()["version"],
+                change_note="publish v2 for rollback test",
             ).status_code
             == 200
         )
@@ -219,6 +247,29 @@ def test_publish_rollback_to_history(client):
         names = {node["name"] for node in rolled.json()["nodes"]}
         assert "开始" in names and "开始2" not in names
     finally:
+        client.delete(f"{API}/process-map/{pid}")
+
+
+def test_delete_instance_only_terminal(client):
+    pid = _minimal_process(client)
+    iid = None
+    try:
+        started = client.post(f"{API}/execution/instances", json={"process_id": pid})
+        assert started.status_code == 201, started.text
+        iid = started.json()["id"]
+        assert client.delete(f"{API}/execution/instances/{iid}").status_code == 409
+
+        cancelled = client.post(f"{API}/execution/instances/{iid}/cancel")
+        assert cancelled.status_code == 200, cancelled.text
+        deleted = client.delete(f"{API}/execution/instances/{iid}")
+        assert deleted.status_code == 200, deleted.text
+        ids = [row["id"] for row in client.get(f"{API}/execution/instances").json()]
+        assert iid not in ids
+        iid = None
+    finally:
+        if iid is not None:
+            client.post(f"{API}/execution/instances/{iid}/cancel")
+            client.delete(f"{API}/execution/instances/{iid}")
         client.delete(f"{API}/process-map/{pid}")
 
 

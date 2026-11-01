@@ -72,6 +72,7 @@ def _to_out(p: ProcessArch) -> ProcessArchOut:
         health_score=p.health_score,
         is_improvement_target=p.is_improvement_target,
         requires_change_request=p.requires_change_request,
+        publish_policy=getattr(p, "publish_policy", None) or "review_required",
         is_draft=p.is_draft,
         source_framework_code=p.source_framework_code,
         source_external_id=p.source_external_id,
@@ -207,6 +208,8 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
         except org_service.OrgError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     data = payload.model_dump()
+    if data.get("publish_policy") not in (None, "direct", "review_required"):
+        raise HTTPException(status_code=422, detail="publish_policy 须为 direct 或 review_required")
     if data.get("org_unit_id") and not data.get("department"):
         data["department"] = org_service.require_org(db, data["org_unit_id"]).name
     data["owner_user_id"], data["owner"] = resolve_owner(
@@ -276,6 +279,11 @@ def update_process(process_id: int, payload: ProcessArchUpdate, db: DbSession, u
     if obj is None:
         raise HTTPException(status_code=404, detail="流程不存在")
     data = payload.model_dump(exclude_unset=True)
+    if "publish_policy" in data and data["publish_policy"] not in (
+        "direct",
+        "review_required",
+    ):
+        raise HTTPException(status_code=422, detail="publish_policy 须为 direct 或 review_required")
     if data.get("org_unit_id") is not None:
         try:
             org = org_service.require_org(db, data["org_unit_id"])

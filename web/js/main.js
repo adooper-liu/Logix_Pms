@@ -36,6 +36,8 @@ import * as knowledgeView from './views/knowledge.js';
 import * as deliverableView from './views/deliverables.js';
 import * as orgsView from './views/orgs.js';
 import * as sketchesView from './views/sketches.js';
+import * as helpView from './views/help.js';
+import { openPageHelp } from './core/help.js';
 
 register('dashboard', dashboard.renderDashboard);
 register('start', startView.renderStart);
@@ -56,6 +58,7 @@ register('knowledge', knowledgeView.renderKnowledge);
 register('deliverables', deliverableView.renderDeliverables);
 register('orgs', orgsView.renderOrgs);
 register('sketches', sketchesView.renderSketches);
+register('help', helpView.renderHelp);
 
 // 跨视图动作：视图只导出自己的 action map，由组合根统一注册。
 registerActions({
@@ -90,6 +93,7 @@ on('shell.mainline', () => {
   // 主线是唯一固定入口；从任何模块回来都清空来源栈。
   go('start', { push: true, skipOrigin: true });
 });
+on('shell.pageHelp', () => openPageHelp());
 
 // 仅保留最小操作面；模板不再依赖这些全局函数。
 Object.assign(window, { go, closeModal, state, actions });

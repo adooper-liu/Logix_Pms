@@ -241,9 +241,41 @@ def _match(condition: Dict, context: Dict) -> bool:
 
 
 def evaluate_rules(rules: List[Dict], context: Dict) -> Optional[str]:
-    """按优先级取第一个全部条件都命中的规则，返回目标节点 key。"""
+    """按优先级取第一个全部条件都命中的规则，返回目标节点 key。
+
+    过渡兼容：路由语义应以模型出边 ``match_conditions`` 为准；
+    见 ``pick_target_from_edges``。本函数仅作旧快照 / 未迁规则的兜底。
+    """
     for rule in rules or []:
         conditions = rule.get("conditions") or []
         if all(_match(condition, context) for condition in conditions):
             return rule.get("target")
+    return None
+
+
+def pick_target_from_edges(outgoing: List[Dict], context: Dict) -> Optional[str]:
+    """按设计器出边匹配下一节点：先 match_conditions，再 is_default。
+
+    outgoing 项字段：dst / match|match_conditions / is_default。
+    多条同时命中时取第一条（建模应避免歧义）。
+    """
+    matched: List[Dict] = []
+    defaults: List[Dict] = []
+    for edge in outgoing or []:
+        conditions = edge.get("match")
+        if conditions is None:
+            conditions = edge.get("match_conditions")
+        if conditions:
+            try:
+                normalized = normalize_conditions(list(conditions))
+            except HTTPException:
+                continue
+            if normalized and all(_match(cond, context) for cond in normalized):
+                matched.append(edge)
+        elif edge.get("is_default"):
+            defaults.append(edge)
+    if matched:
+        return matched[0].get("dst")
+    if defaults:
+        return defaults[0].get("dst")
     return None

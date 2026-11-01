@@ -48,7 +48,7 @@ export const state = {
   start: { data: null, stageKey: null },
   pilot: { pathId: null, layerNo: null, data: null, paths: null, meta: null, users: null,
     pendingProcess: null },
-  execution: { tab: 'tasks', filter: 'open' },
+  execution: { tab: 'tasks', filter: 'mine', configStep: 'process' },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
     documentProcessId: null, documentCategory: '', documentOrgUnitId: null,
@@ -77,4 +77,5 @@ export const TITLES = {
   deliverables: '交付物与模板库',
   orgs: '组织与人员',
   sketches: '架构草图',
+  help: '帮助中心',
 };

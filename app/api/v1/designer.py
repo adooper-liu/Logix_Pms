@@ -41,6 +41,7 @@ from app.schemas.process import (
     ProcessNodeMetricsUpdate,
     ProcessNodeOut,
     PublishModelRequest,
+    PublishPreviewOut,
     ReviewModelRequest,
     RollbackModelRequest,
 )
@@ -114,6 +115,7 @@ def _load_model(db: DbSession, process_id: int) -> ProcessModelOut:
             model_service.STATUS_LABELS.get(model_status, model_status) if model_status else None
         ),
         version_id=latest.id if latest else None,
+        change_note=latest.change_note if latest else None,
         published_version=(
             process.published_model_version
             or (process.model_version if nodes and latest is None else 0)
@@ -122,6 +124,17 @@ def _load_model(db: DbSession, process_id: int) -> ProcessModelOut:
         else 0,
         updated_at=process.model_updated_at if process else None,
         requires_change_request=bool(process and process.requires_change_request),
+        publish_policy=model_service.resolve_publish_policy(process)
+        if process
+        else model_service.PUBLISH_REVIEW_REQUIRED,
+        publish_policy_label=(
+            model_service.PUBLISH_POLICY_LABELS.get(
+                model_service.resolve_publish_policy(process),
+                model_service.PUBLISH_POLICY_LABELS[model_service.PUBLISH_REVIEW_REQUIRED],
+            )
+            if process
+            else None
+        ),
         nodes=[ProcessNodeOut.model_validate(n) for n in nodes],
         edges=[ProcessEdgeOut.model_validate(e) for e in edges],
     )
@@ -329,9 +342,12 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             node["owner_position_id"] = old.get("owner_position_id")
     for edge in parsed["edges"]:
         explicit = edge.pop("_probability_explicit", False)
+        match_explicit = edge.pop("_match_explicit", False)
         old = old_edges.get((edge["source_key"], edge["target_key"]))
         if old and not explicit:
             edge["probability"] = old.get("probability", 1.0)
+        if old and not match_explicit and edge.get("match_conditions") is None:
+            edge["match_conditions"] = old.get("match_conditions")
 
     model_payload = ProcessModelIn(
         nodes=parsed["nodes"], edges=parsed["edges"], expected_version=payload.expected_version
@@ -479,6 +495,16 @@ def reject_model_review(
     return _version_out(row)
 
 
+@router.get(
+    "/processes/{process_id}/design/publish-preview",
+    response_model=PublishPreviewOut,
+    summary="发布确认页预览（策略 / diff / 在途实例）",
+)
+def publish_preview(process_id: int, db: DbSession, user: ManagerUser):
+    process = _require_process(db, process_id)
+    return PublishPreviewOut(**model_service.build_publish_preview(db, process, user))
+
+
 @router.post(
     "/processes/{process_id}/design/publish",
     response_model=ProcessModelOut,
@@ -510,7 +536,13 @@ def publish_model(
             status_code=409,
             detail=("该流程启用了变更门禁：请先在「变更」页创建并批准变更申请，再带着变更单发布"),
         )
-    row = model_service.publish(db, process, user, note=payload.change_note)
+    row = model_service.publish(
+        db,
+        process,
+        user,
+        note=payload.change_note,
+        self_publish_reason=payload.self_publish_reason,
+    )
     if change_row is not None:
         row.change_request_id = change_row.id
         change_service.mark_applied(db, change_row)
@@ -577,10 +609,18 @@ def publish_rollback(
                 detail="该流程启用了变更门禁：回滚发布也必须先有一张已批准的变更申请",
             )
     source = _require_version(db, process_id, version_id)
-    row = model_service.rollback(
-        db, process, source, user, payload.note or f"回滚并发布自 v{source.version}"
+    note = payload.note or f"回滚并发布自 v{source.version}"
+    row = model_service.rollback(db, process, source, user, note)
+    # Emergency path: skip review_required + same-author checks; still needs change gate above.
+    row = model_service.publish(
+        db,
+        process,
+        user,
+        row.id,
+        note=note if len((note or "").strip()) >= 4 else f"回滚并发布自 v{source.version}",
+        bypass_policy=True,
+        bypass_author_check=True,
     )
-    row = model_service.publish(db, process, user, row.id, note=row.change_note)
     if change_row is not None:
         row.change_request_id = change_row.id
         change_service.mark_applied(db, change_row)

@@ -96,6 +96,12 @@ def test_draft_review_publish_diff_and_rollback(client, manager_client, owner_cl
         assert assignment.status_code == 200, assignment.text
         assert assignment.json()["due_hours"] == 2
 
+        assert (
+            client.post(
+                f"{API}/processes/{pid}/design/submit-review", json={"note": "请审"}
+            ).status_code
+            == 200
+        )
         published = manager_client.post(
             f"{API}/processes/{pid}/design/publish",
             json={"expected_version": 1, "change_note": "首次发布"},
@@ -157,7 +163,8 @@ def test_draft_review_publish_diff_and_rollback(client, manager_client, owner_cl
         # 评审后重新提交并发布 v2，运行时节点数变为 3
         client.post(f"{API}/processes/{pid}/design/submit-review", json={})
         published2 = manager_client.post(
-            f"{API}/processes/{pid}/design/publish", json={"expected_version": 2}
+            f"{API}/processes/{pid}/design/publish",
+            json={"expected_version": 2, "change_note": "评审后发布 v2"},
         )
         assert published2.status_code == 200, published2.text
         assert published2.json()["published_version"] == 2
@@ -178,8 +185,15 @@ def test_draft_review_publish_diff_and_rollback(client, manager_client, owner_cl
             == 3
         )
 
+        assert (
+            client.post(
+                f"{API}/processes/{pid}/design/submit-review", json={"note": "回滚稿请审"}
+            ).status_code
+            == 200
+        )
         published3 = manager_client.post(
-            f"{API}/processes/{pid}/design/publish", json={"expected_version": 3}
+            f"{API}/processes/{pid}/design/publish",
+            json={"expected_version": 3, "change_note": "回滚后发布"},
         )
         assert published3.status_code == 200, published3.text
         live3 = manager_client.get(f"{API}/execution/processes").json()
@@ -188,7 +202,8 @@ def test_draft_review_publish_diff_and_rollback(client, manager_client, owner_cl
         # 只有 MANAGER+ 能发布
         assert (
             owner_client.post(
-                f"{API}/processes/{pid}/design/publish", json={"expected_version": 4}
+                f"{API}/processes/{pid}/design/publish",
+                json={"expected_version": 4, "change_note": "Owner 不应能发布"},
             ).status_code
             == 403
         )

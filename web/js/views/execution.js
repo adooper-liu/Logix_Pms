@@ -17,17 +17,30 @@ on('execution.openAssignment', ({ node }) => openAssignmentModal(node));
 on('execution.saveConfig', () => saveExecutionConfig());
 on('execution.runEscalation', () => runEscalationScan());
 on('execution.configProcess', (_data, el) => setExecutionConfigProcess(el.value));
+on('execution.configStep', ({ step }) => setExecutionConfigStep(step));
+on('execution.configNext', () => advanceConfigStep(1));
+on('execution.configPrev', () => advanceConfigStep(-1));
 on('execution.editForm', ({ id }) => editFormModal(id ? Number(id) : null));
 on('execution.deleteForm', ({ id }) => deleteForm(Number(id)));
+on('execution.addFormField', () => addFormFieldRow());
+on('execution.removeFormField', (_data, el) => removeFormFieldRow(el));
+on('execution.formFieldType', (_data, el) => syncFormFieldOptions(el));
 on('execution.editRule', ({ id }) => editRuleModal(id ? Number(id) : null));
 on('execution.deleteRule', ({ id }) => deleteRule(Number(id)));
+on('execution.addRuleCond', () => addRuleCondRow());
+on('execution.removeRuleCond', (_data, el) => removeRuleCondRow(el));
+on('execution.ruleCondOp', (_data, el) => syncRuleCondValue(el));
 on('execution.editEndpoint', ({ id }) => editEndpointModal(id ? Number(id) : null));
 on('execution.deleteEndpoint', ({ id }) => deleteEndpoint(Number(id)));
 on('execution.retryDelivery', ({ id }) => retryDelivery(Number(id)));
 on('execution.runDeliveries', () => runDeliveries());
 on('execution.editInboundHook', ({ id }) => editInboundHookModal(id ? Number(id) : null));
 on('execution.deleteInboundHook', ({ id }) => deleteInboundHook(Number(id)));
-on('execution.close', () => closeModal());
+on('execution.close', () => {
+  closeModal();
+  // 打开公共队列任务时会自动接办；关闭后刷新列表，避免仍显示「待认领」
+  if (state.view === 'execution') RENDERERS.execution();
+});
 on('execution.submitAssignment', ({ node }) => submitAssignment(node));
 on('execution.submitEndpoint', ({ id }) => submitEndpoint(id ? Number(id) : null));
 on('execution.submitInboundHook', ({ id }) => submitInboundHook(id ? Number(id) : null));
@@ -45,12 +58,105 @@ on('execution.resume', ({ id }) => resumeInstance(Number(id)));
 on('execution.cancel', ({ id }) => cancelInstance(Number(id)));
 on('execution.completeCompensation', ({ id }) => completeCompensation(Number(id)));
 on('execution.archiveInstances', () => archiveInstances());
+on('execution.deleteInstance', ({ id }) => deleteInstance(Number(id)));
 on('execution.goProjects', () => go('projects'));
+on('execution.goDesigner', () => {
+  const pid = state.execution.configProcess;
+  go('designer', { params: pid ? { process: pid } : {}, push: true });
+});
+
+/** 统一可启动流程字段（兼容旧接口缺 can_start / published_version）。 */
+function normalizeExecutable(p) {
+  if (!p) return p;
+  const published = Number(p.published_version ?? 0);
+  const nodes = Number(p.node_count || 0);
+  const isPublished = p.is_published != null ? !!p.is_published : published > 0;
+  const canStart = p.can_start != null ? !!p.can_start : (isPublished && nodes > 0);
+  let readiness = Array.isArray(p.readiness) ? p.readiness.slice() : null;
+  if (readiness == null) {
+    readiness = [];
+    if (!isPublished) readiness.push('尚未发布到运行时（设计器需先「发布」）');
+    if (nodes <= 0) readiness.push('没有可执行节点');
+  }
+  return Object.assign({}, p, {
+    published_version: published,
+    is_published: isPublished,
+    can_start: canStart,
+    node_count: nodes,
+    readiness,
+  });
+}
+
+const PATH_TIPS = {
+  designer: '设计器：画模型并「发布到运行时」。定义怎么走；发布本身不产生实例。',
+  config: '运行配置：按流程补分派 / 任务表单 / SLA（非全局）。'
+    + '分支路由在设计器出边；任务表单≠Excel。启动时冻结进快照。',
+  start: '启动：开一笔业务实例并钉住已发布版本快照。须已发布；关联项目仅追溯，不驱动改善项目进度。',
+  tasks: '待办：按启动快照处理任务。公共队列点「处理」即自动接办；实例页可查进度。',
+  page: '上线路径：设计器 → 运行配置 → 启动 → 待办。本页分作业与配置；日常以待办为主。',
+  configScope: '以下分派、任务表单、时限均只属于当前所选流程；分支路由在设计器出边。',
+};
+
+/**
+ * 上线主路径：精简步骤条，说明用 tip（?），不堆副文案。
+ * active: designer | config | start | tasks
+ */
+function execPathGuideHtml(active) {
+  const order = { designer: 0, config: 1, start: 2, tasks: 3 };
+  const step = (key, n, title, act, attrs) => {
+    const on = active === key;
+    const done = (order[active] || 0) > (order[key] || 0);
+    const cls = `exec-path-step${on ? ' on' : ''}${done ? ' done' : ''}`;
+    const tip = tipHelp(PATH_TIPS[key], title);
+    const extra = attrs || '';
+    const label = `<span class="exec-path-n">${n}</span><span class="exec-path-t">${title}</span>`;
+    const core = act
+      ? `<button type="button" class="${cls}" data-act="${act}" ${extra}>${label}</button>`
+      : `<div class="${cls}">${label}</div>`;
+    return `<span class="exec-path-item">${core}${tip}</span>`;
+  };
+  return `
+    <div class="exec-path" role="navigation" aria-label="上线主路径">
+      ${step('designer', '1', '设计器', 'execution.goDesigner')}
+      <span class="exec-path-arrow" aria-hidden="true"></span>
+      ${step('config', '2', '运行配置',
+        canManage() ? 'execution.tab' : '',
+        canManage() ? 'data-tab="config"' : '')}
+      <span class="exec-path-arrow" aria-hidden="true"></span>
+      ${step('start', '3', '启动', canWrite() ? 'execution.startModal' : '')}
+      <span class="exec-path-arrow" aria-hidden="true"></span>
+      ${step('tasks', '4', '待办', 'execution.tab', 'data-tab="tasks"')}
+    </div>`;
+}
+
+/** 启动就绪条：仅 can_start 时显示可启动；阻塞用 warn，建议用 note。 */
+function readinessHtml(process) {
+  if (!process) return '';
+  const p = normalizeExecutable(process);
+  const blockers = (p.readiness || []).filter((item) =>
+    item.includes('尚未发布') || item.includes('没有可执行节点'));
+  const hints = (p.readiness || []).filter((item) => !blockers.includes(item));
+  if (p.can_start) {
+    const ver = p.published_version || p.model_version || 0;
+    const hintLine = hints.length
+      ? `<div class="note mb">建议补齐：${hints.map((item) => esc(item)).join('；')}
+          ${canManage() ? '（本页「运行配置」可维护）' : ''}。</div>`
+      : '';
+    return `<div class="note mb">当前流程 <b>${esc(p.code)}</b> 已发布 v${ver}，可启动新实例。
+      启动后钉住该版本快照，与之后的设计草稿隔离。</div>${hintLine}`;
+  }
+  const blockLine = blockers.length
+    ? `<div class="warnbox mb"><b>不能启动</b>：${blockers.map((item) => esc(item)).join('；')}
+        — 请先到设计器完成「发布到运行时」。</div>`
+    : `<div class="warnbox mb"><b>不能启动</b>：流程尚未就绪（需已发布且有可执行节点）。</div>`;
+  return blockLine;
+}
 
 let manualBranchTask = null;
 
 const renderExecution = () => {
-  const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open' });
+  const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'mine', configStep: 'process' });
+  if (!ex.configStep) ex.configStep = 'process';
   const params = urlParams();
   if (params.process) {
     ex.configProcess = Number(params.process);
@@ -75,6 +181,7 @@ const renderExecution = () => {
       let rules = [];
       let config = null;
       let assignments = [];
+      let modelEdges = [];
       let orgs = [];
       let roleMeta = null;
       let assignees = [];
@@ -83,9 +190,12 @@ const renderExecution = () => {
       let inboundHooks = [];
       let inboundActions = [];
       if (ex.tab === 'config' && processes.length) {
-        const pid = ex.configProcess || processes[0].id;
+        // seed --reset 后 URL 里的旧 process id 会失效，回落到可执行列表首项
+        const stillThere = processes.some((p) => p.id === ex.configProcess);
+        const pid = stillThere ? ex.configProcess : processes[0].id;
         ex.configProcess = pid;
-        [forms, rules, config, assignments, orgs, roleMeta, assignees] = await Promise.all([
+        let design = null;
+        [forms, rules, config, assignments, orgs, roleMeta, assignees, design] = await Promise.all([
           GET('/execution/forms?process_id=' + pid),
           GET('/execution/rules?process_id=' + pid),
           GET('/execution/config?process_id=' + pid),
@@ -93,7 +203,9 @@ const renderExecution = () => {
           GET('/org-units'),
           GET('/auth/meta'),
           GET('/execution/assignees'),
+          GET('/processes/' + pid + '/design').catch(() => null),
         ]);
+        modelEdges = (design && design.edges) || [];
       }
       if (ex.tab === 'integrations') {
         [endpoints, deliveries, inboundHooks, inboundActions, assignees] = await Promise.all([
@@ -105,18 +217,20 @@ const renderExecution = () => {
         ]);
       }
       return {
-        tasks, instances, processes, forms, rules, config, assignments, orgs, roleMeta,
-        assignees, endpoints, deliveries, inboundHooks, inboundActions,
+        tasks, instances, processes, forms, rules, config, assignments, modelEdges,
+        orgs, roleMeta, assignees, endpoints, deliveries, inboundHooks, inboundActions,
       };
     }),
     (d) => {
       state.executionTasks = d.tasks;
       state.executionInstances = d.instances;
-      state.executionProcesses = d.processes;
+      state.executionProcesses = (d.processes || []).map(normalizeExecutable);
+      d.processes = state.executionProcesses;
       state.executionForms = d.forms;
       state.executionRules = d.rules;
       state.executionConfig = d.config;
       state.executionAssignments = d.assignments;
+      state.executionModelEdges = d.modelEdges || [];
       state.executionOrgs = d.orgs;
       state.executionRoleMeta = d.roleMeta;
       state.executionAssignees = d.assignees.length ? d.assignees : state.executionAssignees;
@@ -129,7 +243,7 @@ const renderExecution = () => {
     const mine = d.tasks.filter((t) => t.assignee_user_id === me);
     const queue = d.tasks.filter((t) => t.assignee_user_id === null);
     const running = d.instances.filter((i) => i.status === 'RUNNING');
-    const filter = ex.filter || 'open';
+    const filter = ex.filter || 'mine';
     const shown = filter === 'mine' ? mine : filter === 'queue' ? queue : d.tasks;
 
     const taskRows = shown.map((t) => {
@@ -141,11 +255,10 @@ const renderExecution = () => {
         ? '<span class="tag t-yel">实例挂起</span>'
         : !canWrite()
           ? `<button class="btn-sm" data-act="execution.openTask" data-id="${t.id}">查看</button>`
-          : t.assignee_user_id === null
-            ? `<button class="btn-sm btn-p" data-act="execution.claimTask" data-id="${t.id}">认领</button>`
-            : canAct
-              ? `<button class="btn-sm" data-act="execution.openTask" data-id="${t.id}">处理</button>`
-              : `<button class="btn-sm" data-act="execution.openTask" data-id="${t.id}">查看</button>`;
+          : canAct
+            ? `<button class="btn-sm ${t.assignee_user_id === null ? 'btn-p' : ''}"
+                data-act="execution.openTask" data-id="${t.id}">处理</button>`
+            : `<button class="btn-sm" data-act="execution.openTask" data-id="${t.id}">查看</button>`;
       return `
         <tr class="exec-task-row" data-task-id="${t.id}" data-instance-id="${t.instance_id}">
           <td><b>${esc(t.name)}</b>
@@ -164,51 +277,68 @@ const renderExecution = () => {
       ? '当前没有指派给你的任务'
       : filter === 'queue' ? '公共队列为空' : '没有待办任务');
 
-    const instanceRows = d.instances.map((i) => `
+    const instanceRows = d.instances.map((i) => {
+      const dueCell = i.due_at
+        ? `${i.overdue ? '<span class="tag t-red">已超期</span> ' : ''}${dtShort(i.due_at)}`
+        : (i.open_task_count ? '<span class="muted">无时限</span>' : '—');
+      return `
       <tr class="exec-instance-row" data-instance-id="${i.id}">
         <td><button class="project-open" type="button" data-act="execution.openInstance"
             data-id="${i.id}"><b>${esc(i.code)}</b></button>
           <div class="tiny">${esc(i.process_name)}</div></td>
+        <td class="tiny">v${i.definition_version || 0}</td>
         <td><span class="tag ${i.status === 'RUNNING' ? 't-blu'
           : i.status === 'COMPLETED' ? 't-grn'
           : i.status === 'SUSPENDED' ? 't-yel' : 't-gry'}">
-          ${esc(i.status_label)}</span></td>
+          ${esc(i.status_label)}</span>
+          ${i.escalated ? '<div class="tiny"><span class="tag t-blu">已升级</span></div>' : ''}</td>
         <td>${i.current_node_name ? esc(i.current_node_name) : '—'}
-          <div class="tiny">${esc(i.current_node_key || '')}</div></td>
-        <td>${i.open_task_count}</td>
+          ${i.current_node_key && i.current_node_key !== i.current_node_name
+            ? `<div class="tiny muted">${esc(i.current_node_key)}</div>` : ''}</td>
+        <td>${i.current_assignee_name
+          ? esc(i.current_assignee_name)
+          : (i.open_task_count ? '<span class="muted">—</span>' : '—')}
+          <div class="tiny">${i.open_task_count ? i.open_task_count + ' 待办' : '无待办'}</div></td>
+        <td class="tiny">${dueCell}</td>
         <td class="tiny">${esc(i.started_by_name || '—')}<div>${dtShort(i.started_at)}</div></td>
-        <td><button class="btn-sm" data-act="execution.openInstance"
-          data-id="${i.id}">详情</button></td>
-      </tr>`).join('') || emptyRow(6, '还没有流程实例');
+        <td class="gap" style="flex-wrap:nowrap">
+          <button class="btn-sm" data-act="execution.openInstance" data-id="${i.id}">详情</button>
+          ${canManage() && (i.status === 'COMPLETED' || i.status === 'CANCELLED')
+            ? `<button class="btn-sm" data-act="execution.deleteInstance" data-id="${i.id}"
+                title="物理删除终态实例；日常请优先归档">删除</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') || emptyRow(8, '还没有流程实例');
 
+    // 单层导航：作业与配置同一条 seg，避免与「上线路径」双层抢视线（路径仅保留在启动弹窗）
+    const taskTabLabel = mine.length ? `待办任务 · ${mine.length}` : '待办任务';
+    const instanceTabLabel = running.length ? `流程实例 · ${running.length}` : '流程实例';
     const tabs = `
-      <div class="seg">
-        <button class="${ex.tab === 'tasks' ? 'on' : ''}" data-act="execution.tab" data-tab="tasks">待办任务</button>
-        <button class="${ex.tab === 'instances' ? 'on' : ''}" data-act="execution.tab" data-tab="instances">流程实例</button>
-        ${canManage() ? `<button class="${ex.tab === 'config' ? 'on' : ''}"
-          data-act="execution.tab" data-tab="config">表单与规则</button>
-          <button class="${ex.tab === 'integrations' ? 'on' : ''}"
+      <div class="seg exec-tabs">
+        <button class="${ex.tab === 'tasks' ? 'on' : ''}" data-act="execution.tab" data-tab="tasks"
+          title="我的待办 ${mine.length}">${esc(taskTabLabel)}</button>
+        <button class="${ex.tab === 'instances' ? 'on' : ''}" data-act="execution.tab" data-tab="instances"
+          title="运行中 ${running.length}">${esc(instanceTabLabel)}</button>
+        ${canManage() ? `
+        <button class="${ex.tab === 'config' ? 'on' : ''}" data-act="execution.tab" data-tab="config">运行配置</button>
+        <button class="${ex.tab === 'integrations' ? 'on' : ''}"
           data-act="execution.tab" data-tab="integrations">集成</button>` : ''}
       </div>`;
 
     const taskPane = `
-      <div class="grid g4 stat-row">
-        <button class="kpi stat" data-act="execution.filter" data-filter="mine">
-          <div class="num">${mine.length}</div><div class="lab">我的待办</div></button>
-        <button class="kpi stat" data-act="execution.filter" data-filter="queue">
-          <div class="num">${queue.length}</div><div class="lab">公共队列</div></button>
-        <button class="kpi stat" data-act="execution.filter" data-filter="open">
-          <div class="num">${d.tasks.length}</div><div class="lab">全部待办</div></button>
-        <div class="kpi stat"><div class="num">${running.length}</div><div class="lab">运行中实例</div></div>
-      </div>
       <div class="card">
-        <div class="between mb">
-          <div><h3 style="margin:0">任务队列</h3>
-            <div class="desc" style="margin:2px 0 0">认领后即可处理；分支节点在完成时选择下一步</div></div>
-          <div class="seg">
-            <button class="${filter === 'open' ? 'on' : ''}" data-act="execution.filter" data-filter="open">全部待办</button>
-            <button class="${filter === 'mine' ? 'on' : ''}" data-act="execution.filter" data-filter="mine">我的</button>
-            <button class="${filter === 'queue' ? 'on' : ''}" data-act="execution.filter" data-filter="queue">公共队列</button>
+        <div class="between mb" style="align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 style="margin:0">任务队列</h3>
+            <div class="desc" style="margin:2px 0 0">默认看指派给你的；「公共」可接未认领任务。「处理」即接办并打开表单</div>
+          </div>
+          <div class="seg exec-task-filters" role="tablist" aria-label="待办范围">
+            <button type="button" class="${filter === 'mine' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="mine">我的${mine.length ? ` · ${mine.length}` : ''}</button>
+            <button type="button" class="${filter === 'queue' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="queue">公共${queue.length ? ` · ${queue.length}` : ''}</button>
+            <button type="button" class="${filter === 'open' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="open">全部${d.tasks.length ? ` · ${d.tasks.length}` : ''}</button>
           </div>
         </div>
         <table class="tbl">
@@ -222,34 +352,53 @@ const renderExecution = () => {
       <div class="card">
         <div class="between mb">
           <div><h3 style="margin:0">流程实例</h3>
-            <div class="desc" style="margin:2px 0 0">共 ${d.instances.length} 个实例；点击查看任务时间线</div></div>
+            <div class="desc" style="margin:2px 0 0">共 ${d.instances.length} 个，其中运行中 ${running.length} 个；
+              版本为启动时冻结的已发布模型；时限取当前待办最早到期。终态可删；日常优先归档。</div></div>
           ${canManage() ? `<button class="btn-sm" data-act="execution.archiveInstances">
             归档旧实例</button>` : ''}
         </div>
         <table class="tbl">
-          <thead><tr><th>实例</th><th>状态</th><th>当前节点</th><th>待办</th>
-            <th>发起人 / 时间</th><th></th></tr></thead>
+          <thead><tr><th>实例</th><th>版本</th><th>状态</th><th>当前节点</th>
+            <th>处理人</th><th>时限</th><th>发起人 / 时间</th><th></th></tr></thead>
           <tbody>${instanceRows}</tbody>
         </table>
       </div>`;
 
     const cfgProcess = d.processes.find((p) => p.id === ex.configProcess) || d.processes[0];
     const formRows = (d.forms || []).map((f) => `
-      <tr><td><b>${esc(f.node_key || '流程默认')}</b></td><td>${esc(f.name)}</td>
+      <tr><td><b>${esc(f.node_key
+        ? (processNodes().find((n) => n.node_key === f.node_key)?.name || f.node_key)
+        : '流程默认')}</b>
+        ${f.node_key ? `<div class="tiny muted">${esc(f.node_key)}</div>` : ''}</td>
+        <td>${esc(f.name)}</td>
         <td>${(f.fields || []).length}</td>
         <td>${f.is_active ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
         <td><button class="btn-sm" data-act="execution.editForm" data-id="${f.id}">编辑</button>
           <button class="btn-sm" data-act="execution.deleteForm" data-id="${f.id}">删除</button></td></tr>`).join('')
-      || emptyRow(5, '暂无表单定义');
-    const ruleRows = (d.rules || []).map((r) => {
-      const cond = (r.conditions || [])
-        .map((c) => `${c.field} ${c.op} ${c.value}`).join(' 且 ') || '无条件（兜底）';
-      return `<tr><td><b>${esc(r.node_key)}</b></td>
-        <td>${esc(r.name)}<div class="tiny">${esc(cond)}</div></td>
-        <td>${esc(r.target_node_key)}</td><td>${r.priority}</td>
-        <td><button class="btn-sm" data-act="execution.editRule" data-id="${r.id}">编辑</button>
-          <button class="btn-sm" data-act="execution.deleteRule" data-id="${r.id}">删除</button></td></tr>`;
-    }).join('') || emptyRow(5, '暂无分支规则');
+      || emptyRow(5, '暂无任务表单');
+    const edgeList = d.modelEdges || state.executionModelEdges || [];
+    const outCount = {};
+    edgeList.forEach((e) => {
+      outCount[e.source_key] = (outCount[e.source_key] || 0) + 1;
+    });
+    const routeEdges = edgeList.filter((e) =>
+      (e.match_conditions && e.match_conditions.length)
+      || e.is_default
+      || (outCount[e.source_key] || 0) > 1);
+    const routeRows = routeEdges.map((e) => {
+      const fromNode = processNodes().find((n) => n.node_key === e.source_key);
+      const toNode = processNodes().find((n) => n.node_key === e.target_key);
+      const cond = (e.match_conditions || [])
+        .map((c) => `${c.field} ${c.op} ${c.value}`).join(' 且 ')
+        || (e.is_default ? '默认流' : (e.condition || e.label || '（人工选择 / 单出边）'));
+      return `<tr><td><b>${esc(fromNode ? fromNode.name : e.source_key)}</b>
+          <div class="tiny muted">${esc(e.source_key)}</div></td>
+        <td>${esc(cond)}</td>
+        <td><b>${esc(toNode ? toNode.name : e.target_key)}</b>
+          <div class="tiny muted">${esc(e.target_key)}</div></td>
+        <td>${e.is_default ? '<span class="tag t-blu">默认</span>' : '—'}</td></tr>`;
+    }).join('') || emptyRow(4, '模型暂无分支出边；请在设计器配置');
+    const legacyRuleCount = (d.rules || []).length;
 
     const assignmentRows = (d.assignments || []).map((n) => `
       <tr>
@@ -272,73 +421,194 @@ const renderExecution = () => {
         ? ' selected' : ''}>${esc(u.display_name)} · ${esc(u.role_label || u.role)}</option>`
     ).join('');
 
-    const configPane = !canManage()
-      ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
-      : `
-      <div class="card">
-        <div class="between">
-          <div><h3 style="margin:0">任务时限与升级</h3>
-            <div class="desc" style="margin:2px 0 0">新任务按小时数生成到期时间；到期后再过
-              升级时限，自动改派给升级处理人</div></div>
-          <div class="gap">
-            <input class="sel" id="exDueHours" type="number" min="0" max="8760"
-              style="width:110px" placeholder="时限（小时）"
-              value="${d.config && d.config.default_task_due_hours !== null
-                ? d.config.default_task_due_hours : ''}">
-            <input class="sel" id="exEscHours" type="number" min="0" max="8760"
-              style="width:110px" placeholder="升级（小时）"
-              value="${d.config && d.config.default_escalation_hours !== null
-                ? d.config.default_escalation_hours : ''}">
-            <select class="sel" id="exEscUser">
-              <option value="">不自动升级</option>${escUserOpts}</select>
-            <button class="btn-sm btn-p" data-act="execution.saveConfig">保存</button>
-          </div>
-        </div>
-        <div class="between mt">
-          <div class="tiny">扫描会按实例启动时的快照执行；生产环境可用 cron 调用同接口或
-            <code>scripts/run_escalations.py</code></div>
-          <button class="btn-sm" data-act="execution.runEscalation">运行升级扫描</button>
-        </div>
-      </div>
-      <div class="card">
+    const processSelect = `
+      <select class="sel" id="exConfigProcess" data-act="execution.configProcess">
+        ${d.processes.map((p) => `<option value="${p.id}"${
+          cfgProcess && p.id === cfgProcess.id ? ' selected' : ''}>L${p.level} ${esc(p.code)} ${esc(p.name)}${
+          p.can_start
+            ? ' · 已发布 v' + (p.published_version || p.model_version || 0)
+            : ' · 未发布'}</option>`).join('') || '<option value="">暂无可配置流程</option>'}
+      </select>`;
+
+    if (['forms', 'assign', 'sla', 'process', 'ready'].includes(params.focus)) {
+      state.execution.configStep = params.focus;
+    }
+    const configStep = CONFIG_STEPS.some((s) => s.id === ex.configStep)
+      ? ex.configStep
+      : 'process';
+    ex.configStep = configStep;
+    const stepIdx = CONFIG_STEPS.findIndex((s) => s.id === configStep);
+    const stepMeta = CONFIG_STEPS[stepIdx] || CONFIG_STEPS[0];
+
+    const assignCount = (d.assignments || []).filter(
+      (n) => n.default_assignee_user_id || n.role || n.org_unit_id).length;
+    const formCount = (d.forms || []).length;
+    const routeMatchCount = (d.modelEdges || state.executionModelEdges || [])
+      .filter((e) => (e.match_conditions && e.match_conditions.length) || e.is_default).length;
+    const hasSla = d.config && (
+      d.config.default_task_due_hours != null || d.config.default_escalation_hours != null);
+
+    const leftNav = CONFIG_STEPS.map((s, i) => {
+      const on = s.id === configStep ? ' on' : '';
+      const done = i < stepIdx ? ' done' : '';
+      return `<div class="cfg-step-row">
+        <button type="button" class="cfg-step${on}${done}"
+          data-act="execution.configStep" data-step="${s.id}">
+          <span class="cfg-step-n">${s.n}</span>
+          <span class="cfg-step-t">${s.title}</span>
+        </button>
+        ${tipHelp(s.tip, s.title)}
+      </div>`;
+    }).join('');
+
+    let midBody = '';
+    if (configStep === 'process') {
+      midBody = `
+        <h3 style="margin:0 0 8px">选流程${tipHelp(PATH_TIPS.configScope, '范围说明')}</h3>
+        <div class="field"><label>当前配置流程 *</label>${processSelect}</div>
+        <div class="note mt">切换流程会加载该流程的分派 / 任务表单 / SLA；分支在设计器。互不影响。</div>
+        ${cfgProcess ? readinessHtml(cfgProcess) : ''}`;
+    } else if (configStep === 'assign') {
+      midBody = `
         <div class="between mb">
-          <div><h3 style="margin:0">节点分派</h3>
-            <div class="desc" style="margin:2px 0 0">角色/组织作为候选范围；默认处理人优先直接指派；
-              节点时限与升级覆盖流程默认</div></div>
+          <h3 style="margin:0">节点分派${tipHelp(CONFIG_STEPS[1].tip, '节点分派')}</h3>
         </div>
         <table class="tbl">
           <thead><tr><th>节点</th><th>泳道 / Owner</th><th>候选角色</th><th>组织</th>
             <th>默认处理人</th><th>时限</th><th>升级</th><th></th></tr></thead>
           <tbody>${assignmentRows}</tbody>
-        </table>
-      </div>
-      <div class="card" id="execution-evidence">
+        </table>`;
+    } else if (configStep === 'forms') {
+      midBody = `
         <div class="between mb">
-          <div><h3 style="margin:0">表单与规则</h3>
-            <div class="desc" style="margin:2px 0 0">表单随实例启动冻结；规则按优先级匹配，显式下一步优先</div></div>
-          <select class="sel" data-act="execution.configProcess">
-            ${d.processes.map((p) => `<option value="${p.id}"${
-              cfgProcess && p.id === cfgProcess.id ? ' selected' : ''}>L${p.level} ${esc(p.code)} ${esc(p.name)}</option>`).join('')}
-          </select>
+          <h3 style="margin:0" id="execution-evidence">任务表单${
+            tipHelp(CONFIG_STEPS[2].tip, '任务表单')}</h3>
+          <button class="btn-sm" data-act="execution.editForm">+ 新建任务表单</button>
         </div>
-        <div class="grid g2" style="align-items:start">
-          <div>
-            <div class="between mb"><h3 style="margin:0">表单定义</h3>
-              <button class="btn-sm" data-act="execution.editForm">+ 新建表单</button></div>
-            <table class="tbl">
-              <thead><tr><th>节点</th><th>名称</th><th>字段</th><th>状态</th><th></th></tr></thead>
-              <tbody>${formRows}</tbody>
-            </table>
-          </div>
-          <div>
-            <div class="between mb"><h3 style="margin:0">分支规则</h3>
-              <button class="btn-sm" data-act="execution.editRule">+ 新建规则</button></div>
-            <table class="tbl">
-              <thead><tr><th>节点</th><th>规则</th><th>目标</th><th>优先级</th><th></th></tr></thead>
-              <tbody>${ruleRows}</tbody>
-            </table>
-          </div>
+        <div class="note mb">「表单」是<strong>节点待办输入模板</strong>（非 Excel）。
+          字段值进快照，供<strong>设计器出边匹配</strong>与审计使用。
+          ${tipHelp(
+            '分支路由请在设计器选中连线配置「运行匹配条件」后发布；'
+            + '本页不再把规则当作一等配置。旧 process_rule 仅过渡兜底。',
+            '设计定语义')}</div>
+        <table class="tbl mb">
+          <thead><tr><th>节点</th><th>名称</th><th>字段</th><th>状态</th><th></th></tr></thead>
+          <tbody>${formRows}</tbody>
+        </table>
+        <div class="between mb">
+          <h3 style="margin:0">模型出口（只读）${tipHelp(
+            '来自当前设计模型出边；改路由请回设计器并重新发布。',
+            '模型出口')}</h3>
+          <button class="btn-sm" data-act="execution.goDesigner">打开设计器</button>
         </div>
+        <table class="tbl">
+          <thead><tr><th>从</th><th>匹配 / 说明</th><th>到</th><th></th></tr></thead>
+          <tbody>${routeRows}</tbody>
+        </table>
+        ${legacyRuleCount
+          ? `<div class="tiny muted mt">仍有 ${legacyRuleCount} 条旧执行规则（过渡兜底）；`
+            + '新流程请只用设计器出边。</div>'
+          : ''}`;
+    } else if (configStep === 'sla') {
+      midBody = `
+        <div class="between mb">
+          <h3 style="margin:0">任务时限与升级${tipHelp(CONFIG_STEPS[3].tip, '时限与升级')}</h3>
+        </div>
+        <div class="gap mb" style="flex-wrap:wrap">
+          <input class="sel" id="exDueHours" type="number" min="0" max="8760"
+            style="width:120px" placeholder="时限（小时）"
+            value="${d.config && d.config.default_task_due_hours !== null
+              ? d.config.default_task_due_hours : ''}">
+          <input class="sel" id="exEscHours" type="number" min="0" max="8760"
+            style="width:120px" placeholder="升级（小时）"
+            value="${d.config && d.config.default_escalation_hours !== null
+              ? d.config.default_escalation_hours : ''}">
+          <select class="sel" id="exEscUser">
+            <option value="">不自动升级</option>${escUserOpts}</select>
+          <button class="btn-sm btn-p" data-act="execution.saveConfig">保存</button>
+          <button class="btn-sm" data-act="execution.runEscalation">运行升级扫描</button>
+        </div>
+        <div class="tiny muted">扫描按实例启动快照执行；生产可用 cron 或
+          <code>scripts/run_escalations.py</code></div>`;
+    } else {
+      midBody = `
+        <h3 style="margin:0 0 8px">就绪检查${tipHelp(CONFIG_STEPS[4].tip, '就绪检查')}</h3>
+        ${cfgProcess ? readinessHtml(cfgProcess) : '<div class="empty">请先选择流程</div>'}
+        <table class="tbl mt">
+          <thead><tr><th>检查项</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>已发布到运行时</td><td>${cfgProcess && cfgProcess.can_start
+              ? '<span class="tag t-grn">通过</span>' : '<span class="tag t-red">未通过</span>'}</td></tr>
+            <tr><td>节点分派（建议）</td><td>${assignCount
+              ? `<span class="tag t-grn">${assignCount} 个节点已配</span>`
+              : '<span class="tag t-yel">未配（将进公共队列）</span>'}</td></tr>
+            <tr><td>任务表单（建议）</td><td>${formCount
+              ? `<span class="tag t-grn">${formCount} 份</span>`
+              : '<span class="tag t-yel">未配</span>'}</td></tr>
+            <tr><td>出边匹配（设计器）</td><td>${routeMatchCount
+              ? `<span class="tag t-grn">${routeMatchCount} 条</span>`
+              : '<span class="tag t-gry">无（单出边或人工选）</span>'}</td></tr>
+            <tr><td>时限 / 升级（建议）</td><td>${hasSla
+              ? '<span class="tag t-grn">已设</span>'
+              : '<span class="tag t-gry">未设</span>'}</td></tr>
+          </tbody>
+        </table>
+        <div class="gap mt">
+          <button class="btn btn-p" data-act="execution.startModal"${
+            cfgProcess && cfgProcess.can_start && canWrite() ? '' : ' disabled'}>+ 启动流程</button>
+          ${!cfgProcess || !cfgProcess.can_start
+            ? '<button class="btn btn-g" data-act="execution.goDesigner">去设计器发布</button>' : ''}
+        </div>`;
+    }
+
+    const rightPanel = `
+      <div class="cfg-side-card">
+        <div class="tiny muted mb">当前流程</div>
+        <div><b>${cfgProcess ? esc(cfgProcess.code) : '—'}</b></div>
+        <div class="tiny">${cfgProcess ? esc(cfgProcess.name) : '未选择'}</div>
+        <div class="mt">${cfgProcess
+          ? `<span class="tag ${cfgProcess.can_start ? 't-grn' : 't-yel'}">${
+            cfgProcess.can_start ? '已发布 v' + (cfgProcess.published_version || 0) : '未发布'}</span>`
+          : ''}</div>
+      </div>
+      <div class="cfg-side-card">
+        <div class="tiny muted mb">推荐顺序</div>
+        <ol class="cfg-side-ol">
+          <li>选流程</li>
+          <li>节点分派</li>
+          <li>任务表单</li>
+          <li>时限与升级</li>
+          <li>就绪后启动</li>
+        </ol>
+        <div class="tiny muted">路由在设计器出边；此处只补运行绑定。</div>
+      </div>
+      <div class="cfg-side-card">
+        <div class="tiny muted mb">本步</div>
+        <div><b>${stepMeta.n}. ${esc(stepMeta.title)}</b></div>
+        <div class="tiny mt">${esc(stepMeta.tip)}</div>
+      </div>`;
+
+    const configPane = !canManage()
+      ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
+      : !d.processes.length
+        ? '<div class="card"><div class="empty">还没有可配置的流程。请先在设计器建模。</div></div>'
+      : `
+      <div class="cfg-layout">
+        <aside class="cfg-left">
+          <div class="cfg-left-title">配置步骤${
+            tipHelp(PATH_TIPS.config, '运行配置说明')}</div>
+          <div class="cfg-steps">${leftNav}</div>
+        </aside>
+        <section class="cfg-mid card">
+          ${midBody}
+          <div class="between mt cfg-mid-foot">
+            <button class="btn btn-g" data-act="execution.configPrev"${
+              stepIdx <= 0 ? ' disabled' : ''}>上一步</button>
+            <button class="btn btn-p" data-act="execution.configNext"${
+              stepIdx >= CONFIG_STEPS.length - 1 ? ' disabled' : ''}>下一步</button>
+          </div>
+        </section>
+        <aside class="cfg-right">${rightPanel}</aside>
       </div>`;
 
     const inboundRows = (d.inboundHooks || []).map((h) => `
@@ -417,18 +687,27 @@ const renderExecution = () => {
         </table>
       </div>`;
 
+    const startableCount = (d.processes || []).filter((p) => p.can_start).length;
+    const startReady = startableCount > 0;
     viewEl().innerHTML = `
-      <div class="card page-head">
-        <div class="between">
-          <div><h2>流程执行<span class="module-badge">运行时 · 实例与任务</span></h2>
-            <div class="desc">运行已建模流程的实例 · 认领任务 · 推进到下一节点；改善项目进度在「流程项目组合」维护</div></div>
-          <div class="gap">
-            <a class="link-btn" data-act="execution.goProjects">改善项目进度 →</a>
-            <button class="btn btn-p" id="execStartBtn"
-              data-act="execution.startModal"${canWrite() ? '' : ' disabled'}>+ 启动流程</button>
+      <div class="card page-head exec-head">
+        <div class="exec-head-row">
+          <div class="exec-head-left">
+            <h2>流程执行<span class="module-badge">运行时</span>${
+              tipHelp(PATH_TIPS.page, '流程执行说明')}</h2>
+            ${tabs}
+          </div>
+          <div class="exec-head-right">
+            <button class="btn ${startReady ? 'btn-p' : 'btn-g'}" id="execStartBtn"
+              data-act="execution.startModal"${canWrite() ? '' : ' disabled'}
+              title="${startReady
+                ? '启动已发布流程的新实例'
+                : '没有可启动流程：请先在设计器发布到运行时'}">+ 启动流程</button>
+            <span class="tiny muted">${startReady
+              ? `${startableCount} 条可启动`
+              : '暂无可启动'}</span>
           </div>
         </div>
-        <div class="mt">${tabs}</div>
       </div>
       ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : ex.tab === 'integrations' ? integrationsPane : taskPane}`;
 
@@ -467,12 +746,50 @@ function setExecutionFilter(filter) {
   RENDERERS.execution();
 }
 
+const CONFIG_STEPS = [
+  {
+    id: 'process', n: '1', title: '选流程',
+    tip: '先锁定配置上下文。运行配置按流程各自一份，不是全局共用。',
+  },
+  {
+    id: 'assign', n: '2', title: '节点分派',
+    tip: '先定谁能干：候选角色 / 组织 / 默认处理人。不配则进公共队列。',
+  },
+  {
+    id: 'forms', n: '3', title: '任务表单',
+    tip: '任务表单＝节点待办字段模板（非 Excel）。分支路由以设计器出边为准；'
+      + '本步只配表单，并只读查看已发布模型出口。',
+  },
+  {
+    id: 'sla', n: '4', title: '时限与升级',
+    tip: '最后定 SLA：流程默认时限与升级；节点可覆盖。生产用 cron 扫描。',
+  },
+  {
+    id: 'ready', n: '5', title: '就绪检查',
+    tip: '核对已发布与建议项，再启动实例。发布在设计器完成。',
+  },
+];
+
 function setExecutionConfigProcess(processId) {
   const pid = Number(processId);
   state.execution.configProcess = pid;
   state.execution.tab = 'config';
   setUrlState('execution', { process: pid, tab: 'config' }, { push: true });
   RENDERERS.execution();
+}
+
+function setExecutionConfigStep(step) {
+  const id = CONFIG_STEPS.some((s) => s.id === step) ? step : 'process';
+  state.execution.configStep = id;
+  state.execution.tab = 'config';
+  RENDERERS.execution();
+}
+
+function advanceConfigStep(delta) {
+  const cur = state.execution.configStep || 'process';
+  const idx = CONFIG_STEPS.findIndex((s) => s.id === cur);
+  const next = CONFIG_STEPS[Math.max(0, Math.min(CONFIG_STEPS.length - 1, idx + delta))];
+  if (next) setExecutionConfigStep(next.id);
 }
 
 async function saveExecutionConfig() {
@@ -544,7 +861,7 @@ function openAssignmentModal(nodeKey) {
       ${node.lane ? ' · 泳道 ' + esc(node.lane) : ''}</div>
     <div class="field"><label>候选角色</label>
       <select id="naRole"><option value="">不限角色</option>${roles}</select>
-      <div class="hint">公共任务认领时，账号角色必须匹配； MANAGER+ 始终可处理</div></div>
+      <div class="hint">公共任务接办时账号角色须匹配；MANAGER+ 始终可处理</div></div>
     <div class="field"><label>限定组织</label>
       <select id="naOrg"><option value="">不限组织</option>${orgs}</select>
       <div class="hint">账号所属组织须为该组织或其下级</div></div>
@@ -831,7 +1148,104 @@ async function retryDelivery(deliveryId) {
   }
 }
 
-/* -------------------------------------------------- 表单定义 */
+/* -------------------------------------------------- 表单定义
+ *
+ * 行业常见做法：界面用「字段清单」表格编辑（显示名 / 类型 / 必填 / 选项），
+ * 保存时序列化为 JSON 存库；不要求业务人员手写 JSON。
+ */
+
+const FORM_FIELD_TYPES = [
+  { v: 'text', l: '单行文本' },
+  { v: 'textarea', l: '多行文本' },
+  { v: 'number', l: '数字' },
+  { v: 'date', l: '日期' },
+  { v: 'select', l: '下拉选择' },
+  { v: 'checkbox', l: '勾选' },
+];
+
+function formFieldTypeOptions(selected) {
+  return FORM_FIELD_TYPES.map((t) =>
+    `<option value="${t.v}"${t.v === selected ? ' selected' : ''}>${t.l}</option>`).join('');
+}
+
+function formFieldRowHtml(field) {
+  const f = field || {};
+  const type = f.type || 'text';
+  const opts = Array.isArray(f.options) ? f.options.join('，') : '';
+  const optsDisabled = type === 'select' ? '' : ' disabled';
+  return `<tr class="ef-field-row">
+    <td><input class="ef-label" value="${esc(f.label || '')}" placeholder="如：是否通过"></td>
+    <td><select class="sel ef-type" data-act="execution.formFieldType">
+      ${formFieldTypeOptions(type)}</select></td>
+    <td class="ef-req-cell"><label class="ef-check">
+      <input type="checkbox" class="ef-req"${f.required ? ' checked' : ''}>必填</label></td>
+    <td><input class="ef-opts" value="${esc(opts)}" placeholder="是，否"
+      title="仅下拉：选项用逗号或顿号分隔"${optsDisabled}></td>
+    <td><input class="ef-key" value="${esc(f.key || '')}" placeholder="如 approved"
+      title="分支规则引用名，建议英文/拼音"></td>
+    <td><button type="button" class="btn-sm" data-act="execution.removeFormField">删除</button></td>
+  </tr>`;
+}
+
+function syncFormFieldOptions(typeEl) {
+  const row = typeEl.closest('tr');
+  if (!row) return;
+  const opts = row.querySelector('.ef-opts');
+  if (!opts) return;
+  const isSelect = typeEl.value === 'select';
+  opts.disabled = !isSelect;
+  if (!isSelect) opts.value = '';
+}
+
+function addFormFieldRow() {
+  const body = document.getElementById('efFieldBody');
+  if (!body) return;
+  body.insertAdjacentHTML('beforeend', formFieldRowHtml({
+    key: '', label: '', type: 'text', required: false,
+  }));
+}
+
+function removeFormFieldRow(el) {
+  const body = document.getElementById('efFieldBody');
+  const row = el.closest('tr');
+  if (!body || !row) return;
+  if (body.querySelectorAll('tr.ef-field-row').length <= 1) {
+    return toast('至少保留一个字段', true);
+  }
+  row.remove();
+}
+
+function collectFormFieldsFromDom() {
+  const rows = document.querySelectorAll('#efFieldBody tr.ef-field-row');
+  const fields = [];
+  const keys = new Set();
+  for (const row of rows) {
+    const label = (row.querySelector('.ef-label')?.value || '').trim();
+    let key = (row.querySelector('.ef-key')?.value || '').trim();
+    const type = row.querySelector('.ef-type')?.value || 'text';
+    const required = !!(row.querySelector('.ef-req')?.checked);
+    const optsRaw = (row.querySelector('.ef-opts')?.value || '').trim();
+    if (!label && !key) continue;
+    if (!key) {
+      return { error: `字段「${label || '未命名'}」缺少引用名（供分支规则使用）` };
+    }
+    if (keys.has(key)) {
+      return { error: `引用名重复：${key}` };
+    }
+    keys.add(key);
+    const item = { key, label: label || key, type, required };
+    if (type === 'select') {
+      const options = optsRaw.split(/[,，、;；|]/).map((s) => s.trim()).filter(Boolean);
+      if (!options.length) {
+        return { error: `下拉字段「${label || key}」请填写选项（如：是，否）` };
+      }
+      item.options = options;
+    }
+    fields.push(item);
+  }
+  if (!fields.length) return { error: '请至少定义一个字段' };
+  return { fields };
+}
 
 function editFormModal(formId) {
   const forms = state.executionForms || [];
@@ -839,18 +1253,40 @@ function editFormModal(formId) {
   const fields = form ? form.fields : [
     { key: 'approved', label: '是否通过', type: 'select', required: true, options: ['是', '否'] },
   ];
-  openModal(form ? '编辑表单 · ' + form.name : '新建表单', `
+  const rows = (fields.length ? fields : [{ type: 'text' }]).map(formFieldRowHtml).join('');
+  openModal(form ? '编辑任务表单 · ' + form.name : '新建任务表单', `
+    <div class="note">按日常方式逐行定义待办字段；保存后后台存为 JSON。
+      引用名供分支规则使用（如 approved eq 是）。${tipHelp(
+      '不是 Excel 工作表。标准文件里的 SOP/空白表另挂；本处字段在任务处理界面渲染。',
+      '任务表单定位')}</div>
     <div class="row2">
-      <div class="field"><label>节点 key</label>
-        <input id="efNode" value="${esc(form ? form.node_key : '')}"
-          placeholder="如 n1；留空表示流程默认表单"${form ? ' readonly' : ''}></div>
+      <div class="field"><label>绑定节点${tipHelp(
+        '选节点名称即可；值为设计器 node key。选「流程默认」表示节点无专属表单时回退用它。',
+        '绑定节点')}</label>
+        <select class="sel" id="efNode"${form ? ' disabled' : ''}>
+          ${processNodeSelectHtml(form ? form.node_key : '', {
+            allowEmpty: true, emptyLabel: '（流程默认表单）',
+          })}</select></div>
       <div class="field"><label>表单名称 *</label>
         <input id="efName" value="${esc(form ? form.name : '')}" placeholder="如：需求审批"></div>
     </div>
-    <div class="field"><label>字段定义（JSON）*</label>
-      <textarea id="efFields" style="min-height:220px">${esc(JSON.stringify(fields, null, 2))}</textarea>
-      <div class="hint">type 支持 text / textarea / number / date / select / checkbox；
-        select 必须提供 options</div></div>
+    <div class="field mb">
+      <div class="between mb">
+        <label style="margin:0">字段清单 *${tipHelp(
+          '显示名给人看；类型决定控件；下拉须填选项；引用名给规则/接口用，建议英文或拼音。',
+          '字段清单')}</label>
+        <button type="button" class="btn-sm" data-act="execution.addFormField">+ 添加字段</button>
+      </div>
+      <div class="ef-fields-wrap">
+        <table class="tbl ef-fields">
+          <thead><tr>
+            <th>显示名</th><th>类型</th><th>必填</th><th>选项</th><th>引用名</th><th></th>
+          </tr></thead>
+          <tbody id="efFieldBody">${rows}</tbody>
+        </table>
+      </div>
+      <div class="hint">选项仅「下拉选择」需要，多个用逗号分隔。引用名勿与同表其他字段重复。</div>
+    </div>
     <div class="field"><label>状态</label>
       <select id="efActive">
         <option value="true"${!form || form.is_active ? ' selected' : ''}>启用</option>
@@ -858,18 +1294,17 @@ function editFormModal(formId) {
       </select></div>`,
     `<button class="btn btn-g" data-act="execution.close">取消</button>
      <button class="btn btn-p" data-act="execution.submitForm"
-       data-id="${form ? form.id : ''}">保存</button>`);
+       data-id="${form ? form.id : ''}">保存</button>`,
+    true);
 }
 
 async function submitForm(formId) {
   const nodeKey = document.getElementById('efNode').value.trim();
   const name = document.getElementById('efName').value.trim();
   if (!name) return toast('请填写表单名称', true);
-  let fields;
-  try { fields = JSON.parse(document.getElementById('efFields').value); } catch (e) {
-    return toast('字段定义不是合法 JSON', true);
-  }
-  if (!Array.isArray(fields)) return toast('字段定义必须是数组', true);
+  const collected = collectFormFieldsFromDom();
+  if (collected.error) return toast(collected.error, true);
+  const fields = collected.fields;
   const active = document.getElementById('efActive').value === 'true';
   try {
     if (formId) {
@@ -884,7 +1319,7 @@ async function submitForm(formId) {
       });
     }
     closeModal();
-    toast('表单已保存');
+    toast('任务表单已保存');
     RENDERERS.execution();
   } catch (e) {
     toast(e.message, true);
@@ -892,39 +1327,204 @@ async function submitForm(formId) {
 }
 
 async function deleteForm(formId) {
-  const ok = await confirmDialog('确定删除这个表单定义？已启动实例使用快照，不受影响。',
+  const ok = await confirmDialog('确定删除这个任务表单？已启动实例使用快照，不受影响。',
     { danger: true, okText: '删除' });
   if (!ok) return;
   try {
     await DEL('/execution/forms/' + formId);
-    toast('表单已删除');
+    toast('任务表单已删除');
     RENDERERS.execution();
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-/* -------------------------------------------------- 分支规则 */
+/* -------------------------------------------------- 分支规则
+ *
+ * 条件用「字段 / 运算 / 值」行编辑，保存时序列化为 JSON；空清单＝兜底规则。
+ */
+
+const RULE_OPS = [
+  { v: 'eq', l: '等于' },
+  { v: 'ne', l: '不等于' },
+  { v: 'gt', l: '大于' },
+  { v: 'gte', l: '大于等于' },
+  { v: 'lt', l: '小于' },
+  { v: 'lte', l: '小于等于' },
+  { v: 'in', l: '属于（多值）' },
+  { v: 'contains', l: '包含' },
+  { v: 'truthy', l: '为真 / 已填' },
+  { v: 'falsy', l: '为假 / 空' },
+];
+
+function ruleOpOptions(selected) {
+  return RULE_OPS.map((o) =>
+    `<option value="${o.v}"${o.v === selected ? ' selected' : ''}>${o.l}</option>`).join('');
+}
+
+function formFieldKeyHints() {
+  const keys = new Set();
+  for (const form of state.executionForms || []) {
+    for (const f of form.fields || []) {
+      if (f && f.key) keys.add(String(f.key));
+    }
+  }
+  return [...keys];
+}
+
+/** 当前配置流程的模型节点（来自分派接口，含 name / node_key）。 */
+function processNodes() {
+  return state.executionAssignments || [];
+}
+
+/**
+ * 节点下拉：展示「名称（key）」，value 仍是 node_key。
+ * allowEmpty + emptyLabel：可选空项（如表单默认）。
+ */
+function processNodeSelectHtml(selected, opts = {}) {
+  const nodes = processNodes();
+  const keys = new Set(nodes.map((n) => n.node_key));
+  let html = '';
+  if (opts.allowEmpty) {
+    html += `<option value=""${selected === '' || selected == null ? ' selected' : ''}>${
+      esc(opts.emptyLabel || '（流程默认）')}</option>`;
+  } else {
+    html += `<option value="" disabled${selected ? '' : ' selected'}>请选择节点</option>`;
+  }
+  if (selected && selected !== '' && !keys.has(selected)) {
+    html += `<option value="${esc(selected)}" selected>${esc(selected)}（模型中已不存在）</option>`;
+  }
+  html += nodes.map((n) =>
+    `<option value="${esc(n.node_key)}"${n.node_key === selected ? ' selected' : ''}>${
+      esc(n.name)}（${esc(n.node_key)}）</option>`).join('');
+  return html;
+}
+
+function ruleCondValueNeedsInput(op) {
+  return op !== 'truthy' && op !== 'falsy';
+}
+
+function formatRuleCondValue(op, value) {
+  if (!ruleCondValueNeedsInput(op)) return '';
+  if (op === 'in' && Array.isArray(value)) return value.map(String).join('，');
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function ruleCondRowHtml(cond) {
+  const c = cond || {};
+  const op = c.op || 'eq';
+  const needs = ruleCondValueNeedsInput(op);
+  const val = formatRuleCondValue(op, c.value);
+  const listAttr = ' list="erFieldHints"';
+  return `<tr class="er-cond-row">
+    <td><input class="er-field" value="${esc(c.field || '')}" placeholder="如 approved"${listAttr}></td>
+    <td><select class="sel er-op" data-act="execution.ruleCondOp">${ruleOpOptions(op)}</select></td>
+    <td><input class="er-value" value="${esc(val)}" placeholder="${
+      op === 'in' ? '是，否' : '如：是'}"${needs ? '' : ' disabled'}></td>
+    <td><button type="button" class="btn-sm" data-act="execution.removeRuleCond">删除</button></td>
+  </tr>`;
+}
+
+function syncRuleCondValue(opEl) {
+  const row = opEl.closest('tr');
+  if (!row) return;
+  const val = row.querySelector('.er-value');
+  if (!val) return;
+  const needs = ruleCondValueNeedsInput(opEl.value);
+  val.disabled = !needs;
+  if (!needs) val.value = '';
+  else if (opEl.value === 'in') val.placeholder = '多值用逗号，如 是，否';
+  else val.placeholder = '如：是';
+}
+
+function addRuleCondRow() {
+  const body = document.getElementById('erCondBody');
+  if (!body) return;
+  body.insertAdjacentHTML('beforeend', ruleCondRowHtml({ field: '', op: 'eq', value: '' }));
+}
+
+function removeRuleCondRow(el) {
+  const row = el.closest('tr');
+  if (row) row.remove();
+}
+
+function collectRuleConditionsFromDom() {
+  const rows = document.querySelectorAll('#erCondBody tr.er-cond-row');
+  const conditions = [];
+  for (const row of rows) {
+    const field = (row.querySelector('.er-field')?.value || '').trim();
+    const op = row.querySelector('.er-op')?.value || 'eq';
+    const raw = (row.querySelector('.er-value')?.value || '').trim();
+    if (!field && !raw && op === 'eq') continue;
+    if (!field) return { error: '条件行缺少字段引用名' };
+    const item = { field, op, value: null };
+    if (ruleCondValueNeedsInput(op)) {
+      if (op === 'in') {
+        item.value = raw.split(/[,，、;；|]/).map((s) => s.trim()).filter(Boolean);
+        if (!item.value.length) {
+          return { error: `字段「${field}」的「属于」请填写至少一个值` };
+        }
+      } else if (op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte') {
+        if (raw === '') return { error: `字段「${field}」请填写比较值` };
+        const n = Number(raw);
+        item.value = Number.isFinite(n) ? n : raw;
+      } else {
+        item.value = raw;
+      }
+    }
+    conditions.push(item);
+  }
+  return { conditions };
+}
 
 function editRuleModal(ruleId) {
   const rules = state.executionRules || [];
   const rule = ruleId ? rules.find((r) => r.id === ruleId) : null;
-  const conditions = rule ? rule.conditions : [{ field: 'approved', op: 'eq', value: '是' }];
+  const conditions = rule
+    ? (Array.isArray(rule.conditions) ? rule.conditions : [])
+    : [{ field: 'approved', op: 'eq', value: '是' }];
+  const rows = conditions.length
+    ? conditions.map(ruleCondRowHtml).join('')
+    : '';
+  const hints = formFieldKeyHints().map((k) => `<option value="${esc(k)}">`).join('');
+  const defaultFrom = rule ? rule.node_key
+    : (processNodes().find((n) => n.node_key === 'n4') || processNodes()[0] || {}).node_key || '';
   openModal(rule ? '编辑规则 · ' + rule.name : '新建分支规则', `
+    <div class="note">按<strong>任务表单字段</strong>取值决定下一节点（按名称选节点，后台仍存 key）。
+      条件逐行填写，保存后存为 JSON。${tipHelp(
+        '字段须与任务表单「引用名」一致。不写任何条件＝兜底（总是命中）。多条规则按优先级数字越小越先匹配。',
+        '分支规则说明')}</div>
+    <datalist id="erFieldHints">${hints}</datalist>
     <div class="row2">
-      <div class="field"><label>节点 key *</label>
-        <input id="erNode" value="${esc(rule ? rule.node_key : 'n4')}"${rule ? ' readonly' : ''}></div>
+      <div class="field"><label>生效节点 *${tipHelp(
+        '规则在哪个节点求值；下拉显示名称，值为节点 key。', '生效节点')}</label>
+        <select class="sel" id="erNode"${rule ? ' disabled' : ''}>
+          ${processNodeSelectHtml(defaultFrom)}</select></div>
       <div class="field"><label>规则名称 *</label>
         <input id="erName" value="${esc(rule ? rule.name : '')}" placeholder="如：审批通过 → 采购计划"></div>
     </div>
-    <div class="field"><label>条件（JSON 数组）</label>
-      <textarea id="erConditions" style="min-height:150px">${esc(JSON.stringify(conditions, null, 2))}</textarea>
-      <div class="hint">全部条件满足才命中；空数组表示兜底。op 支持
-        eq/ne/gt/gte/lt/lte/in/contains/truthy/falsy</div></div>
+    <div class="field mb">
+      <div class="between mb">
+        <label style="margin:0">条件（全部满足才命中）${tipHelp(
+          '空清单表示兜底规则。运算选「为真/为假」时无需填值；「属于」可填多个值。',
+          '条件说明')}</label>
+        <button type="button" class="btn-sm" data-act="execution.addRuleCond">+ 添加条件</button>
+      </div>
+      <div class="ef-fields-wrap">
+        <table class="tbl ef-fields er-conds">
+          <thead><tr><th>字段引用名</th><th>运算</th><th>值</th><th></th></tr></thead>
+          <tbody id="erCondBody">${rows}</tbody>
+        </table>
+      </div>
+      <div class="hint">字段引用名可从已建任务表单提示中选取；与 Excel 公式无关。</div>
+    </div>
     <div class="row3">
-      <div class="field"><label>目标节点 *</label>
-        <input id="erTarget" value="${esc(rule ? rule.target_node_key : '')}" placeholder="n5"></div>
-      <div class="field"><label>优先级</label>
+      <div class="field"><label>目标节点 *${tipHelp(
+        '命中后推进到的下一节点；选项为「名称（key）」。', '目标节点')}</label>
+        <select class="sel" id="erTarget">
+          ${processNodeSelectHtml(rule ? rule.target_node_key : '')}</select></div>
+      <div class="field"><label>优先级${tipHelp('数字越小越优先；同优先级按创建顺序。', '优先级')}</label>
         <input id="erPriority" type="number" value="${rule ? rule.priority : 100}"></div>
       <div class="field"><label>状态</label>
         <select id="erActive">
@@ -934,7 +1534,8 @@ function editRuleModal(ruleId) {
     </div>`,
     `<button class="btn btn-g" data-act="execution.close">取消</button>
      <button class="btn btn-p" data-act="execution.submitRule"
-       data-id="${rule ? rule.id : ''}">保存</button>`);
+       data-id="${rule ? rule.id : ''}">保存</button>`,
+    true);
 }
 
 async function submitRule(ruleId) {
@@ -944,11 +1545,9 @@ async function submitRule(ruleId) {
   const priority = Number(document.getElementById('erPriority').value || 100);
   const active = document.getElementById('erActive').value === 'true';
   if (!nodeKey || !name || !target) return toast('节点、名称、目标节点都必填', true);
-  let conditions;
-  try { conditions = JSON.parse(document.getElementById('erConditions').value || '[]'); } catch (e) {
-    return toast('条件不是合法 JSON', true);
-  }
-  if (!Array.isArray(conditions)) return toast('条件必须是数组', true);
+  const collected = collectRuleConditionsFromDom();
+  if (collected.error) return toast(collected.error, true);
+  const conditions = collected.conditions;
   try {
     if (ruleId) {
       await PATCH('/execution/rules/' + ruleId, {
@@ -986,14 +1585,9 @@ async function deleteRule(ruleId) {
   }
 }
 
+/** 兼容旧入口：认领不再单独成步，直接打开（打开时自动接办）。 */
 async function claimTask(taskId) {
-  try {
-    await POST('/execution/tasks/' + taskId + '/claim', {});
-    toast('任务已认领');
-    RENDERERS.execution();
-  } catch (e) {
-    toast(e.message, true);
-  }
+  return openTask(taskId);
 }
 
 async function startInstanceModal(initialProcessId = null) {
@@ -1011,34 +1605,63 @@ async function startInstanceModal(initialProcessId = null) {
     openModal('加载失败', `<div class="errbar"><div>${esc(e.message)}</div></div>`);
     return;
   }
+  processes = (processes || []).map(normalizeExecutable);
+  state.executionProcesses = processes;
   state.executionAssignees = assignees;
   const wanted = Number(initialProcessId) || null;
-  const selectedId = wanted && processes.some((p) => p.id === wanted)
-    ? wanted
-    : (processes[0] ? processes[0].id : null);
+  const startable = processes.filter((p) => p.can_start);
+  const preferred = wanted && processes.find((p) => p.id === wanted);
+  const selectedId = preferred && preferred.can_start
+    ? preferred.id
+    : (startable[0] ? startable[0].id
+      : (wanted && processes.some((p) => p.id === wanted)
+        ? wanted
+        : (processes[0] ? processes[0].id : null)));
+  const selected = processes.find((p) => p.id === selectedId);
   const processOpts = processes.map((p) =>
-    `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>L${p.level} ${esc(p.code)} ${esc(p.name)}（${p.node_count} 节点）</option>`
+    `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>L${p.level} ${
+      esc(p.code)} ${esc(p.name)} · ${p.can_start
+      ? '已发布 v' + (p.published_version || p.model_version || 0) : '未发布'}（${
+      p.node_count} 节点）</option>`
   ).join('');
   const projectOpts = projects.items.map((p) =>
     `<option value="${p.id}">${esc(p.code)} ${esc(p.name)}</option>`
   ).join('');
   openModal('启动流程实例', `
+    <div class="between mb" style="align-items:center">
+      <div class="tiny muted">上线路径${tipHelp(PATH_TIPS.start, '启动说明')}</div>
+    </div>
+    ${execPathGuideHtml('start')}
+    <div id="exReady">${selected ? readinessHtml(selected) : ''}</div>
     <div class="field"><label>流程 *</label>
       <select id="exProcess" data-act="execution.loadStartNodes">${processOpts || '<option value="">没有已建模的流程</option>'}</select>
-      <div class="hint">只列出设计器里已有节点的流程</div></div>
-    <div class="field"><label>关联项目</label>
-      <select id="exProject"><option value="">不关联</option>${projectOpts}</select></div>
+      <div class="hint">须已「发布到运行时」；启动后钉住该发布版本快照</div></div>
+    <div class="field"><label>关联项目（可选）</label>
+      <select id="exProject"><option value="">不关联改善项目</option>${projectOpts}</select>
+      <div class="hint">仅作追溯；不驱动项目 24 步进度</div></div>
     <div id="exAssign" class="mt"></div>
     <div class="field"><label>流程变量（JSON）</label>
       <textarea id="exVars" placeholder='{"申请人":"张三","金额":10000}'>{"source":"manual"}</textarea></div>`,
     `<button class="btn btn-g" data-act="execution.close">取消</button>
-     <button class="btn btn-p" data-act="execution.submitStart">启动</button>`);
+     <button class="btn btn-p" data-act="execution.submitStart"${
+       selected && selected.can_start ? '' : ' disabled'}>启动</button>`);
   if (selectedId) loadStartNodes(selectedId);
 }
 
 async function loadStartNodes(processId) {
   const box = document.getElementById('exAssign');
+  const ready = document.getElementById('exReady');
+  const processes = (state.executionProcesses || []).map(normalizeExecutable);
+  state.executionProcesses = processes;
+  const selected = processes.find((p) => p.id === Number(processId));
+  if (ready) ready.innerHTML = selected ? readinessHtml(selected) : '';
+  const startBtn = document.querySelector('#mFoot [data-act="execution.submitStart"]');
+  if (startBtn) startBtn.disabled = !(selected && selected.can_start);
   if (!box || !processId) return;
+  if (selected && !selected.can_start) {
+    box.innerHTML = '<div class="note">须先在设计器「发布到运行时」，才能配置启动指派并启动实例。</div>';
+    return;
+  }
   box.innerHTML = '<div class="tiny">加载节点…</div>';
   try {
     const model = await GET('/processes/' + processId + '/design');
@@ -1055,11 +1678,11 @@ async function loadStartNodes(processId) {
         a.department ? ' · ' + esc(a.department) : ''}</option>`).join('');
     box.innerHTML = `
       <h3>节点处理人（可选）</h3>
-      <div class="tiny mb">不选则进入公共队列，流程管理科会收到待认领提醒。</div>
+      <div class="tiny mb">不选则进入公共队列。建议在「运行配置 → 节点分派」设默认处理人。</div>
       <div class="row2">${nodes.map((n) => `
         <div class="field">
-          <label>${esc(n.node_key)} ${esc(n.name)}
-            <div class="tiny">${esc(n.lane || '')}${
+          <label>${esc(n.name)}
+            <div class="tiny muted">${esc(n.node_key)}${n.lane ? ' · ' + esc(n.lane) : ''}${
               n.owner_role ? ' · ' + esc(n.owner_role) : ''}</div></label>
           <select class="sel" data-assign-key="${esc(n.node_key)}">
             <option value="">公共队列</option>${userOpts}
@@ -1081,6 +1704,12 @@ async function submitStartInstance() {
     try { variables = JSON.parse(raw); } catch (e) { return toast('流程变量不是合法 JSON', true); }
   }
   if (!processId) return toast('请选择流程', true);
+  const selected = (state.executionProcesses || []).find((p) => p.id === Number(processId));
+  if (selected && !selected.can_start) {
+    return toast(selected.readiness && selected.readiness[0]
+      ? selected.readiness[0]
+      : '流程尚未发布到运行时，无法启动', true);
+  }
   const assignments = {};
   document.querySelectorAll('[data-assign-key]').forEach((el) => {
     if (el.value) assignments[el.dataset.assignKey] = Number(el.value);
@@ -1133,8 +1762,17 @@ async function openTask(taskId, forceManual) {
   let events = [];
   let worklogs = [];
   try {
-    [task, events, worklogs] = await Promise.all([
-      GET('/execution/tasks/' + taskId),
+    task = await GET('/execution/tasks/' + taskId);
+    // 公共队列：打开即接办，不再要求先点「认领」
+    if (
+      canWrite()
+      && task.assignee_user_id === null
+      && task.instance_status !== 'SUSPENDED'
+      && (task.status === 'PENDING' || task.status === 'CLAIMED')
+    ) {
+      task = await POST('/execution/tasks/' + taskId + '/claim', {});
+    }
+    [events, worklogs] = await Promise.all([
       GET('/execution/tasks/' + taskId + '/events'),
       GET('/execution/tasks/' + taskId + '/worklogs'),
     ]);
@@ -1219,8 +1857,9 @@ async function openTask(taskId, forceManual) {
         <div class="field ${manualMode ? '' : 'hide'}" id="exNextWrap"><label>下一步</label>
           <select id="exNext">${options}</select></div>` : ''}
       ${(task.form_schema && task.form_schema.length)
-        ? '<div class="note">表单：' + esc(task.form_name || task.name) + tipHelp(
-          '表单在「流程执行 → 表单与规则」按流程/节点定义；节点没有专属表单时回退到流程默认表单。'
+        ? '<div class="note">任务表单：' + esc(task.form_name || task.name) + tipHelp(
+          '待办输入字段模板（非 Excel）。在「运行配置 → 任务表单」按流程/节点定义；'
+          + '分支由设计器出边匹配；节点无专属表单时回退到流程默认表单。'
           + '实例启动时冻结字段，后续改表单不影响本实例。') + '</div>' +
           renderFormFields(task.form_schema)
         : `<div class="field"><label>表单数据（JSON，可选）</label>
@@ -1307,7 +1946,7 @@ async function completeTask(taskId) {
     if (autoMode && /多个分支|next_node_key/.test(e.message)) {
       // 没有命中规则：回到同一个任务，让处理人手动选择分支
       manualBranchTask = taskId;
-      toast('没有命中分支规则，请手动指定下一步', true);
+      toast('没有命中出边条件，请手动指定下一步', true);
       closeModal();
       openTask(taskId, true);
       return;
@@ -1415,8 +2054,16 @@ async function openInstance(instanceId) {
         i.suspend_reason ? ' · ' + esc(i.suspend_reason) : ''}</div>` : ''}
     <div class="row2">
       <div class="field"><label>状态</label><input value="${esc(i.status_label)}" readonly></div>
+      <div class="field"><label>冻结模型版本</label>
+        <input value="v${i.definition_version || 0}" readonly></div>
+    </div>
+    <div class="row2">
       <div class="field"><label>当前节点</label>
-        <input value="${esc(i.current_node_name || '—')}" readonly></div>
+        <input value="${esc(i.current_node_name || '—')}${
+          i.current_node_key ? '（' + esc(i.current_node_key) + '）' : ''}" readonly></div>
+      <div class="field"><label>当前处理人 / 时限</label>
+        <input value="${esc(i.current_assignee_name || '—')}${
+          i.due_at ? ' · ' + (i.overdue ? '已超期 ' : '') + dtShort(i.due_at) : ''}" readonly></div>
     </div>
     <div class="row2">
       <div class="field"><label>发起人</label><input value="${esc(i.started_by_name || '—')}" readonly></div>
@@ -1445,6 +2092,9 @@ async function openInstance(instanceId) {
      ${canManage() && (i.status === 'RUNNING' || i.status === 'SUSPENDED')
       ? '<button class="btn btn-g" style="color:var(--bad-strong)"'
         + ` data-act="execution.cancel" data-id="${i.id}">取消实例</button>` : ''}
+     ${canManage() && (i.status === 'COMPLETED' || i.status === 'CANCELLED')
+      ? '<button class="btn btn-g" style="margin-right:auto;color:var(--bad-strong)"'
+        + ` data-act="execution.deleteInstance" data-id="${i.id}">删除实例</button>` : ''}
      <button class="btn btn-g" data-act="execution.close">关闭</button>`);
 }
 
@@ -1471,6 +2121,26 @@ async function archiveInstances() {
       {},
     );
     toast(`已归档 ${result.archived} 个实例`);
+    RENDERERS.execution();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteInstance(instanceId) {
+  if (!canManage()) return toast('需要流程管理科或管理员权限', true);
+  const row = (state.executionInstances || []).find((i) => i.id === instanceId);
+  const label = row ? row.code : ('#' + instanceId);
+  const ok = await confirmDialog(
+    `确认物理删除实例 ${label}？任务与事件一并删除，不可恢复。\n`
+      + '日常清理请优先「归档旧实例」；删除仅用于测试/垃圾终态数据。',
+    { title: '删除流程实例', okText: '删除', danger: true },
+  );
+  if (!ok) return;
+  try {
+    await DEL('/execution/instances/' + instanceId);
+    closeModal();
+    toast('已删除 ' + label);
     RENDERERS.execution();
   } catch (e) {
     toast(e.message, true);

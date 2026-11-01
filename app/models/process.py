@@ -81,6 +81,10 @@ class ProcessArch(Base):
     requires_change_request: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()
     )
+    # direct | review_required (default)
+    publish_policy: Mapped[str] = mapped_column(
+        String(32), default="review_required", server_default="review_required"
+    )
 
     children: Mapped[List["ProcessArch"]] = relationship(
         "ProcessArch",
@@ -196,7 +200,11 @@ class ProcessNode(Base):
 
 
 class NodeTool(Base):
-    """活动级工具绑定：某个流程节点推荐/要求使用哪个方法论工具。"""
+    """节点级方法工具绑定（设计证据，可选）。
+
+    计入阶段 5「表单/规则/工具」绑定计数；不作为执行待办的作业指导。
+    方法论主路径在五阶段步骤 / 工具箱；节点作业支撑用标准文件与表单。
+    """
 
     __tablename__ = "node_tool"
 
@@ -236,6 +244,8 @@ class ProcessEdge(Base):
     target_key: Mapped[str] = mapped_column(String(64))
     label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     condition: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 运行时分支匹配（设计定语义）：[{field, op, value}, ...]；空则不自动命中
+    match_conditions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     probability: Mapped[float] = mapped_column(Float, default=1.0)  # 分支发生概率 0–1
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(

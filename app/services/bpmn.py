@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -215,6 +216,9 @@ def export_bpmn(process: ProcessArch, nodes: List[ProcessNode], edges: List[Proc
             attrs["name"] = edge.label
         if edge.probability is not None and edge.probability != 1.0:
             attrs[_q(PMS_NS, "probability")] = str(edge.probability)
+        match = getattr(edge, "match_conditions", None)
+        if match:
+            attrs[_q(PMS_NS, "match")] = json.dumps(match, ensure_ascii=False)
         flow = ET.SubElement(process_el, _q(BPMN_NS, "sequenceFlow"), attrs)
         if getattr(edge, "description", None):
             doc = ET.SubElement(flow, _q(BPMN_NS, "documentation"))
@@ -500,17 +504,28 @@ def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
             probability_value = float(probability) if probability else 1.0
         except ValueError:
             probability_value = 1.0
+        match_raw = el.get(_q(PMS_NS, "match"))
+        match_conditions = None
+        if match_raw:
+            try:
+                parsed_match = json.loads(match_raw)
+                if isinstance(parsed_match, list):
+                    match_conditions = parsed_match
+            except (TypeError, ValueError, json.JSONDecodeError):
+                match_conditions = None
         edges.append(
             {
                 "source_key": source,
                 "target_key": target,
                 "label": (el.get("name") or None) and el.get("name")[:64],
                 "condition": condition[:128] if condition else None,
+                "match_conditions": match_conditions,
                 "probability": probability_value,
                 "description": _documentation(el),
                 "is_default": el.get("id") in default_flow_ids,
                 # 区分「显式为 1.0」和「XML 没写」：后者才允许用旧快照兜底
                 "_probability_explicit": probability is not None,
+                "_match_explicit": match_raw is not None,
             }
         )
 
