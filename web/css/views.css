@@ -1071,3 +1071,38 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
   .tb-detail{grid-template-columns:1fr}
   .tb-card.rec::before{position:static;align-self:flex-start;border-radius:5px}
 }
+
+/* ===== 帮助中心 ===== */
+.help-layout{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr);
+  gap:16px;align-items:start}
+.help-toc{position:sticky;top:8px;max-height:calc(100vh - 140px);overflow:auto;
+  padding:12px 10px;margin:0}
+.help-toc-group{margin-bottom:12px}
+.help-toc-label{font-size:11px;font-weight:700;color:var(--sub-2);letter-spacing:.02em;
+  padding:4px 8px 6px;text-transform:none}
+.help-toc-item{display:block;width:100%;text-align:left;border:none;background:transparent;
+  font:inherit;font-size:12.5px;color:var(--text);padding:7px 10px;border-radius:8px;
+  cursor:pointer;line-height:1.35}
+.help-toc-item:hover{background:var(--panel-hover)}
+.help-toc-item.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.help-article{margin:0;padding:18px 20px 22px}
+.help-article h2{font-size:20px;font-weight:700;letter-spacing:-.02em}
+.help-sec{margin-top:18px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.help-sec h4{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--brand)}
+.help-sec p{margin:0 0 8px;font-size:13.5px;line-height:1.65;color:var(--text)}
+.help-sec p:last-child{margin-bottom:0}
+.help-howto{margin:0;padding-left:1.25em;font-size:13.5px;line-height:1.65}
+.help-howto li{margin:0 0 6px}
+.help-related{margin-top:20px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.help-glossary{display:grid;gap:10px}
+.help-gloss-row{display:grid;grid-template-columns:minmax(100px,160px) minmax(0,1fr);
+  gap:12px;align-items:start;font-size:13px;line-height:1.55;
+  padding-bottom:10px;border-bottom:1px solid var(--line-soft)}
+.help-gloss-row:last-child{border-bottom:none;padding-bottom:0}
+.help-gloss-row b{font-size:12.5px}
+.help-gloss-row span{color:var(--sub)}
+@media(max-width:900px){
+  .help-layout{grid-template-columns:1fr}
+  .help-toc{position:static;max-height:none}
+  .help-gloss-row{grid-template-columns:1fr}
+}

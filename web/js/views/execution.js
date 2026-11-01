@@ -155,7 +155,7 @@ function readinessHtml(process) {
 let manualBranchTask = null;
 
 const renderExecution = () => {
-  const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'open', configStep: 'process' });
+  const ex = state.execution || (state.execution = { tab: 'tasks', filter: 'mine', configStep: 'process' });
   if (!ex.configStep) ex.configStep = 'process';
   const params = urlParams();
   if (params.process) {
@@ -243,7 +243,7 @@ const renderExecution = () => {
     const mine = d.tasks.filter((t) => t.assignee_user_id === me);
     const queue = d.tasks.filter((t) => t.assignee_user_id === null);
     const running = d.instances.filter((i) => i.status === 'RUNNING');
-    const filter = ex.filter || 'open';
+    const filter = ex.filter || 'mine';
     const shown = filter === 'mine' ? mine : filter === 'queue' ? queue : d.tasks;
 
     const taskRows = shown.map((t) => {
@@ -311,34 +311,35 @@ const renderExecution = () => {
     }).join('') || emptyRow(8, '还没有流程实例');
 
     // 单层导航：作业与配置同一条 seg，避免与「上线路径」双层抢视线（路径仅保留在启动弹窗）
+    const taskTabLabel = mine.length ? `待办任务 · ${mine.length}` : '待办任务';
+    const instanceTabLabel = running.length ? `流程实例 · ${running.length}` : '流程实例';
     const tabs = `
       <div class="seg exec-tabs">
-        <button class="${ex.tab === 'tasks' ? 'on' : ''}" data-act="execution.tab" data-tab="tasks">待办任务</button>
-        <button class="${ex.tab === 'instances' ? 'on' : ''}" data-act="execution.tab" data-tab="instances">流程实例</button>
+        <button class="${ex.tab === 'tasks' ? 'on' : ''}" data-act="execution.tab" data-tab="tasks"
+          title="我的待办 ${mine.length}">${esc(taskTabLabel)}</button>
+        <button class="${ex.tab === 'instances' ? 'on' : ''}" data-act="execution.tab" data-tab="instances"
+          title="运行中 ${running.length}">${esc(instanceTabLabel)}</button>
         ${canManage() ? `
         <button class="${ex.tab === 'config' ? 'on' : ''}" data-act="execution.tab" data-tab="config">运行配置</button>
         <button class="${ex.tab === 'integrations' ? 'on' : ''}"
           data-act="execution.tab" data-tab="integrations">集成</button>` : ''}
       </div>`;
 
-    const filterLabel = filter === 'mine' ? '我的待办'
-      : filter === 'queue' ? '公共队列' : '全部待办';
     const taskPane = `
-      <div class="grid g4 stat-row">
-        <button class="kpi stat${filter === 'mine' ? ' on' : ''}" data-act="execution.filter" data-filter="mine">
-          <div class="num">${mine.length}</div><div class="lab">我的待办</div></button>
-        <button class="kpi stat${filter === 'queue' ? ' on' : ''}" data-act="execution.filter" data-filter="queue">
-          <div class="num">${queue.length}</div><div class="lab">公共队列</div></button>
-        <button class="kpi stat${filter === 'open' ? ' on' : ''}" data-act="execution.filter" data-filter="open">
-          <div class="num">${d.tasks.length}</div><div class="lab">全部待办</div></button>
-        <button class="kpi stat" type="button" data-act="execution.tab" data-tab="instances"
-          title="查看流程实例">
-          <div class="num">${running.length}</div><div class="lab">运行中实例</div></button>
-      </div>
       <div class="card">
-        <div class="between mb">
-          <div><h3 style="margin:0">任务队列 · ${esc(filterLabel)}</h3>
-            <div class="desc" style="margin:2px 0 0">点上方卡片切换范围；点「处理」即接办并打开表单，分支在完成时选下一步</div></div>
+        <div class="between mb" style="align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 style="margin:0">任务队列</h3>
+            <div class="desc" style="margin:2px 0 0">默认看指派给你的；「公共」可接未认领任务。「处理」即接办并打开表单</div>
+          </div>
+          <div class="seg exec-task-filters" role="tablist" aria-label="待办范围">
+            <button type="button" class="${filter === 'mine' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="mine">我的${mine.length ? ` · ${mine.length}` : ''}</button>
+            <button type="button" class="${filter === 'queue' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="queue">公共${queue.length ? ` · ${queue.length}` : ''}</button>
+            <button type="button" class="${filter === 'open' ? 'on' : ''}"
+              data-act="execution.filter" data-filter="open">全部${d.tasks.length ? ` · ${d.tasks.length}` : ''}</button>
+          </div>
         </div>
         <table class="tbl">
           <thead><tr><th>任务</th><th>流程</th><th>候选角色</th><th>处理人</th>
@@ -351,8 +352,8 @@ const renderExecution = () => {
       <div class="card">
         <div class="between mb">
           <div><h3 style="margin:0">流程实例</h3>
-            <div class="desc" style="margin:2px 0 0">共 ${d.instances.length} 个；版本为启动时冻结的已发布模型；
-              时限取当前待办最早到期。终态可删；日常优先归档。</div></div>
+            <div class="desc" style="margin:2px 0 0">共 ${d.instances.length} 个，其中运行中 ${running.length} 个；
+              版本为启动时冻结的已发布模型；时限取当前待办最早到期。终态可删；日常优先归档。</div></div>
           ${canManage() ? `<button class="btn-sm" data-act="execution.archiveInstances">
             归档旧实例</button>` : ''}
         </div>

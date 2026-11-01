@@ -191,7 +191,15 @@ html.nav-collapsed .nav a.active::before{left:-8px}
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
 .topbar{height:64px;background:var(--panel);border-bottom:1px solid var(--line);
   display:flex;align-items:center;padding:0 26px;gap:16px}
-.topbar h1{font-size:17px;font-weight:600;flex:1}
+.topbar-title{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.topbar-title h1{font-size:17px;font-weight:600;margin:0;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-help-btn{flex-shrink:0;width:28px;height:28px;border-radius:50%;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--sub);
+  font:inherit;font-size:14px;font-weight:700;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;padding:0}
+.page-help-btn:hover,.page-help-btn:focus-visible{border-color:var(--brand);
+  color:var(--brand);background:var(--brand-soft);outline:none}
 .search{flex:1;max-width:340px;position:relative}
 .search input{width:100%;padding:9px 14px 9px 34px;border:1px solid var(--line);
   border-radius:var(--radius-sm);background:var(--panel-2);font-size:13px;outline:none;

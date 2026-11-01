@@ -2856,13 +2856,16 @@ def main() -> int:
             page.wait_for_timeout(1500)
             assert "流程已启动" in page.inner_text("#toast"), page.inner_text("#toast")
 
+            assert page.locator("#view .exec-task-filters").count() == 1, "待办缺少范围 seg"
+            page.click('#view .exec-task-filters button[data-filter="open"]')
+            page.wait_for_timeout(400)
             row = page.locator("#view .exec-task-row").first
             iid = row.get_attribute("data-instance-id")
             try:
                 assert iid, "任务行缺少 instance id"
 
                 # 挂起 / 恢复：挂起后任务操作应被阻断
-                page.click('#view .seg button:has-text("流程实例")')
+                page.click('#view .exec-tabs button:has-text("流程实例")')
                 page.wait_for_timeout(600)
                 inst_row = page.locator(f'#view tr.exec-instance-row[data-instance-id="{iid}"]')
                 inst_row.locator('button:has-text("详情")').click()
@@ -2882,8 +2885,10 @@ def main() -> int:
                 page.wait_for_timeout(900)
                 assert "已恢复" in page.inner_text("#toast"), page.inner_text("#toast")
 
-                page.click('#view .seg button:has-text("待办任务")')
-                page.wait_for_timeout(600)
+                page.click('#view .exec-tabs button:has-text("待办任务")')
+                page.wait_for_timeout(400)
+                page.click('#view .exec-task-filters button[data-filter="open"]')
+                page.wait_for_timeout(400)
                 # 公共队列点「处理」即自动接办并打开表单，不再单独认领
                 page.click("#view .exec-task-row >> nth=0 >> button:has-text('处理')")
                 page.wait_for_selector("#exf_applicant")
@@ -2991,9 +2996,9 @@ def main() -> int:
             )
             try:
                 goto("execution")
-                page.click('#view button:has-text("待办任务")')
+                page.click('#view .exec-tabs button:has-text("待办任务")')
                 page.wait_for_timeout(400)
-                page.click('#view button:has-text("全部待办")')
+                page.click('#view .exec-task-filters button[data-filter="open"]')
                 page.wait_for_timeout(600)
                 row = page.locator(f'#view tr.exec-task-row[data-instance-id="{iid}"]')
                 row.locator('button:has-text("处理")').first.click()

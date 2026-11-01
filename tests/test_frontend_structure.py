@@ -159,6 +159,7 @@ def test_view_modules_are_registered():
         "deliverables",
         "orgs",
         "sketches",
+        "help",
     ):
         assert f"register('{view}'" in main_src, f"main.js 没有注册视图 {view}"
 
@@ -201,6 +202,49 @@ def test_navigation_origin_and_mainline_exist():
     html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
     assert 'id="originBar"' in html
     assert 'data-act="shell.mainline"' in html
+
+
+def test_help_center_and_page_help_button():
+    """统一帮助中心：顶栏 ? 深链本页；catalog 覆盖全部业务视图标题键。"""
+    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="pageHelpBtn"' in html
+    assert 'data-act="shell.pageHelp"' in html
+
+    main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
+    assert "shell.pageHelp" in main_src
+    assert "openPageHelp" in main_src
+    assert "register('help'" in main_src
+
+    catalog = (JS_ROOT / "help" / "catalog.js").read_text(encoding="utf-8")
+    assert "HELP_GROUPS" in catalog
+    assert "PAGE_TOPIC" in catalog
+    assert "glossary" in catalog
+    for key in (
+        "start",
+        "orgs",
+        "map",
+        "authorization",
+        "strategy",
+        "projects",
+        "workflow",
+        "pilot",
+        "designer",
+        "execution",
+        "dashboard",
+        "monitor",
+        "toolbox",
+        "deliverables",
+        "data",
+        "pcf",
+        "process_card",
+        "sketches",
+    ):
+        assert f"{key}:" in catalog or f"'{key}'" in catalog or f'"{key}"' in catalog, (
+            f"PAGE_TOPIC 缺少视图 {key}"
+        )
+    # 内容树必须含入门与术语，避免又拆成并列产品文
+    assert "intro" in catalog and "positioning" in catalog and "boundaries" in catalog
+    assert "principles" in catalog and "scenario-publish-run" in catalog
 
 
 def test_start_page_follows_nine_stages_only():
