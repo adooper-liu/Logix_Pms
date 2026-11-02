@@ -53,14 +53,17 @@ def test_seeded_kpis_have_definition_cards(client):
         assert kpi["source_system"] and kpi["granularity"] and kpi["quality_rule"]
 
     by_code = {kpi["code"]: kpi for kpi in seeded}
-    # 越小越好：10 天 > 红线 7.6 → 红
+    # 越小越好：10 天 > 红线 7.6，且单位是时长、绑了流程 → 正式来源，红
+    assert by_code["EFF-05"]["intake"] == "EXECUTION"
     assert by_code["EFF-05"]["status"] == "RED"
     assert by_code["EFF-05"]["status_label"] == "红"
-    # 越大越好：97.2 ≥ 绿线 97 → 绿
-    assert by_code["QUA-02"]["status"] == "GREEN"
-    # 健康度指标
+    # 百分数没有入站钩子，不进红黄
+    assert by_code["QUA-02"]["intake"] == "DRAFT"
+    assert by_code["QUA-02"]["status"] == "GRAY"
+    assert by_code["QUA-02"]["status_label"] == "未定来源"
     assert by_code["HLT-01"]["kind"] == "HEALTH"
-    assert by_code["HLT-01"]["status"] == "GREEN"
+    assert by_code["HLT-01"]["intake"] == "DRAFT"
+    assert by_code["HLT-01"]["status_label"] == "未定来源"
     # 种子里的「陈经理」应绑定到账号，而不是只有展示名
     assert by_code["EFF-01"]["owner_user_id"] is not None
 
@@ -74,7 +77,9 @@ def test_meta_labels_are_backend_owned(client):
 
 
 def test_create_and_update_bump_definition_version(client):
-    created = client.post(f"{API}/monitor/kpis", json=_payload())
+    processes = client.get(f"{API}/execution/processes").json()
+    process_id = next(row["id"] for row in processes if row["code"] == "L3-032")
+    created = client.post(f"{API}/monitor/kpis", json=_payload(process_id=process_id))
     assert created.status_code == 201, created.text
     data = created.json()
     assert data["version"] == 1

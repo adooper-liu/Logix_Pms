@@ -123,15 +123,17 @@ def test_closed_project_allows_new_draft(client):
     client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
-def test_green_kpi_is_not_a_candidate(client):
-    kpi = _kpi(client, "QUA-02")  # 97.2 ≥ 绿线 97
-    assert kpi["status"] == "GREEN"
+def test_kpi_without_official_source_is_not_a_candidate(client):
+    kpi = _kpi(client, "QUA-02")
+    assert kpi["status_label"] == "未定来源"
     rejected = _draft(client, kpi["id"])
     assert rejected.status_code == 400
-    assert "红/黄" in rejected.json()["detail"]
+    assert "正式来源" in rejected.json()["detail"]
 
 
 def test_kpi_without_data_or_target_is_rejected(client):
+    processes = client.get(f"{API}/execution/processes").json()
+    process_id = next(row["id"] for row in processes if row["code"] == "L3-032")
     code = "TST-" + uuid.uuid4().hex[:6].upper()
     base = {
         "code": code,
@@ -139,6 +141,8 @@ def test_kpi_without_data_or_target_is_rejected(client):
         "dimension": "EFFICIENCY",
         "kind": "PROCESS",
         "direction": "LOWER_BETTER",
+        "unit": "天",
+        "process_id": process_id,
         "formula": "A ÷ B",
         "red_threshold": 10,
         "yellow_threshold": 8,

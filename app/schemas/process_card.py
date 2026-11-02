@@ -26,6 +26,14 @@ class CardChainItem(BaseModel):
     level: int
 
 
+class CardSheetOut(BaseModel):
+    id: int
+    tool_code: str
+    tool_name: str
+    title: str
+    summary: str = ""
+
+
 class CardObjectiveOut(BaseModel):
     id: int
     code: str
@@ -118,6 +126,7 @@ class ProcessCardOut(BaseModel):
     process: CardProcessOut
     chain: List[CardChainItem] = []
     objectives: List[CardObjectiveOut] = []
+    sheets: List[CardSheetOut] = []
     raci: List[CardRaciMatterOut] = []
     documents: List[CardDocumentOut] = []
     model: CardModelOut = CardModelOut()

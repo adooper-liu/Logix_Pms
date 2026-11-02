@@ -129,14 +129,8 @@ def candidates(db: Session) -> list[ImprovementCandidateOut]:
             continue
         records = kpi_service.ordered_records(kpi.records)
         latest = records[-1].value if records else None
-        status = kpi_service.status_for(
-            latest,
-            kpi.direction,
-            kpi.red_threshold,
-            kpi.yellow_threshold,
-            kpi.green_threshold,
-        )
-        if status not in ("RED", "YELLOW"):
+        status, _label, kind = kpi_service.presentation(db, kpi, latest)
+        if kind == kpi_service.INTAKE_DRAFT or status not in ("RED", "YELLOW"):
             continue
         process = processes.get(kpi.process_id) if kpi.process_id else None
         rows.append(
@@ -169,13 +163,9 @@ def draft_from_kpi(db: Session, kpi: KpiDefinition, user: User) -> Project:
     latest = records[-1].value if records else None
     if latest is None:
         raise ImprovementError("该 KPI 还没有数据点，无法判断是否越线")
-    status = kpi_service.status_for(
-        latest,
-        kpi.direction,
-        kpi.red_threshold,
-        kpi.yellow_threshold,
-        kpi.green_threshold,
-    )
+    status, _label, kind = kpi_service.presentation(db, kpi, latest)
+    if kind == kpi_service.INTAKE_DRAFT:
+        raise ImprovementError("这条指标还没有正式来源，不能转成改善项目")
     if status not in ("RED", "YELLOW"):
         raise ImprovementError("该 KPI 当前不在红/黄区间，不需要自动立项")
     if kpi.target_value is None:

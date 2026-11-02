@@ -23,6 +23,7 @@ import { createChanges } from './changes.js';
 import { createRaci } from './raci.js';
 import { createComments } from './comments.js';
 import { createSimulation } from './simulation.js';
+import { toolMountHtml } from '../shared/tool_mount.js';
 import { createCompensation } from './compensation.js';
 import { createDecisions } from './decisions.js';
 
@@ -370,6 +371,7 @@ function paintDesigner() {
           <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
         </div>
       </div>
+      ${toolMountHtml(st.tools, 'design', st.processId)}
       ${stateStrip}
       <div class="designer-head-nav">
         ${tabBar}

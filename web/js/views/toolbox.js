@@ -12,9 +12,11 @@ import { renderAsync, go, RENDERERS, urlParams } from '../core/router.js';
 import { GET, POST, PATCH } from '../core/api.js';
 import { canWrite, canManage } from '../core/auth.js';
 import {
-  SCENARIO_ICON, relatedResourceCard, resourceCard, resourceManagerCards,
+  relatedResourceCard, resourceCard, resourceManagerCards,
   resourcePagerHtml, resourceQuery, syncToolboxUrl,
 } from './shared/knowledge_resources.js';
+import { openToolSheet, submitToolSheet } from './shared/tool_sheet.js';
+import { toolMountHtml } from './shared/tool_mount.js';
 
 /* ============================================================ 5. 方法论工具箱 */
 
@@ -80,7 +82,8 @@ on('toolbox.toggleCategory', ({ category }) => {
   RENDERERS.toolbox();
 });
 on('toolbox.stageLink', ({ stage }) => {
-  state.toolbox.stage = Number(stage) || null;
+  const next = Number(stage) || null;
+  state.toolbox.stage = state.toolbox.stage === next ? null : next;
   state.toolbox.sort = 'fit';
   state.toolbox.section = 'resources';
   state.toolbox.navSection = 'stage';
@@ -88,10 +91,19 @@ on('toolbox.stageLink', ({ stage }) => {
   syncToolboxUrl();
   RENDERERS.toolbox();
 });
+on('toolbox.segment', ({ segment }) => {
+  state.toolbox.segment = state.toolbox.segment === segment ? '' : (segment || '');
+  state.toolbox.section = 'resources';
+  state.toolbox.navSection = 'tools';
+  state.knowledge.type = 'TOOL';
+  leaveToolDetail();
+  syncToolboxUrl();
+  RENDERERS.toolbox();
+});
 on('toolbox.clear', () => {
   state.toolbox = {
     q: '', scenario: '', categories: [], stage: null, step: '', sort: 'fit', open: '', status: '',
-    selected: '', section: 'reco', navSection: 'problem',
+    selected: '', section: 'reco', navSection: 'problem', segment: '',
   };
   state.knowledge.type = '';
   state.knowledge.sort = 'recent';
@@ -108,6 +120,8 @@ on('toolbox.clearFilter', () => clearToolboxFilter());
 on('toolbox.open', ({ code, stack }) => openToolByCode(code, stack === '1'));
 on('toolbox.applyStep', ({ code }) => openToolApply(code));
 on('toolbox.applyStepSubmit', ({ code }) => submitToolApply(code));
+on('toolbox.fillSheet', ({ code }) => openToolSheet(code, state.toolbox.attachProcess));
+on('toolbox.submitSheet', ({ code }) => submitToolSheet(code));
 on('toolbox.setStatus', (_data, el) => {
   state.toolbox.status = el.value;
   leaveToolDetail();
@@ -167,12 +181,14 @@ const renderToolbox = () => {
     tb.categories = params.category ? params.category.split(',').filter(Boolean) : [];
   }
   if ('stage' in params) tb.stage = Number(params.stage) || null;
+  if ('segment' in params) tb.segment = params.segment || '';
   if ('step' in params) tb.step = params.step;
   if ('sort' in params) tb.sort = params.sort;
   if ('open' in params) {
     tb.open = params.open;
     tb.selected = params.open || tb.selected;
   }
+  tb.attachProcess = params.process ? Number(params.process) : null;
   if ('status' in params) tb.status = params.status;
   // 知识资源筛选（rtype/rsort/...）与旧 #knowledge 参数都落到 state.knowledge
   if ('rtype' in params) k.type = params.rtype;
@@ -225,7 +241,7 @@ const renderToolbox = () => {
     () => Promise.all([
       GET('/tools/meta'),
       GET('/tools/grouped' + (tb.status ? '?status=' + encodeURIComponent(tb.status) : '')),
-      POST('/tools/match', { ...payload, limit: 33 }),
+      POST('/tools/match', { ...payload, limit: 48 }),
       hasQuery ? POST('/tools/match', { ...payload, problem: tb.q || null, limit: 8 })
         : Promise.resolve(null),
       GET('/workflow/stages'),
@@ -266,7 +282,6 @@ function paint(d) {
   state.toolboxMeta = meta;
   if (d.knowledgeMeta) state.knowledgeMeta = d.knowledgeMeta;
   const scenarios = meta.scenarios || [];
-  const categoryLabels = meta.category_labels || {};
   const filter = state.toolboxFilter;
   const allowed = filter ? new Set(filter.codes) : null;
   const filterHit = (hit) => !allowed || allowed.has(hit.tool.code);
@@ -286,23 +301,26 @@ function paint(d) {
   );
 
   const scenarioButtons = scenarios.map((scenario) => `
-    <button class="kb-pain${tb.scenario === scenario.code ? ' on' : ''}"
+    <button class="tb-index-row${tb.scenario === scenario.code ? ' on' : ''}"
       data-act="toolbox.quick" data-scenario="${esc(scenario.code)}"
       data-query="${esc(scenario.name)}"
       aria-pressed="${tb.scenario === scenario.code ? 'true' : 'false'}">
-      <span class="ic">${SCENARIO_ICON[scenario.code] || '•'}</span>
-      <span><b>${esc(scenario.name)}</b><small>${esc(scenario.description || '')}</small></span>
+      <span class="tb-index-name">${esc(scenario.name)}</span>
     </button>`).join('');
 
-  const categoryCounts = {};
-  (d.groups || []).forEach((group) => {
-    categoryCounts[group.category] = group.count;
+  const listedTools = (d.groups || []).flatMap((group) => group.tools || [])
+    .filter((tool) => !allowed || allowed.has(tool.code));
+  const segmentCounts = {};
+  listedTools.forEach((tool) => {
+    if (!tool.lifecycle_key) return;
+    segmentCounts[tool.lifecycle_key] = (segmentCounts[tool.lifecycle_key] || 0) + 1;
   });
-  const categoryRows = Object.entries(categoryLabels).map(([code, label]) => `
-    <button class="tb-quad${(tb.categories || []).includes(code) ? ' on' : ''}"
-      data-act="toolbox.toggleCategory" data-category="${esc(code)}">
-      <span class="sw"></span><span>${esc(label)}</span>
-      <span class="n">${categoryCounts[code] || 0}</span>
+  const activeSegment = tb.segment || (d.detail && d.detail.lifecycle_key) || '';
+  const segmentRows = (meta.lifecycle_segments || []).map((row) => `
+    <button class="tb-index-row${activeSegment === row.key ? ' on' : ''}"
+      data-act="toolbox.segment" data-segment="${esc(row.key)}">
+      <span class="tb-index-name">${esc(row.label)}</span>
+      <span class="n">${segmentCounts[row.key] || 0}</span>
     </button>`).join('');
 
   const resourceTypeChips = [
@@ -315,18 +333,16 @@ function paint(d) {
       data-act="knowledge.setType" data-value="${value}">${esc(label)}</button>`).join('');
 
   const stageLinks = (d.stages || []).map((stage) => `
-    <button class="kb-stage-link${tb.stage === stage.stage_no ? ' on' : ''}"
+    <button class="tb-index-row${tb.stage === stage.stage_no ? ' on' : ''}"
       data-act="toolbox.stageLink" data-stage="${stage.stage_no}">
       <span class="num">${stage.stage_no}</span>
-      <span><b>${esc(stage.stage_name)}</b><small>${esc(stage.stage_goal || '')}</small></span>
+      <span class="tb-index-name">${esc(stage.stage_name)}</span>
     </button>`).join('');
 
-  const toolNav = catalogHits.map((hit) => `
-    <button class="tb-nav-item${tb.selected === hit.tool.code ? ' on' : ''}"
-      data-act="toolbox.selectTool" data-code="${esc(hit.tool.code)}">
-      <span class="tb-nav-name">${esc(hit.tool.name)}</span>
-      <span class="tiny">${esc(hit.tool.category_label || '')}</span>
-    </button>`).join('') || '<div class="tiny muted">没有工具</div>';
+  const visibleHits = tb.segment
+    ? catalogHits.filter((hit) => hit.tool.lifecycle_key === tb.segment)
+    : catalogHits;
+  const segmentLabel = ((meta.lifecycle_segments || []).find((row) => row.key === tb.segment) || {}).label || '';
 
   const filterBanner = filter
     ? `<div class="note mb between">
@@ -356,7 +372,7 @@ function paint(d) {
     `<option value="${value}"${k.sort === value ? ' selected' : ''}>${label}</option>`).join('');
 
   const statusOptions = canManage()
-    ? `<select class="sel sel-sm" data-act="toolbox.setStatus">
+    ? `<select id="tbStatus" class="sel sel-sm tb-nav-status" data-act="toolbox.setStatus">
         <option value=""${!tb.status ? ' selected' : ''}>公开工具</option>
         <option value="DRAFT"${tb.status === 'DRAFT' ? ' selected' : ''}>草稿</option>
         <option value="IN_REVIEW"${tb.status === 'IN_REVIEW' ? ' selected' : ''}>待审核</option>
@@ -403,8 +419,9 @@ function paint(d) {
   const toolGrid = showToolGrid ? `
     <div class="kb-res-group">
       <div class="kb-res-group-hd"><b>工具</b>
-        <span class="tiny">${catalogHits.length} 个 · 点击查看详情</span></div>
-      <div class="tb-mini-grid">${catalogHits.map((hit) => compactToolCard(hit, meta)).join('')}</div>
+        <span class="tiny">${visibleHits.length} 个${segmentLabel ? ' · ' + esc(segmentLabel) : ''} · 点击查看详情</span></div>
+      <div class="tb-mini-grid">${visibleHits.map((hit) => compactToolCard(hit, meta)).join('')
+        || '<div class="empty">这一段还没有工具。</div>'}</div>
     </div>` : '';
   const knowledgeGrid = showKnowledgeGrid
     ? (resourcePage
@@ -431,8 +448,7 @@ function paint(d) {
       </div>
       <div class="gap" style="flex-wrap:wrap">
         ${showToolGrid ? `<span class="tiny muted">工具</span>
-          <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>
-          ${statusOptions}` : ''}
+          <select class="sel sel-sm" data-act="toolbox.setSort">${sortOptions}</select>` : ''}
         ${showKnowledgeGrid ? `<span class="tiny muted">案例/模板</span>
           <select class="sel sel-sm" data-act="knowledge.setSort">${resSortOptions}</select>
           ${resStatusOptions}` : ''}
@@ -480,7 +496,7 @@ function paint(d) {
               + '强制制度已移到制度中心。')}</span>
           <span class="kb-chev" aria-hidden="true">${showResources ? '−' : '+'}</span>
         </button>
-        <span class="tiny muted">点击左侧阶段/类型自动展开</span>
+        <span class="tiny muted">点左侧的阶段或目录，这里列出对应工具</span>
       </div>
       ${showResources ? `<div class="kb-section-body">
         ${resourceFilters}
@@ -506,30 +522,20 @@ function paint(d) {
         </div>
       </div>
       ${filterBanner}
+      ${toolMountHtml((d.groups || []).flatMap((group) => group.tools || []), 'knowledge')}
     </div>
 
     <div class="tb-shell">
       <aside class="tb-nav-col">
-        <div class="card tb-nav-card">
-          <details class="kb-nav-fold"${tb.navSection === 'problem' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="problem">按问题</summary>
-            <div class="kb-pains" role="group" aria-label="痛点场景">${scenarioButtons}</div>
-          </details>
-          <details class="kb-nav-fold"${tb.navSection === 'stage' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="stage">按阶段</summary>
-            <div class="kb-stage-list">${stageLinks}</div>
-          </details>
-          <details class="kb-nav-fold"${tb.navSection === 'type' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="type">按资源类型</summary>
-            <div class="kb-chips">${resourceTypeChips}</div>
-          </details>
-          <details class="kb-nav-fold"${tb.navSection === 'tools' ? ' open' : ''}>
-            <summary data-act="toolbox.navSection" data-section="tools">工具目录（${catalogHits.length}）</summary>
-            <div class="tiny muted mb">按工具类别筛选</div>
-            <div class="tb-quads">${categoryRows}</div>
-            <div class="tb-tool-nav mt">${toolNav}</div>
-          </details>
-        </div>
+        <nav class="card tb-nav-card" aria-label="工具索引">
+          <div class="tb-index-label">问题</div>
+          <div class="tb-index" role="group" aria-label="问题">${scenarioButtons}</div>
+          <div class="tb-index-label">阶段</div>
+          <div class="tb-index" role="group" aria-label="阶段">${stageLinks}</div>
+          <div class="tb-index-label">目录</div>
+          <div class="tb-index" role="group" aria-label="目录">${segmentRows}</div>
+          ${statusOptions ? `<label class="tb-index-label" for="tbStatus">维护状态</label>${statusOptions}` : ''}
+        </nav>
       </aside>
 
       <main class="tb-main">
@@ -550,7 +556,6 @@ function paint(d) {
                  <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤</a>
                </div>`}
         </div>
-        ${statusOptions ? `<div class="card"><h3>工具维护状态</h3>${statusOptions}</div>` : ''}
         ${showResources ? resourceManagerCards({
           archiveCandidates: d.archiveCandidates || [],
           effectStats: d.effectStats || null,
@@ -628,8 +633,8 @@ function toolCard(hit, meta, options = {}) {
         ? `<div class="tiny">命中：${hit.matched_on.map(esc).join(' · ')}</div>` : ''}
       <div class="tb-actions">
         <button class="btn-sm" data-act="toolbox.open" data-code="${esc(tool.code)}">查看详情</button>
-        ${state.toolbox.step ? `<button class="btn-sm" data-act="toolbox.applyStep"
-          data-code="${esc(tool.code)}">用到 ${esc(state.toolbox.step)}</button>` : ''}
+        ${canWrite() ? `<button class="btn-sm btn-p" data-act="toolbox.fillSheet"
+          data-code="${esc(tool.code)}">填写并挂上</button>` : ''}
         <button class="btn-sm" data-act="toolbox.goKnowledge" data-code="${esc(tool.code)}">相关案例/模板</button>
       </div>
     </article>`;
@@ -773,10 +778,8 @@ function toolDetailHtml(t) {
 }
 
 function toolDetailActions(t, inline = false) {
-  const stepCtx = state.toolbox.step;
-  const applyButton = stepCtx
-    ? `<button class="btn btn-p" data-act="toolbox.applyStep" data-code="${esc(t.code)}">
-         用到步骤 ${esc(stepCtx)}</button>`
+  const applyButton = canWrite()
+    ? `<button class="btn btn-p" data-act="toolbox.fillSheet" data-code="${esc(t.code)}">填写并挂上</button>`
     : '';
   const canEdit = canWrite() && ['DRAFT', 'IN_REVIEW'].includes(t.status);
   const canReview = canManage() && t.status === 'IN_REVIEW';

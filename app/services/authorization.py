@@ -15,10 +15,11 @@ from app.models.enums import (
     AuthorizationExceptionStatus,
     AuthorizationStatus,
 )
+from app.models.execution import ProcessTask
 from app.models.org import OrgUnit
 from app.models.process import ProcessArch
 from app.models.process_document import ProcessDocument
-from app.models.raci import GovernanceRole
+from app.models.raci import GovernanceRole, GovernanceRoleMember
 from app.models.user import User
 from app.schemas.authorization import (
     AuthorizationExceptionOut,
@@ -465,3 +466,76 @@ def list_exceptions(
     if status:
         stmt = stmt.where(AuthorizationException.status == status)
     return list(db.scalars(stmt.order_by(AuthorizationException.id.desc())).all())
+
+
+def _amount_exceeds(form_data: dict, limit: Optional[float]) -> bool:
+    if limit is None:
+        return False
+    ceiling = float(limit)
+    for value in form_data.values():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if float(value) > ceiling:
+            return True
+    return False
+
+
+def _approved_exception(db: Session, rule: AuthorizationRule, process_id: Optional[int]) -> bool:
+    now = utcnow()
+    rows = db.scalars(
+        select(AuthorizationException).where(
+            AuthorizationException.rule_id == rule.id,
+            AuthorizationException.status == AuthorizationExceptionStatus.APPROVED.value,
+        )
+    ).all()
+    for row in rows:
+        if row.expires_at is not None and row.expires_at <= now:
+            continue
+        if row.process_id is not None and row.process_id != process_id:
+            continue
+        return True
+    return False
+
+
+def _is_approver(db: Session, user: User, rule: AuthorizationRule) -> bool:
+    if rule.approver_role_id is None:
+        return False
+    member = db.scalar(
+        select(GovernanceRoleMember.id).where(
+            GovernanceRoleMember.role_id == rule.approver_role_id,
+            GovernanceRoleMember.user_id == user.id,
+        )
+    )
+    return member is not None
+
+
+def assert_task_allowed(db: Session, task: ProcessTask, user: User, form_data: dict) -> None:
+    """已生效、并且命中本步或金额上限的规则，没有批准例外就不能办完。
+
+    没指定流程的规则不拦截办理。待办分给谁仍由运行配置决定。
+    """
+    process_id = task.instance.process_id
+    if process_id is None:
+        return
+    today = date.today()
+    rules = db.scalars(
+        select(AuthorizationRule).where(
+            AuthorizationRule.status == AuthorizationStatus.EFFECTIVE.value,
+            AuthorizationRule.process_id == process_id,
+        )
+    ).all()
+    node_name = (task.name or "").strip()
+    for rule in rules:
+        if rule.valid_from is not None and rule.valid_from > today:
+            continue
+        if rule.valid_to is not None and rule.valid_to < today:
+            continue
+        named = node_name and node_name == (rule.matter or "").strip()
+        if not named and not _amount_exceeds(form_data, rule.amount_limit):
+            continue
+        if _is_approver(db, user, rule) or _approved_exception(db, rule, process_id):
+            continue
+        raise AuthorizationError(
+            f"授权规则 {rule.code} 命中（{rule.title}），"
+            "当前办理人不是审批角色，也没有未过期的已批准例外"
+        )

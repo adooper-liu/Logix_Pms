@@ -28,7 +28,8 @@ export const HELP_GROUPS = [
       'module-start', 'module-orgs', 'module-map', 'module-authorization',
       'module-strategy', 'module-projects', 'module-workflow', 'module-pilot',
       'module-designer', 'module-execution', 'module-dashboard', 'module-monitor',
-      'module-toolbox', 'module-deliverables', 'module-data', 'module-pcf',
+      'module-toolbox', 'module-deliverables', 'module-data', 'module-bpmn',
+      'module-pcf', 'module-cbok', 'module-train',
       'module-process-card', 'module-sketches',
     ],
   },
@@ -44,7 +45,7 @@ export const HELP_GROUPS = [
     id: 'howto',
     title: '操作实例',
     topics: [
-      'howto-execution-config', 'howto-task-queue', 'howto-publish',
+      'howto-execution-config', 'howto-task-queue', 'howto-publish', 'howto-workload',
     ],
   },
   {
@@ -63,7 +64,7 @@ export const TOPICS = {
     principle: 'Logix PMS 把 BPR / BPI / 精益收成一条可落地主线：识别 → 诊断 → 设计 → 落地 → 运营。',
     value: '新人用同一套语言走完「建体系 → 改一条 → 跑起来」，不必在菜单里猜。',
     boundary: '本页是说明书；「开始使用」是带做主线；工程文档（架构/gap）不在帮助导航里。',
-    scenario: '第一次登录：读完本页 → 打开「开始使用」跟九步 → 用演示流程走一遍「发布到待办」。',
+    scenario: '第一次登录：读完本页 → 打开「开始使用」看框架边界 → 用演示流程走一遍「发布到待办」。',
     howto: [
       '点顶栏「?」：任何页面都能打开**本页**对应帮助。',
       '在帮助左侧目录切换章节；文末「相关」可跳到场景/实操。',
@@ -96,7 +97,7 @@ export const TOPICS = {
     boundary: '价值不靠「功能数量」体现；若页面不能减少一次选择或一次争论，就不该占首屏。',
     scenario: '向管理层说明：家底在地图、工程在项目、图纸在设计器、日常在执行、结果在驾驶舱。',
     howto: [
-      '用运营驾驶舱看「今天该关注什么」，再下钻到地图/项目/异常。',
+      '用运营驾驶舱看越线的指标、过期的异常和该继续的项目，再下钻到 KPI、异常台账或地图。',
     ],
     related: ['positioning', 'module-dashboard', 'principles'],
     openView: 'dashboard',
@@ -148,15 +149,15 @@ export const TOPICS = {
   'module-start': {
     id: 'module-start',
     title: '开始使用',
-    summary: '0→1 建体系的唯一主路径（九步），带证据出门。',
-    principle: '九步管「第一次建体系」，不替代单个改善项目，也不跑日常业务。',
-    value: '把散落动作收成可验证阶段，避免「系统装了但没上线」。',
-    boundary: '不是百科；详细方法仍回五阶段/工具箱。',
-    scenario: '新工厂/新体系首次上线培训；任意页面可用顶栏「⌂ 主线」回来。',
+    summary: '只回答公司流程地图的框架边界有没有划清。',
+    principle: '这里数全公司这张图。某一条流程的起止，看十层核对。',
+    value: '出门条件和证据数字用同一套计数。',
+    boundary: '活动、表单、工时、指标和发布不在这一页推进。',
+    scenario: '新工厂或新体系第一次把流程地图立起来。任意页面可用顶栏回到这一页。',
     howto: [
-      '按阶段看「这一步只回答 / 怎样算出门」。',
-      '点证据数字跳到对应模块补齐。',
-      '全部出门后确认首次上线。',
+      '看「这一步只回答」和「怎样算出门」，再看右边还缺的数。',
+      '点数字或主按钮，去补第一条还缺的必需证据。',
+      '某一条流程从哪开始、到哪结束，打开十层核对第 2 层来写。',
     ],
     related: ['scenario-zero-to-one', 'intro'],
     openView: 'start',
@@ -219,7 +220,8 @@ export const TOPICS = {
     boundary: '不是 KPI 看板（看运营驾驶舱/监控）。',
     scenario: '立项前先定基线；阶段 1 退出常检查目标—流程—KPI 承接。',
     howto: [
-      '新建目标 → 填基线/目标值 → 承接流程。',
+      '左侧先点目标。流程层级收在目标下面，默认只露出 L1。',
+      '整理时打开 OGSM、SWOT、目标树或加权决策矩阵，结果写回这张目标。',
     ],
     related: ['scenario-improve', 'module-projects'],
     openView: 'strategy',
@@ -307,13 +309,14 @@ export const TOPICS = {
   'module-dashboard': {
     id: 'module-dashboard',
     title: '运营驾驶舱',
-    summary: '今天该关注什么：在办、待改善、异常与优先级入口。',
-    principle: '指标卡可下钻；阶段行带筛选跳到项目组合。',
-    value: '全局结论层，避免一上来扎进明细。',
-    boundary: '不是单条流程 360（用流程卡）；细 KPI 曲线在监控页签。',
-    scenario: '每日站会、管理巡检。',
+    summary: '今天要处理的三件事：越线的指标、过期的异常、接着推进的项目。',
+    principle: '总览只放能点下去处理的数。框架边界在开始使用，指标曲线在 KPI。',
+    value: '打开就能决定先处理哪一件。',
+    boundary: '单条流程的起止在十层核对。路径、测算和基线在流程分析。',
+    scenario: '每日站会先看超期异常和红/黄指标，再看项目的下一步。',
     howto: [
-      '点指标卡/阶段行/优先级行进入带筛选的下游页。',
+      '点红/黄 KPI 打开 KPI 页签，点未闭环异常打开异常台账。',
+      '点继续推进打开该项目。改善优先级进入地图上的那条流程。',
     ],
     related: ['module-monitor', 'module-map', 'module-projects'],
     openView: 'dashboard',
@@ -322,13 +325,14 @@ export const TOPICS = {
   'module-monitor': {
     id: 'module-monitor',
     title: '运营监控（驾驶舱·KPI）',
-    summary: 'KPI 雷达/趋势、异常台账与标准工时等运营结果面。',
+    summary: 'KPI 的当前值、目标、红黄绿和达成率趋势。异常台账与标准工时在各自页签。',
     principle: '监控回答「跑得怎样」；异常要闭环。',
     value: '把改善结果从感觉变成可追踪指标。',
     boundary: '不在这里改流程模型或项目 24 步。',
     scenario: '运营例会、异常升级。',
     howto: [
       '从驾驶舱切入监控页签；按状态筛异常。',
+      '流程分析先在标题右侧选流程，再在左边点一项，中间只显示这一项。默认是全部流程。',
     ],
     related: ['module-dashboard', 'module-strategy'],
     openView: 'monitor',
@@ -340,11 +344,11 @@ export const TOPICS = {
     summary: '方法/工具书：按问题与阶段推荐 SIPOC、VSM、FMEA 等；知识资源已并入。',
     principle: '步骤推荐工具；一次选 1–2 个，不要全上。',
     value: '从「下一步做什么」落到「具体怎么做」。',
-    boundary: '不改变业务状态；案例/模板不是运行表单。',
+    boundary: '填写并挂上会写成目标或挂到流程。下载用的文件模板仍在交付物库。',
     scenario: '项目某一步卡住时，从步骤进入只看推荐。',
     howto: [
       '可用问题描述或痛点快捷入口排序。',
-      '工具详情可参考步骤与模板。',
+      '点「填写并挂上」，按格子填写。OGSM 和目标树会同时写成战略目标。',
     ],
     related: ['module-workflow', 'module-projects'],
     openView: 'toolbox',
@@ -383,17 +387,68 @@ export const TOPICS = {
 
   'module-pcf': {
     id: 'module-pcf',
-    title: 'PCF 分类框架',
-    summary: '行业参照系（APQC 等），与公司流程地图映射。',
-    principle: '切换框架只换参照树，不改公司 L1–L4。',
-    value: '对标、培训与跨企业沟通有共同词典。',
-    boundary: '不是公司架构本身。',
-    scenario: '建架构时选映射；严格门禁下阶段退出要检查映射。',
+    title: '流程架构',
+    summary: '用 APQC 分类往下建公司地图：先定 L1，留 L2，只把在跑的 L3 生成过去。',
+    principle: '分类是类名，不是生命周期的先后，也不是 BPMN 图。',
+    value: '对标和跨公司沟通时有同一套类名，并且知道下一步写到哪。',
+    boundary: '不代替公司自己的流程地图。活动和任务不从分类树整包抄进地图。',
+    scenario: '先看右边的构建顺序，再点一条分类看它该往哪一步走。',
     howto: [
-      '在 PCF 树定位分类，回地图维护映射。',
+      '左边点分类，中间看定义，右边按 L1、L2、L3 往下建。',
+      '用「按 1+3+10 往下建」打开地图上的引导。',
+      '生成后回到这一页，看还没对上的 L3。活动写进这条 L3 的设计器。',
     ],
-    related: ['module-map', 'boundaries'],
+    related: ['module-map', 'module-bpmn', 'module-cbok'],
     openView: 'pcf',
+  },
+
+  'module-bpmn': {
+    id: 'module-bpmn',
+    title: 'BPMN 符号',
+    summary: 'OMG 的流程符号。按本系统画布能保存的符号来学一条流程怎么走。',
+    principle: '符号表示先后、分支和等待。分类去 PCF，从业范围去 CBOK。',
+    value: '画之前就知道哪些符号执行引擎收得下。',
+    boundary: '不转载 OMG 规范正文。并行网关、子流程和边界事件不能保存。',
+    scenario: '准备在设计器里画一条 L3 之前，先把符号过一遍。',
+    howto: [
+      '从「这一页管什么」读到「画布上不提供的符号」。',
+      '再打开流程设计器画。',
+    ],
+    related: ['module-designer', 'module-pcf', 'module-cbok'],
+    openView: 'bpmn',
+  },
+
+  'module-cbok': {
+    id: 'module-cbok',
+    title: 'CBOK 知识域',
+    summary: '生命周期在公司体系。知识域 1 到 7 对一条流程，8 和 9 留在公司体系。流程架构对 APQC。',
+    principle: '先看现状再定以后怎么走。技术是帮手，流程还乱就不要先自动化。',
+    value: '学一项就能打开系统里对应的那一页。',
+    boundary: '不转载手册章节正文。4.0 公告里的技术题目，只接到系统里已经有记录的页面。',
+    scenario: '新加入流程管理科的人，先看九项分别落在哪一页。',
+    howto: [
+      '从「业务流程管理」点到「流程技术」。',
+      '用每条上的按钮打开对应页面。',
+    ],
+    related: ['module-start', 'module-bpmn', 'module-pcf'],
+    openView: 'cbok',
+  },
+
+  'module-train': {
+    id: 'module-train',
+    title: 'BPM 实训',
+    summary: '九讲按 CBOK 讲义展开：开场、概念、演练、小结。本系统的页面只在每讲末尾作实证。',
+    principle: '讲义怎么讲就怎么放。系统里没有的仿真、机器人运行时和个人考核，写在实证里，不写进正文。',
+    value: '学完能按讲义复述，并打开对应页面核对这套系统实际做到哪一步。',
+    boundary: '不调用外部语言模型。标准工时不用于个人排名或奖金。',
+    scenario: '讲完一讲，用末尾的实证打开十层核对、设计器、KPI 或地图。',
+    howto: [
+      '从左边选一讲，先读开场和概念。',
+      '演练按讲师备注的时间做。',
+      '最后看本系统实证，再打开对应页面。',
+    ],
+    related: ['module-cbok', 'module-bpmn', 'module-pcf'],
+    openView: 'train',
   },
 
   'module-process-card': {
@@ -403,7 +458,7 @@ export const TOPICS = {
     principle: '聚合入口，不新建第二套数据。',
     value: 'Owner 月度复盘、交接、评审前自查。',
     boundary: '不做跨流程排名（驾驶舱）或项目进度（项目组合）。',
-    scenario: '从地图或战略「看流程」进入。',
+    scenario: '从地图或战略「核对流程」进入。',
     howto: [
       '按模块页签补齐 readiness，再跳原模块深耕。',
     ],
@@ -429,11 +484,11 @@ export const TOPICS = {
   'scenario-zero-to-one': {
     id: 'scenario-zero-to-one',
     title: '场景：从 0 建体系',
-    summary: '新体系首次上线：跟「开始使用」九步，证据出门。',
-    principle: '九步是主线；十层核对按单条流程关门；项目工作台管改善工程。',
+    summary: '新体系先划清公司流程地图的框架边界，再改一条流程。',
+    principle: '开始使用数这张图；十层核对写这一条的起止；项目工作台管改善工程。',
     value: '培训可复制，完成必须有证据。',
     boundary: '不要一上来选整条价值链当试点；Owner 必须是人。',
-    scenario: '选痛点清晰的一条 L3，配战略基线 → 架构 → 制度授权 → 模型表单 → 试运行 → 固化。',
+    scenario: '先在开始使用划清流程地图，再在十层核对写一条 L3 的起止。',
     howto: [
       '打开开始使用，逐步补证据。',
       '详细带练脚本见仓库 docs/training-zero-to-one.md（素材）。',
@@ -545,6 +600,29 @@ export const TOPICS = {
     openView: 'designer',
   },
 
+  'howto-workload': {
+    id: 'howto-workload',
+    title: '工作量：怎么用',
+    summary: '本月已验证的标准需求，和登记的可用产能差多少。有任务工时之后，再和标准比。',
+    principle: '没有产能就不要显示负荷平衡；没有工时记录就不要把实际当成 0 去比标准。',
+    value: '看出哪个岗位这个月不够，以及标准工时有没有审过。',
+    boundary: '标准工时只做能力基线，不用于个人排名、扣罚或奖金。实际工时不在这页录入。',
+    scenario: '排班或加人之前，先看负荷率是不是超过 100%。',
+    howto: [
+      '选月份。标准需求只加总「已验证」、且在该月有效的标准工时卡。',
+      '选一条流程时，只看这条流程的活动和需求。再选一个岗位时，只留这个岗位在这条流程上的标准。可用工时仍是岗位整月，同岗位还服务其他流程。全部流程、全部岗位用来看岗位是否已经不够。',
+      '点「+ 标准工时」。标准工时 = 观测 × 评定系数 × (1 + 宽放率)。月需求 = 标准工时 × 月频次。',
+      '草稿先记至少 5 条样本，再提交评审。通过之后才进入标准需求和负荷率。「直接验证」跳过样本，只用于补已有标准。',
+      '点「+ 产能」，按组织、岗位、月份登记人数、人均可用工时、出勤率、设备可用率。可用工时 = 人数 × 人均可用工时 × 60 × 出勤率 × 设备可用率。同一组织、岗位、月份只能有一条。',
+      '理论负荷率 = 已验证标准需求 ÷ 可用产能。没有产能时显示 —。',
+      '实际工时来自流程执行里的任务工时。本月没有记录时，页面不展示「标准 vs 实际」。',
+      '瓶颈岗位只在已登记产能里、缺口为正（需求大于可用）时列出。未来 3 个月用当前需求和产能原样外推。一边有余量、一边不够时才给出派工建议，不自动改派。',
+    ],
+    related: ['module-monitor', 'module-execution', 'howto-task-queue'],
+    openView: 'monitor',
+    openParams: { tab: 'workload' },
+  },
+
   glossary: {
     id: 'glossary',
     title: '术语表',
@@ -579,6 +657,9 @@ export const PAGE_TOPIC = {
   deliverables: 'module-deliverables',
   data: 'module-data',
   pcf: 'module-pcf',
+  bpmn: 'module-bpmn',
+  cbok: 'module-cbok',
+  train: 'module-train',
   process_card: 'module-process-card',
   sketches: 'module-sketches',
   help: 'intro',
@@ -615,6 +696,7 @@ export function topicIdForPage(view, params = {}) {
   if (view === 'execution' && params.tab === 'config') return 'howto-execution-config';
   if (view === 'execution' && params.tab === 'tasks') return 'howto-task-queue';
   if (view === 'execution' && params.tab === 'instances') return 'module-execution';
+  if (view === 'monitor' && params.tab === 'workload') return 'howto-workload';
   return PAGE_TOPIC[view] || 'intro';
 }
 

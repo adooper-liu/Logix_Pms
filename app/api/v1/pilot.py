@@ -9,6 +9,9 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser, resolve_owner
 from app.schemas.common import DeleteResult, as_columns
 from app.schemas.pilot import (
+    CaseIn,
+    CodeLabelOut,
+    EventLogIn,
     PilotIssueCreate,
     PilotIssueOut,
     PilotIssueUpdate,
@@ -21,6 +24,12 @@ from app.schemas.pilot import (
     PilotTaskCreate,
     PilotTaskOut,
     PilotTaskUpdate,
+    RecordSavedOut,
+    RpaIn,
+    RpaRunIn,
+    RpaRunOptionsOut,
+    TechnologyUseIn,
+    TrainingIn,
 )
 from app.services import audit as audit_service
 from app.services import pilot as pilot_service
@@ -276,3 +285,82 @@ def delete_issue(issue_id: int, db: DbSession, user: WriteUser):
     pilot_service.delete_issue(db, issue)
     db.commit()
     return DeleteResult(deleted=1)
+
+
+@router.post("/rpa", response_model=RecordSavedOut, summary="登记一条机器人（WRITE 角色）")
+def save_rpa(payload: RpaIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_rpa(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)
+
+
+@router.post("/training", response_model=RecordSavedOut, summary="登记一条培训到场（WRITE 角色）")
+def save_training(payload: TrainingIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_training(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)
+
+
+@router.post("/event-logs", response_model=RecordSavedOut, summary="记入一条外部日志（WRITE 角色）")
+def save_event_log(payload: EventLogIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_event_log(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)
+
+
+@router.get(
+    "/rpa-run-options",
+    response_model=RpaRunOptionsOut,
+    summary="登记运行时可选的机器人和集成端点",
+)
+def rpa_run_options(process_id: int, db: DbSession, user: CurrentUser):
+    try:
+        return pilot_service.rpa_run_options(db, process_id)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/rpa-runs", response_model=RecordSavedOut, summary="记下一次机器人运行（WRITE 角色）")
+def save_rpa_run(payload: RpaRunIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_rpa_run(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)
+
+
+@router.post("/cases", response_model=RecordSavedOut, summary="登记一条案例（WRITE 角色）")
+def save_case(payload: CaseIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_case(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)
+
+
+@router.get(
+    "/technology-kinds",
+    response_model=List[CodeLabelOut],
+    summary="技术用途的种类",
+)
+def technology_kinds(user: CurrentUser):
+    return pilot_service.technology_kinds()
+
+
+@router.post(
+    "/technology-uses",
+    response_model=RecordSavedOut,
+    summary="登记一条技术用途（WRITE 角色）",
+)
+def save_technology_use(payload: TechnologyUseIn, db: DbSession, user: WriteUser):
+    try:
+        saved_id = pilot_service.save_technology_use(db, user, payload)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RecordSavedOut(id=saved_id)

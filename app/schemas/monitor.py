@@ -39,6 +39,8 @@ class KpiDefinitionCreate(BaseModel):
     granularity: Optional[str] = None
     frequency: KpiFrequency = KpiFrequency.MONTHLY
     source_system: Optional[str] = None
+    data_flow_id: Optional[int] = None
+    inbound_webhook_id: Optional[int] = None
     quality_rule: Optional[str] = None
 
     # 红/黄/绿三条线
@@ -73,6 +75,8 @@ class KpiDefinitionUpdate(BaseModel):
     granularity: Optional[str] = None
     frequency: Optional[KpiFrequency] = None
     source_system: Optional[str] = None
+    data_flow_id: Optional[int] = None
+    inbound_webhook_id: Optional[int] = None
     quality_rule: Optional[str] = None
 
     red_threshold: Optional[float] = None
@@ -123,6 +127,10 @@ class KpiDefinitionOut(ORMModel):
     frequency: str
     frequency_label: str
     source_system: Optional[str] = None
+    data_flow_id: Optional[int] = None
+    inbound_webhook_id: Optional[int] = None
+    intake: str = "DRAFT"
+    intake_label: str = "未定来源"
     quality_rule: Optional[str] = None
 
     red_threshold: Optional[float] = None
@@ -189,6 +197,8 @@ class KpiTrendSeries(BaseModel):
     granularity: Optional[str] = None
     status: Optional[str] = None
     status_label: Optional[str] = None
+    intake: str = "DRAFT"
+    intake_label: str = "未定来源"
     points: List[KpiTrendPoint] = []
 
 
@@ -234,6 +244,8 @@ class ExceptionCreate(BaseModel):
         default=None, description="责任账号 id，权限判断以它为准；不传则按 owner 姓名尝试绑定"
     )
     due_at: Optional[UtcDateTimeIn] = None
+    source_kpi_id: Optional[int] = None
+    source_instance_id: Optional[int] = None
 
 
 class ExceptionUpdate(BaseModel):
@@ -259,6 +271,8 @@ class ExceptionOut(ORMModel):
     status: str
     process_id: Optional[int] = None
     project_id: Optional[int] = None
+    source_kpi_id: Optional[int] = None
+    source_instance_id: Optional[int] = None
     owner: Optional[str] = None
     owner_user_id: Optional[int] = None
     detected_at: UtcDateTime
@@ -268,6 +282,16 @@ class ExceptionOut(ORMModel):
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
     is_overdue: bool = False
+
+
+class ExceptionSuggestion(BaseModel):
+    source: str
+    kpi_id: Optional[int] = None
+    instance_id: Optional[int] = None
+    process_id: Optional[int] = None
+    title: str
+    description: str
+    severity: str
 
 
 class ExceptionSummary(BaseModel):

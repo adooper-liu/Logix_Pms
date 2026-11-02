@@ -10,6 +10,13 @@ on('pcf.search', (_data, el) => setPcfKeyword(el.value));
 on('pcf.select', ({ id }) => selectPcfNode(Number(id)));
 on('pcf.expand', ({ id }) => togglePcfBrowseNode(Number(id)));
 on('pcf.goMap', () => go('map'));
+on('pcf.build', ({ external }) => {
+  state.map.openGuidedPcf = true;
+  state.map.guidedPcfExternal = external || '';
+  state.map.guidedPcfFramework = state.pcf.framework || '';
+  state.map.guidedPcfActivities = false;
+  go('map');
+});
 
 const LEVELS = {
   1: { label: 'L1 流程类', en: 'Category', desc: '最高层级的流程分类（业务域）' },
@@ -59,12 +66,23 @@ async function loadPcf() {
   return available;
 }
 
-const renderPcf = () => {
-  if (state.pcf.tree && state.pcf.treeFramework === state.pcf.framework) {
-    paintPcf();
-    return;
+async function refreshCoverage() {
+  try {
+    state.pcf.coverage = await GET(
+      '/benchmark/frameworks/' + encodeURIComponent(state.pcf.framework)
+      + '/coverage?process_level=3');
+  } catch (e) {
+    state.pcf.coverage = null;
   }
-  renderAsync('pcf', loadPcf, () => paintPcf());
+}
+
+const renderPcf = () => {
+  renderAsync('pcf', async () => {
+    if (!state.pcf.tree || state.pcf.treeFramework !== state.pcf.framework) {
+      await loadPcf();
+    }
+    await refreshCoverage();
+  }, () => paintPcf());
 };
 
 function paintPcf() {
@@ -75,12 +93,8 @@ function paintPcf() {
   const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   flat.forEach(({ node }) => { counts[node.level] = (counts[node.level] || 0) + 1; });
 
-  const levelCards = Object.entries(LEVELS).map(([level, meta]) => `
-    <div class="pcf-level">
-      <b>${meta.label}</b>
-      <div class="tiny">${meta.en} · ${counts[level] || 0} 个</div>
-      <div class="tiny">${meta.desc}</div>
-    </div>`).join('');
+  const levelLine = Object.entries(LEVELS).map(([level, meta]) =>
+    `<span class="pcf-count-chip">${esc(meta.label.split(' ')[0])} ${counts[level] || 0}</span>`).join('');
 
   const frameworkOptions = pcfFrameworks().map((f) =>
     `<option value="${f.code}"${f.code === state.pcf.framework ? ' selected' : ''}>${
@@ -89,14 +103,14 @@ function paintPcf() {
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between mb">
-        <div><h2>APQC PCF 分类框架<span class="module-badge">分类宪法 · 学习与识别</span></h2>
-          <div class="desc">L1–L5 分类字典、中英文对照、官方定义与指标；PCF 是分类，不是流程图</div></div>
+        <div><h2>流程架构<span class="module-badge">APQC PCF · 分类不是先后</span></h2>
+          <div class="desc">公司体系里的流程架构用这套分类对齐。L1–L5 是类名，不是生命周期的顺序。</div></div>
         <div class="gap">
           <select class="sel" data-act="pcf.framework">${frameworkOptions}</select>
           <a class="link-btn" data-act="pcf.goMap">去流程地图 →</a>
         </div>
       </div>
-      <div class="pcf-levels">${levelCards}</div>
+      <div class="pcf-counts">${levelLine}</div>
     </div>
     <div class="pcf-layout">
       <div class="card pcf-tree-card">
@@ -109,12 +123,14 @@ function paintPcf() {
         <div class="pcf-rows" id="pcfRows"></div>
       </div>
       <div class="card pcf-detail" id="pcfDetail"></div>
+      <div class="card pcf-guide" id="pcfGuide"></div>
     </div>`;
 
   paintPcfRows();
   const selected = state.pcf.selectedId && state.pcf.byId.get(state.pcf.selectedId);
+  paintGuide(selected || null);
   if (selected) paintPcfDetail(selected);
-  else paintPcfIntro();
+  else paintMiddleEmpty();
 }
 
 function setPcfFramework(code) {
@@ -146,7 +162,10 @@ function selectPcfNode(id) {
     row.classList.toggle('on', Number(row.dataset.id) === id);
   });
   const node = state.pcf.byId.get(id);
-  if (node) paintPcfDetail(node);
+  if (node) {
+    paintPcfDetail(node);
+    paintGuide(node);
+  }
 }
 
 /** 搜索时把匹配节点的祖先全部展开，保证结果可见。 */
@@ -242,19 +261,127 @@ function breadcrumb(node) {
   return names.join(' › ');
 }
 
-function paintPcfIntro() {
+function coverageRecord() {
+  const coverage = state.pcf.coverage;
+  if (!coverage) {
+    return `<div class="tiny muted">公司地图的对应记录暂时读不到。步骤仍然可以做。</div>`;
+  }
+  const pending = coverage.unmapped_processes || [];
+  const shown = pending.slice(0, 6).map((row) =>
+    `${esc(row.code)} ${esc(row.name)}`).join('、');
+  const rest = pending.length - Math.min(pending.length, 6);
+  const pendingHtml = pending.length
+    ? `<div class="tiny" style="margin-top:6px">还没对上：${shown}${
+      rest > 0 ? `，另有 ${rest} 条` : ''}。</div>
+       <button class="btn-sm" style="margin-top:8px" data-act="pcf.goMap">去地图补对应</button>`
+    : `<div class="tiny" style="margin-top:6px">地图上的 L3 都已对上这份分类。要加新流程，再走第 3 步。</div>`;
+  return `
+    <div class="tiny">公司 L3 ${coverage.total_processes} 条，已对上 ${
+      coverage.mapped_processes} 条。</div>
+    ${pendingHtml}`;
+}
+
+function paintMiddleEmpty() {
   const box = document.getElementById('pcfDetail');
   if (!box) return;
   box.innerHTML = `
-    <h3 style="margin-top:0">怎么用这份分类</h3>
-    <div class="desc">在左侧选择任意元素，查看中英文名、PCF ID、官方定义、指标与公司流程覆盖情况。</div>
-    <div class="pcf-section"><h4>学习</h4>
-      <div class="tiny">L1/L2 是“一组流程”，本质是分类文件夹；L3 才是“一条流程”，从 L3 开始才有流转与端到端闭环。</div></div>
-    <div class="pcf-section"><h4>识别</h4>
-      <div class="tiny">用 5 位 PCF ID 做跨版本、跨行业识别；Hierarchy ID（如 4.3.1.2）会因行业元素插入而漂移，不能当稳定键。</div></div>
-    <div class="pcf-section"><h4>对标</h4>
-      <div class="tiny">PCF 指标按 PCF ID 挂载，可直接用于 KPI 口径；公司流程在流程地图里与分类建立映射。</div></div>
-    <div class="pcf-note">PCF 不含先后顺序、分支和事件触发——它是业务名词字典。流程图与执行逻辑由 BPMN 设计器维护。</div>`;
+    <h3 style="margin-top:0">分类内容</h3>
+    <div class="desc">在左边点一条。这里看中英文名、官方定义、公司覆盖和指标。</div>`;
+}
+
+function paintGuide(node) {
+  const box = document.getElementById('pcfGuide');
+  if (!box) return;
+  const next = node
+    ? buildActionHtml(node)
+    : '<div class="tiny muted">点左边一条之后，这里换成这一层的下一步。</div>';
+  box.innerHTML = `
+    <h3 style="margin-top:0">往下建</h3>
+    <div class="desc">分类不是执行顺序。一次先建一段，再看下面的数字有没有变。</div>
+    <div class="pcf-step">
+      <h4>1. 先定一个业务域 <span class="pcf-count">L1</span></h4>
+      <div class="tiny">它是文件夹，不执行。</div>
+    </div>
+    <div class="pcf-step">
+      <h4>2. 留下公司真有的组 <span class="pcf-count">L2</span></h4>
+      <div class="tiny">这个域下面先留大约 3 个组。</div>
+    </div>
+    <div class="pcf-step">
+      <h4>3. 只把在跑的流程生成到地图 <span class="pcf-count">L3</span></h4>
+      <div class="tiny">大约 10 条。默认不把分类里的活动整包抄进地图。</div>
+      <button class="btn btn-p btn-sm" style="margin-top:8px" data-act="pcf.build">按 1+3+10 往下建</button>
+    </div>
+    <div class="pcf-step">
+      <h4>4. 活动写在这条流程里面 <span class="pcf-count">L4 / L5</span></h4>
+      <div class="tiny">分类里的步骤只对照名称。公司自己的步骤写进这条 L3 的设计器。</div>
+    </div>
+    <div class="pcf-section"><h4>这一层怎么往下</h4>${next}</div>
+    <div class="pcf-section"><h4>根据当前记录</h4>${coverageRecord()}</div>`;
+}
+
+function ancestorAt(node, level) {
+  let current = node;
+  while (current) {
+    if (current.level === level) return current;
+    const parentId = state.pcf.parents.get(current.id);
+    current = parentId ? state.pcf.byId.get(parentId) : null;
+  }
+  return null;
+}
+
+function buildAction(node) {
+  const external = node.external_id || '';
+  if (node.level <= 2) {
+    return {
+      title: '这一层是文件夹',
+      text: '下一步在它下面挑公司真有的 L3，再生成到地图。',
+      button: '从这里往下建',
+      act: 'pcf.build',
+      external,
+    };
+  }
+  if (node.level === 3) {
+    const count = node.mapped_process_count || 0;
+    if (count > 0) {
+      return {
+        title: `已有 ${count} 条公司流程对上这条`,
+        text: '去地图核对名称、负责人和上级。活动写在这条流程里面。',
+        button: '去地图核对',
+        act: 'pcf.goMap',
+      };
+    }
+    return {
+      title: '这条还没进公司地图',
+      text: '生成时会带上它的 L1、L2，并写上 PCF ID。',
+      button: '把这条生成到地图',
+      act: 'pcf.build',
+      external,
+    };
+  }
+  const owner = ancestorAt(node, 3);
+  const where = owner
+    ? `${owner.code} ${owner.name_zh || owner.name}`
+    : '对应的 L3';
+  return {
+    title: '这是步骤名，不是另一条流程',
+    text: `对照名称即可。公司里的步骤写在 ${where} 里面。`,
+    button: owner ? '回到这条 L3' : '',
+    act: owner ? 'pcf.select' : '',
+    id: owner ? owner.id : '',
+  };
+}
+
+function buildActionHtml(node) {
+  const action = buildAction(node);
+  const button = action.button
+    ? `<button class="btn btn-p btn-sm" style="margin-top:8px" data-act="${action.act}"
+        ${action.external ? `data-external="${esc(action.external)}"` : ''}
+        ${action.id ? `data-id="${action.id}"` : ''}>${esc(action.button)}</button>`
+    : '';
+  return `
+    <div class="tiny"><b>${esc(action.title)}</b></div>
+    <div class="tiny">${esc(action.text)}</div>
+    ${button}`;
 }
 
 async function paintPcfDetail(node) {

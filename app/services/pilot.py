@@ -12,6 +12,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.timeutil import utcnow
+from app.models.adoption import (
+    ProcessCase,
+    ProcessEventLog,
+    ProcessTechnologyUse,
+    ProcessTrainingRecord,
+    RpaBot,
+    RpaRun,
+)
 from app.models.authorization import AuthorizationException, AuthorizationRule
 from app.models.enums import (
     PilotIssueStatus,
@@ -21,6 +29,7 @@ from app.models.enums import (
     PilotSeverity,
     PilotTaskStatus,
 )
+from app.models.integration import IntegrationEndpoint
 from app.models.pilot import PilotIssue, PilotLayer, PilotPath, PilotTask
 from app.models.process import ProcessArch
 from app.models.process_document import ProcessDocument
@@ -39,6 +48,7 @@ from app.schemas.pilot import (
     PilotRuleOut,
     PilotTaskOut,
 )
+from app.services import audit as audit_service
 from app.services import authorization as authorization_service
 from app.services import deliverable as deliverable_service
 from app.services import process_document as document_service
@@ -99,37 +109,26 @@ LAYER_DEFINITIONS: List[Dict] = [
     {
         "layer_no": 1,
         "title": "战略与目标",
-        "goal": "说清楚为什么做、为谁创造什么价值、不做什么。",
-        "inputs": ["年度经营计划", "客户/质量/成本目标", "现状数据"],
-        "process": ["为本流程挂年度目标", "补责任人与目标值", "补现状基线"],
-        "outputs": ["目标卡", "现状基线", "目标—本流程映射"],
-        "exit_criteria": "本流程已挂可测目标，有责任人与基线。",
-        "evidence": [
-            "objectives",
-            "linked_objectives",
-            "objectives_with_owner",
-            "objectives_with_baseline",
-        ],
+        "goal": "同一张目标卡上要有责任人、目标值和现状基线，并且挂到这一条流程。",
+        "inputs": ["年度目标", "责任人", "目标值", "现状基线"],
+        "process": ["把目标挂到本流程", "在同一张卡上写责任人、目标值和基线"],
+        "outputs": ["挂到本流程的完整目标卡"],
+        "exit_criteria": "本流程至少有一条在用目标，同一张卡上同时有责任人、目标值和基线。",
+        "evidence": ["objective_complete"],
         "actions": [{"label": "去定目标", "view": "strategy"}],
     },
     {
         "layer_no": 2,
-        "title": "架构与端到端链路",
-        "goal": "用 PCF 统一名称和边界，画出起点、终点和关键接口。",
-        "inputs": ["PCF 分类", "现有流程清单", "组织和系统边界"],
-        "process": ["选 1 个 L1 + 3 个 L2 + 10 个 L3", "补齐 L1–L3", "映射 PCF"],
-        "outputs": ["L1–L3 架构", "PCF 映射", "端到端链路"],
-        "exit_criteria": "主链路完整、关键接口有责任方。",
-        "evidence": ["l1", "l2", "l3", "pcf_mapped_l3"],
+        "title": "这条流程的起止",
+        "goal": "写清这一条流程从哪里开始、到哪里结束、做什么、不做什么、什么情况停，"
+        "并指定发起人。流程地图的上下级和 PCF 对应，在开始使用里数。",
+        "inputs": ["这条 L3 的负责人", "发起人"],
+        "process": ["写起点和终点", "写范围内和范围外", "写停止条件"],
+        "outputs": ["挂在这条 L3 上的范围说明"],
+        "exit_criteria": "这条 L3 有负责人；范围说明写全起止、范围内、范围外和停止条件；发起人已指定。",
+        "evidence": ["process_charters"],
         "actions": [
-            {"label": "看流程地图", "view": "map"},
-            {"label": "看 PCF", "view": "pcf"},
-            {
-                "label": "1+3+10 建架构",
-                "view": "map",
-                "hint": "引导式选择",
-                "action": "start.guidedPcf",
-            },
+            {"label": "写这条流程的起止", "view": "pilot", "action": "pilot.openCharter"},
         ],
     },
     {
@@ -181,15 +180,36 @@ LAYER_DEFINITIONS: List[Dict] = [
     {
         "layer_no": 6,
         "title": "表单/工具",
-        "goal": "用哪些字段、模板、工具和确认动作。",
-        "inputs": ["表单字段", "系统配置", "工具模板"],
-        "process": ["建最小字段集", "绑定表单/规则/工具", "验证可填写、可留存"],
-        "outputs": ["表单", "规则", "工具绑定"],
-        "exit_criteria": "字段可填写、可验证、可留存。",
-        "evidence": ["forms", "bindings"],
+        "goal": "表单能填写；路径来自执行实例或记入的日志；机器人有一次挂了端点的运行；"
+        "并写下案例，以及区块链、人工智能或物联网用在哪一段。",
+        "inputs": ["表单", "执行实例或日志行", "机器人运行", "案例", "技术用途"],
+        "process": [
+            "建最小字段集",
+            "从执行实例或记入的日志挖路径",
+            "登记机器人，并记下一次挂了集成端点的运行",
+            "登记案例和技术用途",
+        ],
+        "outputs": ["表单", "路径变体", "机器人运行", "案例", "技术用途"],
+        "exit_criteria": "表单、路径变体、机器人登记、挂了端点的运行、案例、技术用途都大于 0。"
+        "日志行是记进本系统的，不会自动从 ERP 或 OA 拉下来。运行记录不代替机器人去执行。",
+        "evidence": [
+            "forms",
+            "bindings",
+            "mining_variants",
+            "rpa_bots",
+            "rpa_runs",
+            "process_cases",
+            "technology_uses",
+        ],
         "actions": [
             {"label": "流程设计器", "view": "designer"},
             {"label": "方法工具箱", "view": "toolbox"},
+            {"label": "看这条流程的挖掘", "view": "monitor", "action": "pilot.openMining"},
+            {"label": "登记机器人", "view": "pilot", "action": "pilot.openRpa"},
+            {"label": "记一条外部日志", "view": "pilot", "action": "pilot.openEvent"},
+            {"label": "登记一次运行", "view": "pilot", "action": "pilot.openRun"},
+            {"label": "登记案例", "view": "pilot", "action": "pilot.openCase"},
+            {"label": "登记技术用途", "view": "pilot", "action": "pilot.openTech"},
         ],
     },
     {
@@ -206,13 +226,15 @@ LAYER_DEFINITIONS: List[Dict] = [
     {
         "layer_no": 8,
         "title": "绩效",
-        "goal": "用哪些指标判断成功和异常。",
-        "inputs": ["目标与基线", "数据来源", "异常台账"],
-        "process": ["建 2–5 个结果/过程/健康度指标", "设红黄绿阈值", "录入数据点"],
-        "outputs": ["KPI 卡", "红黄灯", "异常闭环"],
-        "exit_criteria": "指标可采集、不与安全/质量冲突。",
-        "evidence": ["kpi_cards", "kpi_records"],
-        "actions": [{"label": "运营监控", "view": "monitor"}],
+        "goal": "同一张指标卡上要有公式、红黄绿阈值、责任人，并且至少有一个数据点。",
+        "inputs": ["公式", "红黄绿阈值", "责任人", "数据点"],
+        "process": ["在同一张 KPI 上写公式和三条阈值", "指定责任人", "录入至少一个数据点"],
+        "outputs": ["可判断红黄绿的 KPI"],
+        "exit_criteria": "本流程至少有一张 KPI 同时具备公式、目标值、红黄绿阈值、责任人和数据点。",
+        "evidence": ["kpi_monitored"],
+        "actions": [
+            {"label": "运营监控", "view": "monitor", "view_params": {"tab": "kpi"}},
+        ],
     },
     {
         "layer_no": 9,
@@ -231,21 +253,46 @@ LAYER_DEFINITIONS: List[Dict] = [
     {
         "layer_no": 10,
         "title": "新版本",
-        "goal": "何时发布、谁批准、如何回退。",
-        "inputs": ["模型/制度/培训/权限", "回退方案", "变更单"],
-        "process": ["门禁评审", "发布 V1.0", "更新基线、沉淀知识"],
-        "outputs": ["基线/草稿/发布版本", "回退预案", "知识条目"],
-        "exit_criteria": "验收通过、变更可追溯、回退可执行。",
-        "evidence": ["applied_changes", "l3_published", "effective_documents"],
+        "goal": "模型已发布，制度已生效，变更已应用。培训到场或已应用变更上的培训说明，有一处即可。",
+        "inputs": ["已发布模型", "生效制度", "变更单", "培训到场或培训说明"],
+        "process": [
+            "发布模型",
+            "让制度生效",
+            "把变更标成已应用，并写上培训说明",
+            "或记下谁在哪一天听完了哪一课",
+        ],
+        "outputs": ["已发布模型", "生效制度", "已应用变更", "培训到场或培训说明"],
+        "exit_criteria": "已发布模型、生效制度、已应用变更都大于 0。"
+        "培训到场，或已应用变更上写明的培训说明，至少有一处。回退方案写在变更单上。",
+        "evidence": ["applied_changes", "l3_published", "effective_documents", "training_records"],
         "actions": [
             {"label": "流程设计器", "view": "designer"},
             {"label": "交付物", "view": "deliverables"},
             {"label": "知识库", "view": "knowledge"},
+            {"label": "登记培训到场", "view": "pilot", "action": "pilot.openTraining"},
         ],
     },
 ]
 
 LAYER_BY_NO = {layer["layer_no"]: layer for layer in LAYER_DEFINITIONS}
+
+# 这些页面用流程 id 打开这一条；地图用流程编码定位节点。
+_PROCESS_ID_VIEWS = frozenset({"designer", "monitor", "execution", "deliverables", "process_card"})
+
+
+def _scope_view(
+    view: str,
+    params: Optional[dict],
+    path: PilotPath,
+    process: Optional[ProcessArch],
+) -> Dict[str, str]:
+    """从这条路径跳出去时，带上当前流程，避免落到上一次打开的另一条。"""
+    scoped = {key: str(value) for key, value in (params or {}).items() if value is not None}
+    if path.process_id and view in _PROCESS_ID_VIEWS:
+        scoped["process"] = str(path.process_id)
+    elif process is not None and view == "map":
+        scoped["process"] = process.code
+    return scoped
 
 
 def require_path(db: Session, path_id: int) -> PilotPath:
@@ -460,9 +507,10 @@ def _layer4_resources(db: Session, path: PilotPath):
 
 
 def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
-    if not path.process_id:
-        raise PilotError("十层路径必须关联流程")
-    process_counts = process_evidence.collect(db, path.process_id)
+    if path.process_id:
+        process_counts = process_evidence.collect(db, path.process_id)
+    else:
+        process_counts = {key: 0 for key in process_evidence.PROCESS_EVIDENCE_LABELS}
     _layer4_counts, layer4_resources = _layer4_resources(db, path)
     # 第 4 层制度/授权以本流程范围清单为准（与 collect 同源口径，展示用资源明细）
     layer_rows = _ensure_layers(db, path)
@@ -475,25 +523,28 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
     for issue in issues:
         issues_by_layer.setdefault(issue.layer_no, []).append(issue)
 
+    process = db.get(ProcessArch, path.process_id) if path.process_id else None
     layers: List[PilotLayerOut] = []
     done_count = 0
     for definition in LAYER_DEFINITIONS:
         layer_no = definition["layer_no"]
         layer_evidence = process_counts
-        items = [
-            PilotLayerEvidenceOut(
-                key=key,
-                label=process_evidence.PROCESS_EVIDENCE_LABELS.get(
-                    key, startup_service.EVIDENCE_LABELS.get(key, key)
-                ),
-                value=layer_evidence.get(key, 0),
-                required=key != "open_authorization_exceptions",
-                met=startup_service.evidence_met(key, layer_evidence.get(key, 0)),
-                view=startup_service.EVIDENCE_DESTINATIONS[key][0],
-                view_params=startup_service.EVIDENCE_DESTINATIONS[key][1],
+        items = []
+        for key in definition["evidence"]:
+            view, params = startup_service.EVIDENCE_DESTINATIONS[key]
+            items.append(
+                PilotLayerEvidenceOut(
+                    key=key,
+                    label=process_evidence.PROCESS_EVIDENCE_LABELS.get(
+                        key, startup_service.EVIDENCE_LABELS.get(key, key)
+                    ),
+                    value=layer_evidence.get(key, 0),
+                    required=key != "open_authorization_exceptions",
+                    met=startup_service.evidence_met(key, layer_evidence.get(key, 0)),
+                    view=view,
+                    view_params=_scope_view(view, params, path, process),
+                )
             )
-            for key in definition["evidence"]
-        ]
         layer_issues = issues_by_layer.get(layer_no, [])
         blocked = any(
             issue.severity == PilotSeverity.BLOCKER.value
@@ -521,7 +572,20 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
                 context_summary=row.context_summary,
                 notes=row.notes,
                 evidence_items=items,
-                actions=[PilotActionOut(**action) for action in definition["actions"]],
+                actions=[
+                    PilotActionOut(
+                        **{
+                            **action,
+                            "view_params": _scope_view(
+                                action.get("view") or "",
+                                action.get("view_params"),
+                                path,
+                                process,
+                            ),
+                        }
+                    )
+                    for action in definition["actions"]
+                ],
                 resources=layer4_resources if layer_no == 4 else None,
                 tasks=[
                     _task_out(task)
@@ -545,7 +609,6 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
         for layer in layers
     ]
 
-    process = db.get(ProcessArch, path.process_id) if path.process_id else None
     current = LAYER_BY_NO.get(path.current_layer)
     return PilotPathOut(
         id=path.id,
@@ -772,3 +835,201 @@ def update_issue(db: Session, issue: PilotIssue, data: dict) -> PilotIssueOut:
 def delete_issue(db: Session, issue: PilotIssue) -> None:
     db.delete(issue)
     db.flush()
+
+
+def _require_activity_process(db: Session, process_id: int) -> ProcessArch:
+    process = db.get(ProcessArch, process_id)
+    if process is None or process.level not in (3, 4):
+        raise PilotError("这条记录只能挂在 L3 或 L4 上")
+    return process
+
+
+def save_rpa(db: Session, user: User, payload) -> int:
+    """新增一条机器人登记。活动名、机器人名、替掉的人工操作和责任人都要写上。"""
+    process = _require_activity_process(db, payload.process_id)
+    owner = db.get(User, payload.owner_user_id)
+    if owner is None:
+        raise PilotError("责任人不存在")
+    activity_name = (payload.activity_name or "").strip()
+    bot_name = (payload.bot_name or "").strip()
+    manual_step = (payload.manual_step or "").strip()
+    if not activity_name or not bot_name or not manual_step:
+        raise PilotError("活动、机器人名称和替掉的人工操作都要写上")
+    row = RpaBot(
+        process_id=process.id,
+        activity_name=activity_name,
+        bot_name=bot_name,
+        manual_step=manual_step,
+        owner_user_id=owner.id,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "rpa_bot", row.id, f"登记机器人 {bot_name}")
+    db.commit()
+    return row.id
+
+
+def save_training(db: Session, user: User, payload) -> int:
+    """新增一条培训到场。课题、听课人和完成日期都要有。"""
+    process = _require_activity_process(db, payload.process_id)
+    trainee = db.get(User, payload.trainee_user_id)
+    if trainee is None:
+        raise PilotError("听课人不存在")
+    topic = (payload.topic or "").strip()
+    if not topic or payload.completed_on is None:
+        raise PilotError("课题和完成日期都要写上")
+    row = ProcessTrainingRecord(
+        process_id=process.id,
+        trainee_user_id=trainee.id,
+        topic=topic,
+        completed_on=payload.completed_on,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "process_training_record", row.id, f"登记培训 {topic}")
+    db.commit()
+    return row.id
+
+
+TECH_KINDS = {
+    "BLOCKCHAIN": "区块链",
+    "AI": "人工智能",
+    "IOT": "物联网",
+}
+RUN_OUTCOMES = {
+    "SUCCEEDED": "成功",
+    "FAILED": "失败",
+}
+
+
+def technology_kinds() -> List[dict]:
+    return [{"code": code, "label": label} for code, label in TECH_KINDS.items()]
+
+
+def rpa_run_options(db: Session, process_id: int) -> dict:
+    process = _require_activity_process(db, process_id)
+    bots = db.scalars(select(RpaBot).where(RpaBot.process_id == process.id)).all()
+    endpoints = db.scalars(select(IntegrationEndpoint).order_by(IntegrationEndpoint.id)).all()
+    return {
+        "bots": [
+            {"id": row.id, "bot_name": row.bot_name, "activity_name": row.activity_name}
+            for row in bots
+        ],
+        "endpoints": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "kind": row.kind,
+                "status_label": "启用" if row.is_active else "未启用",
+            }
+            for row in endpoints
+        ],
+        "outcomes": [{"code": code, "label": label} for code, label in RUN_OUTCOMES.items()],
+    }
+
+
+def save_event_log(db: Session, user: User, payload) -> int:
+    """记入一条外部日志。来源、案例号、活动和发生时间都要写上。"""
+    process = _require_activity_process(db, payload.process_id)
+    source_name = (payload.source_name or "").strip()
+    case_key = (payload.case_key or "").strip()
+    activity_name = (payload.activity_name or "").strip()
+    if not source_name or not case_key or not activity_name or payload.occurred_at is None:
+        raise PilotError("来源、案例号、活动和发生时间都要写上")
+    row = ProcessEventLog(
+        process_id=process.id,
+        source_name=source_name,
+        case_key=case_key,
+        activity_name=activity_name,
+        occurred_at=payload.occurred_at,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(
+        db, user, "CREATE", "process_event_log", row.id, f"记入日志 {source_name} {case_key}"
+    )
+    db.commit()
+    return row.id
+
+
+def save_rpa_run(db: Session, user: User, payload) -> int:
+    """记下一次运行，并挂到一个已启用的集成端点。这里不代替机器人去执行。"""
+    bot = db.get(RpaBot, payload.bot_id)
+    if bot is None:
+        raise PilotError("先登记机器人，再记运行")
+    _require_activity_process(db, bot.process_id)
+    if payload.outcome not in RUN_OUTCOMES:
+        raise PilotError("运行结果只能是成功或失败")
+    endpoint = db.get(IntegrationEndpoint, payload.endpoint_id)
+    if endpoint is None:
+        raise PilotError("要挂一个已经登记的集成端点")
+    if payload.ran_at is None:
+        raise PilotError("写下这次运行的时间")
+    row = RpaRun(
+        bot_id=bot.id,
+        ran_at=payload.ran_at,
+        outcome=payload.outcome,
+        endpoint_id=endpoint.id,
+        note=(payload.note or "").strip() or None,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "rpa_run", row.id, f"记下运行 {bot.bot_name}")
+    db.commit()
+    return row.id
+
+
+def save_case(db: Session, user: User, payload) -> int:
+    """登记一条案例。标题、情形和责任人都要写上。"""
+    process = _require_activity_process(db, payload.process_id)
+    owner = db.get(User, payload.owner_user_id)
+    if owner is None:
+        raise PilotError("责任人不存在")
+    title = (payload.title or "").strip()
+    situation = (payload.situation or "").strip()
+    if not title or not situation:
+        raise PilotError("案例标题和情形都要写上")
+    row = ProcessCase(
+        process_id=process.id,
+        title=title,
+        situation=situation,
+        owner_user_id=owner.id,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(db, user, "CREATE", "process_case", row.id, f"登记案例 {title}")
+    db.commit()
+    return row.id
+
+
+def save_technology_use(db: Session, user: User, payload) -> int:
+    """登记区块链、人工智能或物联网在这条流程上的用途。"""
+    process = _require_activity_process(db, payload.process_id)
+    if payload.kind not in TECH_KINDS:
+        raise PilotError("技术用途只能是区块链、人工智能或物联网")
+    owner = db.get(User, payload.owner_user_id)
+    if owner is None:
+        raise PilotError("责任人不存在")
+    name = (payload.name or "").strip()
+    usage_note = (payload.usage_note or "").strip()
+    if not name or not usage_note:
+        raise PilotError("名称和用在哪一段都要写上")
+    row = ProcessTechnologyUse(
+        process_id=process.id,
+        kind=payload.kind,
+        name=name,
+        usage_note=usage_note,
+        owner_user_id=owner.id,
+    )
+    db.add(row)
+    db.flush()
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "process_technology_use",
+        row.id,
+        f"登记{TECH_KINDS[payload.kind]} {name}",
+    )
+    db.commit()
+    return row.id

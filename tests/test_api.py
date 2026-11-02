@@ -232,10 +232,10 @@ def test_tools_grouped(client):
     groups = {g["category"]: g for g in r.json()}
     assert set(groups) == {"DIAGNOSE", "DESIGN", "DEPLOY", "MONITOR"}
     assert groups["DIAGNOSE"]["count"] == 9
-    assert groups["DESIGN"]["count"] == 9
+    assert groups["DESIGN"]["count"] == 12
     assert groups["DEPLOY"]["count"] == 7
     assert groups["MONITOR"]["count"] == 8
-    assert sum(g["count"] for g in groups.values()) == 33
+    assert sum(g["count"] for g in groups.values()) == 36
 
 
 def test_tool_detail_has_steps(client):
@@ -1011,6 +1011,15 @@ def test_kpi_radar(client):
     assert all({"kind", "kind_label", "status", "status_label"} <= set(s) for s in data["series"])
 
 
+def test_kpi_radar_filters_by_process(client):
+    kpis = client.get(f"{API}/monitor/kpis").json()
+    bound = next(row for row in kpis if row["process_id"])
+    data = client.get(f"{API}/monitor/kpi-radar", params={"process_id": bound["process_id"]}).json()
+    codes = {row["code"] for row in kpis if row["process_id"] == bound["process_id"]}
+    assert {row["code"] for row in data["series"]} == codes
+    assert len(data["series"]) < 16
+
+
 def test_kpi_achievement_direction(client):
     """越小越好的指标：目标 5 天、当前 8.2 天 → 达成率应低于 100%。"""
     kpis = client.get(f"{API}/monitor/kpis", params={"dimension": "EFFICIENCY"}).json()
@@ -1026,7 +1035,9 @@ def test_kpi_achievement_direction(client):
         if k["code"] == "QUA-01"
     )
     assert otd["direction"] == "HIGHER_BETTER"
-    assert otd["achievement_rate"] == 92.6
+    assert otd["intake"] == "DRAFT"
+    assert otd["achievement_rate"] is None
+    assert otd["status_label"] == "未定来源"
 
 
 def test_project_current_value_follows_kpi(client):

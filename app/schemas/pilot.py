@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.core.timeutil import UtcDateTime
+from app.core.timeutil import UtcDateTime, UtcDateTimeIn
 from app.models.enums import (
     PilotIssueStatus,
     PilotPathStatus,
@@ -42,6 +42,7 @@ class PilotActionOut(BaseModel):
     view: str
     hint: Optional[str] = None
     action: Optional[str] = None
+    view_params: Dict[str, str] = Field(default_factory=dict)
 
 
 class PilotDocumentOut(BaseModel):
@@ -221,6 +222,80 @@ class PilotIssueCreate(BaseModel):
     owner_user_id: Optional[int] = None
     owner: Optional[str] = Field(default=None, max_length=64)
     due_date: Optional[date] = None
+
+
+class RpaIn(BaseModel):
+    process_id: int
+    activity_name: str = Field(max_length=200)
+    bot_name: str = Field(max_length=200)
+    manual_step: str
+    owner_user_id: int
+
+
+class TrainingIn(BaseModel):
+    process_id: int
+    trainee_user_id: int
+    topic: str = Field(max_length=200)
+    completed_on: date
+
+
+class RecordSavedOut(BaseModel):
+    id: int
+
+
+class EventLogIn(BaseModel):
+    process_id: int
+    source_name: str = Field(max_length=80)
+    case_key: str = Field(max_length=80)
+    activity_name: str = Field(max_length=200)
+    occurred_at: UtcDateTimeIn
+
+
+class RpaRunIn(BaseModel):
+    bot_id: int
+    ran_at: UtcDateTimeIn
+    outcome: str = Field(max_length=16)
+    endpoint_id: int
+    note: Optional[str] = None
+
+
+class CaseIn(BaseModel):
+    process_id: int
+    title: str = Field(max_length=200)
+    situation: str
+    owner_user_id: int
+
+
+class TechnologyUseIn(BaseModel):
+    process_id: int
+    kind: str = Field(max_length=16)
+    name: str = Field(max_length=200)
+    usage_note: str
+    owner_user_id: int
+
+
+class CodeLabelOut(BaseModel):
+    code: str
+    label: str
+
+
+class RunBotOption(BaseModel):
+    id: int
+    bot_name: str
+    activity_name: str
+
+
+class RunEndpointOption(BaseModel):
+    id: int
+    name: str
+    kind: str
+    status_label: str
+
+
+class RpaRunOptionsOut(BaseModel):
+    bots: List[RunBotOption]
+    endpoints: List[RunEndpointOption]
+    outcomes: List[CodeLabelOut]
 
 
 class PilotIssueUpdate(BaseModel):

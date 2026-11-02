@@ -44,6 +44,9 @@ def test_frontend_has_modules():
         "authorization.js",
         "pilot.js",
         "pcf.js",
+        "bpmn.js",
+        "cbok.js",
+        "train.js",
         "workflow.js",
         "projects.js",
         "toolbox.js",
@@ -148,6 +151,9 @@ def test_view_modules_are_registered():
         "authorization",
         "pilot",
         "pcf",
+        "bpmn",
+        "cbok",
+        "train",
         "workflow",
         "projects",
         "toolbox",
@@ -236,6 +242,9 @@ def test_help_center_and_page_help_button():
         "deliverables",
         "data",
         "pcf",
+        "bpmn",
+        "cbok",
+        "train",
         "process_card",
         "sketches",
     ):
@@ -247,18 +256,39 @@ def test_help_center_and_page_help_button():
     assert "principles" in catalog and "scenario-publish-run" in catalog
 
 
-def test_start_page_follows_nine_stages_only():
-    """开始页只按 9 个阶段展开，不再用八问另切同一批证据。"""
+def test_start_page_counts_framework_boundary_only():
+    """开始页只数流程框架边界，不再铺九阶段，也不确认首次上线。"""
     src = (JS_ROOT / "views" / "start.js").read_text(encoding="utf-8")
-    assert "start.selectStage" in src
     assert 'data-act="start.evidence"' in src
     assert "item.view" in src
     assert "next_hint" in src
-    assert "首次上线已确认" in src
-    assert "第一条流程已确认上线" not in src
+    assert "start-points" in src
+    assert "start-kicker" in src
+    assert "start.guidedPcf" in src
+    assert "start.openBoundary" not in src
+    assert "start.openCoverage" not in src
+    assert "框架边界" in src
+    assert "start.selectStage" not in src
+    assert "tl-step" not in src
+    assert "首次上线" not in src
+    assert "九个阶段" not in src
     assert "Q1 要什么" not in src
     assert "地图层" not in src
     assert "activeQ" not in src
+
+
+def test_process_analysis_keeps_six_records():
+    """流程分析只列六项已有记录，不把驾驶舱总览当成分析。"""
+    cockpit = (JS_ROOT / "core" / "cockpit.js").read_text(encoding="utf-8")
+    monitor = (JS_ROOT / "views" / "monitor.js").read_text(encoding="utf-8")
+    cbok = (JS_ROOT / "views" / "cbok.js").read_text(encoding="utf-8")
+    start = (JS_ROOT / "views" / "start.js").read_text(encoding="utf-8")
+    assert "{ key: 'analysis', label: '流程分析'" in cockpit
+    for label in ("现状拆解", "瓶颈识别", "根因分析", "价值流分析", "规则与上下文", "绩效基线"):
+        assert label in monitor
+    assert "tab=analysis" in cbok
+    assert "tab=analysis" in start
+    assert "打开运营驾驶舱" not in cbok.split("id: 'analysis'")[1].split("id: 'design'")[0]
 
 
 def test_pilot_page_evidence_jumps_like_start():
@@ -267,6 +297,12 @@ def test_pilot_page_evidence_jumps_like_start():
     assert 'data-act="pilot.evidence"' in src
     assert "item.view" in src
     assert "这条会不会跑" in src
+    assert "pilot.openRpa" in src
+    assert "pilot.openTraining" in src
+    assert "pilot.openMining" in src
+    assert "pilot.openEvent" in src
+    assert "pilot.openCase" in src
+    assert "pilot.openTech" in src
     assert "本流程" in src
 
 
@@ -278,20 +314,24 @@ def test_nav_follows_what_each_page_writes():
     views = re.findall(r'<a[^>]*data-view="([^"]+)"', html)
     assert views == [
         "start",
-        "orgs",
-        "map",
-        "authorization",
         "strategy",
-        "projects",
+        "pcf",
+        "map",
+        "orgs",
+        "authorization",
         "pilot",
         "designer",
+        "projects",
         "execution",
         "dashboard",
+        "cbok",
+        "train",
+        "bpmn",
     ]
     assert "把公司流程体系立起来" in html
-    assert "把一条流程改好" in html
+    assert "把一条流程建好" in html
     assert "十层核对" in html
-    build = html.split("把一条流程改好")[0]
+    build = html.split("把一条流程建好")[0]
     assert 'data-view="pilot"' not in build
     assert "能力地图" not in html
     assert "capability" not in views
@@ -600,6 +640,9 @@ def test_every_view_module_exports_a_renderer():
         "authorization.js": "renderAuthorization",
         "pilot.js": "renderPilot",
         "pcf.js": "renderPcf",
+        "bpmn.js": "renderBpmn",
+        "cbok.js": "renderCbok",
+        "train.js": "renderTrain",
         "workflow.js": "renderWorkflow",
         "projects.js": "renderProjects",
         "toolbox.js": "renderToolbox",

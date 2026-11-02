@@ -72,7 +72,7 @@ MODEL_TO_DELIVERABLE_STATUS: Dict[str, str] = {
 TOOL_CATEGORY_LABELS: Dict[str, str] = {
     "DIAGNOSE": "诊断工具",
     "DESIGN": "设计工具",
-    "DEPLOY": "落地工具",
+    "DEPLOY": "变革",
     "MONITOR": "监控工具",
 }
 

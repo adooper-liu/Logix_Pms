@@ -46,6 +46,7 @@ from app.schemas.execution import (
     WorklogCreate,
     WorklogOut,
 )
+from app.services import authorization as authorization_service
 from app.services import compensation as compensation_service
 from app.services import forms as forms_service
 from app.services import org_scope
@@ -684,6 +685,10 @@ def complete_task(
     form = forms_service.form_for_snapshot(instance.snapshot, task.node_key)
     fields = form.get("fields", []) if form else []
     form_data = forms_service.validate_form_data(fields, payload.form_data)
+    try:
+        authorization_service.assert_task_allowed(db, task, user, form_data)
+    except authorization_service.AuthorizationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     context = {**(instance.variables or {}), **form_data}
 
     next_key: Optional[str] = None

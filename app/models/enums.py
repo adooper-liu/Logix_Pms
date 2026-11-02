@@ -25,7 +25,7 @@ class ProjectStatus(str, Enum):
 
 class ProjectType(str, Enum):
     IMPROVEMENT = "IMPROVEMENT"  # 流程改善项目（24 步）
-    GOVERNANCE_SETUP = "GOVERNANCE_SETUP"  # 治理体系落地项目（9 阶段）
+    GOVERNANCE_SETUP = "GOVERNANCE_SETUP"  # 治理体系落地项目（流程框架边界）
 
 
 class ProcessState(str, Enum):
@@ -70,7 +70,7 @@ class TaskStatus(str, Enum):
 class ToolCategory(str, Enum):
     DIAGNOSE = "DIAGNOSE"  # 诊断
     DESIGN = "DESIGN"  # 设计
-    DEPLOY = "DEPLOY"  # 落地
+    DEPLOY = "DEPLOY"  # 变革：让人跟上这次改动
     MONITOR = "MONITOR"  # 监控
 
 

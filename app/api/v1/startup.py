@@ -1,18 +1,24 @@
-"""启动向导 API：九步 readiness 与下一步动作。"""
+"""开始使用 API：流程框架边界，以及单条流程的范围说明。"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser
-from app.schemas.startup import StartupPilotConfirmIn, StartupSkipIn, StartupStatusOut
+from app.schemas.startup import (
+    CharterIn,
+    CharterOptionsOut,
+    StartupPilotConfirmIn,
+    StartupSkipIn,
+    StartupStatusOut,
+)
 from app.services import startup as startup_service
 
 router = APIRouter(prefix="/start", tags=["启动向导"])
 
 
 @router.get(
-    "/status", response_model=StartupStatusOut, summary="九步启动状态（按现有数据自动计算）"
+    "/status", response_model=StartupStatusOut, summary="流程框架边界（按现有数据自动计算）"
 )
 def startup_status(db: DbSession, user: CurrentUser):
     return startup_service.status(db)
@@ -61,3 +67,24 @@ def confirm_pilot(payload: StartupPilotConfirmIn, db: DbSession, user: ManagerUs
 )
 def revoke_pilot(db: DbSession, user: ManagerUser):
     return startup_service.revoke_pilot(db, user)
+
+
+@router.get(
+    "/charter-options",
+    response_model=CharterOptionsOut,
+    summary="范围说明表单的可选项",
+)
+def charter_options(db: DbSession, user: CurrentUser):
+    return startup_service.charter_options(db)
+
+
+@router.post(
+    "/charters",
+    response_model=StartupStatusOut,
+    summary="写入一条 L3 的范围说明（MANAGER+）",
+)
+def save_charter(payload: CharterIn, db: DbSession, user: ManagerUser):
+    try:
+        return startup_service.save_charter(db, user, payload)
+    except startup_service.CharterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

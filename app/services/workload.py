@@ -552,6 +552,7 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
         select(WorkMeasurementStandard)
         .options(
             joinedload(WorkMeasurementStandard.activity),
+            joinedload(WorkMeasurementStandard.position),
             selectinload(WorkMeasurementStandard.reviewed_by),
         )
         .where(
@@ -572,6 +573,19 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
             .group_by(WorkMeasurementObservation.standard_id)
         ).all()
     )
+    parent_ids = {
+        row.activity.parent_id
+        for row in standards
+        if row.activity is not None and row.activity.parent_id is not None
+    }
+    parents = (
+        {
+            row.id: row
+            for row in db.scalars(select(ProcessArch).where(ProcessArch.id.in_(parent_ids)))
+        }
+        if parent_ids
+        else {}
+    )
     standard_rows = [
         WorkloadStandardRow(
             standard_id=row.id,
@@ -580,6 +594,18 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
             activity_id=row.activity_id,
             activity_code=row.activity.code if row.activity else None,
             activity_name=row.activity.name if row.activity else None,
+            process_id=row.activity.parent_id if row.activity else None,
+            process_code=(
+                parents[row.activity.parent_id].code
+                if row.activity and row.activity.parent_id in parents
+                else None
+            ),
+            process_name=(
+                parents[row.activity.parent_id].name
+                if row.activity and row.activity.parent_id in parents
+                else None
+            ),
+            org_unit_id=_effective_org(row, row.position),
             position_id=row.position_id,
             position_name=row.position.name if row.position else None,
             standard_minutes=row.standard_minutes,
@@ -629,11 +655,34 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
         if position_ids
         else {}
     )
+    actual_parent_ids = {
+        row.parent_id for row in activities.values() if row.parent_id is not None
+    } - set(parents)
+    if actual_parent_ids:
+        parents.update(
+            {
+                row.id: row
+                for row in db.scalars(
+                    select(ProcessArch).where(ProcessArch.id.in_(actual_parent_ids))
+                )
+            }
+        )
     actual_rows = [
         WorkloadActualRow(
             activity_id=activity_id,
             activity_code=activities[activity_id].code if activity_id in activities else None,
             activity_name=activities[activity_id].name if activity_id in activities else None,
+            process_id=(activities[activity_id].parent_id if activity_id in activities else None),
+            process_code=(
+                parents[activities[activity_id].parent_id].code
+                if activity_id in activities and activities[activity_id].parent_id in parents
+                else None
+            ),
+            process_name=(
+                parents[activities[activity_id].parent_id].name
+                if activity_id in activities and activities[activity_id].parent_id in parents
+                else None
+            ),
             position_id=position_id,
             position_name=positions[position_id].name if position_id in positions else None,
             task_count=int(task_count or 0),

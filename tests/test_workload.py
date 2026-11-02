@@ -172,6 +172,13 @@ def test_summary_excludes_draft_demand(client):
     assert after["totals"]["demand_minutes"] == before["totals"]["demand_minutes"]
     draft = next(row for row in after["standards"] if row["standard_id"] == created.json()["id"])
     assert draft["included"] is False
+    activity = next(
+        row
+        for row in client.get(f"{API}/process-map/flat", params={"level": 4}).json()
+        if row["id"] == draft["activity_id"]
+    )
+    assert draft["process_id"] == activity["parent_id"]
+    assert draft["process_code"]
 
 
 def test_actual_worklog_is_attributed_to_activity(client):

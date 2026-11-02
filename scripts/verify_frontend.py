@@ -39,6 +39,9 @@ VIEWS = [
     ("deliverables", "交付物与模板库"),
     ("orgs", "组织与人员"),
     ("sketches", "架构草图"),
+    ("bpmn", "BPMN 符号"),
+    ("pcf", "流程架构"),
+    ("cbok", "CBOK 知识域"),
 ]
 
 failures: list[str] = []
@@ -102,12 +105,14 @@ def main() -> int:
                 f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
             )
             groups = [text.strip() for text in page.locator(".nav .grp").all_inner_texts()]
-            assert groups == ["把公司流程体系立起来", "把一条流程改好"], groups
+            assert groups == ["把公司流程体系立起来", "把一条流程建好", "系统学习"], groups
             assert page.locator("#expertToggle").count() == 0
             assert page.locator('.nav a[data-view="map"]').is_visible()
             assert page.locator('.nav a[data-view="execution"]').is_visible()
+            assert page.locator('.nav a[data-view="bpmn"]').is_visible()
+            assert page.locator('.nav a[data-view="pcf"]').is_visible()
+            assert page.locator('.nav a[data-view="cbok"]').is_visible()
             assert page.locator('.nav a[data-view="workflow"]').count() == 0
-            assert page.locator('.nav a[data-view="pcf"]').count() == 0
 
         check("默认入口与两侧栏分组", default_entry_and_nav)
 
@@ -273,25 +278,27 @@ def main() -> int:
         # 地图下钻
         def map_drill() -> None:
             goto("map")
-            before = page.inner_text(".crumb")
+            crumb = page.locator("#view .crumb")
+            before = crumb.inner_text() if crumb.count() else ""
             page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(700)
-            after = page.inner_text(".crumb")
+            after = page.inner_text("#view .crumb")
             assert len(after) > len(before), f"面包屑未增长：{before!r} → {after!r}"
             assert page.inner_text("#view").count("Owner:") > 0
 
         def map_enter_button() -> None:
             goto("map")
-            before = page.inner_text(".crumb")
+            crumb = page.locator("#view .crumb")
+            before = crumb.inner_text() if crumb.count() else ""
             page.click('#view .map-go-btn:has-text("进入") >> nth=0')
             page.wait_for_timeout(700)
-            after = page.inner_text(".crumb")
+            after = page.inner_text("#view .crumb")
             assert len(after) > len(before), f"「进入」按钮没有下钻：{before!r} → {after!r}"
 
         # 流程详情里的配套文件入口：L4 叶子节点 → 管理标准文件
         def map_documents_entry() -> None:
             goto("map")
-            page.click('.crumb a:has-text("全部价值链")')
+            page.click("#view .tree-item.root")
             page.wait_for_timeout(500)
             page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(600)
@@ -343,8 +350,6 @@ def main() -> int:
         def pcf_guided_wizard() -> None:
             goto("start")
             page.wait_for_timeout(700)
-            page.click('#view .start-nav-item:has-text("流程架构设计")')
-            page.wait_for_timeout(300)
             page.click('#view button:has-text("1+3+10 建架构")')
             page.wait_for_selector("#mask.show", timeout=8000)
             page.wait_for_selector('#pcfGuided input[data-act="map.guidedL1"]', timeout=12000)
@@ -1201,7 +1206,7 @@ def main() -> int:
         # 架构树计数：L1「研发设计」下含 9 个 L4 活动
         def map_tree_counts() -> None:
             goto("map")
-            page.click('.crumb a:has-text("全部价值链")')
+            page.click("#view .tree-item.root")
             page.wait_for_timeout(600)
             item = page.locator("#view .tree-item").filter(has_text="研发设计").first
             count = item.locator(".cnt")
@@ -2043,9 +2048,11 @@ def main() -> int:
             page.click('#view .cockpit-tabs button:has-text("KPI")')
             page.wait_for_timeout(1200)
             kpi_view = page.inner_text("#view")
-            assert "流程健康度雷达" in kpi_view, "KPI 页签缺少雷达图"
+            assert "综合达成率" in kpi_view, "KPI 页签缺少综合达成率"
             assert "整体达成率趋势" in kpi_view, "KPI 页签缺少整体趋势"
-            assert "改善候选" in kpi_view, "KPI 页签缺少改善候选"
+            assert "KPI 明细" in kpi_view, "KPI 页签缺少明细"
+            assert "流程健康度雷达" not in kpi_view, "KPI 页签不应再画雷达"
+            assert "异常概览" not in kpi_view, "异常台账不放在 KPI 页"
             assert "红/黄/绿" in kpi_view, "KPI 页签缺少红黄绿状态列"
             assert "全部类型" in kpi_view, "KPI 页签缺少类型筛选"
 
@@ -2186,9 +2193,12 @@ def main() -> int:
             row = page.locator('#view tr:has-text("自检用标准工时")').first
             assert "已验证" in row.inner_text(), "审核通过后状态不是已验证"
             workload_view = page.inner_text("#view")
-            assert "标准 vs 实际" in workload_view, "工作量看板缺少标准 vs 实际"
-            assert "瓶颈岗位" in workload_view, "工作量看板缺少瓶颈岗位"
-            assert "未来 3 个月缺口" in workload_view, "工作量看板缺少预测"
+            assert "标准工时卡" in workload_view
+            assert "产能与负荷" in workload_view
+            assert "标准 vs 实际" not in workload_view, "没有任务工时不应拿 0 和标准比"
+            assert "没有超出可用工时的岗位" not in workload_view
+            assert "未来 3 个月没有缺口" not in workload_view
+            assert "负荷平衡" not in workload_view
 
         # 数据治理：数据域/数据流登记与缺口概览
         def data_governance_view() -> None:
@@ -2313,7 +2323,7 @@ def main() -> int:
             assert any("识别与优先级排序" in item for item in labels), (
                 f"改善项目阶段名缺失：{labels}"
             )
-            assert any("立项定界" in item for item in labels), f"体系落地阶段名缺失：{labels}"
+            assert any("框架边界" in item for item in labels), f"体系落地阶段名缺失：{labels}"
 
         # 工具箱：工具卡的「相关案例/模板」应切到 ② 并按工具过滤
         def knowledge_tool_jump() -> None:
@@ -2545,76 +2555,22 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "开始使用" in view and "唯一主入口" in view, "启动向导未渲染"
-            assert page.locator("#view .tl-step").count() == 9, "九阶段时间轴不完整"
-            assert page.locator("#view .tl-step.current").count() == 1, "时间轴没有当前阶段"
-            assert page.locator("#view .tl-step.done").count() >= 1, "时间轴没有已完成阶段"
-            assert "当前" in page.inner_text("#view .start-timeline")
-            assert page.locator("#view .start-shell").count() == 1, "开始页没有三栏布局"
-            assert page.locator("#view .start-nav-item").count() == 9, "左侧应是 9 个阶段"
-            assert page.locator("#view .start-nav-item.on").count() == 1, "左侧没有唯一选中阶段"
-            assert "Q1 要什么" not in view and "地图层" not in view, "八问不该再出现在开始页"
-            assert "当前位置" in view, "右侧缺少当前位置"
-            assert "前 8 个阶段" in view and "评审与固化" in view, "启动页缺少上线范围"
+            assert page.locator("#view .tl-step").count() == 0, "开始页不应再铺阶段时间轴"
+            assert page.locator("#view .start-nav-item").count() == 0, "开始页不应再有阶段导航"
+            assert "流程框架边界" in view, "开始页应回答框架边界"
+            assert "九个阶段" not in view and "前 8 个阶段" not in view
+            assert "Q1 要什么" not in view and "地图层" not in view
+            assert "确认首次上线" not in view
             tip = page.locator("#view .page-head .metric-help.has-tip")
             assert tip.count() == 1, "开始页没有把计数口径收进说明"
             tip_text = tip.first.get_attribute("data-tip") or ""
-            assert "全公司计数" in tip_text and "这次先不做" in tip_text, tip_text
-            gate = page.evaluate(
-                """async () => {
-                    const token = localStorage.getItem('psm_token');
-                    const res = await fetch('/api/v1/start/status', {
-                        headers: { Authorization: 'Bearer ' + token },
-                    });
-                    return res.ok ? await res.json() : null;
-                }"""
-            )
-            view = page.inner_text("#view")
-            if gate and gate["pilot_confirmed"]:
-                assert "已确认上线" in view and "撤销确认" in view
-            elif gate and gate["pilot_gate_open"]:
-                assert "确认首次上线" in view
-            else:
-                assert "还差 " in view and "个阶段" in view, "启动页缺少上线缺口说明"
-
-            view = page.inner_text("#view")
-            has_current = page.locator("#view .start-current").count() == 1
-            assert has_current or "九个阶段都齐了" in view or "能做的都做了" in view, (
-                "启动页没有当前步"
-            )
-            assert page.locator("#view .start-current").count() <= 1, "不应一次展开多步"
-
-            if has_current:
-                view = page.inner_text("#view")
-                assert "这一步要留下什么" in view, "启动向导缺少证据面板"
-                jumps = page.locator("#view .start-current button.ev-jump")
-                assert jumps.count() >= 1, "证据计数不能打开记录"
-                assert jumps.first.get_attribute("data-view"), "证据计数没有落点页面"
-                assert "已经有的" in view and ("还缺的" in view or "建议补上" in view), (
-                    "证据面板缺少缺项"
-                )
-                # 跳过 = 未验证，且可以取消
-                skip_button = page.locator('#view .start-current button[data-act="start.skip"]')
-                key = skip_button.first.get_attribute("data-key")
-                skipped_keys.append(key)
-                skip_button.first.click()
-                page.wait_for_selector("#mask.show")
-                page.click("#uiDialogOk")
-                page.wait_for_timeout(1400)
-                assert page.locator("#view .tl-step.skipped").count() >= 1, (
-                    "跳过步骤未在时间轴标记为未验证"
-                )
-                assert "未验证" in page.inner_text("#view .start-timeline")
-                # 恢复入口在右侧折叠列表
-                page.locator("#view details.start-fold summary").first.click()
-                page.wait_for_timeout(300)
-                unskip = page.locator(f'#view button[data-act="start.unskip"][data-key="{key}"]')
-                assert unskip.count(), "跳过后的步骤没有取消跳过入口"
-                unskip.first.click()
-                page.wait_for_selector("#mask.show")
-                page.click("#uiDialogOk")
-                page.wait_for_timeout(1400)
-                skipped_keys.remove(key)
-                assert page.locator("#view .tl-step.skipped").count() == 0, "取消跳过后仍是未验证"
+            assert "流程地图" in tip_text and "十层核对" in tip_text, tip_text
+            assert page.locator("#view .start-current").count() == 1, "开始页应展开框架边界"
+            assert "这一步要留下什么" in view
+            jumps = page.locator("#view .start-current button.ev-jump")
+            assert jumps.count() >= 1, "证据计数不能打开记录"
+            assert jumps.first.get_attribute("data-view"), "证据计数没有落点页面"
+            assert page.locator('#view button:has-text("1+3+10 建架构")').count() == 1
 
         def process_card_view() -> None:
             goto("process_card")
@@ -3079,7 +3035,7 @@ def main() -> int:
         # 地图 → 立项：带流程进入项目向导
         def map_to_project() -> None:
             goto("map")
-            page.click('.crumb a:has-text("全部价值链")')
+            page.click("#view .tree-item.root")
             page.wait_for_timeout(500)
             page.click("#view .map-open >> nth=2")
             page.wait_for_timeout(600)
@@ -3161,7 +3117,7 @@ def main() -> int:
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)
         check("战略目标承接", strategy_view)
-        check("开始使用九步向导", start_view)
+        check("开始使用框架边界", start_view)
         check("流程卡聚合视图", process_card_view)
         check("返回来源与固定主线", navigation_origin_and_mainline)
         check("下拉选择稳定", select_click_stable)
