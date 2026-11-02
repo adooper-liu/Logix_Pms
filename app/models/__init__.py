@@ -3,6 +3,18 @@
 注意：导入顺序无关紧要，但必须全部被导入，否则 Base.metadata 不完整。
 """
 
+from app.models.adoption import (
+    MapCoverageItem,
+    MapCoverageReview,
+    ProcessCase,
+    ProcessEventLog,
+    ProcessTechnologyUse,
+    ProcessTrainingRecord,
+    RpaBot,
+    RpaRun,
+    SiblingBoundaryLine,
+    SiblingBoundaryReview,
+)
 from app.models.authorization import AuthorizationException, AuthorizationRule
 from app.models.baseline import AssetBaseline
 from app.models.benchmark import (
@@ -113,9 +125,10 @@ from app.models.project import Project, ProjectGateCondition, ProjectStep, Workf
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.replication import ReplicationPack
 from app.models.sketch import Sketch
-from app.models.startup import StartupPilotConfirm, StartupStepSkip
+from app.models.startup import ProcessCharter, StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool, ToolScenarioLink, ToolUsage, ToolUsagePlan
+from app.models.tool_sheet import ToolSheet
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
 from app.models.user import AuditLog, User
 from app.models.workload import (
@@ -144,6 +157,7 @@ __all__ = [
     "ToolScenarioLink",
     "ToolUsage",
     "ToolUsagePlan",
+    "ToolSheet",
     "ToolTemplate",
     "ToolTemplateVersion",
     "TemplateUsage",
@@ -180,6 +194,17 @@ __all__ = [
     "PilotIssue",
     "StartupStepSkip",
     "StartupPilotConfirm",
+    "ProcessCharter",
+    "SiblingBoundaryReview",
+    "SiblingBoundaryLine",
+    "MapCoverageReview",
+    "MapCoverageItem",
+    "RpaBot",
+    "RpaRun",
+    "ProcessEventLog",
+    "ProcessCase",
+    "ProcessTechnologyUse",
+    "ProcessTrainingRecord",
     "ProcessInstance",
     "ProcessTask",
     "ProcessTaskEvent",

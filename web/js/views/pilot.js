@@ -28,9 +28,17 @@ function statusTag(tone, label) {
 }
 
 function actionAttrs(action) {
-  return action.action === 'start.guidedPcf'
-    ? 'data-act="start.guidedPcf"'
-    : 'data-act="pilot.go"';
+  if (action.action === 'start.guidedPcf') return 'data-act="start.guidedPcf"';
+  if (action.action === 'pilot.openCharter') return 'data-act="pilot.openCharter"';
+  if (action.action === 'pilot.openMining') return 'data-act="pilot.openMining"';
+  if (action.action === 'pilot.openRpa') return 'data-act="pilot.openRpa"';
+  if (action.action === 'pilot.openEvent') return 'data-act="pilot.openEvent"';
+  if (action.action === 'pilot.openRun') return 'data-act="pilot.openRun"';
+  if (action.action === 'pilot.openCase') return 'data-act="pilot.openCase"';
+  if (action.action === 'pilot.openTech') return 'data-act="pilot.openTech"';
+  if (action.action === 'pilot.openTraining') return 'data-act="pilot.openTraining"';
+  const params = new URLSearchParams(action.view_params || {}).toString();
+  return `data-act="pilot.go"${params ? ` data-params="${esc(params)}"` : ''}`;
 }
 
 async function loadUsers() {
@@ -51,15 +59,341 @@ function userOptions(users, selectedId) {
 
 /* -------------------------------------------------- 选择与渲染 */
 
-on('pilot.go', ({ view }) => go(view));
+const PROCESS_ID_VIEWS = new Set([
+  'designer', 'monitor', 'execution', 'deliverables', 'process_card',
+]);
 
-on('pilot.evidence', ({ view, params }) => {
-  if (!view) return;
+function scopedParams(view, params) {
   const parsed = {};
   new URLSearchParams(params || '').forEach((value, key) => {
     parsed[key] = value;
   });
-  go(view, { params: parsed, push: true });
+  const detail = state.pilot.data;
+  if (!detail) return parsed;
+  if (detail.process_id && PROCESS_ID_VIEWS.has(view)) parsed.process = String(detail.process_id);
+  if (detail.process_code && view === 'map') parsed.process = detail.process_code;
+  return parsed;
+}
+
+on('pilot.go', ({ view, params }) => {
+  if (!view) return;
+  const parsed = scopedParams(view, params);
+  go(view, Object.keys(parsed).length ? { params: parsed, push: true } : undefined);
+});
+
+on('pilot.openMining', () => {
+  const detail = state.pilot.data;
+  const params = { tab: 'mining' };
+  if (detail && detail.process_id) params.process = String(detail.process_id);
+  go('monitor', { params, push: true });
+});
+
+on('pilot.openCharter', async () => {
+  try {
+    state.pilot.charterForm = await GET('/start/charter-options');
+    const detail = state.pilot.data;
+    if (detail) paint({ detail, paths: state.pilot.paths, meta: state.pilot.meta });
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveCharter', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程，起止记不到某一条 L3 上', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const sponsorId = Number(value('chSponsor'));
+  if (!sponsorId) {
+    toast('先选择发起人', true);
+    return;
+  }
+  try {
+    await POST('/start/charters', {
+      process_id: detail.process_id,
+      purpose: value('chPurpose'),
+      starts_at: value('chStart'),
+      ends_at: value('chEnd'),
+      in_scope: value('chIn'),
+      out_of_scope: value('chOut'),
+      stop_condition: value('chStop'),
+      sponsor_user_id: sponsorId,
+    });
+    state.pilot.charterForm = await GET('/start/charter-options');
+    const updated = await GET(`/pilot/paths/${detail.id}`);
+    state.pilot.data = updated;
+    paint({ detail: updated, paths: state.pilot.paths, meta: state.pilot.meta });
+    toast('已保存范围说明');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+function repaintPilot() {
+  const detail = state.pilot.data;
+  if (detail) paint({ detail, paths: state.pilot.paths, meta: state.pilot.meta });
+}
+
+async function refreshPath(message) {
+  const detail = state.pilot.data;
+  const updated = await GET(`/pilot/paths/${detail.id}`);
+  state.pilot.data = updated;
+  paint({ detail: updated, paths: state.pilot.paths, meta: state.pilot.meta });
+  toast(message);
+}
+
+on('pilot.openRpa', async () => {
+  try {
+    await loadUsers();
+    state.pilot.rpaOpen = true;
+    repaintPilot();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.openEvent', () => {
+  state.pilot.eventOpen = true;
+  repaintPilot();
+});
+
+on('pilot.saveEvent', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  if (!value('evSource') || !value('evCase') || !value('evActivity') || !value('evAt')) {
+    toast('来源、案例号、活动和发生时间都要写上', true);
+    return;
+  }
+  try {
+    await POST('/pilot/event-logs', {
+      process_id: detail.process_id,
+      source_name: value('evSource'),
+      case_key: value('evCase'),
+      activity_name: value('evActivity'),
+      occurred_at: value('evAt'),
+    });
+    await refreshPath('已记入这条日志');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.openRun', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程', true);
+    return;
+  }
+  try {
+    state.pilot.runOptions = await GET(`/pilot/rpa-run-options?process_id=${detail.process_id}`);
+    state.pilot.runOpen = true;
+    repaintPilot();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveRun', async () => {
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const botId = Number(value('runBot'));
+  const endpointId = Number(value('runEndpoint'));
+  if (!botId || !endpointId || !value('runAt') || !value('runOutcome')) {
+    toast('先选择机器人、结果、时间和集成端点', true);
+    return;
+  }
+  try {
+    await POST('/pilot/rpa-runs', {
+      bot_id: botId,
+      ran_at: value('runAt'),
+      outcome: value('runOutcome'),
+      endpoint_id: endpointId,
+      note: value('runNote'),
+    });
+    await refreshPath('已记下这次运行');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.openCase', async () => {
+  try {
+    await loadUsers();
+    state.pilot.caseOpen = true;
+    repaintPilot();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveCase', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const ownerId = Number(value('caseOwner'));
+  if (!value('caseTitle') || !value('caseSituation') || !ownerId) {
+    toast('标题、情形和责任人都要写上', true);
+    return;
+  }
+  try {
+    await POST('/pilot/cases', {
+      process_id: detail.process_id,
+      title: value('caseTitle'),
+      situation: value('caseSituation'),
+      owner_user_id: ownerId,
+    });
+    await refreshPath('已登记案例');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.openTech', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程', true);
+    return;
+  }
+  try {
+    await loadUsers();
+    state.pilot.techKinds = await GET('/pilot/technology-kinds');
+    state.pilot.techOpen = true;
+    repaintPilot();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveTech', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const ownerId = Number(value('techOwner'));
+  if (!value('techKind') || !value('techName') || !value('techNote') || !ownerId) {
+    toast('种类、名称、用在哪一段和责任人都要写上', true);
+    return;
+  }
+  try {
+    await POST('/pilot/technology-uses', {
+      process_id: detail.process_id,
+      kind: value('techKind'),
+      name: value('techName'),
+      usage_note: value('techNote'),
+      owner_user_id: ownerId,
+    });
+    await refreshPath('已登记技术用途');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveRpa', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程，机器人记不到某一条 L3 上', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const ownerId = Number(value('rpaOwner'));
+  if (!ownerId) {
+    toast('先选择责任人', true);
+    return;
+  }
+  try {
+    await POST('/pilot/rpa', {
+      process_id: detail.process_id,
+      activity_name: value('rpaActivity'),
+      bot_name: value('rpaBot'),
+      manual_step: value('rpaManual'),
+      owner_user_id: ownerId,
+    });
+    const updated = await GET(`/pilot/paths/${detail.id}`);
+    state.pilot.data = updated;
+    paint({ detail: updated, paths: state.pilot.paths, meta: state.pilot.meta });
+    toast('已登记机器人');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.openTraining', async () => {
+  try {
+    await loadUsers();
+    state.pilot.trainingOpen = true;
+    const detail = state.pilot.data;
+    if (detail) paint({ detail, paths: state.pilot.paths, meta: state.pilot.meta });
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.saveTraining', async () => {
+  const detail = state.pilot.data;
+  if (!detail || !detail.process_id) {
+    toast('这条路径还没有挂上流程，培训到场记不到某一条 L3 上', true);
+    return;
+  }
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+  const traineeId = Number(value('trTrainee'));
+  if (!traineeId) {
+    toast('先选择听课人', true);
+    return;
+  }
+  if (!value('trDate')) {
+    toast('先填写完成日期', true);
+    return;
+  }
+  try {
+    await POST('/pilot/training', {
+      process_id: detail.process_id,
+      trainee_user_id: traineeId,
+      topic: value('trTopic'),
+      completed_on: value('trDate'),
+    });
+    const updated = await GET(`/pilot/paths/${detail.id}`);
+    state.pilot.data = updated;
+    paint({ detail: updated, paths: state.pilot.paths, meta: state.pilot.meta });
+    toast('已登记培训到场');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+on('pilot.evidence', ({ view, params }) => {
+  if (!view) return;
+  go(view, { params: scopedParams(view, params), push: true });
 });
 
 on('pilot.selectPath', (_data, el) => {
@@ -495,16 +829,207 @@ function layerResources(resources) {
   return `
     <div class="pilot-section">
       <div class="between mb">
-        <h4>制度、授权与例外（本流程范围）</h4>
+        <div class="pilot-kicker">本层要核对的记录</div>
         <span class="tiny muted">生效制度 ${resources.documents.length} ·
           规则 ${resources.rules.length} · 例外 ${resources.exceptions.length}</span>
       </div>
-      <div class="pilot-three">
-        <div><span class="ev-h">已生效制度/SOP</span>${docs}</div>
-        <div><span class="ev-h">授权规则</span>${rules}</div>
-        <div><span class="ev-h">例外台账</span>${exceptions}</div>
+      <div class="pilot-resources">
+        <div class="pilot-step"><span class="ev-h">已生效制度/SOP</span>${docs}</div>
+        <div class="pilot-step"><span class="ev-h">授权规则</span>${rules}</div>
+        <div class="pilot-step"><span class="ev-h">例外台账</span>${exceptions}</div>
       </div>
     </div>`;
+}
+
+function charterBox(detail) {
+  const form = state.pilot.charterForm;
+  if (!form || !detail) return '';
+  const saved = (form.charters || []).find(
+    (row) => Number(row.process_id) === Number(detail.process_id),
+  ) || null;
+  const proc = (form.processes || []).find(
+    (row) => Number(row.id) === Number(detail.process_id),
+  );
+  const users = (form.users || []).map((row) => `
+    <option value="${row.id}"${
+      saved && String(row.id) === String(saved.sponsor_user_id) ? ' selected' : ''
+    }>${esc(row.display_name)}</option>`).join('');
+  const field = (id, label, value) => `
+    <div class="field"><label for="${id}">${label}</label>
+      <input id="${id}" maxlength="500" value="${esc(value || '')}"></div>`;
+  const ownerNote = !detail.process_id
+    ? '<div class="note mb">这条路径还没有挂上流程。新建路径时要选一条 L3，起止才能记到那条流程上。</div>'
+    : proc && !proc.has_owner
+      ? '<div class="note mb">这条 L3 还没有负责人。先到流程地图指定负责人，再保存起止。</div>'
+      : '';
+  return `
+    <div class="pilot-section" id="charterBox">
+      <h4>这条流程的起止</h4>
+      ${ownerNote}
+      <div class="tiny muted mb">${esc(detail.process_code || '')} ${esc(detail.process_name || '')}</div>
+      ${field('chPurpose', '为什么做', saved && saved.purpose)}
+      ${field('chStart', '从哪里开始', saved && saved.starts_at)}
+      ${field('chEnd', '到哪里结束', saved && saved.ends_at)}
+      ${field('chIn', '做什么', saved && saved.in_scope)}
+      ${field('chOut', '不做什么', saved && saved.out_of_scope)}
+      ${field('chStop', '什么情况停', saved && saved.stop_condition)}
+      <div class="field"><label for="chSponsor">发起人（有权批准范围）</label>
+        <select id="chSponsor">${users}</select></div>
+      <button class="btn btn-p" data-act="pilot.saveCharter">保存范围说明</button>
+    </div>`;
+}
+
+function rpaBox(detail) {
+  if (!state.pilot.rpaOpen) return '';
+  if (!detail.process_id) {
+    return '<div class="note mb">这条路径还没有挂上流程，机器人记不到某一条 L3 上。</div>';
+  }
+  const users = userOptions(state.pilot.users || [], null);
+  return `
+    <div class="pilot-section" id="rpaBox">
+      <h4>登记机器人</h4>
+      <div class="tiny muted mb">${esc(detail.process_code || '')} ${esc(detail.process_name || '')}</div>
+      <div class="field"><label for="rpaActivity">哪一步由机器人做</label>
+        <input id="rpaActivity" placeholder="例如：核对入库单字段"></div>
+      <div class="field"><label for="rpaBot">机器人名称</label>
+        <input id="rpaBot" placeholder="例如：入库单核对机器人"></div>
+      <div class="field"><label for="rpaManual">替掉的人工操作</label>
+        <textarea id="rpaManual" rows="2" placeholder="原来由人打开系统、逐项核对的哪一段"></textarea></div>
+      <div class="field"><label for="rpaOwner">责任人</label>
+        <select id="rpaOwner">${users}</select></div>
+      <button class="btn btn-p" data-act="pilot.saveRpa">保存机器人</button>
+    </div>`;
+}
+
+function eventBox(detail) {
+  if (!state.pilot.eventOpen) return '';
+  if (!detail.process_id) {
+    return '<div class="note mb">这条路径还没有挂上流程，日志记不到某一条 L3 上。</div>';
+  }
+  return `
+    <div class="pilot-section" id="eventBox">
+      <h4>记一条外部日志</h4>
+      <div class="tiny muted mb">写进来源、案例号、活动和发生时间。挖掘会读这些行。
+        这里不会自动去 ERP 或 OA 拉取。</div>
+      <div class="field"><label for="evSource">来源</label>
+        <input id="evSource" placeholder="例如：ERP 采购订单"></div>
+      <div class="field"><label for="evCase">案例号</label>
+        <input id="evCase" placeholder="同一条路径用同一个案例号"></div>
+      <div class="field"><label for="evActivity">活动</label>
+        <input id="evActivity" placeholder="例如：创建采购订单"></div>
+      <div class="field"><label for="evAt">发生时间（UTC）</label>
+        <input id="evAt" type="datetime-local"></div>
+      <button class="btn btn-p" data-act="pilot.saveEvent">保存这条日志</button>
+    </div>`;
+}
+
+function runBox(detail) {
+  if (!state.pilot.runOpen) return '';
+  const options = state.pilot.runOptions || { bots: [], endpoints: [], outcomes: [] };
+  if (!options.bots.length) {
+    return '<div class="note mb">先登记机器人，再记一次运行。</div>';
+  }
+  if (!options.endpoints.length) {
+    return '<div class="note mb">还没有集成端点。先登记一个端点，再把这次运行挂上去。</div>';
+  }
+  const bots = options.bots.map((row) =>
+    `<option value="${row.id}">${esc(row.bot_name)} · ${esc(row.activity_name)}</option>`).join('');
+  const endpoints = options.endpoints.map((row) =>
+    `<option value="${row.id}">${esc(row.name)} · ${esc(row.kind)} · ${esc(row.status_label)}</option>`).join('');
+  const outcomes = options.outcomes.map((row) =>
+    `<option value="${esc(row.code)}">${esc(row.label)}</option>`).join('');
+  return `
+    <div class="pilot-section" id="runBox">
+      <h4>登记一次运行</h4>
+      <div class="tiny muted mb">${esc(detail.process_code || '')} ${esc(detail.process_name || '')}
+        这是记下的一次结果，并指向已有的集成端点。这里不代替机器人去执行。</div>
+      <div class="field"><label for="runBot">机器人</label><select id="runBot">${bots}</select></div>
+      <div class="field"><label for="runOutcome">结果</label><select id="runOutcome">${outcomes}</select></div>
+      <div class="field"><label for="runAt">运行时间（UTC）</label>
+        <input id="runAt" type="datetime-local"></div>
+      <div class="field"><label for="runEndpoint">集成端点</label>
+        <select id="runEndpoint">${endpoints}</select></div>
+      <div class="field"><label for="runNote">备注</label>
+        <input id="runNote" placeholder="这次替掉了哪一段，可空"></div>
+      <button class="btn btn-p" data-act="pilot.saveRun">保存这次运行</button>
+    </div>`;
+}
+
+function caseBox(detail) {
+  if (!state.pilot.caseOpen) return '';
+  if (!detail.process_id) {
+    return '<div class="note mb">这条路径还没有挂上流程。</div>';
+  }
+  const users = userOptions(state.pilot.users || [], null);
+  return `
+    <div class="pilot-section" id="caseBox">
+      <h4>登记案例</h4>
+      <div class="tiny muted mb">没有固定步骤顺序的一件事：标题、当时的情形、责任人。</div>
+      <div class="field"><label for="caseTitle">标题</label>
+        <input id="caseTitle" placeholder="例如：供应商资质临时例外"></div>
+      <div class="field"><label for="caseSituation">情形</label>
+        <textarea id="caseSituation" rows="2" placeholder="当时发生了什么，为什么不能按固定步骤走"></textarea></div>
+      <div class="field"><label for="caseOwner">责任人</label>
+        <select id="caseOwner">${users}</select></div>
+      <button class="btn btn-p" data-act="pilot.saveCase">保存案例</button>
+    </div>`;
+}
+
+function techBox(detail) {
+  if (!state.pilot.techOpen) return '';
+  if (!detail.process_id) {
+    return '<div class="note mb">这条路径还没有挂上流程。</div>';
+  }
+  const kinds = (state.pilot.techKinds || []).map((row) =>
+    `<option value="${esc(row.code)}">${esc(row.label)}</option>`).join('');
+  const users = userOptions(state.pilot.users || [], null);
+  return `
+    <div class="pilot-section" id="techBox">
+      <h4>登记技术用途</h4>
+      <div class="tiny muted mb">写下区块链、人工智能或物联网具体用在这条流程的哪一段。
+        这是一条记录，不是已经接通的外部系统。</div>
+      <div class="field"><label for="techKind">种类</label><select id="techKind">${kinds}</select></div>
+      <div class="field"><label for="techName">名称</label>
+        <input id="techName" placeholder="例如：入库照片识别"></div>
+      <div class="field"><label for="techNote">用在哪一段</label>
+        <textarea id="techNote" rows="2" placeholder="哪一步用它，替掉或补充了什么"></textarea></div>
+      <div class="field"><label for="techOwner">责任人</label>
+        <select id="techOwner">${users}</select></div>
+      <button class="btn btn-p" data-act="pilot.saveTech">保存技术用途</button>
+    </div>`;
+}
+
+function trainingBox(detail) {
+  if (!state.pilot.trainingOpen) return '';
+  if (!detail.process_id) {
+    return '<div class="note mb">这条路径还没有挂上流程，培训到场记不到某一条 L3 上。</div>';
+  }
+  const users = userOptions(state.pilot.users || [], null);
+  return `
+    <div class="pilot-section" id="trainingBox">
+      <h4>登记培训到场</h4>
+      <div class="tiny muted mb">${esc(detail.process_code || '')} ${esc(detail.process_name || '')}</div>
+      <div class="field"><label for="trTopic">课题</label>
+        <input id="trTopic" placeholder="例如：这条流程的起止和停止条件"></div>
+      <div class="field"><label for="trTrainee">听课人</label>
+        <select id="trTrainee">${users}</select></div>
+      <div class="field"><label for="trDate">完成日期</label>
+        <input id="trDate" type="date"></div>
+      <button class="btn btn-p" data-act="pilot.saveTraining">保存到场记录</button>
+    </div>`;
+}
+
+function workBand(detail, layer) {
+  const parts = [
+    layer.resources ? layerResources(layer.resources) : '',
+    layer.layer_no === 2 ? charterBox(detail) : '',
+    layer.layer_no === 6
+      ? rpaBox(detail) + eventBox(detail) + runBox(detail) + caseBox(detail) + techBox(detail)
+      : '',
+    layer.layer_no === 10 ? trainingBox(detail) : '',
+  ].join('');
+  if (!parts.trim()) return '';
+  return `<div class="pilot-work">${parts}</div>`;
 }
 
 function workspace(detail, layer) {
@@ -516,64 +1041,80 @@ function workspace(detail, layer) {
          detail.current_layer >= 10 ? '完成这条路径' : '进入下一层'}</button>`
     : `<button class="btn btn-g" data-act="pilot.selectLayer"
          data-layer="${detail.current_layer}">回到当前层</button>`;
+  const flowStep = (no, label, items) => `
+    <div class="pilot-step">
+      <span class="pilot-step-no">${no}</span>
+      <span class="ev-h">${label}</span>
+      ${items.map((item) => `<div class="pilot-bullet">${esc(item)}</div>`).join('')}
+    </div>`;
   return `
     <div class="card pilot-workspace">
-      <div class="between mb">
+      <div class="pilot-head">
         <div>
           <div class="tiny muted">第 ${layer.layer_no} 层${isCurrent ? ' · 当前层' : ''}</div>
           <h3>${esc(layer.title)}</h3>
-          <div class="desc">${esc(layer.goal)}</div>
+          <p class="pilot-goal">${esc(layer.goal)}</p>
         </div>
-        <div class="gap">
-          ${statusTag(LAYER_TONE[layer.status], layer.status_label)}
+        ${statusTag(LAYER_TONE[layer.status], layer.status_label)}
+      </div>
+
+      <section class="pilot-band" aria-label="这一层怎么走">
+        <div class="pilot-kicker">1 这一层怎么走</div>
+        <div class="pilot-three">
+          ${flowStep(1, '输入', layer.inputs)}
+          <div class="pilot-arrow" aria-hidden="true">→</div>
+          ${flowStep(2, '处理', layer.process)}
+          <div class="pilot-arrow" aria-hidden="true">→</div>
+          ${flowStep(3, '输出', layer.outputs)}
+        </div>
+      </section>
+
+      <section class="pilot-gate ${layer.gate_open ? 'is-open' : 'is-wait'}" aria-label="退出条件">
+        <div class="between mb">
+          <div class="pilot-kicker">2 对退出条件</div>
           ${layer.gate_open ? '<span class="tag t-grn">退出门已满足</span>'
             : `<span class="tag t-yel">还差 ${missing.length} 项</span>`}
         </div>
-      </div>
-
-      <div class="pilot-three">
-        <div><span class="ev-h">输入</span>
-          ${layer.inputs.map((item) => `<div class="pilot-bullet">· ${esc(item)}</div>`).join('')}</div>
-        <div><span class="ev-h">处理</span>
-          ${layer.process.map((item) => `<div class="pilot-bullet">· ${esc(item)}</div>`).join('')}</div>
-        <div><span class="ev-h">输出</span>
-          ${layer.outputs.map((item) => `<div class="pilot-bullet">· ${esc(item)}</div>`).join('')}</div>
-      </div>
-
-      <div class="pilot-section">
-        <div class="between mb"><h4>退出门</h4>
-          <span class="tiny muted">${esc(layer.exit_criteria)}</span></div>
+        <p class="pilot-exit">${esc(layer.exit_criteria)}</p>
         ${evidenceList(layer)}
+      </section>
+
+      ${workBand(detail, layer)}
+
+      <div class="pilot-record">
+        <section class="pilot-section" aria-label="本层备注">
+          <div class="between mb">
+            <div class="pilot-kicker">3 记下这一层</div>
+            <span class="tiny muted">摘要会出现在前置层</span>
+          </div>
+          <div class="field"><label>上下文摘要</label>
+            <input id="plContext" value="${esc(layer.context_summary || '')}"
+              placeholder="一句话说明本层已经确认了什么"></div>
+          <div class="field"><label>备注</label>
+            <textarea id="plNotes" rows="2"
+              placeholder="待补事项、风险、决策记录">${esc(layer.notes || '')}</textarea></div>
+          <button class="btn-sm" data-act="pilot.saveLayer">保存本层备注</button>
+        </section>
+        <div class="pilot-follow">
+          <section class="pilot-section" aria-label="待办">
+            <div class="between mb">
+              <h4>待办（${layer.tasks.length}）</h4>
+              <button class="btn-sm" data-act="pilot.newTask">+ 新增待办</button>
+            </div>
+            ${taskRows(layer)}
+          </section>
+          <section class="pilot-section" aria-label="异常与改善">
+            <div class="between mb">
+              <h4>异常与改善（${layer.issues.length}）</h4>
+              <button class="btn-sm" data-act="pilot.newIssue">+ 新增异常</button>
+            </div>
+            ${issueRows(layer)}
+          </section>
+        </div>
       </div>
 
-      ${layer.resources ? layerResources(layer.resources) : ''}
-
       <div class="pilot-section">
-        <div class="between mb"><h4>本层备注</h4>
-          <span class="tiny muted">上下文摘要会出现在前置层折叠里</span></div>
-        <div class="field"><label>上下文摘要</label>
-          <input id="plContext" value="${esc(layer.context_summary || '')}"
-            placeholder="一句话说明本层已经确认了什么"></div>
-        <div class="field"><label>备注</label>
-          <textarea id="plNotes" rows="2"
-            placeholder="待补事项、风险、决策记录">${esc(layer.notes || '')}</textarea></div>
-        <button class="btn-sm" data-act="pilot.saveLayer">保存本层备注</button>
-      </div>
-
-      <div class="pilot-section">
-        <div class="between mb"><h4>待办（${layer.tasks.length}）</h4>
-          <button class="btn-sm" data-act="pilot.newTask">+ 新增待办</button></div>
-        ${taskRows(layer)}
-      </div>
-
-      <div class="pilot-section">
-        <div class="between mb"><h4>异常与改善（${layer.issues.length}）</h4>
-          <button class="btn-sm" data-act="pilot.newIssue">+ 新增异常</button></div>
-        ${issueRows(layer)}
-      </div>
-
-      <div class="pilot-section">
-        <div class="between mb"><h4>本层入口</h4></div>
+        <div class="pilot-kicker">去相关页面</div>
         <div class="gap">
           ${layer.actions.map((action) => `<button class="btn btn-g"
             ${actionAttrs(action)} data-view="${esc(action.view)}"
@@ -581,7 +1122,7 @@ function workspace(detail, layer) {
         </div>
       </div>
 
-      <div class="between mt">
+      <div class="pilot-advance">
         <span class="tiny muted">${layer.gate_open
           ? '退出门已满足，可以进入下一层。'
           : '退出门未满足；先补齐红色项或关闭阻断异常。'}</span>

@@ -182,8 +182,9 @@ const renderMap = () => {
       : current
       ? `${LEVEL_LABELS[current.level] || ''} · ${(current.children || []).length} 个${childWord}` +
         (kw ? ` · 匹配 ${shown.length} 项` : '')
-      : `L1 价值链 · ${tree.length} 条主线，点击任一行逐级下钻` +
+      : `L1 价值链 · ${tree.length} 条主线` +
         (kw ? ` · 匹配 ${shown.length} 项` : '');
+    const drillHint = !ownerList && !current && !kw ? '点击任一行，逐级下钻' : '';
 
     const crumbs = ['<a data-act="map.go" data-index="-1">全部价值链</a>']
       .concat(path.map((code, i) =>
@@ -334,14 +335,16 @@ const renderMap = () => {
         </aside>
 
         <div class="map-main">
-          <div class="card">
-            <div class="between mb">
-              <div style="min-width:0">
-                <div class="crumb" style="margin-bottom:6px">${crumbs.join(' ')}</div>
-                <h2 style="margin:0">${esc(title)}</h2>
-                <div class="desc" style="margin:4px 0 0">${esc(desc)}</div>
+          <div class="card map-list">
+            <div class="map-list-hd">
+              <div class="map-list-id">
+                ${path.length || ownerList
+                  ? `<div class="crumb">${crumbs.join(' ')}</div>` : ''}
+                <h2>${esc(title)}</h2>
+                <p class="map-list-desc">${esc(desc)}</p>
+                ${drillHint ? `<p class="map-list-hint">${esc(drillHint)}</p>` : ''}
               </div>
-              <div class="gap">
+              <div class="map-list-actions">
                 ${!ownerList && canManage() && (!current || current.level < 4)
                   ? `<button class="btn btn-p" data-act="map.newChild"
                       data-parent="${current ? current.id : ''}">+ ${
@@ -352,12 +355,14 @@ const renderMap = () => {
                   ${improvementOnly ? '显示全部' : '只看待改善'}</button>
               </div>
             </div>
-            <div class="legend mb">
-              <span><i style="background:var(--bad)"></i>紧急</span>
-              <span><i style="background:var(--warn)"></i>高</span>
-              <span><i style="background:var(--brand)"></i>中</span>
-              <span><i style="background:var(--ok)"></i>低</span>
-              <span class="muted">优先级 = 战略 × 痛点 × 改善空间</span>
+            <div class="map-key">
+              <div class="legend">
+                <span><i style="background:var(--bad)"></i>紧急</span>
+                <span><i style="background:var(--warn)"></i>高</span>
+                <span><i style="background:var(--brand)"></i>中</span>
+                <span><i style="background:var(--ok)"></i>低</span>
+              </div>
+              <span class="map-key-formula">优先级 = 战略 × 痛点 × 改善空间</span>
             </div>
             <table class="tbl map-table">
               <thead><tr><th>流程</th><th>Owner / 部门</th><th>${metricHelp('health_score', '健康度')}</th>
@@ -415,8 +420,14 @@ const renderMap = () => {
         '/benchmark/frameworks/' + state.map.benchmarkFramework + '/coverage?process_level=3');
     }
     if (state.map.openGuidedPcf) {
+      const external = state.map.guidedPcfExternal || '';
+      const framework = state.map.guidedPcfFramework || '';
+      const includeActivities = state.map.guidedPcfActivities !== false;
       state.map.openGuidedPcf = false;
-      openPcfDraftWizard('guided');
+      state.map.guidedPcfExternal = '';
+      state.map.guidedPcfFramework = '';
+      state.map.guidedPcfActivities = true;
+      openPcfDraftWizard('guided', { external, framework, includeActivities });
     }
     const pending = state.map.pendingJump;
     state.map.pendingJump = null;
@@ -693,9 +704,9 @@ function pcfFrameworkOptions() {
     .join('');
 }
 
-function openPcfDraftWizard(mode = 'expert') {
+function openPcfDraftWizard(mode = 'expert', options = {}) {
   const primary = (state.map.frameworks || []).find((f) => f.is_primary);
-  pcfDraft.framework = primary ? primary.code : 'APQC_PCF';
+  pcfDraft.framework = options.framework || (primary ? primary.code : 'APQC_PCF');
   pcfDraft.selected = new Set();
   pcfDraft.open = new Set();
   pcfDraft.keyword = '';
@@ -703,6 +714,8 @@ function openPcfDraftWizard(mode = 'expert') {
   pcfDraft.mode = mode === 'guided' ? 'guided' : 'expert';
   pcfDraft.guidedL1 = null;
   pcfDraft.guidedL2 = new Set();
+  pcfDraft.pendingExternal = options.external || '';
+  const activitiesChecked = options.includeActivities === false ? '' : ' checked';
   pcfDraft.gen = openModal('从 PCF 生成流程架构草稿', `
     <div class="row2">
       <div class="field"><label>分类框架</label>
@@ -710,7 +723,7 @@ function openPcfDraftWizard(mode = 'expert') {
           ${pcfFrameworkOptions()}
         </select></div>
       <div class="field"><label>生成范围</label>
-        <label class="pcf-label"><input type="checkbox" id="pcfActivities" checked>
+        <label class="pcf-label"><input type="checkbox" id="pcfActivities"${activitiesChecked}>
           <span>同时生成 L4 活动（不勾选只生成 L3）</span></label></div>
     </div>
     <div class="seg mb">
@@ -744,6 +757,7 @@ async function loadPcfDraftTree(gen) {
       '/benchmark/frameworks/' + encodeURIComponent(pcfDraft.framework) + '/tree?max_level=3');
     if (!modalAlive(gen)) return;
     pcfDraft.tree = tree;
+    applyPendingGuide();
     renderPcfDraftTree();
     renderGuidedPanel();
     resetPcfPreview();
@@ -866,6 +880,40 @@ function findPcfNode(nodes, externalId) {
     if (hit) return hit;
   }
   return null;
+}
+
+function findPcfChain(nodes, externalId, trail) {
+  const path = trail || [];
+  for (const node of nodes || []) {
+    const next = path.concat(node);
+    if (node.external_id === externalId) return next;
+    const hit = findPcfChain(node.children || [], externalId, next);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** 从流程架构页带过来的分类：展开到对应的 L1/L2，并勾上那条 L3。 */
+function applyPendingGuide() {
+  const external = pcfDraft.pendingExternal;
+  if (!external) return;
+  pcfDraft.pendingExternal = '';
+  const chain = findPcfChain(pcfDraft.tree, external);
+  if (!chain) return;
+  pcfDraft.mode = 'guided';
+  const l1 = chain.find((node) => node.level === 1);
+  const l2 = chain.find((node) => node.level === 2);
+  const l3 = chain.find((node) => node.level === 3);
+  if (l1) pcfDraft.guidedL1 = l1.external_id;
+  if (l2) pcfDraft.guidedL2 = new Set([l2.external_id]);
+  if (l3 && l3.external_id) pcfDraft.selected = new Set([l3.external_id]);
+  const expert = document.getElementById('pcfExpertPanel');
+  const guided = document.getElementById('pcfGuidedPanel');
+  if (expert) expert.classList.add('hide');
+  if (guided) guided.classList.remove('hide');
+  document.querySelectorAll('#mBody [data-act="map.pcfMode"]').forEach((btn) => {
+    btn.classList.toggle('on', btn.dataset.mode === 'guided');
+  });
 }
 
 function togglePcfNode(externalId, checked) {

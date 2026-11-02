@@ -14,6 +14,18 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.core.timeutil import utcnow
 from app.models import AuthorizationException, AuthorizationRule
+from app.models.adoption import (
+    MapCoverageItem,
+    MapCoverageReview,
+    ProcessCase,
+    ProcessEventLog,
+    ProcessTechnologyUse,
+    ProcessTrainingRecord,
+    RpaBot,
+    RpaRun,
+    SiblingBoundaryLine,
+    SiblingBoundaryReview,
+)
 from app.models.benchmark import (
     BenchmarkCategory,
     BenchmarkFramework,
@@ -69,6 +81,7 @@ from app.models.process_document import ProcessDocument, ProcessDocumentVersion
 from app.models.project import Project, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.sketch import Sketch
+from app.models.startup import ProcessCharter
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.tool import Tool, ToolScenarioLink, ToolUsage
 from app.models.tool_template import TemplateUsage, ToolTemplate, ToolTemplateVersion
@@ -699,7 +712,13 @@ def _seed_workload(
                 created_by_id=verifier_id,
             )
         )
-    for row in workload_data.CAPACITY_CALENDAR:
+    # 出门数的是「当月」。演示行停在 2026-10，过了这个月要再抄一份到本月，
+    # 十月那几行留给按月份查询的用例。
+    capacity_rows = list(workload_data.CAPACITY_CALENDAR)
+    this_month = date.today().replace(day=1).isoformat()
+    if not any(row["period"] == this_month for row in capacity_rows):
+        capacity_rows.extend({**row, "period": this_month} for row in list(capacity_rows))
+    for row in capacity_rows:
         org_id = org_ids.get(row["org"])
         position_id = position_ids.get(row["position"])
         if not org_id or not position_id:
@@ -1456,12 +1475,51 @@ def _seed_users(
     return {u.display_name: u.id for u in db.scalars(select(User)).all()}
 
 
+def _seed_charter(db: Session, user_ids: Dict[str, int]) -> None:
+    """给第一条已有负责人的 L3 写一份范围说明，让第 1 阶段的出门条件有例可看。"""
+    process = db.scalar(
+        select(ProcessArch)
+        .where(ProcessArch.level == 3, ProcessArch.owner_user_id.is_not(None))
+        .order_by(ProcessArch.code)
+        .limit(1)
+    )
+    sponsor_id = user_ids.get("流程管理科") or user_ids.get("系统管理员")
+    if process is None or sponsor_id is None:
+        return
+    if db.scalar(select(ProcessCharter).where(ProcessCharter.process_id == process.id)):
+        return
+    db.add(
+        ProcessCharter(
+            process_id=process.id,
+            purpose="先把这一条端到端流程的结果交到下游，不一次铺开整条价值链。",
+            starts_at="需求单提交",
+            ends_at="计划或交付物交给下游并被签收",
+            in_scope="这条 L3 上的主路径、负责人、发起人和停止条件。",
+            out_of_scope="其他 L3、系统实施和人员考核。",
+            stop_condition="负责人或发起人书面确认停止，或范围被改到另一条 L3。",
+            sponsor_user_id=sponsor_id,
+        )
+    )
+    db.flush()
+
+
 def _wipe(db: Session) -> None:
     """按外键依赖倒序清空。
 
     ProcessArch 自引用，按 L4→L1 逐层删，兼容开启了外键约束的 PostgreSQL。
     """
     for model in (
+        SiblingBoundaryLine,
+        SiblingBoundaryReview,
+        MapCoverageItem,
+        MapCoverageReview,
+        RpaRun,
+        RpaBot,
+        ProcessEventLog,
+        ProcessCase,
+        ProcessTechnologyUse,
+        ProcessTrainingRecord,
+        ProcessCharter,
         DataFlow,
         DataDomain,
         RaciAssignment,
@@ -1537,6 +1595,7 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     user_ids = _seed_users(db, org_ids, position_ids)
     role_ids = _seed_governance_roles(db, user_ids)
     code_to_id = _seed_process_arch(db, user_ids, org_name_ids)
+    _seed_charter(db, user_ids)
     _seed_raci(db, code_to_id, role_ids)
     _seed_authorization(db, code_to_id, role_ids, user_ids)
     _seed_data_governance(db, code_to_id, user_ids)
@@ -1559,6 +1618,9 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_execution(db, code_to_id, project_ids, user_ids)
     _seed_notifications(db, user_ids)
     _seed_integrations(db)
+    from app.seed.fillable_templates import ensure_fillable_templates
+
+    ensure_fillable_templates(db)
     db.commit()
 
     return {
@@ -1622,7 +1684,7 @@ def seed_reference(db: Session) -> Dict[str, int]:
     """只灌生产需要的参考数据，不碰演示业务数据。
 
     - 24 步标准工作流模板
-    - 33 个方法论工具
+    - 36 个方法论工具
     - 步骤契约与交付物定义（标准侧，不含项目实例）
     - SCOR 与 APQC PCF v8.0（跨行业/消费品/消费电子）框架、分类与指标目录（不含流程映射）
 
@@ -1663,6 +1725,9 @@ def seed_reference(db: Session) -> Dict[str, int]:
             len(framework["categories"]) for framework in pcf_dataset["frameworks"]
         )
         created["benchmark_metrics"] = len(pcf_dataset["metrics"])
+    from app.seed.fillable_templates import ensure_fillable_templates
+
+    created["fillable_templates"] = ensure_fillable_templates(db)
     db.commit()
     return created
 

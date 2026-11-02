@@ -289,6 +289,7 @@ canvas{max-width:100%}
 .cockpit-tabs{padding:8px 12px;margin-bottom:18px}
 .cockpit-tabs .seg{display:flex;width:100%;overflow-x:auto}
 .cockpit-tabs .seg button{flex:1;min-width:84px}
+.page-head .cockpit-process{width:auto;min-width:220px;max-width:320px;flex:0 0 auto}
 .seg button{border:none;background:transparent;color:var(--sub);font-family:inherit;
   font-size:12.5px;padding:6px 13px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .seg button.on{background:var(--panel);color:var(--text);font-weight:600;box-shadow:var(--shadow-sm)}

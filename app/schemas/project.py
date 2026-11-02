@@ -121,7 +121,7 @@ class ProjectCreate(ProjectBase):
 
 
 class SetupProgramCreate(BaseModel):
-    """治理体系落地项目：9 阶段，不走 24 步改善工作流。"""
+    """治理体系落地项目：跟踪流程框架边界，不走改善项目的工作流。"""
 
     name: str = Field(max_length=160)
     owner: str = Field(default="", max_length=64)

@@ -7,10 +7,19 @@
 import { esc } from '../../core/format.js';
 import { toast, openModal, closeModal, on } from '../../core/ui.js';
 import { state } from '../../core/state.js';
-import { POST, DEL } from '../../core/api.js';import { canManage } from '../../core/auth.js';
-import { RENDERERS } from '../../core/router.js';
+import { POST, DEL } from '../../core/api.js';
+import { canManage } from '../../core/auth.js';
+import { RENDERERS, go } from '../../core/router.js';
 
 const RACI_TONE = { A: 't-red', R: 't-blu', C: 't-yel', I: 't-gry' };
+
+on('designer.openRuntime', () => {
+  const processId = state.designer.processId;
+  go('execution', {
+    params: processId ? { tab: 'config', process: processId } : { tab: 'config' },
+    push: true,
+  });
+});
 
 export function createRaci(ctx) {
   function meta() {
@@ -56,10 +65,13 @@ export function createRaci(ctx) {
             <span class="tag ${matrix.valid ? 't-grn' : 't-red'}">${
               matrix.valid ? '矩阵完整' : '矩阵不完整'}</span>
             ${canManage()
+              ? '<button class="btn btn-g" data-act="designer.openRuntime">打开运行配置</button>' : ''}
+            ${canManage()
               ? '<button class="btn btn-p" data-act="designer.raciNew">+ 事项权责</button>' : ''}
           </div>
         </div>
-        <div class="hint mb">权责矩阵是「一条流程一套」，不是全公司共用一张表。
+        <div class="hint mb">权责不派待办。R 只说明谁负责动手，候选人要在运行配置里另行保存。
+          权责矩阵是「一条流程一套」，不是全公司共用一张表。
           当前事项只属于本流程；换流程后矩阵可以完全不同。
           治理角色（如「集团战略流程所有者」）是全公司角色库，各流程从里面选来填 A/R/C/I——
           <b>角色可共用，事项怎么分工按流程各自配</b>。事项数量不固定，用「+ 事项权责」按需增加。</div>

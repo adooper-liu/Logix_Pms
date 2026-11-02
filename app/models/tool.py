@@ -120,9 +120,27 @@ class Tool(Base):
         return {
             "DIAGNOSE": "诊断工具",
             "DESIGN": "设计工具",
-            "DEPLOY": "落地工具",
+            "DEPLOY": "变革",
             "MONITOR": "监控工具",
         }.get(self.category, self.category)
+
+    @property
+    def lifecycle_key(self) -> str:
+        from app.services.tool_lifecycle import segment_for
+
+        return segment_for(self.code, self.stage_no)[0]
+
+    @property
+    def lifecycle_label(self) -> str:
+        from app.services.tool_lifecycle import segment_for
+
+        return segment_for(self.code, self.stage_no)[1]
+
+    @property
+    def system_place(self) -> dict:
+        from app.services.tool_lifecycle import place_for
+
+        return place_for(self.code)
 
     @property
     def owner(self) -> Optional[str]:

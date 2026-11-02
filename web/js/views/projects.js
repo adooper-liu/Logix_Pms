@@ -8,6 +8,7 @@ import { AUTH, role, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 import { actions as appActions } from '../core/actions.js';
 import { renderRecommendation } from './shared/recommendation.js';
+import { toolMountHtml } from './shared/tool_mount.js';
 
 /* ============================================================ 4. 流程项目组合 */
 
@@ -233,9 +234,10 @@ const renderProjects = () => {
     async () => {
       const params = urlParams();
       const newObjectiveId = Number(params.new_objective) || null;
-      const [page, meta] = await Promise.all([
+      const [page, meta, tools] = await Promise.all([
         GET('/projects?' + qs.join('&')),
         GET('/projects/meta'),
+        GET('/tools').catch(() => []),
       ]);
       // 战略目标立项时把目标一并带进来，用于预填改善目标/基线/目标值
       const objective = newObjectiveId
@@ -248,6 +250,7 @@ const renderProjects = () => {
         newProcess: Number(params.new_process) || null,
         newName: params.new_name || '',
         newObjective: objective,
+        tools,
       };
     },
     (d) => {
@@ -312,6 +315,7 @@ const renderProjects = () => {
               <button class="btn btn-p" data-act="projects.new">+ 新建流程项目</button>
             </div>
           </div>
+          ${toolMountHtml(d.tools, 'change')}
           <div class="grid g4 stat-row">
             <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">${metricHelp('project_total', '项目总数')}</div></div>
             <div class="kpi stat"><div class="num">${activeCount}</div><div class="lab">${metricHelp('active_count', '进行中')}</div></div>
@@ -643,8 +647,8 @@ function newSetupProgramModal() {
           ${[1, 2, 3, 4, 5].map((i) => `<option value="${i}"${i === 2 ? ' selected' : ''}>${i}</option>`).join('')}
         </select></div>
     </div>
-    <div class="note">会按九阶段模板生成 27 个步骤：立项定界 → 战略基线 → 架构 → 制度授权 →
-      流程/表单/工具 → 工时 → 试运行 → 固化 → 改善与复制。</div>`,
+    <div class="note">会生成 3 个步骤：划清哪些工作进 L1–L3，把一条 L3 对上 PCF，
+      任命能改这张图的治理角色。</div>`,
     `<button class="btn btn-g" data-act="projects.close">取消</button>
      <button class="btn btn-p" data-act="projects.submitSetup">创建</button>`);
 
@@ -683,7 +687,7 @@ async function submitSetupProgram() {
       end_date: end,
     });
     closeModal();
-    toast('体系落地项目已创建（9 阶段）');
+    toast('体系落地项目已创建');
     openProject(created.id);
   } catch (e) {
     toast(e.message, true);

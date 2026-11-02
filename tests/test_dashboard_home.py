@@ -17,6 +17,7 @@ def test_admin_home_has_setup_and_governance(client):
     assert any(action["view"] == "start" for action in setup["actions"])
     assert data["active_project_count"] >= 1
     assert data["setup_project_count"] >= 0
+    assert data["kpi_total"] >= data["kpi_red_yellow"] >= 0
 
 
 def test_owner_home_is_personal(owner_client):

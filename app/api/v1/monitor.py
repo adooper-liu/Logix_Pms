@@ -32,6 +32,7 @@ from app.schemas.common import DeleteResult, as_columns
 from app.schemas.monitor import (
     ExceptionCreate,
     ExceptionOut,
+    ExceptionSuggestion,
     ExceptionSummary,
     ExceptionUpdate,
     ImprovementCandidateOut,
@@ -49,6 +50,7 @@ from app.schemas.monitor import (
 )
 from app.schemas.project import ProjectDraftOut
 from app.services import audit as audit_service
+from app.services import exception_intake
 from app.services import improvement as improvement_service
 from app.services import integrations as integration_service
 from app.services import kpi as kpi_service
@@ -123,15 +125,14 @@ def _dimension_status(rate: float) -> str:
     return "RISK"
 
 
-def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
+def _to_kpi_out(db, kpi: KpiDefinition) -> KpiDefinitionOut:
     records = kpi_service.ordered_records(kpi.records)
     latest = records[-1].value if records else None
-    status = kpi_service.status_for(
-        latest,
-        kpi.direction,
-        kpi.red_threshold,
-        kpi.yellow_threshold,
-        kpi.green_threshold,
+    status, status_label, intake = kpi_service.presentation(db, kpi, latest)
+    achievement = (
+        None
+        if intake == kpi_service.INTAKE_DRAFT
+        else _achievement(kpi.direction, latest, kpi.target_value)
     )
     return KpiDefinitionOut(
         id=kpi.id,
@@ -152,6 +153,10 @@ def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
         frequency=kpi.frequency,
         frequency_label=FREQUENCY_LABELS.get(kpi.frequency, kpi.frequency),
         source_system=kpi.source_system,
+        data_flow_id=kpi.data_flow_id,
+        inbound_webhook_id=kpi.inbound_webhook_id,
+        intake=intake,
+        intake_label=kpi_service.INTAKE_LABELS.get(intake, intake),
         quality_rule=kpi.quality_rule,
         red_threshold=kpi.red_threshold,
         yellow_threshold=kpi.yellow_threshold,
@@ -165,23 +170,17 @@ def _to_kpi_out(kpi: KpiDefinition) -> KpiDefinitionOut:
         valid_to=kpi.valid_to,
         is_active=kpi.is_active,
         latest_value=latest,
-        achievement_rate=_achievement(kpi.direction, latest, kpi.target_value),
+        achievement_rate=achievement,
         trend=_trend(records),
         status=status,
-        status_label=STATUS_LABELS.get(status) if status else None,
+        status_label=status_label,
     )
 
 
-def _to_series(kpi: KpiDefinition) -> KpiTrendSeries:
+def _to_series(db, kpi: KpiDefinition) -> KpiTrendSeries:
     records = kpi_service.ordered_records(kpi.records)
     latest = records[-1].value if records else None
-    status = kpi_service.status_for(
-        latest,
-        kpi.direction,
-        kpi.red_threshold,
-        kpi.yellow_threshold,
-        kpi.green_threshold,
-    )
+    status, status_label, intake = kpi_service.presentation(db, kpi, latest)
     return KpiTrendSeries(
         kpi_id=kpi.id,
         code=kpi.code,
@@ -195,7 +194,9 @@ def _to_series(kpi: KpiDefinition) -> KpiTrendSeries:
         frequency=kpi.frequency,
         granularity=kpi.granularity,
         status=status,
-        status_label=STATUS_LABELS.get(status) if status else None,
+        status_label=status_label,
+        intake=intake,
+        intake_label=kpi_service.INTAKE_LABELS.get(intake, intake),
         points=[KpiTrendPoint(period=r.period, value=r.value) for r in records],
     )
 
@@ -229,8 +230,15 @@ def _exception_event(e: ExceptionEvent) -> dict:
 
 
 @router.get("/kpi-radar", response_model=KpiRadarResponse, summary="四维度 KPI 雷达 + 时序")
-def kpi_radar(db: DbSession, include_series: bool = True):
-    kpis = db.scalars(select(KpiDefinition).where(KpiDefinition.is_active.is_(True))).all()
+def kpi_radar(
+    db: DbSession,
+    include_series: bool = True,
+    process_id: Optional[int] = Query(default=None, description="只看挂在这条流程上的指标"),
+):
+    stmt = select(KpiDefinition).where(KpiDefinition.is_active.is_(True))
+    if process_id is not None:
+        stmt = stmt.where(KpiDefinition.process_id == process_id)
+    kpis = db.scalars(stmt).all()
 
     buckets: Dict[str, List[float]] = {d.value: [] for d in KpiDimension}
     series: List[KpiTrendSeries] = []
@@ -239,7 +247,7 @@ def kpi_radar(db: DbSession, include_series: bool = True):
     }
 
     for kpi in kpis:
-        out = _to_kpi_out(kpi)
+        out = _to_kpi_out(db, kpi)
         if out.achievement_rate is not None:
             buckets.setdefault(kpi.dimension, []).append(out.achievement_rate)
         stats = kind_stats.setdefault(
@@ -248,7 +256,7 @@ def kpi_radar(db: DbSession, include_series: bool = True):
         stats["total"] += 1
         stats[out.status or "GRAY"] += 1
         if include_series:
-            series.append(_to_series(kpi))
+            series.append(_to_series(db, kpi))
 
     dimensions: List[RadarDimension] = []
     for dim in KpiDimension:
@@ -324,7 +332,7 @@ def list_kpis(
     if active_only:
         stmt = stmt.where(KpiDefinition.is_active.is_(True))
     rows = db.scalars(stmt.order_by(KpiDefinition.dimension, KpiDefinition.code)).all()
-    return [_to_kpi_out(k) for k in rows]
+    return [_to_kpi_out(db, k) for k in rows]
 
 
 @router.get("/kpis/{kpi_id}", response_model=KpiDefinitionOut, summary="KPI 定义详情")
@@ -332,7 +340,7 @@ def get_kpi(kpi_id: int, db: DbSession):
     obj = db.get(KpiDefinition, kpi_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="KPI 不存在")
-    return _to_kpi_out(obj)
+    return _to_kpi_out(db, obj)
 
 
 @router.post(
@@ -369,12 +377,16 @@ def create_kpi(payload: KpiDefinitionCreate, db: DbSession, user: ManagerUser):
     obj = KpiDefinition(**data)
     db.add(obj)
     db.flush()
+    try:
+        kpi_service.bind_sources(db, obj)
+    except kpi_service.KpiDefinitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_service.record(
         db, user, "CREATE", "kpi", obj.id, f"新增 KPI 定义卡 {obj.code} {obj.name} v1"
     )
     db.commit()
     db.refresh(obj)
-    return _to_kpi_out(obj)
+    return _to_kpi_out(db, obj)
 
 
 @router.patch("/kpis/{kpi_id}", response_model=KpiDefinitionOut, summary="修改 KPI 定义卡")
@@ -417,6 +429,10 @@ def update_kpi(kpi_id: int, payload: KpiDefinitionUpdate, db: DbSession, user: M
     fields = sorted(data)
     for field, value in data.items():
         setattr(obj, field, value)
+    try:
+        kpi_service.bind_sources(db, obj)
+    except kpi_service.KpiDefinitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 定义版本只在口径字段变更时递增；追加数据点走 /records，不影响版本
     obj.version = (obj.version or 1) + 1
     audit_service.record(
@@ -429,7 +445,7 @@ def update_kpi(kpi_id: int, payload: KpiDefinitionUpdate, db: DbSession, user: M
     )
     db.commit()
     db.refresh(obj)
-    return _to_kpi_out(obj)
+    return _to_kpi_out(db, obj)
 
 
 @router.get(
@@ -585,6 +601,15 @@ def list_exceptions(
     return [_to_exception_out(e) for e in rows]
 
 
+@router.get(
+    "/exception-suggestions",
+    response_model=List[ExceptionSuggestion],
+    summary="待确认的异常，确认前不写入台账",
+)
+def exception_suggestions(db: DbSession, user: CurrentUser):
+    return exception_intake.suggestions(db)
+
+
 @router.post(
     "/exceptions",
     response_model=ExceptionOut,
@@ -592,6 +617,24 @@ def list_exceptions(
     summary="登记异常事件",
 )
 def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
+    if payload.source_kpi_id is not None and db.scalar(
+        select(ExceptionEvent.id).where(
+            ExceptionEvent.source_kpi_id == payload.source_kpi_id,
+            ExceptionEvent.status.in_(
+                (ExceptionStatus.OPEN.value, ExceptionStatus.IN_PROGRESS.value)
+            ),
+        )
+    ):
+        raise HTTPException(status_code=409, detail="这条指标已有未关闭的异常")
+    if payload.source_instance_id is not None and db.scalar(
+        select(ExceptionEvent.id).where(
+            ExceptionEvent.source_instance_id == payload.source_instance_id,
+            ExceptionEvent.status.in_(
+                (ExceptionStatus.OPEN.value, ExceptionStatus.IN_PROGRESS.value)
+            ),
+        )
+    ):
+        raise HTTPException(status_code=409, detail="这条实例已有未关闭的异常")
     year = date.today().year
     prefix = f"EXC-{year}-"
     existing = db.scalars(

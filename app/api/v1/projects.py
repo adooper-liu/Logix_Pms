@@ -251,7 +251,7 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     if payload.project_type == ProjectType.GOVERNANCE_SETUP:
         raise HTTPException(
             status_code=400,
-            detail="治理体系落地项目请使用 /projects/setup-program 创建（9 阶段模板）",
+            detail="治理体系落地项目请使用 /projects/setup-program 创建",
         )
     if payload.current_stage != 1:
         raise HTTPException(status_code=400, detail="新建改善项目必须从阶段1开始")
@@ -400,7 +400,7 @@ def decide_project_claim(
     "/setup-program",
     response_model=ProjectOut,
     status_code=status.HTTP_201_CREATED,
-    summary="新建治理体系落地项目（9 阶段，MANAGER+）",
+    summary="新建治理体系落地项目（MANAGER+）",
 )
 def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: ManagerUser):
     data = as_columns(payload.model_dump())
@@ -436,7 +436,7 @@ def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: Manag
         "CREATE",
         "project",
         project.id,
-        f"创建治理体系落地项目 {project.code} {project.name}（9 阶段）",
+        f"创建治理体系落地项目 {project.code} {project.name}",
     )
     db.commit()
     db.refresh(project)
@@ -489,7 +489,7 @@ def get_project(project_id: int, db: DbSession):
         head = current_steps[0]
         if project.project_type == ProjectType.GOVERNANCE_SETUP.value:
             suggestion = (
-                f"按九阶段体系落地路径推进：{head.deliverable or head.name}；完成后标记为已完成。"
+                f"按流程框架边界推进：{head.deliverable or head.name}；完成后标记为已完成。"
             )
         else:
             tpl = db.scalar(

@@ -13,6 +13,7 @@ from app.api.v1 import (
     baselines,
     benchmark,
     changes,
+    coach,
     collaboration,
     compensation,
     dashboard,
@@ -76,6 +77,7 @@ protected.include_router(designer.router)
 protected.include_router(collaboration.router)
 protected.include_router(compensation.router)
 protected.include_router(changes.router)
+protected.include_router(coach.router)
 protected.include_router(monitor.router)
 protected.include_router(notifications.router)
 protected.include_router(orgs.router)

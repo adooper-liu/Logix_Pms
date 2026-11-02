@@ -36,6 +36,9 @@ SPA_VIEWS = {
     "authorization",
     "pilot",
     "pcf",
+    "bpmn",
+    "cbok",
+    "train",
     "workflow",
     "projects",
     "execution",
@@ -61,10 +64,13 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
 
     if settings.seed_on_startup:
+        from app.seed.fillable_templates import ensure_fillable_templates
         from app.seed.runner import seed_if_empty
 
         with SessionLocal() as db:
             seed_if_empty(db)
+            ensure_fillable_templates(db)
+            db.commit()
     yield
 
 

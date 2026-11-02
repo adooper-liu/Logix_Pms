@@ -22,7 +22,23 @@ on('process_card.select', (_data, el) => {
   }, { push: true });
   RENDERERS.process_card();
 });
-on('process_card.go', ({ view }) => go(view));
+on('process_card.go', ({ view }) => {
+  const processId = state.processCard.processId;
+  if (view === 'deliverables' && processId) {
+    go('deliverables', {
+      params: { tab: 'document', process: processId },
+      push: true,
+    });
+    return;
+  }
+  if (view === 'monitor' && processId) {
+    state.cockpit.processId = processId;
+    state.monitor.tab = 'kpi';
+    go('monitor', { params: { tab: 'kpi', process: processId }, push: true });
+    return;
+  }
+  go(view);
+});
 on('process_card.pilot', ({ path, layer }) => {
   go('pilot', { params: { path: Number(path), layer: Number(layer) }, push: true });
 });
@@ -42,8 +58,13 @@ on('process_card.changes', () => {
   appActions['designer.open'](state.processCard.processId);
 });
 on('process_card.workload', () => {
+  const processId = state.processCard.processId;
+  state.cockpit.processId = processId;
   state.monitor.tab = 'workload';
-  go('monitor');
+  go('monitor', {
+    params: processId ? { tab: 'workload', process: processId } : { tab: 'workload' },
+    push: true,
+  });
 });
 on('process_card.newMaturity', () => openMaturityModal());
 on('process_card.submitMaturity', () => submitMaturity());
@@ -126,6 +147,11 @@ const renderProcessCard = () => {
           <span><b>${esc(row.name)}</b><div class="tiny">${esc(row.code)} · ${row.year}</div></span>
           <span class="tag t-blu">${row.target_value === null ? '—' : num(row.target_value, 2)}
             ${esc(row.unit || '')}</span>
+        </div>`).join('');
+      const sheetRows = (c.sheets || []).map((row) => `
+        <div class="bpmn-node-row">
+          <div class="tiny">${esc(row.tool_name)} · ${esc(row.title)}</div>
+          ${row.summary ? `<div class="tiny muted">${esc(row.summary)}</div>` : ''}
         </div>`).join('');
       const raciRows = c.raci.map((matter) => `
         <div class="between bpmn-node-row">
@@ -221,11 +247,12 @@ const renderProcessCard = () => {
                 data-process="${c.process.id}">去十层单页</button>
             </div>
           </section>`;
+      const strategyBody = objectiveRows + sheetRows;
       const strategyCard = moduleCard(
         '战略承接', c.objectives.length,
         '<button class="btn-sm" data-act="process_card.go" data-view="strategy">战略目标</button>',
-        c.objectives.length ? objectiveRows : '',
-        c.objectives.length ? '' : '年度经营计划需承接 ≥1 项战略指标 → 去关联',
+        strategyBody,
+        strategyBody ? '' : '年度经营计划需承接 ≥1 项战略指标 → 去关联',
       );
       const raciCard = moduleCard(
         '权责矩阵', c.raci.length,

@@ -45,6 +45,26 @@ class KpiDefinition(Base):
         String(16), default="MONTHLY", server_default="MONTHLY", index=True
     )
     source_system: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 数据流台账上的来源。选定后，source_system 跟这条流的来源系统走。
+    data_flow_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "data_flow.id",
+            ondelete="SET NULL",
+            name="fk_kpi_definition_data_flow",
+        ),
+        nullable=True,
+        index=True,
+    )
+    # 非时长指标的正式写入口。未启用、或不允许回传指标时，这条 KPI 不进红黄。
+    inbound_webhook_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "inbound_webhook.id",
+            ondelete="SET NULL",
+            name="fk_kpi_definition_inbound_webhook",
+        ),
+        nullable=True,
+        index=True,
+    )
     quality_rule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # 红/黄/绿三条线：红=最差边界，绿=达标边界，黄为两者之间
@@ -117,6 +137,25 @@ class ExceptionEvent(Base):
     )
     project_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("project.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # 从红黄指标或超时任务带出、经人确认后写入。空着表示人手登记。
+    source_kpi_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "kpi_definition.id",
+            ondelete="SET NULL",
+            name="fk_exception_event_source_kpi",
+        ),
+        nullable=True,
+        index=True,
+    )
+    source_instance_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "process_instance.id",
+            ondelete="SET NULL",
+            name="fk_exception_event_source_instance",
+        ),
+        nullable=True,
+        index=True,
     )
 
     title: Mapped[str] = mapped_column(String(160))

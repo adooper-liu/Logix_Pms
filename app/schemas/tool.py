@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,17 @@ from app.core.timeutil import UtcDateTime
 from app.models.enums import ToolCategory, ToolDifficulty
 from app.schemas.common import ORMModel
 from app.schemas.knowledge import KnowledgeBrief, KnowledgeScenarioOut
+
+
+class ToolSystemPlace(BaseModel):
+    segment: str = ""
+    label: str = ""
+    stage_no: int = 0
+    view: str = ""
+    params: Dict[str, str] = Field(default_factory=dict)
+    page_label: str = ""
+    note: str = ""
+    computes: bool = False
 
 
 class ToolOut(ORMModel):
@@ -46,6 +57,9 @@ class ToolOut(ORMModel):
     review_due_at: Optional[date] = None
     review_overdue: bool = False
     is_active: bool = True
+    lifecycle_key: str = ""
+    lifecycle_label: str = ""
+    system_place: ToolSystemPlace = Field(default_factory=ToolSystemPlace)
 
 
 class ToolBrief(ORMModel):
@@ -207,7 +221,7 @@ class ToolMatchRequest(BaseModel):
     stage_no: Optional[int] = Field(default=None, ge=1, le=5)
     step_no: Optional[str] = None
     sort: str = Field(default="fit", pattern="^(fit|difficulty|duration|usage)$")
-    limit: int = Field(default=8, ge=1, le=33)
+    limit: int = Field(default=8, ge=1, le=48)
 
 
 class ToolMatchHit(BaseModel):
@@ -227,8 +241,15 @@ class ToolMatchResponse(BaseModel):
     hint: str
 
 
+class ToolLifecycleSegment(BaseModel):
+    key: str
+    label: str
+    stage_no: int
+
+
 class ToolMetaOut(BaseModel):
     category_labels: dict
     level_labels: dict
     difficulty_labels: dict
     scenarios: List[KnowledgeScenarioOut] = []
+    lifecycle_segments: List[ToolLifecycleSegment] = []

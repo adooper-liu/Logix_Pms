@@ -29,6 +29,13 @@ class StartupEvidenceOut(BaseModel):
     view_params: Dict[str, str] = Field(default_factory=dict)
 
 
+class StartupPointOut(BaseModel):
+    """框架边界上的一条要点：短标题在左，说明在右。"""
+
+    label: str
+    text: str
+
+
 class StartupStepOut(BaseModel):
     key: str
     order: int
@@ -37,8 +44,9 @@ class StartupStepOut(BaseModel):
     input: str
     output: str
     exit_criteria: str
+    points: List[StartupPointOut] = []
     estimated: str = ""
-    pilot: bool = True  # 是否属于「首次上线」范围（前 8 阶段）；第 9 阶段不阻塞首次上线
+    pilot: bool = False  # 保留字段。框架边界不再有「首次上线」阶段列表。
     status: str
     status_label: str
     skipped: bool = False
@@ -67,7 +75,7 @@ class StartupStatusOut(BaseModel):
     pilot_confirm_note: Optional[str] = None
     pilot_stale: bool = False
     pilot_missing_steps: List[str] = []
-    # 单流程落地汇总（B）：不替代九阶段能力门，只回答「有多少条路径在跑」
+    # 单流程落地汇总：只回答有多少条十层路径在跑
     path_count: int = 0
     path_completed_count: int = 0
     path_avg_layer: float = 0.0
@@ -80,3 +88,43 @@ class StartupPilotConfirmIn(BaseModel):
 
 class StartupSkipIn(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class CharterIn(BaseModel):
+    process_id: int
+    purpose: str = Field(min_length=1, max_length=500)
+    starts_at: str = Field(min_length=1, max_length=200)
+    ends_at: str = Field(min_length=1, max_length=200)
+    in_scope: str = Field(min_length=1, max_length=500)
+    out_of_scope: str = Field(min_length=1, max_length=500)
+    stop_condition: str = Field(min_length=1, max_length=500)
+    sponsor_user_id: int
+
+
+class CharterOut(BaseModel):
+    process_id: int
+    purpose: str
+    starts_at: str
+    ends_at: str
+    in_scope: str
+    out_of_scope: str
+    stop_condition: str
+    sponsor_user_id: int
+
+
+class CharterProcessOption(BaseModel):
+    id: int
+    code: str
+    name: str
+    has_owner: bool
+
+
+class CharterUserOption(BaseModel):
+    id: int
+    display_name: str
+
+
+class CharterOptionsOut(BaseModel):
+    processes: List[CharterProcessOption]
+    users: List[CharterUserOption]
+    charters: List[CharterOut]

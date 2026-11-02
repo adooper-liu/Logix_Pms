@@ -31,6 +31,34 @@ class StartupStepSkip(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class ProcessCharter(Base):
+    """一条 L3 的范围说明：从哪开始、到哪结束、做不做、何时停、谁发起。
+
+    第 1 阶段只认这种写全的说明，外加该 L3 已有负责人。
+    """
+
+    __tablename__ = "process_charter"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE", name="fk_process_charter_process"),
+        unique=True,
+        index=True,
+    )
+    purpose: Mapped[str] = mapped_column(Text)
+    starts_at: Mapped[str] = mapped_column(String(200))
+    ends_at: Mapped[str] = mapped_column(String(200))
+    in_scope: Mapped[str] = mapped_column(Text)
+    out_of_scope: Mapped[str] = mapped_column(Text)
+    stop_condition: Mapped[str] = mapped_column(Text)
+    sponsor_user_id: Mapped[int] = mapped_column(
+        ForeignKey("app_user.id", ondelete="RESTRICT", name="fk_process_charter_sponsor"),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class StartupPilotConfirm(Base):
     """首次上线确认：把“数据看起来齐了”升级为一次可审计的上线动作。"""
 

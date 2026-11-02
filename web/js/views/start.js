@@ -1,13 +1,13 @@
 /* 视图：开始使用
  *
- * 公司流程体系的唯一主入口：九个阶段、全公司计数。
- * 点非当前阶段只是查看证据；就绪由后端按证据算；「这次先不做」不计入就绪。
+ * 只回答公司流程地图的框架边界：哪些工作进这张图，上下级怎么挂，谁有权改图。
+ * 某一条流程从哪开始、到哪结束，去十层核对。
  */
 
-import { esc, dtShort, tipHelp } from '../core/format.js';
-import { viewEl, on, confirmDialog, promptDialog, toast } from '../core/ui.js';
+import { esc, tipHelp } from '../core/format.js';
+import { viewEl, on } from '../core/ui.js';
 import { renderAsync, go } from '../core/router.js';
-import { GET, POST, DEL } from '../core/api.js';
+import { GET } from '../core/api.js';
 import { state, TITLES } from '../core/state.js';
 
 const STATUS_TONE = {
@@ -16,16 +16,6 @@ const STATUS_TONE = {
   NOT_STARTED: 't-gry',
   SKIPPED: 't-pur',
 };
-const RAIL_TONE = {
-  READY: 'ok',
-  IN_PROGRESS: 'warn',
-  NOT_STARTED: 'gray',
-  SKIPPED: 'purple',
-};
-
-function shortTitle(step) {
-  return step.title.replace(/^\d+\.\s*/, '');
-}
 
 /* -------------------------------------------------- 展示片段 */
 
@@ -56,16 +46,6 @@ function evidencePanel(step) {
       ${group('已经有的', have, 'ok')}
       ${group('还缺的', missing, 'miss')}
       ${suggest.length ? group('建议补上', suggest, 'opt') : ''}
-      ${step.skipped ? `<div class="note mt">这次先不做：时间线会跳过；确认上线仍要它变成已具备${
-        step.skip_reason ? '；原因：' + esc(step.skip_reason) : ''}${
-        step.skipped_by ? ' · ' + esc(step.skipped_by) : ''}</div>` : ''}
-      <div class="gap mt">
-        ${step.skipped
-          ? `<button class="btn-sm" data-act="start.unskip" data-key="${esc(step.key)}">
-               恢复这一阶段</button>`
-          : `<button class="btn-sm" data-act="start.skip" data-key="${esc(step.key)}">
-               这次先不做</button>`}
-      </div>
     </aside>`;
 }
 
@@ -75,7 +55,7 @@ function actionAttrs(action) {
   return `data-act="start.go"${params ? ` data-params="${esc(params)}"` : ''}`;
 }
 
-/** 主按钮跟「第一条未满足的必需证据」走同一去向，避免文案路径与门槛脱节。 */
+/** 主按钮跟「第一条未满足的必需证据」走同一去向。 */
 function primaryActionIndex(step) {
   const actions = step.actions || [];
   if (!actions.length) return -1;
@@ -95,192 +75,79 @@ function stepActionsHtml(step) {
   const actions = step.actions || [];
   const primary = primaryActionIndex(step);
   if (!actions.length) return '';
-  if (primary < 0) {
-    return `<div class="note mb">本阶段必需证据已齐。可做建议项，或看下一阶段。</div>
+  const missing = (step.evidence_items || []).find((item) => !item.met && item.required);
+  if (!missing) {
+    return `<div class="note mb">框架边界的必需证据已齐。</div>
       <div class="gap">${actions.map((action) => `<button class="btn btn-g"
         ${actionAttrs(action)} data-view="${esc(action.view)}"
         title="${esc(action.hint || '')}">${esc(action.label)}</button>`).join('')}</div>`;
   }
   return `<div class="gap">${actions.map((action, index) => {
     const cls = index === primary ? 'btn btn-p' : 'btn btn-g';
-    return `<button class="${cls}" ${actionAttrs(action)} data-view="${esc(action.view)}"
+    return `<button class="${cls}" ${actionAttrs(action)}
+      data-view="${esc(action.view)}"
       title="${esc(action.hint || '')}">${esc(action.label)}</button>`;
   }).join('')}</div>`;
 }
 
 function stepBody(step) {
+  const points = (step.points || []).map((point) => `
+    <li>
+      <span class="start-point-label">${esc(point.label)}</span>
+      <span>${esc(point.text)}</span>
+    </li>`).join('');
   return `
     <div class="start-main">
       ${step.goal
-        ? `<p class="start-goal"><b>这一步只回答</b>：${esc(step.goal)}</p>`
+        ? `<p class="start-kicker">这一步只回答</p><p class="start-goal">${esc(step.goal)}</p>`
         : ''}
-      ${step.exit_criteria
-        ? `<p class="start-exit"><b>怎样算出门</b>：${esc(step.exit_criteria)}</p>`
-        : ''}
-      ${step.next_hint
-        ? `<p class="start-hint">${esc(step.next_hint)}</p>`
-        : ''}
+      ${points ? `<ul class="start-points">${points}</ul>` : ''}
+      ${lifecycleStrip()}
+      ${step.next_hint ? `<p class="start-hint">${esc(step.next_hint)}</p>` : ''}
       ${stepActionsHtml(step)}
     </div>
     ${evidencePanel(step)}`;
+}
+
+function lifecycleStrip() {
+  const steps = [
+    ['strategy', '战略对齐', '战略目标'],
+    ['pcf', '流程架构', 'APQC'],
+    ['designer', '建模', '设计器'],
+    ['monitor', '分析', '流程分析', 'tab=analysis'],
+    ['designer', '设计', '设计器'],
+    ['execution', '执行', '流程执行'],
+    ['dashboard', '监控度量', '驾驶舱'],
+    ['projects', '变革优化', '项目组合'],
+    ['authorization', '治理', '授权矩阵'],
+  ];
+  const buttons = steps.map(([view, title, where, params]) => `
+    <button type="button" class="life-step" data-act="start.go" data-view="${view}"${
+      params ? ` data-params="${params}"` : ''}>
+      <b>${esc(title)}</b><span class="tiny">${esc(where)}</span>
+    </button>`).join('');
+  return `<p class="start-kicker">公司体系按这个顺序走</p><div class="life-row">${buttons}</div>`;
 }
 
 function statusTag(step) {
   return `<span class="tag ${STATUS_TONE[step.status] || 't-gry'}">${esc(step.status_label)}</span>`;
 }
 
-function currentCard(step, flat = false) {
+function currentCard(step) {
+  const missing = (step.evidence_items || []).some((item) => item.required && !item.met);
+  const desc = missing
+    ? '右边是流程地图要数的证据。主按钮打开第一条还缺的必需证据。'
+    : '右边是流程地图要数的证据。必需项已经齐了。';
   return `
-    <div class="${flat ? 'start-current start-current-flat' : 'card start-current'}">
+    <div class="card start-current">
       <div class="start-current-hd">
         <div>
           <h3>${esc(step.title)}</h3>
-          <div class="desc">左侧按缺口去补；右侧必需证据齐了，这一阶段才算已具备。</div>
+          <div class="desc">${desc}</div>
         </div>
-        <div class="gap">
-          ${step.estimated ? `<span class="tag t-blu">预计 ${esc(step.estimated)}</span>` : ''}
-          ${statusTag(step)}
-        </div>
+        ${statusTag(step)}
       </div>
       ${stepBody(step)}
-    </div>`;
-}
-
-function completionCard(data) {
-  const skipped = data.steps.filter((step) => step.status === 'SKIPPED').length;
-  return `
-    <div class="card start-complete">
-      <h3>${skipped
-        ? `能做的都做了 ${data.ready_count}/${data.total}`
-        : `九个阶段都齐了 ${data.ready_count}/${data.total}`}</h3>
-      <div class="desc">${skipped
-        ? `其中 ${skipped} 个阶段标了“这次先不做”。时间线会跳过它们，确认上线仍要它们变成已具备。`
-        : '进入运营驾驶舱与流程卡持续运行；后续改善走同一条改善链，改完发布新版本。'}</div>
-      <div class="gap">
-        <button class="btn btn-p" data-act="start.go" data-view="dashboard">运营驾驶舱（总览）</button>
-        <button class="btn btn-g" data-act="start.go" data-view="monitor">运营驾驶舱（KPI）</button>
-        <button class="btn btn-g" data-act="start.go" data-view="process_card">流程卡</button>
-      </div>
-    </div>`;
-}
-
-function pilotGateCard(data) {
-  if (data.pilot_confirmed) {
-    const stale = data.pilot_stale
-      ? `<div class="note mb">证据已变化，当前不再满足上线条件：${
-        data.pilot_missing_steps.map(esc).join('、')}。请补齐后重新确认。</div>`
-      : '';
-    return `
-      <div class="card start-complete">
-        <h3>首次上线已确认</h3>
-        <div class="desc">确认人：${esc(data.pilot_confirmed_by || '—')} · ${
-          dtShort(data.pilot_confirmed_at)}${
-          data.pilot_confirm_note ? ' · ' + esc(data.pilot_confirm_note) : ''}</div>
-        ${stale}
-        <div class="gap">
-          <button class="btn btn-p" data-act="start.go" data-view="dashboard">进入驾驶舱</button>
-          <button class="btn btn-g" data-act="start.revokePilot">撤销确认</button>
-        </div>
-      </div>`;
-  }
-  if (!data.pilot_gate_open) return '';
-  return `
-    <div class="card start-complete">
-      <h3>前 8 个阶段已齐，可以确认上线</h3>
-      <div class="desc">从「立项定界」到「评审与固化」都齐了；确认后默认首页切到驾驶舱。
-        第 9 阶段「改善与复制」在运营中继续。</div>
-      <div class="gap">
-        <button class="btn btn-p" data-act="start.confirmPilot">确认首次上线</button>
-        <button class="btn btn-g" data-act="start.setupProjects">体系落地项目</button>
-      </div>
-    </div>`;
-}
-
-/* -------------------------------------------------- 九个阶段 */
-
-function openStage(data) {
-  return data.steps.find((step) => step.status !== 'READY' && step.status !== 'SKIPPED') || null;
-}
-
-function viewedStage(data) {
-  const current = openStage(data);
-  const picked = data.steps.find((step) => step.key === state.start.stageKey);
-  return picked || current || data.steps[data.steps.length - 1];
-}
-
-function stageNav(data, viewed, current) {
-  return `
-    <div class="card start-nav">
-      <div class="start-nav-layer">阶段</div>
-      ${data.steps.map((step) => `
-        <button type="button" class="start-nav-item${step.key === viewed.key ? ' on' : ''}"
-          data-act="start.selectStage" data-key="${esc(step.key)}">
-          <span class="nav-dot ${RAIL_TONE[step.status] || 'gray'}"></span>
-          <span>${esc(shortTitle(step))}</span>
-          ${current && current.key === step.key ? '<span class="tl-now">当前</span>' : ''}
-        </button>`).join('')}
-    </div>`;
-}
-
-function timeline(data, viewed, current) {
-  const parts = [];
-  data.steps.forEach((step, index) => {
-    const visual = step.status === 'READY'
-      ? 'done'
-      : step.status === 'SKIPPED'
-        ? 'skipped'
-        : current && current.key === step.key
-          ? 'current'
-          : 'future';
-    const mark = visual === 'done' ? '✓' : visual === 'skipped' ? '–' : index + 1;
-    parts.push(`
-      <button type="button" class="tl-step ${visual}${step.key === viewed.key ? ' viewing' : ''}"
-        data-act="start.selectStage" data-key="${esc(step.key)}"
-        title="${esc(step.title)} · ${esc(step.status_label)}">
-        <span class="tl-dot">${mark}</span>
-        <span class="tl-label">${esc(shortTitle(step))}</span>
-        ${current && current.key === step.key ? '<span class="tl-now">当前</span>' : ''}
-        ${visual === 'skipped' ? '<span class="tl-skip">未验证</span>' : ''}
-      </button>`);
-    if (index < data.steps.length - 1) {
-      parts.push(`<span class="tl-line ${step.status === 'READY' ? 'done' : ''}"></span>`);
-    }
-  });
-  return `
-    <div class="card start-rail-card">
-      <div class="between mb"><h3>9 个阶段</h3>
-        <span class="tiny muted">点阶段可查看证据；公司停在「当前」那一步</span></div>
-      <div class="start-timeline">${parts.join('')}</div>
-    </div>`;
-}
-
-function skippedFold(data) {
-  const skipped = data.steps.filter((step) => step.skipped);
-  if (!skipped.length) return '';
-  return `
-    <details class="card start-fold">
-      <summary><span>这次先不做（${skipped.length}）</span>
-        <span class="tiny muted">时间线会跳过；确认上线仍要它变成已具备</span></summary>
-      <div class="start-done">
-        ${skipped.map((step) => `
-          <div class="between">
-            <span>${statusTag(step)} ${esc(step.title)}</span>
-            <button class="btn-sm" data-act="start.unskip" data-key="${esc(step.key)}">恢复这一阶段</button>
-          </div>`).join('')}
-      </div>
-    </details>`;
-}
-
-function goLiveCard(data) {
-  const readyCard = pilotGateCard(data);
-  if (readyCard) return readyCard;
-  const missing = data.pilot_missing_steps || [];
-  return `
-    <div class="card start-aside-card">
-      <h3>确认上线</h3>
-      <div class="tiny muted">前 8 个阶段（到评审与固化）都要变成已具备。第 9 阶段不挡上线。这次先不做不算已具备。</div>
-      <div class="tiny muted mt">还差 ${missing.length} 个阶段：</div>
-      <div class="gap">${missing.map((title) => `<span class="tag t-yel">${esc(title)}</span>`).join('')}</div>
     </div>`;
 }
 
@@ -290,62 +157,32 @@ function pathRollupCard(data) {
   const avg = data.path_avg_layer || 0;
   return `
     <div class="card start-aside-card">
-      <div class="tiny muted">单流程落地（汇总）</div>
+      <div class="tiny muted">单条流程的边界</div>
       <h3>${count ? `${count} 条十层路径` : '还没有十层路径'}</h3>
       <div class="tiny muted mt">${count
-        ? `已完成 ${done} 条 · 平均到第 ${avg} 层。能力门在左侧九阶段；某条流程会不会跑，进十层核对。`
-        : '公司能力用九阶段衡量。选一条 L3/L4 建十层核对，才按本流程关门。'}</div>
+        ? `已完成 ${done} 条 · 平均到第 ${avg} 层。某一条流程从哪开始、到哪结束，在十层核对里写。`
+        : '某一条流程从哪开始、到哪结束，去十层核对写。这里只数公司这张流程地图。'}</div>
       <button class="btn-sm mt" data-act="start.go" data-view="pilot">${
         count ? '打开十层核对' : '去建第一条路径'}</button>
     </div>`;
 }
 
 function paint(data) {
-  const current = openStage(data);
-  const viewed = viewedStage(data);
-  const viewingOther = current && viewed.key !== current.key;
+  const step = (data.steps || [])[0];
+  const ready = step && step.status === 'READY';
   viewEl().innerHTML = `
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">唯一主入口 · 公司会不会做</span>${tipHelp(
-            '证据按全公司计数：九阶段只量公司能力（框架、主数据、方法是否存在）。'
-            + '多数项大于 0 就算具备；权责冲突、未闭环治理待办、未关闭的授权例外要等于 0。'
-            + '某条流程会不会跑，不在这里量——进「十层核对」按本流程关门。'
-            + '确认上线只认前 8 个阶段都已具备。这次先不做不算已具备。')}</h2>
+          <h2>开始使用<span class="module-badge">唯一主入口 · 公司流程地图</span>${tipHelp(
+            '数的是全公司这张流程地图：至少一条 L3 同时有 L1、L2 上级并对上 PCF，'
+            + '并且至少一个治理角色启用且有成员。')}</h2>
         </div>
-        <div class="gap">
-          <span class="tag t-blu">${current
-            ? '当前 ' + esc(shortTitle(current))
-            : '时间线已走完'}</span>
-          <span class="tag ${data.pilot_gate_open ? 't-grn' : 't-yel'}">上线 ${
-            data.pilot_ready_count}/${data.pilot_total}</span>
-        </div>
+        <span class="tag ${ready ? 't-grn' : 't-yel'}">${ready ? '框架边界已划清' : '框架边界还没划清'}</span>
       </div>
     </div>
-    ${timeline(data, viewed, current)}
-    <div class="start-shell">
-      <aside class="start-side">${stageNav(data, viewed, current)}</aside>
-      <main class="start-center">
-        ${viewingOther
-          ? `<div class="note mb">公司现在停在「${esc(current.title)}」。下面是「${esc(viewed.title)}」的证据。</div>`
-          : ''}
-        ${current ? '' : completionCard(data)}
-        ${currentCard(viewed)}
-      </main>
-      <aside class="start-aside">
-        <div class="card start-aside-card">
-          <div class="tiny muted">当前位置</div>
-          <h3>${current ? esc(shortTitle(current)) : '时间线已走完'}</h3>
-          ${current
-            ? `<button class="btn-sm mt" data-act="start.selectStage" data-key="${esc(current.key)}">看当前阶段</button>`
-            : ''}
-        </div>
-        ${goLiveCard(data)}
-        ${pathRollupCard(data)}
-        ${skippedFold(data)}
-      </aside>
-    </div>`;
+    ${step ? currentCard(step) : ''}
+    ${pathRollupCard(data)}`;
 }
 
 /* -------------------------------------------------- 交互 */
@@ -368,82 +205,9 @@ on('start.evidence', ({ view, params }) => {
   go(view, { params: parsed, push: true });
 });
 
-on('start.selectStage', ({ key }) => {
-  if (!key) return;
-  state.start.stageKey = key;
-  if (state.start.data) paint(state.start.data);
-});
-
 on('start.guidedPcf', () => {
   state.map.openGuidedPcf = true;
   go('map');
-});
-
-on('start.confirmPilot', async () => {
-  const note = await promptDialog('上线备注（可留空）',
-    { title: '确认首次上线', okText: '确认', value: '' });
-  if (note === undefined) return;
-  try {
-    const data = await POST('/start/pilot/confirm', { note: note || null });
-    state.start.data = data;
-    paint(data);
-    toast('已确认首次上线');
-  } catch (e) {
-    toast(e.message, true);
-  }
-});
-
-on('start.revokePilot', async () => {
-  const ok = await confirmDialog('撤销后默认首页会回到开始使用，确定继续？',
-    { title: '撤销首次上线', okText: '撤销', danger: true });
-  if (!ok) return;
-  try {
-    const data = await DEL('/start/pilot/confirm');
-    state.start.data = data;
-    paint(data);
-    toast('已撤销首次上线确认');
-  } catch (e) {
-    toast(e.message, true);
-  }
-});
-
-on('start.setupProjects', () => {
-  state.projects.filter = {
-    methodology: '', status: '', stage: '', projectType: 'GOVERNANCE_SETUP',
-  };
-  state.projects.keyword = '';
-  go('projects');
-});
-
-on('start.skip', async ({ key }) => {
-  const reason = await promptDialog(
-    '时间线会跳过这一阶段。确认上线仍要它变成已具备。请说明原因（可留空）。',
-    { title: '这次先不做', okText: '确认', value: '' },
-  );
-  if (reason === undefined) return;
-  try {
-    const data = await POST('/start/steps/' + encodeURIComponent(key) + '/skip',
-      { reason: reason || null });
-    state.start.data = data;
-    paint(data);
-    toast('已标记为这次先不做');
-  } catch (e) {
-    toast(e.message, true);
-  }
-});
-
-on('start.unskip', async ({ key }) => {
-  const ok = await confirmDialog('恢复后该阶段会重新按现有数据判定。',
-    { title: '恢复阶段', okText: '恢复' });
-  if (!ok) return;
-  try {
-    const data = await DEL('/start/steps/' + encodeURIComponent(key) + '/skip');
-    state.start.data = data;
-    paint(data);
-    toast('已恢复这一阶段');
-  } catch (e) {
-    toast(e.message, true);
-  }
 });
 
 const renderStart = () => {

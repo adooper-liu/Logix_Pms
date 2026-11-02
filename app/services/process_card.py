@@ -35,6 +35,7 @@ from app.schemas.process_card import (
     CardProcessOut,
     CardRaciEntryOut,
     CardRaciMatterOut,
+    CardSheetOut,
     CardWorkloadOut,
     ProcessCardOut,
 )
@@ -47,6 +48,7 @@ from app.services import process_document as document_service
 from app.services import process_model as model_service
 from app.services import raci as raci_service
 from app.services import strategy as strategy_service
+from app.services import tool_sheet as tool_sheet_service
 from app.services import workload as workload_service
 
 
@@ -230,13 +232,7 @@ def _kpis(db: Session, process_id: int, l4_ids: List[int]) -> List[CardKpiOut]:
     for kpi in rows:
         records = kpi_service.ordered_records(kpi.records)
         latest = records[-1].value if records else None
-        state = kpi_service.status_for(
-            latest,
-            kpi.direction,
-            kpi.red_threshold,
-            kpi.yellow_threshold,
-            kpi.green_threshold,
-        )
+        state, status_label, _kind = kpi_service.presentation(db, kpi, latest)
         result.append(
             CardKpiOut(
                 id=kpi.id,
@@ -246,7 +242,7 @@ def _kpis(db: Session, process_id: int, l4_ids: List[int]) -> List[CardKpiOut]:
                 target_value=kpi.target_value,
                 unit=kpi.unit,
                 status=state,
-                status_label=kpi_service.STATUS_LABELS.get(state, state),
+                status_label=status_label,
             )
         )
     return result
@@ -364,6 +360,9 @@ def build(db: Session, process_id: int) -> ProcessCardOut:
             health_score=process.health_score,
         ),
         chain=_chain(db, process),
+        sheets=[
+            CardSheetOut(**row) for row in tool_sheet_service.sheets_for_process(db, process_id)
+        ],
         objectives=[
             CardObjectiveOut(
                 id=row.id,

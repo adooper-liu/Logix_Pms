@@ -61,7 +61,7 @@ const renderOrgs = () => {
     viewEl().innerHTML = `
       <div class="card page-head">
         <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span></h2>
-        <div class="desc">组织树、岗位、账号与治理角色供「开始使用」九阶段计数，
+        <div class="desc">组织树、岗位、账号与治理角色供「开始使用」核对谁能改流程地图，
           也是标准文件继承范围的来源。</div>
         <div class="note mt">仅系统管理员可维护。需要建组织或任命角色时，请管理员处理。</div>
       </div>`;
@@ -102,11 +102,11 @@ function paintShell() {
       <div class="between">
         <div>
           <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span>${tipHelp(
-            '阶段1「立项定界」数治理角色；阶段3「流程架构」数岗位。'
+            '开始使用数启用且有成员的治理角色，用来回答谁有权改流程地图。'
             + '组织编码决定标准文件/模板的继承范围。'
             + '系统角色管能不能改系统；治理角色管对流程/事项承担什么责任——两套不要混。'
             + '先建试点相关组织与岗位，不用一次建全集团。')}</h2>
-          <div class="desc">给九阶段和标准文件继承一个可信来源；编码与启停先对，再谈账号。</div>
+          <div class="desc">给流程地图和标准文件继承一个可信来源；编码与启停先对，再谈账号。</div>
         </div>
         <div class="gap">
           <span class="tag t-blu">治理角色 ${roleCount}</span>

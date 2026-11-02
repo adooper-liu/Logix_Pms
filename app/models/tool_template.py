@@ -103,6 +103,8 @@ class ToolTemplateVersion(Base):
 
     # [{"key","label","source","required","format"}]；source 由服务端上下文解析
     placeholders: Mapped[Any] = mapped_column(JSON, default=list)
+    # 在线填写格子。填写并挂上只读已生效版本的这一列，不读工具的操作步骤。
+    sheet_fields: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     base_version_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("tool_template_version.id", ondelete="SET NULL"), nullable=True

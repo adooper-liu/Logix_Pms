@@ -1,30 +1,8 @@
-"""九步启动状态：readiness 由现有数据自动计算。"""
+"""开始使用：只数流程框架边界，由现有数据自动计算。"""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-
-from sqlalchemy import select
-
-from app.core.database import SessionLocal
-from app.models.authorization import AuthorizationRule
-from app.models.enums import AuthorizationStatus, DeliverableStatus
-from app.models.process import ProcessArch
-from app.models.process_document import ProcessDocument, ProcessDocumentVersion
-from app.models.user import User
-
 API = "/api/v1"
-
-PILOT_KEYS = {
-    "scope",
-    "strategy",
-    "architecture",
-    "policy",
-    "process_design",
-    "workload",
-    "performance",
-    "review_release",
-}
 
 
 def _step(data: dict, key: str) -> dict:
@@ -33,78 +11,58 @@ def _step(data: dict, key: str) -> dict:
 
 def test_startup_status_shape(client):
     data = client.get(f"{API}/start/status").json()
-    assert data["total"] == 9
-    assert data["pilot_total"] == 8
-    assert len(data["steps"]) == 9
-    assert [step["key"] for step in data["steps"]] == [
-        "scope",
-        "strategy",
-        "architecture",
-        "policy",
-        "process_design",
-        "workload",
-        "performance",
-        "review_release",
-        "improvement",
-    ]
+    assert data["total"] == 1
+    assert data["pilot_total"] == 0
+    assert data["pilot_gate_open"] is False
+    assert data["pilot_missing_steps"] == []
+    assert len(data["steps"]) == 1
+    assert data["steps"][0]["key"] == "framework"
+    assert data["steps"][0]["pilot"] is False
     assert 0 <= data["readiness_pct"] <= 100
-    assert 0 <= data["pilot_readiness_pct"] <= 100
-    assert {step["key"] for step in data["steps"] if step["pilot"]} == PILOT_KEYS
-    assert _step(data, "improvement")["pilot"] is False
-    if data["next_pilot_step"] is not None:
-        assert data["next_pilot_step"] in PILOT_KEYS
 
-    for step in data["steps"]:
-        assert step["status"] in {"NOT_STARTED", "IN_PROGRESS", "READY", "SKIPPED"}
-        assert step["status_label"] in {"还没开始", "进行中", "已具备", "这次先不做（未验证）"}
-        assert step["title"] and step["goal"] and step["input"] and step["output"]
-        assert step["estimated"]
-        assert isinstance(step["evidence"], dict)
-        assert step["actions"]
-        assert step["evidence_items"], f"{step['key']} 缺少结构化证据"
-        for item in step["evidence_items"]:
-            assert {"key", "label", "value", "required", "met"} <= set(item)
-            assert item["label"]
-            assert isinstance(item["required"], bool)
-            assert isinstance(item["met"], bool)
-        missing = [item for item in step["evidence_items"] if item["required"] and not item["met"]]
-        assert (step["status"] == "READY") == (not missing)
+    step = data["steps"][0]
+    assert step["status"] in {"NOT_STARTED", "IN_PROGRESS", "READY", "SKIPPED"}
+    assert step["title"] and step["goal"] and step["input"] and step["output"]
+    assert "端到端" not in step["goal"]
+    assert "十层核对" not in step["goal"]
+    from app.services.startup import STEP_DEFINITIONS
 
-    by_key = {step["key"]: step for step in data["steps"]}
-    assert by_key["scope"]["status"] == "READY"
-    assert by_key["strategy"]["status"] == "READY"
-    assert by_key["architecture"]["status"] == "READY"
-    assert by_key["workload"]["status"] == "READY"
-    assert by_key["performance"]["status"] == "READY"
-    # 种子数据还没有 KPI 越线改善项目与已应用变更单
-    assert by_key["improvement"]["status"] != "READY"
-    assert data["next_step"] is not None
+    defined = next(item for item in STEP_DEFINITIONS if item["key"] == "framework")
+    assert "十层核对" in defined["next_hint"]
+    assert step["next_hint"] is None
+    assert [point["label"] for point in step["points"]] == ["生命周期", "地图", "改图的人"]
+    keys = [item["key"] for item in step["evidence_items"]]
+    assert keys == [
+        "anchored_l3",
+        "l1",
+        "l2",
+        "l3",
+        "pcf_mapped_l3",
+        "governance_roles",
+    ]
+    assert "process_charters" not in keys
+    assert "boundary_gaps" not in keys
+    assert "coverage_gaps" not in keys
+    for item in step["evidence_items"]:
+        assert item["required"] is True
+        assert item["label"]
+    missing = [item for item in step["evidence_items"] if not item["met"]]
+    assert (step["status"] == "READY") == (not missing)
+    # 种子地图和治理角色已经齐，框架边界按这两件判定
+    assert step["status"] == "READY"
+    assert data["next_step"] is None
+    assert data["readiness_pct"] == 100
 
 
-def test_startup_evidence_zero_is_good(client):
+def test_startup_evidence_counts_the_map(client):
     data = client.get(f"{API}/start/status").json()
-    raci = _step(data, "architecture")
-    invalid = next(item for item in raci["evidence_items"] if item["key"] == "invalid_processes")
-    assert invalid["value"] == 0
-    assert invalid["met"] is True
-
-    architecture = _step(data, "architecture")
-    mapped = next(item for item in architecture["evidence_items"] if item["key"] == "pcf_mapped_l3")
-    assert mapped["value"] > 0
-    assert mapped["met"] is True
-
-
-def test_policy_requires_structured_authorization(client):
-    """S4 不能只看制度文件：结构化授权规则也是必需证据。"""
-    policy = _step(client.get(f"{API}/start/status").json(), "policy")
-    items = {item["key"]: item for item in policy["evidence_items"]}
-    rules = items["effective_authorization_rules"]
-    assert rules["required"] is True
-    assert rules["value"] >= 4
-    assert rules["met"] is True
-    # 种子数据没有生效制度文件，所以 S4 仍不应就绪
-    if items["effective_documents"]["value"] == 0:
-        assert policy["status"] != "READY"
+    items = {item["key"]: item for item in _step(data, "framework")["evidence_items"]}
+    assert items["anchored_l3"]["value"] > 0
+    assert items["anchored_l3"]["met"] is True
+    assert items["pcf_mapped_l3"]["value"] > 0
+    assert items["governance_roles"]["value"] > 0
+    assert items["governance_roles"]["view"] == "orgs"
+    assert items["l1"]["view"] == "map"
 
 
 def test_every_evidence_count_opens_its_page(client):
@@ -125,72 +83,75 @@ def test_every_evidence_count_opens_its_page(client):
         "execution",
         "monitor",
         "toolbox",
+        "start",
+        "pilot",
     }
     assert {view for view, _params in EVIDENCE_DESTINATIONS.values()} <= allowed
 
     data = client.get(f"{API}/start/status").json()
-    for step in data["steps"]:
-        for item in step["evidence_items"]:
-            view, params = EVIDENCE_DESTINATIONS[item["key"]]
-            assert item["view"] == view
-            assert item["view_params"] == params
-    scope = {item["key"]: item for item in _step(data, "scope")["evidence_items"]}
-    assert scope["l3_with_owner"]["view"] == "map"
-    assert scope["l3_with_owner"]["view_params"] == {"owners": "l3"}
-    assert scope["governance_roles"]["view_params"]["tab"] == "governance"
-    assert scope["sponsor_projects"]["view"] == "projects"
-    scope_step = _step(data, "scope")
-    assert scope_step["actions"][0]["label"] == "去指定 L3 负责人"
-    assert scope_step["actions"][0]["view"] == "map"
-    assert scope_step["actions"][0]["view_params"] == {"owners": "l3"}
-    assert not any(a["label"] == "去定目标" for a in scope_step["actions"]), (
-        "阶段1不应再放「去定目标」（属阶段2）"
-    )
-    appoint = next(a for a in scope_step["actions"] if a["label"] == "去任命治理角色")
+    framework = _step(data, "framework")
+    for item in framework["evidence_items"]:
+        view, params = EVIDENCE_DESTINATIONS[item["key"]]
+        assert item["view"] == view
+        assert item["view_params"] == params
+    assert framework["actions"][0]["label"] == "去建流程地图"
+    guided = next(a for a in framework["actions"] if a["label"] == "1+3+10 建架构")
+    assert guided["action"] == "start.guidedPcf"
+    appoint = next(a for a in framework["actions"] if a["label"] == "去任命治理角色")
     assert appoint["view"] == "orgs"
     assert appoint["view_params"] == {"tab": "governance"}
-    assert "有发起人的试点项目为建议项" in scope_step["exit_criteria"]
-    arch = next(a for a in _step(data, "architecture")["actions"] if a["label"] == "去建岗位")
-    assert arch["view_params"] == {"tab": "position"}
+    assert all(a["action"] != "start.openBoundary" for a in framework["actions"])
+    assert all(a["action"] != "start.openCoverage" for a in framework["actions"])
+    assert "boundary_gaps" not in EVIDENCE_DESTINATIONS
+    assert "coverage_gaps" not in EVIDENCE_DESTINATIONS
+    assert EVIDENCE_DESTINATIONS["process_charters"] == ("pilot", {})
+    assert EVIDENCE_DESTINATIONS["objective_complete"] == ("strategy", {})
+    assert EVIDENCE_DESTINATIONS["rpa_runs"] == ("pilot", {})
+    assert EVIDENCE_DESTINATIONS["process_cases"] == ("pilot", {})
+    assert EVIDENCE_DESTINATIONS["technology_uses"] == ("pilot", {})
+    assert EVIDENCE_DESTINATIONS["mining_variants"] == ("monitor", {"tab": "mining"})
+    assert EVIDENCE_DESTINATIONS["rpa_bots"] == ("pilot", {})
+    assert EVIDENCE_DESTINATIONS["training_records"] == ("pilot", {})
 
 
 def test_startup_status_for_owner(owner_client):
     data = owner_client.get(f"{API}/start/status").json()
-    assert data["total"] == 9
+    assert data["total"] == 1
     assert data["steps"]
 
 
 def test_skip_marks_unverified_and_unblocks_next(client):
     before = client.get(f"{API}/start/status").json()
-    workload = _step(before, "workload")
-    assert workload["status"] == "READY"
+    framework = _step(before, "framework")
+    assert framework["status"] == "READY"
     ready_before = before["ready_count"]
+    assert ready_before == 1
 
     try:
-        skipped = client.post(f"{API}/start/steps/workload/skip", json={"reason": "样本复核中"})
+        skipped = client.post(f"{API}/start/steps/framework/skip", json={"reason": "样本复核中"})
         assert skipped.status_code == 200, skipped.text
         data = skipped.json()
-        step = _step(data, "workload")
+        step = _step(data, "framework")
         assert step["status"] == "SKIPPED"
         assert step["status_label"] == "这次先不做（未验证）"
         assert step["skipped"] is True
         assert step["skip_reason"] == "样本复核中"
         assert step["skipped_by"] == "系统管理员"
-        assert data["ready_count"] == ready_before - 1
+        assert data["ready_count"] == 0
         assert data["skipped_count"] == 1
-        assert data["next_step"] != "workload"
+        assert data["next_step"] is None
 
         # 重复跳过是幂等的：更新原因，不新增记录
-        again = client.post(f"{API}/start/steps/workload/skip", json={"reason": "等待新样本"})
+        again = client.post(f"{API}/start/steps/framework/skip", json={"reason": "等待新样本"})
         assert again.status_code == 200
         assert again.json()["skipped_count"] == 1
-        assert _step(again.json(), "workload")["skip_reason"] == "等待新样本"
+        assert _step(again.json(), "framework")["skip_reason"] == "等待新样本"
     finally:
-        undone = client.delete(f"{API}/start/steps/workload/skip")
+        undone = client.delete(f"{API}/start/steps/framework/skip")
         assert undone.status_code == 200, undone.text
 
     restored = undone.json()
-    step = _step(restored, "workload")
+    step = _step(restored, "framework")
     assert step["status"] == "READY"
     assert step["skipped"] is False
     assert restored["skipped_count"] == 0
@@ -198,9 +159,9 @@ def test_skip_marks_unverified_and_unblocks_next(client):
 
 
 def test_unskip_is_idempotent(client):
-    response = client.delete(f"{API}/start/steps/policy/skip")
+    response = client.delete(f"{API}/start/steps/framework/skip")
     assert response.status_code == 200
-    assert _step(response.json(), "policy")["skipped"] is False
+    assert _step(response.json(), "framework")["skipped"] is False
 
 
 def test_skip_unknown_step(client):
@@ -209,125 +170,68 @@ def test_skip_unknown_step(client):
 
 
 def test_skip_requires_manager(owner_client, viewer_client):
-    assert owner_client.post(f"{API}/start/steps/policy/skip", json={}).status_code == 403
-    assert viewer_client.post(f"{API}/start/steps/policy/skip", json={}).status_code == 403
-    assert viewer_client.delete(f"{API}/start/steps/policy/skip").status_code == 403
+    assert owner_client.post(f"{API}/start/steps/framework/skip", json={}).status_code == 403
+    assert viewer_client.post(f"{API}/start/steps/framework/skip", json={}).status_code == 403
+    assert viewer_client.delete(f"{API}/start/steps/framework/skip").status_code == 403
 
 
-def _make_pilot_ready():
-    """直接落库构造 S4/阶段 8 证据；返回清理函数，避免污染其他用例。"""
-    db = SessionLocal()
-    process = db.scalar(select(ProcessArch).where(ProcessArch.level == 3).limit(1))
-    admin = db.scalar(select(User).where(User.username == "admin"))
-    old_published = process.published_model_version
-    for document in db.scalars(
-        select(ProcessDocument).where(ProcessDocument.code == "DOC-GATE-TEST")
-    ).all():
-        db.query(ProcessDocumentVersion).filter(
-            ProcessDocumentVersion.document_id == document.id
-        ).delete()
-        db.delete(document)
-    for rule in db.scalars(
-        select(AuthorizationRule).where(AuthorizationRule.code == "AUTH-GATE-TEST")
-    ).all():
-        db.delete(rule)
-    db.flush()
-
-    document = ProcessDocument(
-        code="DOC-GATE-TEST",
-        title="门禁测试 SOP",
-        process_id=process.id,
-        category="SOP",
-        is_active=True,
-    )
-    db.add(document)
-    db.flush()
-    version = ProcessDocumentVersion(
-        document_id=document.id,
-        version_label="1.0",
-        status=DeliverableStatus.EFFECTIVE.value,
-        valid_from=date.today() - timedelta(days=1),
-        approved_by="系统管理员",
-        approved_by_id=admin.id,
-    )
-    db.add(version)
-    db.flush()
-    document.current_version_id = version.id
-    db.add(
-        AuthorizationRule(
-            code="AUTH-GATE-TEST",
-            title="门禁测试规则",
-            matter="门禁测试事项",
-            category="B",
-            status=AuthorizationStatus.EFFECTIVE.value,
-            approver_label="测试审批人",
-            exception_path="测试例外路径",
-            evidence_required="测试证据",
-            owner_user_id=admin.id,
-        )
-    )
-    process.published_model_version = max(process.published_model_version or 0, 1)
-    db.commit()
-    process_id = process.id
-    db.close()
-
-    def cleanup() -> None:
-        session = SessionLocal()
-        try:
-            for document in session.scalars(
-                select(ProcessDocument).where(ProcessDocument.code == "DOC-GATE-TEST")
-            ).all():
-                session.query(ProcessDocumentVersion).filter(
-                    ProcessDocumentVersion.document_id == document.id
-                ).delete()
-                session.delete(document)
-            for rule in session.scalars(
-                select(AuthorizationRule).where(AuthorizationRule.code == "AUTH-GATE-TEST")
-            ).all():
-                session.delete(rule)
-            row = session.get(ProcessArch, process_id)
-            if row is not None:
-                row.published_model_version = old_published
-            session.commit()
-        finally:
-            session.close()
-
-    return cleanup
-
-
-def test_pilot_confirm_gate(client):
-    # 任一试点阶段被跳过或未就绪时，门禁必须拒绝
-    client.post(f"{API}/start/steps/policy/skip", json={"reason": "门禁测试"})
-    try:
-        rejected = client.post(f"{API}/start/pilot/confirm", json={"note": "测试"})
-        assert rejected.status_code == 409, rejected.text
-        assert "首次上线条件未满足" in rejected.json()["detail"]
-    finally:
-        client.delete(f"{API}/start/steps/policy/skip")
-
-    cleanup = _make_pilot_ready()
-    try:
-        status = client.get(f"{API}/start/status").json()
-        assert status["pilot_gate_open"] is True, status["pilot_missing_steps"]
-
-        confirmed = client.post(f"{API}/start/pilot/confirm", json={"note": "试运行通过"})
-        assert confirmed.status_code == 200, confirmed.text
-        data = confirmed.json()
-        assert data["pilot_confirmed"] is True
-        assert data["pilot_confirmed_by"] == "系统管理员"
-        assert data["pilot_confirm_note"] == "试运行通过"
-        assert data["pilot_stale"] is False
-        assert data["pilot_missing_steps"] == []
-
-        revoked = client.delete(f"{API}/start/pilot/confirm")
-        assert revoked.status_code == 200
-        assert revoked.json()["pilot_confirmed"] is False
-    finally:
-        cleanup()
-        client.delete(f"{API}/start/pilot/confirm")
+def test_pilot_confirm_stays_closed(client):
+    """框架边界不再打开「前若干步齐了才能首次上线」。"""
+    status = client.get(f"{API}/start/status").json()
+    assert status["pilot_gate_open"] is False
+    rejected = client.post(f"{API}/start/pilot/confirm", json={"note": "测试"})
+    assert rejected.status_code == 409, rejected.text
+    assert "首次上线条件未满足" in rejected.json()["detail"]
 
 
 def test_pilot_confirm_requires_manager(owner_client, viewer_client):
     assert owner_client.post(f"{API}/start/pilot/confirm", json={}).status_code == 403
     assert viewer_client.post(f"{API}/start/pilot/confirm", json={}).status_code == 403
     assert viewer_client.delete(f"{API}/start/pilot/confirm").status_code == 403
+
+
+def test_charter_completes_one_process_boundary(client, viewer_client):
+    """范围说明记在十层核对上，不记在开始使用的框架边界上。"""
+    options = client.get(f"{API}/start/charter-options")
+    assert options.status_code == 200, options.text
+    body = options.json()
+    owned = next(row for row in body["processes"] if row["has_owner"])
+    sponsor = body["users"][0]["id"]
+    payload = {
+        "process_id": owned["id"],
+        "purpose": "把结果交给下游",
+        "starts_at": "需求提交",
+        "ends_at": "下游签收",
+        "in_scope": "这条 L3 的主路径",
+        "out_of_scope": "其他 L3",
+        "stop_condition": "发起人书面停止",
+        "sponsor_user_id": sponsor,
+    }
+    blank = {**payload, "purpose": "   "}
+    assert client.post(f"{API}/start/charters", json=blank).status_code == 400
+    assert viewer_client.post(f"{API}/start/charters", json=payload).status_code == 403
+
+    saved = client.post(f"{API}/start/charters", json=payload)
+    assert saved.status_code == 200, saved.text
+    company_keys = {item["key"] for item in _step(saved.json(), "framework")["evidence_items"]}
+    assert "process_charters" not in company_keys
+
+    created = client.post(f"{API}/pilot/paths", json={"process_id": owned["id"]})
+    if created.status_code == 201:
+        path_id = created.json()["id"]
+        detail = created.json()
+    else:
+        listed = client.get(f"{API}/pilot/paths").json()
+        path_id = next(row["id"] for row in listed if row["process_id"] == owned["id"])
+        detail = client.get(f"{API}/pilot/paths/{path_id}").json()
+    try:
+        layer2 = next(layer for layer in detail["layers"] if layer["layer_no"] == 2)
+        assert layer2["title"] == "这条流程的起止"
+        item = layer2["evidence_items"][0]
+        assert item["key"] == "process_charters"
+        assert "本流程" in item["label"]
+        assert item["value"] >= 1
+        assert item["met"] is True
+    finally:
+        if created.status_code == 201:
+            client.delete(f"{API}/pilot/paths/{path_id}")

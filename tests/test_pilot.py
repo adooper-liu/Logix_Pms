@@ -44,8 +44,19 @@ def test_create_path_has_ten_layers(client):
     assert path["layers"][3]["title"] == "制度与授权设计"
     assert 0 <= path["progress"] <= 100
     # 退出门按本流程计数，标签应是本流程口径
+    process = _l3(client)
     sample = path["layers"][0]["evidence_items"][0]
     assert "本流程" in sample["label"] or sample["key"] in {"l1", "l2", "l3"}
+    published = next(
+        item for item in path["layers"][4]["evidence_items"] if item["key"] == "l3_published"
+    )
+    assert published["view"] == "designer"
+    assert published["view_params"]["process"] == str(process["id"])
+    assert published["view_params"]["tab"] == "model"
+    designer = next(
+        action for action in path["layers"][4]["actions"] if action["view"] == "designer"
+    )
+    assert designer["view_params"]["process"] == str(process["id"])
     for layer in path["layers"]:
         for item in layer["evidence_items"]:
             assert item["view"], f"{layer['title']} · {item['key']} 缺少证据落点"
@@ -191,3 +202,138 @@ def test_permissions(client, owner_client, viewer_client):
         assert owner_client.post(f"{API}/pilot/paths/{pid}/advance").status_code == 403
     finally:
         client.delete(f"{API}/pilot/paths/{pid}")
+
+
+def test_layers_count_one_kpi_mining_rpa_and_training(client, viewer_client):
+    """第 8 层只数同一张 KPI；挖掘、机器人和培训到场各自有计数。"""
+    process = _l3(client)
+    created = client.post(f"{API}/pilot/paths", json={"process_id": process["id"]})
+    if created.status_code == 201:
+        detail = created.json()
+        owns_path = True
+    else:
+        listed = client.get(f"{API}/pilot/paths").json()
+        path_id = next(row["id"] for row in listed if row["process_id"] == process["id"])
+        detail = client.get(f"{API}/pilot/paths/{path_id}").json()
+        owns_path = False
+    try:
+        layer6 = next(layer for layer in detail["layers"] if layer["layer_no"] == 6)
+        layer8 = next(layer for layer in detail["layers"] if layer["layer_no"] == 8)
+        layer10 = next(layer for layer in detail["layers"] if layer["layer_no"] == 10)
+        layer1 = next(layer for layer in detail["layers"] if layer["layer_no"] == 1)
+        assert [item["key"] for item in layer1["evidence_items"]] == ["objective_complete"]
+        assert "同一条" in layer1["evidence_items"][0]["label"]
+        assert [item["key"] for item in layer6["evidence_items"]] == [
+            "forms",
+            "bindings",
+            "mining_variants",
+            "rpa_bots",
+            "rpa_runs",
+            "process_cases",
+            "technology_uses",
+        ]
+        assert [item["key"] for item in layer8["evidence_items"]] == ["kpi_monitored"]
+        assert "本流程" in layer8["evidence_items"][0]["label"]
+        assert "training_records" in [item["key"] for item in layer10["evidence_items"]]
+        users = client.get(f"{API}/start/charter-options").json()["users"]
+        owner_id = users[0]["id"]
+        rpa = {
+            "process_id": process["id"],
+            "activity_name": "核对入库单",
+            "bot_name": "入库核对机器人",
+            "manual_step": "打开系统逐项核对字段",
+            "owner_user_id": owner_id,
+        }
+        assert viewer_client.post(f"{API}/pilot/rpa", json=rpa).status_code == 403
+        assert client.post(f"{API}/pilot/rpa", json={**rpa, "manual_step": " "}).status_code == 400
+        saved = client.post(f"{API}/pilot/rpa", json=rpa)
+        assert saved.status_code == 200, saved.text
+        training = {
+            "process_id": process["id"],
+            "trainee_user_id": owner_id,
+            "topic": "这条流程的起止",
+            "completed_on": "2026-11-01",
+        }
+        assert viewer_client.post(f"{API}/pilot/training", json=training).status_code == 403
+        trained = client.post(f"{API}/pilot/training", json=training)
+        assert trained.status_code == 200, trained.text
+        refreshed = client.get(f"{API}/pilot/paths/{detail['id']}").json()
+        by_key = {
+            item["key"]: item
+            for layer in refreshed["layers"]
+            if layer["layer_no"] in (6, 10)
+            for item in layer["evidence_items"]
+        }
+        assert by_key["rpa_bots"]["value"] >= 1
+        assert by_key["rpa_bots"]["met"] is True
+        assert by_key["training_records"]["value"] >= 1
+        assert by_key["training_records"]["met"] is True
+        assert "mining_variants" in by_key
+        event = client.post(
+            f"{API}/pilot/event-logs",
+            json={
+                "process_id": process["id"],
+                "source_name": "ERP",
+                "case_key": "PO-1",
+                "activity_name": "创建采购订单",
+                "occurred_at": "2026-11-01T08:00:00",
+            },
+        )
+        assert event.status_code == 200, event.text
+        mined = client.get(
+            f"{API}/execution/mining",
+            params={"process_id": process["id"], "limit": 10},
+        )
+        assert mined.status_code == 200, mined.text
+        assert mined.json()["variant_count"] >= 1
+        endpoints = client.get(f"{API}/integrations/endpoints")
+        assert endpoints.status_code == 200, endpoints.text
+        endpoint_id = endpoints.json()[0]["id"]
+        run = client.post(
+            f"{API}/pilot/rpa-runs",
+            json={
+                "bot_id": saved.json()["id"],
+                "ran_at": "2026-11-01T09:00:00",
+                "outcome": "SUCCEEDED",
+                "endpoint_id": endpoint_id,
+            },
+        )
+        assert run.status_code == 200, run.text
+        case = client.post(
+            f"{API}/pilot/cases",
+            json={
+                "process_id": process["id"],
+                "title": "资质临时例外",
+                "situation": "供应商证照过期一天，不能按固定步骤放行",
+                "owner_user_id": owner_id,
+            },
+        )
+        assert case.status_code == 200, case.text
+        kinds = client.get(f"{API}/pilot/technology-kinds")
+        assert kinds.status_code == 200, kinds.text
+        assert {row["code"] for row in kinds.json()} == {"BLOCKCHAIN", "AI", "IOT"}
+        tech = client.post(
+            f"{API}/pilot/technology-uses",
+            json={
+                "process_id": process["id"],
+                "kind": "AI",
+                "name": "入库照片识别",
+                "usage_note": "收货拍照后识别单号，人仍要确认",
+                "owner_user_id": owner_id,
+            },
+        )
+        assert tech.status_code == 200, tech.text
+        again = client.get(f"{API}/pilot/paths/{detail['id']}").json()
+        again_keys = {
+            item["key"]: item
+            for layer in again["layers"]
+            if layer["layer_no"] == 6
+            for item in layer["evidence_items"]
+        }
+        assert again_keys["mining_variants"]["value"] >= 1
+        assert again_keys["rpa_runs"]["value"] >= 1
+        assert again_keys["process_cases"]["value"] >= 1
+        assert again_keys["technology_uses"]["value"] >= 1
+    finally:
+        if owns_path:
+            client.delete(f"{API}/pilot/paths/{detail['id']}")

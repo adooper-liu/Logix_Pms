@@ -119,5 +119,7 @@ class DashboardHome(BaseModel):
     headline: str
     active_project_count: int = 0
     setup_project_count: int = 0
+    kpi_total: int = 0
+    kpi_red_yellow: int = 0
     blocks: List[DashboardHomeBlock] = []
     next_actions: List[HomeNextAction] = []

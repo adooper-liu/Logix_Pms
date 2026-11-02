@@ -312,17 +312,13 @@ def _kpi_red_yellow(db: Session, owner_user_id: int | None = None) -> tuple[int,
     total = 0
     red_yellow = 0
     for kpi in db.scalars(stmt).all():
+        if kpi_service.intake_kind(db, kpi) == kpi_service.INTAKE_DRAFT:
+            continue
         total += 1
         records = kpi_service.ordered_records(kpi.records)
         if not records:
             continue
-        state = kpi_service.status_for(
-            records[-1].value,
-            kpi.direction,
-            kpi.red_threshold,
-            kpi.yellow_threshold,
-            kpi.green_threshold,
-        )
+        state, _label, _kind = kpi_service.presentation(db, kpi, records[-1].value)
         if state in ("RED", "YELLOW"):
             red_yellow += 1
     return total, red_yellow
@@ -445,11 +441,8 @@ def build_home(db: Session, user: User) -> DashboardHome:
         or 0
     )
     next_step = next((s for s in startup.steps if s.key == startup.next_step), None)
-    next_title = next_step.title if next_step else "九步已全部就绪"
-    invalid_raci = next(
-        (s.evidence.get("invalid_processes", 0) for s in startup.steps if s.key == "org_raci"),
-        0,
-    )
+    next_title = next_step.title if next_step else "流程框架边界已划清"
+    invalid_raci = startup.steps[0].evidence.get("invalid_processes", 0) if startup.steps else 0
     total_kpi, red_yellow = _kpi_red_yellow(db)
 
     blocks: list[DashboardHomeBlock] = []
@@ -457,18 +450,17 @@ def build_home(db: Session, user: User) -> DashboardHome:
         blocks.append(
             DashboardHomeBlock(
                 key="setup",
-                title="流程试点进度",
-                description="从立项定界到改善复制，按 9 个阶段推进",
+                title="流程框架边界",
+                description="公司流程地图：哪些工作进这张图，上下级怎么挂，谁有权改图",
                 items=[
                     HomeItem(
-                        label="已具备",
-                        value=f"{startup.ready_count}/{startup.total} 个阶段",
-                        hint=f"完成度 {startup.readiness_pct}%",
+                        label="框架边界",
+                        value="已划清" if startup.ready_count >= startup.total else "还没划清",
+                        hint=next_title,
                     ),
-                    HomeItem(label="下一步", value=next_title),
                 ],
                 actions=[
-                    HomeAction(label="打开试点路径", view="start"),
+                    HomeAction(label="打开开始使用", view="start"),
                     HomeAction(label="战略目标", view="strategy"),
                     HomeAction(label="流程地图", view="map"),
                 ],
@@ -493,7 +485,8 @@ def build_home(db: Session, user: User) -> DashboardHome:
             )
         )
         headline = (
-            f"{user.display_name}，流程试点已具备 {startup.ready_count}/{startup.total} 个阶段；"
+            f"{user.display_name}，流程框架边界"
+            f"{'已划清' if startup.ready_count >= startup.total else '还没划清'}；"
             f"当前 {open_findings} 项治理待办、{pending_changes} 张变更待审。"
         )
     elif user.role == Role.OWNER.value:
@@ -584,7 +577,10 @@ def build_home(db: Session, user: User) -> DashboardHome:
                 title="只读概览",
                 description="你可以查看整体进度，但不能修改业务数据",
                 items=[
-                    HomeItem(label="九步启动", value=f"{startup.ready_count}/{startup.total} 步"),
+                    HomeItem(
+                        label="框架边界",
+                        value="已划清" if startup.ready_count >= startup.total else "还没划清",
+                    ),
                     HomeItem(label="治理待办", value=f"{open_findings} 项"),
                     HomeItem(label="执行中项目", value=f"{active_projects} 个"),
                 ],
@@ -595,7 +591,8 @@ def build_home(db: Session, user: User) -> DashboardHome:
             )
         )
         headline = (
-            f"{user.display_name}，当前流程试点已具备 {startup.ready_count}/{startup.total} 个阶段，"
+            f"{user.display_name}，流程框架边界"
+            f"{'已划清' if startup.ready_count >= startup.total else '还没划清'}，"
             f"有 {open_findings} 项治理待办。"
         )
 
@@ -606,6 +603,8 @@ def build_home(db: Session, user: User) -> DashboardHome:
         headline=headline,
         active_project_count=active_projects,
         setup_project_count=setup_projects,
+        kpi_total=total_kpi,
+        kpi_red_yellow=red_yellow,
         blocks=blocks,
         next_actions=_next_actions(db, user),
     )

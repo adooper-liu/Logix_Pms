@@ -162,7 +162,7 @@ def recompute_progress(db: Session, project: Project, *, auto_advance: bool = Tr
     project.progress = round(done / len(steps) * 100, 1)
 
     # 连续推进：当前阶段全部完成就进入下一阶段。
-    # 阶段上限由实际步骤决定（改善项目 5 阶段，体系落地项目 9 阶段）。
+    # 阶段上限由实际步骤决定（改善项目 5 阶段，体系落地项目按框架边界步骤）。
     max_stage = max((s.stage_no for s in steps), default=5)
     while auto_advance and project.current_stage < max_stage:
         stage_steps = [s for s in steps if s.stage_no == project.current_stage]

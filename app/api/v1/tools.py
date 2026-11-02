@@ -43,15 +43,19 @@ from app.schemas.tool import (
     ToolUsageSummary,
     ToolWorkflowStepOut,
 )
+from app.schemas.tool_sheet import SheetFormOut, ToolSheetCreate, ToolSheetOut
 from app.services import audit as audit_service
-from app.services import knowledge_match, tool_match
+from app.services import knowledge_match, tool_lifecycle, tool_match
+from app.services import tool_sheet as tool_sheet_service
+from app.services.strategy import StrategyError
+from app.services.tool_sheet import ToolSheetError
 
 router = APIRouter(prefix="/tools", tags=["方法论工具箱"])
 
 CATEGORY_LABELS = {
     ToolCategory.DIAGNOSE.value: "诊断工具",
     ToolCategory.DESIGN.value: "设计工具",
-    ToolCategory.DEPLOY.value: "落地工具",
+    ToolCategory.DEPLOY.value: "变革",
     ToolCategory.MONITOR.value: "监控工具",
 }
 
@@ -224,6 +228,7 @@ def tool_meta(db: DbSession):
         level_labels=TOOL_LEVEL_LABELS,
         difficulty_labels=DIFFICULTY_LABELS,
         scenarios=knowledge_match.scenario_list(db),
+        lifecycle_segments=tool_lifecycle.segments_out(),
     )
 
 
@@ -467,6 +472,45 @@ def archive_tool(code: str, db: DbSession, user: ManagerUser):
     audit_service.record(db, user, "UPDATE", "tool", tool.id, f"归档工具《{tool.name}》")
     db.commit()
     return get_tool(code, db, user)
+
+
+@router.get("/{code}/sheet-form", response_model=SheetFormOut, summary="工具的可填写模板")
+def tool_sheet_form(code: str, db: DbSession, user: CurrentUser):
+    tool = _require_tool(db, code, user)
+    return tool_sheet_service.form_for(db, tool)
+
+
+@router.post(
+    "/{code}/sheets",
+    response_model=ToolSheetOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="填写模板并挂到流程",
+)
+def save_tool_sheet(code: str, payload: ToolSheetCreate, db: DbSession, user: WriteUser):
+    tool = _require_tool(db, code, user)
+    try:
+        saved = tool_sheet_service.save_sheet(
+            db,
+            tool,
+            user,
+            process_id=payload.process_id,
+            project_id=payload.project_id,
+            step_no=payload.step_no,
+            values=payload.values,
+            make_objectives=payload.make_objectives,
+        )
+    except (ToolSheetError, StrategyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_service.record(
+        db,
+        user,
+        "CREATE",
+        "tool_sheet",
+        saved.id,
+        f"填写 {tool.name} 并挂到流程 {saved.process_code or saved.process_id}",
+    )
+    db.commit()
+    return saved
 
 
 @router.post(

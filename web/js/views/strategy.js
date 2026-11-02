@@ -1,17 +1,21 @@
 /* 视图：战略目标
  *
- * 一张目标卡 + 承接关系：目标 → L1/L2/L3 流程 → 可选 KPI。
- * 流程卡按祖先继承反查，L3/L4 能看到挂在 L1/L2 的目标。
+ * 目标之间没有上下级。左边先列目标，流程层级收在目标下面，默认只露出 L1。
+ * 中间只展开当前这一条。右边是行动，以及要接着做的流程 / KPI。
+ * 挂在上层的目标，下层流程卡按祖先继承能看见，不另建一条目标。
  */
 
 import { esc, num } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
+import { toolMountHtml } from './shared/tool_mount.js';
 
 on('strategy.year', (_data, el) => setStrategyYear(Number(el.value)));
+on('strategy.select', ({ id }) => selectObjective(Number(id)));
+on('strategy.goMap', () => go('map'));
 on('strategy.new', () => objectiveModal());
 on('strategy.edit', ({ id }) => editObjective(Number(id)));
 on('strategy.submit', ({ id }) => submitObjective(id ? Number(id) : null));
@@ -34,7 +38,110 @@ on('strategy.openProcess', ({ code, id, level }) => {
 
 function setStrategyYear(year) {
   state.strategy.year = year;
+  state.strategy.selectedId = null;
   RENDERERS.strategy();
+}
+
+function selectObjective(id) {
+  if (!id) return;
+  state.strategy.selectedId = id;
+  setUrlState('strategy', { ...urlParams(), objective: id });
+  RENDERERS.strategy();
+}
+
+function ancestorChain(processId, byId) {
+  const chain = [];
+  const seen = new Set();
+  let cursor = byId.get(processId);
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    chain.push(cursor);
+    cursor = cursor.parent_id ? byId.get(cursor.parent_id) : null;
+  }
+  return chain.reverse();
+}
+
+function processTree(obj, processes) {
+  const byId = new Map((processes || []).map((row) => [row.id, row]));
+  const roots = new Map();
+  (obj.links || []).forEach((link) => {
+    const chain = ancestorChain(link.process_id, byId);
+    let level = roots;
+    let bucket = null;
+    chain.forEach((node) => {
+      if (!level.has(node.id)) {
+        level.set(node.id, { node, children: new Map(), linked: false });
+      }
+      bucket = level.get(node.id);
+      level = bucket.children;
+    });
+    if (bucket) bucket.linked = true;
+  });
+  return roots;
+}
+
+function objectiveButton(obj, selectedId) {
+  const on = obj.id === selectedId;
+  return `<button type="button" class="so-node${on ? ' on' : ''}"
+    data-act="strategy.select" data-id="${obj.id}"
+    ${on ? 'aria-current="true"' : ''}>
+    <b>${esc(obj.name)}</b>
+    <small>${esc(obj.owner || '未指派')} · ${esc(obj.status_label)}</small>
+  </button>`;
+}
+
+function renderProcessNodes(map, depth) {
+  return [...map.values()]
+    .sort((a, b) => a.node.level - b.node.level
+      || String(a.node.code).localeCompare(String(b.node.code)))
+    .map((branch) => {
+      const node = branch.node;
+      const label = `L${node.level} ${esc(node.code)} ${esc(node.name)}${
+        branch.linked ? ' · 已挂' : ''}`;
+      const kids = renderProcessNodes(branch.children, depth + 1);
+      if (!kids) {
+        return `<div class="so-branch" style="--so-depth:${depth}">${label}</div>`;
+      }
+      return `<details class="so-fold" style="--so-depth:${depth}">
+        <summary>${label}</summary>${kids}</details>`;
+    }).join('');
+}
+
+function renderObjectiveTree(objectives, processes, selectedId) {
+  if (!objectives.length) return '<div class="empty">该年度还没有战略目标</div>';
+  return objectives.map((obj) => {
+    const branches = renderProcessNodes(processTree(obj, processes), 1);
+    return `<div class="so-obj">
+      ${objectiveButton(obj, selectedId)}
+      ${branches || '<div class="so-branch" style="--so-depth:1">还没挂到流程</div>'}
+    </div>`;
+  }).join('');
+}
+
+function inheritedConsumers(obj, processes) {
+  const byParent = new Map();
+  (processes || []).forEach((row) => {
+    if (row.is_draft) return;
+    const list = byParent.get(row.parent_id) || [];
+    list.push(row);
+    byParent.set(row.parent_id, list);
+  });
+  const direct = new Set((obj.links || []).map((link) => link.process_id));
+  const seen = new Set();
+  const out = [];
+  const queue = [];
+  direct.forEach((id) => {
+    (byParent.get(id) || []).forEach((row) => queue.push(row));
+  });
+  while (queue.length) {
+    const row = queue.shift();
+    if (seen.has(row.id) || direct.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+    (byParent.get(row.id) || []).forEach((child) => queue.push(child));
+  }
+  out.sort((a, b) => a.level - b.level || String(a.code).localeCompare(String(b.code)));
+  return out;
 }
 
 const renderStrategy = () => {
@@ -45,89 +152,132 @@ const renderStrategy = () => {
       GET('/strategy/objectives?year=' + year),
       GET('/strategy/meta'),
       GET('/strategy/summary?year=' + year),
-    ]).then(([objectives, meta, summary]) => ({ objectives, meta, summary })),
+      GET('/tools').catch(() => []),
+      GET('/process-map/flat').catch(() => []),
+    ]).then(([objectives, meta, summary, tools, processes]) => ({
+      objectives, meta, summary, tools, processes,
+    })),
     (d) => {
       state.strategyYear = year;
       state.strategyMeta = d.meta;
       state.strategyObjectives = d.objectives;
       const s = d.summary;
+      const params = urlParams();
+      const wanted = Number(params.objective) || state.strategy.selectedId;
+      const selected = d.objectives.find((row) => row.id === wanted) || d.objectives[0] || null;
+      state.strategy.selectedId = selected ? selected.id : null;
+      if (selected && String(params.objective || '') !== String(selected.id)) {
+        setUrlState('strategy', { ...params, objective: selected.id });
+      }
       const yearOptions = [year - 1, year, year + 1].map((value) =>
         `<option value="${value}"${value === year ? ' selected' : ''}>${value} 年</option>`).join('');
-
-      const cards = d.objectives.map((obj) => {
-        const links = obj.links.map((link) => `
-          <div class="between bpmn-node-row">
-            <span class="tiny">L${link.process_level || ''} ${esc(link.process_code || '')}
-              ${esc(link.process_name || '')}${
-                link.kpi_code ? ` · KPI ${esc(link.kpi_code)} ${esc(link.kpi_name || '')}` : ''}</span>
-            <span class="gap">
-              ${link.process_code
-                ? `<button class="btn-sm" data-act="strategy.openProcess"
-                    data-code="${esc(link.process_code)}" data-id="${link.process_id}"
-                    data-level="${link.process_level || ''}">看流程</button>` : ''}
-              ${canManage()
-                ? `<button class="btn-sm" data-act="strategy.unlink"
-                    data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}
-            </span>
-          </div>`).join('') || '<div class="tiny muted">尚未承接流程或 KPI</div>';
-        return `
-          <div class="card">
-            <div class="between mb">
-              <div>
-                <h3 style="margin:0">${esc(obj.name)}
-                  <span class="tag ${obj.status === 'ACTIVE' ? 't-grn' : 't-gry'}">${
-                    esc(obj.status_label)}</span></h3>
-                <div class="desc" style="margin:2px 0 0">
-                  ${esc(obj.code)} · ${obj.year} ${esc(obj.period_label)}
-                  · 责任人 ${esc(obj.owner || '未指派')}
-                  ${obj.source_document ? ' · 来源 ' + esc(obj.source_document) : ''}</div>
-              </div>
-              <div class="gap">
-                ${canWrite() ? `
-                  <button class="btn-sm btn-p" data-act="strategy.initiate"
-                    data-id="${obj.id}">选流程 / 立项</button>` : ''}
-                ${canManage() ? `
-                  <button class="btn-sm" data-act="strategy.link" data-id="${obj.id}">承接</button>
-                  <button class="btn-sm" data-act="strategy.edit" data-id="${obj.id}">编辑</button>
-                  ${obj.status === 'ACTIVE'
-                    ? `<button class="btn-sm btn-g" data-act="strategy.archive"
-                        data-id="${obj.id}">归档</button>` : ''}` : ''}
-              </div>
-            </div>
-            ${obj.description ? `<div class="tiny muted mb">${esc(obj.description)}</div>` : ''}
-            <div class="mb">
-              <b>目标值</b>
-              <span class="tag t-blu">${obj.baseline_value === null ? '—' : num(obj.baseline_value, 2)}
-                → ${obj.target_value === null ? '—' : num(obj.target_value, 2)}
-                ${esc(obj.unit || '')}</span>
-              <span class="tiny muted">承接 ${obj.process_count} 条流程 · ${obj.kpi_count} 个 KPI</span>
-            </div>
-            ${links}
-          </div>`;
-      }).join('') || '<div class="card"><div class="empty">该年度还没有战略目标</div></div>';
+      const treeHtml = renderObjectiveTree(
+        d.objectives, d.processes, state.strategy.selectedId);
 
       viewEl().innerHTML = `
         <div class="card page-head">
           <div class="between">
             <div><h2>战略目标<span class="module-badge">目标 → 流程 → KPI</span></h2>
-              <div class="desc">目标只写“赢什么、目标值、责任人、来源”；
-                承接关系按流程层级继承，L3/L4 能看到挂在 L1/L2 的目标</div></div>
+              <div class="desc">左边先点目标，流程层级收在这条目标下面，默认只露出 L1。
+                挂到流程或 KPI 的链接不进入总览优先级，三个分数在地图节点上改。</div></div>
             <div class="gap">
+              <button class="btn btn-g" data-act="strategy.goMap">去地图改优先级</button>
               <select class="sel sel-sm" data-act="strategy.year">${yearOptions}</select>
               ${canManage() ? '<button class="btn btn-p" data-act="strategy.new">+ 新建目标</button>' : ''}
             </div>
           </div>
         </div>
-        <div class="grid g4 stat-row">
-          <div class="kpi stat"><div class="num">${s.objective_count}</div><div class="lab">年度目标</div></div>
-          <div class="kpi stat"><div class="num">${s.active_count}</div><div class="lab">进行中</div></div>
-          <div class="kpi stat"><div class="num">${s.linked_count}</div><div class="lab">已承接流程</div></div>
-          <div class="kpi stat"><div class="num">${s.unlinked_count}</div><div class="lab">未承接（需补）</div></div>
-        </div>
-        <div class="grid g2">${cards}</div>`;
+        <div class="so-shell">
+          <div class="so-side">
+            <div class="card">
+              <div class="so-count">${year} 年 · ${s.objective_count} 条目标 · 进行中 ${s.active_count}
+                · 未承接 ${s.unlinked_count}</div>
+              <div class="so-tree">${treeHtml}</div>
+            </div>
+          </div>
+          ${detailHtml(selected)}
+          ${asideHtml(selected, d.tools, d.processes)}
+        </div>`;
     },
   );
 };
+
+function detailHtml(obj) {
+  if (!obj) {
+    return `<div class="card so-main"><div class="empty">这一年还没有目标。先新建一条，写清赢什么和目标值。</div></div>`;
+  }
+  const base = obj.baseline_value === null ? '—' : num(obj.baseline_value, 2);
+  const target = obj.target_value === null ? '—' : num(obj.target_value, 2);
+  return `
+    <div class="card so-main">
+      <div class="between mb">
+        <h3>${esc(obj.name)}</h3>
+        <span class="tag ${obj.status === 'ACTIVE' ? 't-grn' : 't-gry'}">${esc(obj.status_label)}</span>
+      </div>
+      <div class="desc" style="margin:0 0 12px">${esc(obj.code)} · ${obj.year} ${esc(obj.period_label)}</div>
+      ${obj.description ? `<p class="tiny" style="line-height:1.65;margin:0 0 14px;white-space:pre-line">${esc(obj.description)}</p>` : ''}
+      <div class="wb-meta">
+        <div><label>目标值</label><span>${base} → ${target} ${esc(obj.unit || '')}</span></div>
+        <div><label>责任人</label><span>${esc(obj.owner || '未指派')}</span></div>
+        <div><label>来源</label><span>${esc(obj.source_document || '未填写')}</span></div>
+        <div><label>承接</label><span>${obj.process_count} 条流程 · ${obj.kpi_count} 个 KPI</span></div>
+      </div>
+    </div>`;
+}
+
+function asideHtml(obj, tools, processes) {
+  const linked = obj && (obj.links || []).find((link) => link.process_id);
+  const mounted = toolMountHtml(tools, 'strategy', linked ? linked.process_id : null);
+  const actions = obj ? `
+    <div class="gap" style="flex-wrap:wrap">
+      ${canWrite() ? `<button class="btn btn-p" data-act="strategy.initiate" data-id="${obj.id}">选流程 / 立项</button>` : ''}
+      ${canManage() ? `
+        <button class="btn btn-g" data-act="strategy.link" data-id="${obj.id}">承接</button>
+        <button class="btn btn-g" data-act="strategy.edit" data-id="${obj.id}">编辑</button>
+        ${obj.status === 'ACTIVE'
+          ? `<button class="btn btn-g" data-act="strategy.archive" data-id="${obj.id}">归档</button>` : ''}` : ''}
+    </div>` : '<div class="tiny muted">先在左侧点开一条目标。</div>';
+  return `
+    <div class="so-aside">
+      <div class="card">
+        <h3 style="margin:0 0 8px">行动</h3>
+        ${actions}
+        ${mounted}
+      </div>
+      <div class="card">
+        <h3 style="margin:0 0 8px">谁要接着做</h3>
+        ${consumerHtml(obj, processes)}
+      </div>
+    </div>`;
+}
+
+function consumerHtml(obj, processes) {
+  if (!obj) return '<div class="tiny muted">选中目标后，这里列出承接的流程和 KPI。</div>';
+  const links = (obj.links || []).map((link) => `
+    <div class="bpmn-node-row">
+      <div class="tiny">L${link.process_level || ''} ${esc(link.process_code || '')}
+        ${esc(link.process_name || '')}${
+          link.kpi_code ? `<br>KPI ${esc(link.kpi_code)} ${esc(link.kpi_name || '')}` : ''}${
+          link.note ? `<br>${esc(link.note)}` : ''}</div>
+      <div class="gap" style="margin-top:4px">
+        ${link.process_code
+          ? `<button class="btn-sm" data-act="strategy.openProcess"
+              data-code="${esc(link.process_code)}" data-id="${link.process_id}"
+              data-level="${link.process_level || ''}">核对流程</button>` : ''}
+        ${canManage()
+          ? `<button class="btn-sm" data-act="strategy.unlink"
+              data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}
+      </div>
+    </div>`).join('');
+  if (!links) {
+    return '<div class="tiny muted">还没有流程要接这条目标。先点「承接」。</div>';
+  }
+  const inherited = inheritedConsumers(obj, processes).length;
+  const extra = inherited
+    ? `<div class="tiny muted" style="margin-top:8px">下面还有 ${inherited} 条活动，跟上面的流程一起看。</div>`
+    : '';
+  return links + extra;
+}
 
 async function editObjective(objectiveId) {
   try {

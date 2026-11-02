@@ -103,6 +103,9 @@ class DataFlow(Base):
 
     domain: Mapped["DataDomain"] = relationship("DataDomain", back_populates="flows")
     process: Mapped[Optional["ProcessArch"]] = relationship("ProcessArch")  # noqa: F821
-    kpi: Mapped[Optional["KpiDefinition"]] = relationship("KpiDefinition")  # noqa: F821
+    kpi: Mapped[Optional["KpiDefinition"]] = relationship(  # noqa: F821
+        "KpiDefinition",
+        foreign_keys=[kpi_id],
+    )
 
     __table_args__ = (Index("ix_data_flow_domain_active", "domain_id", "is_active"),)

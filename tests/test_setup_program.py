@@ -35,7 +35,7 @@ def _evidence_stage(client) -> int:
     return len(status["steps"])
 
 
-def test_create_setup_program_with_nine_stages(client):
+def test_create_setup_program_tracks_framework(client):
     created = client.post(f"{API}/projects/setup-program", json=_payload(client))
     assert created.status_code == 201, created.text
     data = created.json()
@@ -46,14 +46,13 @@ def test_create_setup_program_with_nine_stages(client):
 
     detail = client.get(f"{API}/projects/{pid}").json()
     assert detail["project"]["project_type"] == "GOVERNANCE_SETUP"
-    assert len(detail["stages"]) == 9
-    assert [stage["stage_no"] for stage in detail["stages"]] == list(range(1, 10))
-    assert detail["stages"][0]["stage_name"] == "立项定界"
-    assert detail["stages"][-1]["stage_name"] == "改善与复制"
+    assert len(detail["stages"]) == 1
+    assert detail["stages"][0]["stage_no"] == 1
+    assert detail["stages"][0]["stage_name"] == "框架边界"
 
     steps = client.get(f"{API}/projects/{pid}/steps").json()
-    assert len(steps) == 27
-    assert sum(1 for step in steps if step["is_milestone"]) == 9
+    assert len(steps) == 3
+    assert sum(1 for step in steps if step["is_milestone"]) == 1
 
     expected = _evidence_stage(client)
     # 勾完第 1 阶段也不会另开一套进度，阶段仍等于启动页证据
@@ -62,12 +61,12 @@ def test_create_setup_program_with_nine_stages(client):
         assert updated.status_code == 200, updated.text
     after = client.get(f"{API}/projects/{pid}").json()["project"]
     assert after["current_stage"] == expected
-    assert 1 <= after["current_stage"] <= 9
+    assert after["current_stage"] == 1
 
     patched = client.patch(f"{API}/projects/{pid}", json={"current_stage": 9})
     assert patched.status_code == 200, patched.text
     assert patched.json()["current_stage"] == expected
-    late_steps = client.get(f"{API}/projects/{pid}/steps", params={"stage_no": 9}).json()
+    late_steps = client.get(f"{API}/projects/{pid}/steps", params={"stage_no": 1}).json()
     assert len(late_steps) == 3
     late_rows = client.get(
         f"{API}/projects",

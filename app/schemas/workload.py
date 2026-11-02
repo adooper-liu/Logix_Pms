@@ -160,6 +160,10 @@ class WorkloadStandardRow(BaseModel):
     activity_id: int
     activity_code: Optional[str] = None
     activity_name: Optional[str] = None
+    process_id: Optional[int] = None
+    process_code: Optional[str] = None
+    process_name: Optional[str] = None
+    org_unit_id: Optional[int] = None
     position_id: int
     position_name: Optional[str] = None
     standard_minutes: float
@@ -181,6 +185,9 @@ class WorkloadActualRow(BaseModel):
     activity_id: Optional[int] = None
     activity_code: Optional[str] = None
     activity_name: Optional[str] = None
+    process_id: Optional[int] = None
+    process_code: Optional[str] = None
+    process_name: Optional[str] = None
     position_id: Optional[int] = None
     position_name: Optional[str] = None
     task_count: int = 0

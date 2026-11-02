@@ -12,8 +12,10 @@ from typing import Optional, Sequence
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.models.data_governance import DataFlow
 from app.models.enums import InstanceStatus, KpiDirection, ProjectStatus
 from app.models.execution import ProcessInstance
+from app.models.integration import InboundWebhook
 from app.models.monitor import KpiDefinition, KpiRecord
 from app.models.process import ProcessArch
 from app.models.project import Project
@@ -29,6 +31,15 @@ STATUS_LABELS = {
     "YELLOW": "黄",
     "GREEN": "绿",
     "GRAY": "灰（未取数）",
+}
+
+INTAKE_EXECUTION = "EXECUTION"
+INTAKE_INBOUND = "INBOUND"
+INTAKE_DRAFT = "DRAFT"
+INTAKE_LABELS = {
+    INTAKE_EXECUTION: "实例完成",
+    INTAKE_INBOUND: "入站回传",
+    INTAKE_DRAFT: "未定来源",
 }
 
 
@@ -96,6 +107,64 @@ def status_for(
     if value <= green:
         return "GREEN"
     return "YELLOW"
+
+
+def intake_kind(db: Session, kpi: KpiDefinition) -> str:
+    """正式写入口。时长且绑了流程走实例；其余要有能回传指标的启用钩子。"""
+    if kpi.process_id is not None and _duration_seconds(kpi.unit) is not None:
+        return INTAKE_EXECUTION
+    if kpi.inbound_webhook_id is None:
+        return INTAKE_DRAFT
+    hook = db.get(InboundWebhook, kpi.inbound_webhook_id)
+    if hook is None or not hook.is_active or "record_kpi" not in (hook.actions or []):
+        return INTAKE_DRAFT
+    if hook.process_id is not None and hook.process_id != kpi.process_id:
+        return INTAKE_DRAFT
+    return INTAKE_INBOUND
+
+
+def presentation(db: Session, kpi: KpiDefinition, value: Optional[float]) -> tuple[str, str, str]:
+    """红黄绿只统计已有正式来源的指标。未定来源即使有数也显示为未定来源。"""
+    kind = intake_kind(db, kpi)
+    if kind == INTAKE_DRAFT:
+        return "GRAY", INTAKE_LABELS[INTAKE_DRAFT], kind
+    status = status_for(
+        value,
+        kpi.direction,
+        kpi.red_threshold,
+        kpi.yellow_threshold,
+        kpi.green_threshold,
+    )
+    return status, STATUS_LABELS.get(status, status), kind
+
+
+def bind_sources(db: Session, kpi: KpiDefinition) -> None:
+    """校验入站钩子，并把选中的数据流挂到这条指标上。"""
+    if kpi.inbound_webhook_id is not None:
+        hook = db.get(InboundWebhook, kpi.inbound_webhook_id)
+        if hook is None or not hook.is_active:
+            raise KpiDefinitionError("入站钩子不存在或未启用")
+        if "record_kpi" not in (hook.actions or []):
+            raise KpiDefinitionError("这条入站钩子不能回传指标")
+        if (
+            hook.process_id is not None
+            and kpi.process_id is not None
+            and hook.process_id != kpi.process_id
+        ):
+            raise KpiDefinitionError("入站钩子限定了另一条流程")
+    linked = db.scalars(select(DataFlow).where(DataFlow.kpi_id == kpi.id)).all()
+    for flow in linked:
+        if flow.id != kpi.data_flow_id:
+            flow.kpi_id = None
+    if kpi.data_flow_id is None:
+        return
+    flow = db.get(DataFlow, kpi.data_flow_id)
+    if flow is None or not flow.is_active:
+        raise KpiDefinitionError("数据流不存在或未启用")
+    if flow.kpi_id not in (None, kpi.id):
+        raise KpiDefinitionError("这条数据流已经挂在别的指标上")
+    flow.kpi_id = kpi.id
+    kpi.source_system = flow.source_system
 
 
 def validate_activity(

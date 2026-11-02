@@ -1,14 +1,8 @@
-"""启动向导状态：从现有数据自动计算九步 readiness。
+"""开始使用：只回答公司流程地图的框架边界有没有划清。
 
-这是治理体系落地的唯一阶段口径：
-- 每个步骤的“是否就绪”由真实数据推导；
-- 治理体系落地项目的 current_stage 直接使用 open stage，不按步骤勾选另推进；
-- 改善项目的五阶段仍走阶段门，不读这里的公司级计数。
-
-“首次上线”范围 = S0–S7（8 步，含制度与授权）；S8 改善闭环不阻塞首次上线。
-默认首页以 pilot_ready_count 是否达到 pilot_total 为切换门槛。
-
-人工“跳过”只记录“本轮不把现有数据作为就绪证据”，不修改业务对象。
+单条流程的起止、活动、工时、指标和发布不在这里数，去十层核对。
+这里没有 1 到 N 的阶段楼梯，也没有「前若干步齐了才能首次上线」。
+人工“跳过”仍可记下，但不构成另一条进度。
 """
 
 from __future__ import annotations
@@ -17,12 +11,13 @@ from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.timeutil import utcnow
+from app.models.authorization import AuthorizationRule
 from app.models.benchmark import ProcessBenchmarkMap
 from app.models.change import ProcessChangeRequest
-from app.models.enums import ChangeStatus, WorkMeasurementStatus
+from app.models.enums import AuthorizationStatus, ChangeStatus, WorkMeasurementStatus
 from app.models.execution import FormDefinition, ProcessRule, TaskWorklog
 from app.models.governance import GovernanceFinding
 from app.models.knowledge import KnowledgeItem
@@ -31,14 +26,15 @@ from app.models.org import Position
 from app.models.process import NodeTool, ProcessArch
 from app.models.process_document import ProcessDocument
 from app.models.project import Project
-from app.models.raci import GovernanceRole, RaciAssignment
-from app.models.startup import StartupPilotConfirm, StartupStepSkip
+from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
+from app.models.startup import ProcessCharter, StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
 from app.models.user import User
 from app.models.workload import CapacityCalendar, WorkMeasurementStandard
 from app.schemas.startup import (
     StartupActionOut,
     StartupEvidenceOut,
+    StartupPointOut,
     StartupStatusOut,
     StartupStepOut,
 )
@@ -51,178 +47,57 @@ from app.services import workload as workload_service
 
 STEP_DEFINITIONS: List[Dict] = [
     {
-        "key": "scope",
-        "title": "1. 立项定界",
-        "goal": "先别铺开：选一条痛点明确、跨岗位或跨组织、能算清结果的流程，"
-        "定清流程负责人与治理角色；发起人建议补齐，但不挡本阶段出门。",
-        "input": "痛点、战略方向、法人/工厂范围、可用的人和时间。",
-        "output": "试点范围（哪条 L3）、负责人、治理角色；建议有发起人的试点项目。",
-        "exit_criteria": "至少一条 L3 已绑定负责人；至少一个治理角色。"
-        "（有发起人的试点项目为建议项，不计入本阶段必需门槛。）",
-        "estimated": "1–2 周",
-        "pilot": True,
-        "actions": [
+        "key": "framework",
+        "title": "流程框架边界",
+        "goal": "公司这张流程地图的边界：哪些工作进图，上下级怎么挂，谁能改图。",
+        "points": [
             {
-                "label": "去指定 L3 负责人",
-                "view": "map",
-                "view_params": {"owners": "l3"},
+                "label": "生命周期",
+                "text": "战略对齐、流程架构、建模、分析、设计、执行、监控度量、变革优化、治理。"
+                "流程架构用 APQC 的分类，分类不是先后。建模到监控在「把一条流程建好」。",
             },
+            {"label": "地图", "text": "至少一条 L3 同时有 L1、L2 上级，并对上 PCF。"},
+            {"label": "改图的人", "text": "至少一个治理角色启用且有成员。"},
+        ],
+        "input": "流程地图上的 L1、L2、L3 与 PCF 对应，以及有成员的治理角色。",
+        "output": "至少一条同时具备上级并对上 PCF 的 L3；至少一个有成员的治理角色。",
+        "exit_criteria": "地图和改图的人都齐。",
+        "estimated": "",
+        "pilot": False,
+        "actions": [
+            {"label": "去建流程地图", "view": "map"},
+            {"label": "1+3+10 建架构", "view": "map", "action": "start.guidedPcf"},
+            {"label": "去对上 PCF", "view": "map", "view_params": {"benchmark": "1"}},
             {
                 "label": "去任命治理角色",
                 "view": "orgs",
                 "view_params": {"tab": "governance"},
             },
-            {"label": "去建试点项目", "view": "projects"},
         ],
-        "next_hint": "先在「流程地图」给试点 L3 指定负责人，"
-        "再到「组织与人员 → 治理角色」确认谁对结果负责；"
-        "年度目标与基线放到下一阶段，不要在这里提前做。",
-    },
-    {
-        "key": "strategy",
-        "title": "2. 战略与现状基线",
-        "goal": "说清楚为什么做、承接哪条经营目标、现在基线是多少；"
-        "用少量指标衡量，不追求一次定全。",
-        "input": "年度经营计划、现状数据、访谈和流程走查记录。",
-        "output": "目标卡、现状基线、目标—流程—指标映射。",
-        "exit_criteria": "目标有责任人和目标值，有现状基线，并且已经挂到这条流程上。",
-        "estimated": "2–4 周",
-        "pilot": True,
-        "actions": [{"label": "去定目标和基线", "view": "strategy"}],
-        "next_hint": "在「战略目标」建一条年度目标，填目标值和现状基线，再挂到试点流程上。",
-    },
-    {
-        "key": "architecture",
-        "title": "3. 流程架构设计",
-        "goal": "用同一套分类语言把这条流程放进 L1–L3 地图，标出边界、上下游，"
-        "并让每个关键事项只有一个负责人。",
-        "input": "PCF 分类、现有流程清单、组织边界、关键决策事项。",
-        "output": "L1–L3 架构、PCF 映射、RACI 矩阵。",
-        "exit_criteria": "L1/L2/L3 都有节点；试点流程能对应到 PCF 分类；每个关键事项恰好一个 A。",
-        "estimated": "3–5 周",
-        "pilot": True,
-        "actions": [
-            {"label": "去建流程地图", "view": "map"},
-            {"label": "1+3+10 建架构", "view": "map", "action": "start.guidedPcf"},
-            {"label": "去看 PCF", "view": "pcf"},
-            {
-                "label": "去建岗位",
-                "view": "orgs",
-                "view_params": {"tab": "position"},
-            },
-            {"label": "去配权责", "view": "designer"},
-        ],
-        "next_hint": "在「企业流程地图」补 L1–L3，在「PCF 分类框架」做对标映射，"
-        "在「组织与人员 → 岗位」补岗位，在「流程设计器 → 权责」保证每个事项唯一 A。",
-    },
-    {
-        "key": "policy",
-        "title": "4. 制度与授权设计",
-        "goal": "定清楚哪些事必须按制度、谁有权批、例外找谁；规则要能查到人、金额/风险和证据。",
-        "input": "风险/合规要求、现有制度、金额/风险阈值、例外场景。",
-        "output": "制度/SOP、A/B/C/D 授权规则、例外路径和审批证据。",
-        "exit_criteria": "至少一份生效的制度/SOP；至少一条生效的授权规则，"
-        "写清审批人、例外路径和审批证据。",
-        "estimated": "2–4 周",
-        "pilot": True,
-        "actions": [
-            {"label": "去上传制度", "view": "deliverables"},
-            {"label": "去定审批规则", "view": "authorization"},
-        ],
-        "next_hint": "先上传一份能生效的 SOP，再到「授权矩阵」按 A/B/C/D 建规则，"
-        "写清审批人、例外路径和证据。",
-    },
-    {
-        "key": "process_design",
-        "title": "5. 流程/表单/工具设计",
-        "goal": "把流程拆成岗位看得懂的步骤，写清楚输入、输出、角色、控制点，"
-        "以及配套的表单和工具。",
-        "input": "SIPOC、泳道图、控制点、系统配置和表单字段。",
-        "output": "L4 步骤/SOP、表单、规则、工具绑定。",
-        "exit_criteria": "至少一份表单，并且表单/规则/工具至少绑定一项。",
-        "estimated": "3–6 周",
-        "pilot": True,
-        "actions": [
-            {"label": "去画流程", "view": "designer"},
-            {"label": "去看方法手册", "view": "workflow"},
-        ],
-        "next_hint": "在流程设计器把 L4 步骤、表单、规则和工具串起来；先小范围能用，再求全。",
-    },
-    {
-        "key": "workload",
-        "title": "6. 工作量测量",
-        "goal": "先定方法，再现场观测、评定、宽放和审核；标准工时只做能力基线，不用来扣个人。",
-        "input": "作业分解、现场观测/抽样、岗位和可用工时。",
-        "output": "标准工时卡、能力负荷表。",
-        "exit_criteria": "至少一条已验证的标准工时；至少一条当月产能记录。",
-        "estimated": "4–8 周",
-        "pilot": True,
-        "actions": [
-            {"label": "去登记工时", "view": "monitor", "hint": "运营监控 → 工作量"},
-        ],
-        "next_hint": "先稳定方法，再做 5 次以上观测；在「运营监控 → 工作量」录工时、验证，"
-        "并补当月产能。",
-    },
-    {
-        "key": "performance",
-        "title": "7. 试运行与绩效监测",
-        "goal": "小范围试运行，建立 2–5 个结果/过程/健康度指标，让红黄灯和异常有人处理、能闭环。",
-        "input": "试运行记录、指标数据、异常台账、客户/下游反馈。",
-        "output": "KPI 卡、红黄绿阈值、异常台账、试运行报告。",
-        "exit_criteria": "至少一张完整 KPI 卡（公式、阈值、责任人）并且有数据点。",
-        "estimated": "4–8 周",
-        "pilot": True,
-        "actions": [{"label": "去看 KPI 和异常", "view": "monitor"}],
-        "next_hint": "在「运营监控 → KPI 明细」补齐公式、红黄绿阈值和责任人，"
-        "至少录入一个数据点；异常要有人闭环。",
-    },
-    {
-        "key": "review_release",
-        "title": "8. 评审与固化",
-        "goal": "门禁评审：模型、制度、培训、权限都到位后发布 V1.0；旧版归档，回退方案写清楚。",
-        "input": "评审记录、培训记录、权限配置、回退方案。",
-        "output": "V1.0 发布包、培训记录、权限清单、回退方案。",
-        "exit_criteria": "至少一条 L3 已发布模型，并且有生效的制度/SOP 支撑发布。",
-        "estimated": "2–4 周",
-        "pilot": True,
-        "actions": [
-            {"label": "去发布模型", "view": "designer"},
-            {"label": "去看制度版本", "view": "deliverables"},
-        ],
-        "next_hint": "在流程设计器完成校验并发布；把 SOP 生效、培训和权限记录补齐，再发 V1.0。",
-    },
-    {
-        "key": "improvement",
-        "title": "9. 改善与复制",
-        "goal": "问题走同一条改善链：看现场→找根因→试办法→验结果→改标准→教全员；"
-        "把好方法复制到相似组织。",
-        "input": "红黄指标、异常、根因、改善验证结果、复制条件。",
-        "output": "改善项目卡、变更单、新版本、复制资产包和知识条目。",
-        "exit_criteria": "至少一个改善项目、一张已应用变更单，且没有未闭环的治理待办。",
-        "estimated": "每轮 8–12 周",
-        "pilot": False,
-        "actions": [
-            {"label": "从红黄指标转改善", "view": "monitor"},
-            {"label": "看改善项目", "view": "projects"},
-            {"label": "去提变更", "view": "designer"},
-            {"label": "看治理待办", "view": "deliverables"},
-            {"label": "看流程卡", "view": "process_card"},
-        ],
-        "next_hint": "先处理未闭环治理待办，再从红黄 KPI 转改善项目；"
-        "改完走变更单，发布新版本并沉淀知识。",
+        "next_hint": "某一条流程从哪开始、到哪结束，去十层核对写。",
     },
 ]
 
 STEP_KEYS = {step["key"] for step in STEP_DEFINITIONS}
 
 EVIDENCE_LABELS: Dict[str, str] = {
+    "process_charters": "写全起止和范围的 L3",
     "l3_with_owner": "L3 已绑定负责人",
-    "governance_roles": "治理角色",
-    "sponsor_projects": "有发起人的试点项目",
-    "objectives": "年度目标",
+    "governance_roles": "有成员且启用的治理角色",
+    "objective_complete": "同一条目标具备责任人、目标值和基线",
+    "rpa_runs": "已记下并挂了集成端点的机器人运行",
+    "process_cases": "已登记的案例",
+    "technology_uses": "已登记的区块链、人工智能或物联网用途",
+    "mining_variants": "已挖出的路径变体",
+    "rpa_bots": "已登记的机器人",
+    "training_records": "已登记的培训到场",
+    "complete_objectives": "同一条目标具备责任人、目标值、基线和流程",
+    "sponsor_projects": "挂了流程且写了发起人的项目",
+    "objectives": "在用的年度目标",
     "linked_objectives": "目标已挂到流程",
     "objectives_with_owner": "目标有责任人和目标值",
     "objectives_with_baseline": "目标有现状基线",
+    "anchored_l3": "有 L1/L2 上级且对上 PCF 的 L3",
     "l1": "L1 节点",
     "l2": "L2 节点",
     "l3": "L3 节点",
@@ -231,94 +106,63 @@ EVIDENCE_LABELS: Dict[str, str] = {
     "positions": "岗位主数据",
     "raci_matters": "关键事项的 RACI",
     "invalid_processes": "权责冲突（应为 0）",
-    "documents": "制度/SOP 文件",
-    "effective_documents": "已生效的制度/SOP",
-    "effective_authorization_rules": "已生效的授权规则",
-    "open_authorization_exceptions": "未闭环的授权例外",
-    "l3_published": "已发布的流程模型",
-    "bindings": "表单/规则/工具绑定（方法工具可选）",
+    "documents": "制度或作业指导书",
+    "effective_documents": "已生效的制度或作业指导书",
+    "effective_authorization_rules": "写了审批人、例外路径和证据的生效规则",
+    "open_authorization_exceptions": "未关闭的授权例外",
+    "l4": "L4 活动",
+    "l3_published": "已发布模型的 L3",
+    "bindings": "表单、规则与方法工具合计",
     "forms": "表单",
     "rules": "规则",
     "node_tools": "方法工具绑定（设计证据，可选）",
     "verified_standards": "已验证的标准工时",
     "capacity_rows": "当月产能记录",
     "actual_worklogs": "实际工时记录",
-    "kpi_cards": "完整的 KPI 卡",
+    "kpi_monitored": "有公式、阈值、责任人和数据点的 KPI",
+    "kpi_cards": "有公式、目标值和红黄绿阈值的 KPI",
     "kpi_records": "KPI 数据点",
     "red_yellow": "红/黄指标",
-    "improvement_projects": "改善项目",
-    "applied_changes": "已应用的变更",
-    "open_findings": "未闭环治理待办",
+    "improvement_projects": "KPI 越线转来的改善项目",
+    "applied_changes": "已应用的变更单",
+    "open_findings": "未关闭的治理待办",
     "knowledge_items": "知识条目",
-    "kpi_records_30d": "近 30 天数据",
+    "kpi_records_30d": "近 30 天的 KPI 数据点",
 }
 
 # 这些指标 0 才是好结果；其余指标 > 0 才算“已有证据”
-ZERO_IS_GOOD = {"invalid_processes", "open_findings", "open_authorization_exceptions"}
+ZERO_IS_GOOD = {
+    "invalid_processes",
+    "open_findings",
+    "open_authorization_exceptions",
+}
 
 # (evidence key, 是否必需)。必需项全部满足才算 READY；可选项只用于“建议补充”。
 EVIDENCE_ITEMS: Dict[str, List[Tuple[str, bool]]] = {
-    "scope": [
-        ("l3_with_owner", True),
-        ("governance_roles", True),
-        ("sponsor_projects", False),
-    ],
-    "strategy": [
-        ("objectives", True),
-        ("linked_objectives", True),
-        ("objectives_with_owner", True),
-        ("objectives_with_baseline", True),
-    ],
-    "architecture": [
+    "framework": [
+        ("anchored_l3", True),
         ("l1", True),
         ("l2", True),
         ("l3", True),
         ("pcf_mapped_l3", True),
-        ("benchmark_maps", False),
-        ("positions", True),
-        ("raci_matters", True),
-        ("invalid_processes", True),
-    ],
-    "policy": [
-        ("effective_documents", True),
-        ("effective_authorization_rules", True),
-        ("documents", False),
-        ("open_authorization_exceptions", False),
-    ],
-    "process_design": [
-        ("forms", True),
-        ("bindings", True),
-        ("rules", False),
-        ("node_tools", False),
-        ("l3_published", False),
-    ],
-    "workload": [
-        ("verified_standards", True),
-        ("capacity_rows", True),
-        ("actual_worklogs", False),
-    ],
-    "performance": [
-        ("kpi_cards", True),
-        ("kpi_records", True),
-        ("red_yellow", False),
-    ],
-    "review_release": [
-        ("l3_published", True),
-        ("effective_documents", True),
-    ],
-    "improvement": [
-        ("improvement_projects", True),
-        ("applied_changes", True),
-        ("open_findings", True),
-        ("knowledge_items", False),
-        ("kpi_records_30d", False),
+        ("governance_roles", True),
     ],
 }
 
 # 计数点开后落到的页面。参数只打开该页里已经有的页签。
 EVIDENCE_DESTINATIONS: Dict[str, Tuple[str, Dict[str, str]]] = {
+    "process_charters": ("pilot", {}),
     "l3_with_owner": ("map", {"owners": "l3"}),
+    "complete_objectives": ("strategy", {}),
+    "anchored_l3": ("map", {"benchmark": "1"}),
     "governance_roles": ("orgs", {"tab": "governance"}),
+    "objective_complete": ("strategy", {}),
+    "rpa_runs": ("pilot", {}),
+    "process_cases": ("pilot", {}),
+    "technology_uses": ("pilot", {}),
+    "mining_variants": ("monitor", {"tab": "mining"}),
+    "rpa_bots": ("pilot", {}),
+    "training_records": ("pilot", {}),
     "sponsor_projects": ("projects", {}),
     "objectives": ("strategy", {}),
     "linked_objectives": ("strategy", {}),
@@ -336,7 +180,9 @@ EVIDENCE_DESTINATIONS: Dict[str, Tuple[str, Dict[str, str]]] = {
     "effective_documents": ("deliverables", {"tab": "document"}),
     "effective_authorization_rules": ("authorization", {}),
     "open_authorization_exceptions": ("authorization", {"pane": "exceptions"}),
+    "l4": ("map", {}),
     "l3_published": ("designer", {"tab": "model"}),
+    "kpi_monitored": ("monitor", {"tab": "kpi"}),
     "bindings": ("execution", {"tab": "config", "focus": "forms"}),
     "forms": ("execution", {"tab": "config", "focus": "forms"}),
     "rules": ("execution", {"tab": "config", "focus": "forms"}),
@@ -356,7 +202,7 @@ EVIDENCE_DESTINATIONS: Dict[str, Tuple[str, Dict[str, str]]] = {
 
 
 class StartupStepNotFound(ValueError):
-    """步骤不存在或不在九步定义里。"""
+    """步骤不存在或不在框架边界定义里。"""
 
 
 class PilotGateError(ValueError):
@@ -368,6 +214,54 @@ class PilotGateError(ValueError):
 
 
 PILOT_KEY = "PILOT_GO_LIVE"
+
+_CHARTER_TEXT = (
+    "purpose",
+    "starts_at",
+    "ends_at",
+    "in_scope",
+    "out_of_scope",
+    "stop_condition",
+)
+
+
+class CharterError(ValueError):
+    """范围说明写得不完整，或挂错了流程。"""
+
+
+def _filled(value: Optional[str]) -> bool:
+    return bool((value or "").strip())
+
+
+def _complete_charter_count(db: Session) -> int:
+    rows = db.execute(
+        select(ProcessCharter, ProcessArch).join(
+            ProcessArch, ProcessArch.id == ProcessCharter.process_id
+        )
+    ).all()
+    count = 0
+    for charter, process in rows:
+        if process.level != 3 or process.owner_user_id is None:
+            continue
+        if charter.sponsor_user_id is None:
+            continue
+        if all(_filled(getattr(charter, name)) for name in _CHARTER_TEXT):
+            count += 1
+    return count
+
+
+def _complete_authorization_count(db: Session) -> int:
+    rules = db.scalars(
+        select(AuthorizationRule).where(
+            AuthorizationRule.status == AuthorizationStatus.EFFECTIVE.value
+        )
+    ).all()
+    count = 0
+    for rule in rules:
+        approver = rule.approver_role_id is not None or _filled(rule.approver_label)
+        if approver and _filled(rule.exception_path) and _filled(rule.evidence_required):
+            count += 1
+    return count
 
 
 def _count(db: Session, stmt) -> int:
@@ -448,7 +342,7 @@ def _status(started: bool, ready: bool, skipped: bool) -> Tuple[str, str]:
     return "NOT_STARTED", "还没开始"
 
 
-def _kpi_card_stats(db: Session) -> Tuple[int, int, int]:
+def _kpi_card_stats(db: Session) -> Tuple[int, int, int, int]:
     kpis = db.scalars(
         select(KpiDefinition)
         .options(selectinload(KpiDefinition.records))
@@ -457,6 +351,7 @@ def _kpi_card_stats(db: Session) -> Tuple[int, int, int]:
     cards = 0
     records = 0
     red_yellow = 0
+    monitored = 0
     for kpi in kpis:
         has_card = bool(
             (kpi.formula or "").strip()
@@ -469,22 +364,18 @@ def _kpi_card_stats(db: Session) -> Tuple[int, int, int]:
             cards += 1
         periods = kpi_service.ordered_records(kpi.records)
         records += len(periods)
+        if has_card and periods and kpi.owner_user_id is not None:
+            monitored += 1
         if not periods:
             continue
-        status = kpi_service.status_for(
-            periods[-1].value,
-            kpi.direction,
-            kpi.red_threshold,
-            kpi.yellow_threshold,
-            kpi.green_threshold,
-        )
+        status, _label, _kind = kpi_service.presentation(db, kpi, periods[-1].value)
         if status in ("RED", "YELLOW"):
             red_yellow += 1
-    return cards, records, red_yellow
+    return cards, records, red_yellow, monitored
 
 
 def _collect_evidence(db: Session) -> Dict[str, int]:
-    """一次性收集九步用到的全部证据计数。"""
+    """一次性收集证据计数。开始使用只用其中的框架边界项。"""
     today = date.today()
     month_start = workload_service.normalize_period(today)
     last_30 = today - timedelta(days=30)
@@ -497,7 +388,23 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
     )
     governance_roles = _count(
         db,
-        select(func.count()).select_from(GovernanceRole).where(GovernanceRole.is_active.is_(True)),
+        select(func.count(func.distinct(GovernanceRole.id)))
+        .select_from(GovernanceRole)
+        .join(GovernanceRoleMember, GovernanceRoleMember.role_id == GovernanceRole.id)
+        .where(GovernanceRole.is_active.is_(True)),
+    )
+    process_charters = _complete_charter_count(db)
+    complete_objectives = _count(
+        db,
+        select(func.count(func.distinct(StrategyObjective.id)))
+        .select_from(StrategyObjective)
+        .join(ObjectiveProcessLink, ObjectiveProcessLink.objective_id == StrategyObjective.id)
+        .where(
+            StrategyObjective.status == "ACTIVE",
+            StrategyObjective.owner_user_id.is_not(None),
+            StrategyObjective.target_value.is_not(None),
+            StrategyObjective.baseline_value.is_not(None),
+        ),
     )
     sponsor_projects = _count(
         db,
@@ -544,6 +451,18 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
     l2 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 2))
     l3 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 3))
     benchmark_maps = _count(db, select(func.count()).select_from(ProcessBenchmarkMap))
+    l3_node = aliased(ProcessArch)
+    l2_node = aliased(ProcessArch)
+    l1_node = aliased(ProcessArch)
+    anchored_l3 = _count(
+        db,
+        select(func.count(func.distinct(l3_node.id)))
+        .select_from(l3_node)
+        .join(l2_node, l3_node.parent_id == l2_node.id)
+        .join(l1_node, l2_node.parent_id == l1_node.id)
+        .join(ProcessBenchmarkMap, ProcessBenchmarkMap.process_id == l3_node.id)
+        .where(l3_node.level == 3, l2_node.level == 2, l1_node.level == 1),
+    )
     pcf_mapped_l3 = _count(
         db,
         select(func.count(func.distinct(ProcessBenchmarkMap.process_id)))
@@ -574,8 +493,9 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         ).all()
         if document_service.effective_version_on(document) is not None
     )
-    effective_authorization_rules = authorization_service.effective_rule_count(db)
+    effective_authorization_rules = _complete_authorization_count(db)
     open_authorization_exceptions = authorization_service.open_exception_count(db)
+    l4 = _count(db, select(func.count()).select_from(ProcessArch).where(ProcessArch.level == 4))
     l3_published = _count(
         db,
         select(func.count())
@@ -598,7 +518,7 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         .where(CapacityCalendar.period == month_start),
     )
     worklogs = _count(db, select(func.count()).select_from(TaskWorklog))
-    kpi_cards, kpi_records, red_yellow = _kpi_card_stats(db)
+    kpi_cards, kpi_records, red_yellow, kpi_monitored = _kpi_card_stats(db)
     improvements = _count(
         db,
         select(func.count()).select_from(Project).where(Project.source == "KPI_THRESHOLD"),
@@ -622,13 +542,16 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
     )
 
     return {
+        "process_charters": process_charters,
         "l3_with_owner": l3_with_owner,
         "governance_roles": governance_roles,
+        "complete_objectives": complete_objectives,
         "sponsor_projects": sponsor_projects,
         "objectives": objectives,
         "linked_objectives": linked_objectives,
         "objectives_with_owner": objectives_with_owner,
         "objectives_with_baseline": objectives_with_baseline,
+        "anchored_l3": anchored_l3,
         "l1": l1,
         "l2": l2,
         "l3": l3,
@@ -641,6 +564,7 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         "effective_documents": effective_documents,
         "effective_authorization_rules": effective_authorization_rules,
         "open_authorization_exceptions": open_authorization_exceptions,
+        "l4": l4,
         "l3_published": l3_published,
         "bindings": forms + rules + node_tools,
         "forms": forms,
@@ -649,6 +573,7 @@ def _collect_evidence(db: Session) -> Dict[str, int]:
         "verified_standards": verified_standards,
         "capacity_rows": capacity_rows,
         "actual_worklogs": worklogs,
+        "kpi_monitored": kpi_monitored,
         "kpi_cards": kpi_cards,
         "kpi_records": kpi_records,
         "red_yellow": red_yellow,
@@ -691,6 +616,7 @@ def status(db: Session) -> StartupStatusOut:
                 input=definition["input"],
                 output=definition["output"],
                 exit_criteria=definition["exit_criteria"],
+                points=[StartupPointOut(**point) for point in definition.get("points", [])],
                 estimated=definition["estimated"],
                 pilot=definition["pilot"],
                 status=state,
@@ -728,7 +654,8 @@ def status(db: Session) -> StartupStatusOut:
         (step.key for step in pilot_steps if step.status not in ("READY", "SKIPPED")),
         None,
     )
-    pilot_gate_open = pilot_ready_count >= len(pilot_steps)
+    # 没有「首次上线」阶段列表时，门永远关着。空列表不能变成 0 >= 0。
+    pilot_gate_open = bool(pilot_steps) and pilot_ready_count >= len(pilot_steps)
     pilot_missing_steps = [step.title for step in pilot_steps if step.status != "READY"]
     confirm = db.scalar(select(StartupPilotConfirm).where(StartupPilotConfirm.key == PILOT_KEY))
     confirmed_by = (
@@ -842,6 +769,84 @@ def confirm_pilot(db: Session, user: User, note: Optional[str]) -> StartupStatus
         "startup_pilot",
         None,
         f"确认首次上线：{current.pilot_ready_count}/{current.pilot_total} 阶段就绪",
+    )
+    db.commit()
+    return status(db)
+
+
+def charter_options(db: Session) -> dict:
+    """第 1 阶段表单：L3、可选发起人、已经写过的范围说明。"""
+    processes = db.scalars(
+        select(ProcessArch).where(ProcessArch.level == 3).order_by(ProcessArch.code)
+    ).all()
+    users = db.scalars(select(User).order_by(User.display_name)).all()
+    charters = db.scalars(select(ProcessCharter).order_by(ProcessCharter.id)).all()
+    return {
+        "processes": [
+            {
+                "id": row.id,
+                "code": row.code,
+                "name": row.name,
+                "has_owner": row.owner_user_id is not None,
+            }
+            for row in processes
+        ],
+        "users": [{"id": row.id, "display_name": row.display_name} for row in users],
+        "charters": [
+            {
+                "process_id": row.process_id,
+                "purpose": row.purpose,
+                "starts_at": row.starts_at,
+                "ends_at": row.ends_at,
+                "in_scope": row.in_scope,
+                "out_of_scope": row.out_of_scope,
+                "stop_condition": row.stop_condition,
+                "sponsor_user_id": row.sponsor_user_id,
+            }
+            for row in charters
+        ],
+    }
+
+
+def save_charter(db: Session, user: User, payload) -> StartupStatusOut:
+    """写入或更新一条 L3 的范围说明。负责人必须已经在流程地图上。"""
+    process = db.get(ProcessArch, payload.process_id)
+    if process is None or process.level != 3:
+        raise CharterError("范围说明只能挂在 L3 上")
+    if process.owner_user_id is None:
+        raise CharterError("先给这条 L3 指定负责人，再写范围说明")
+    sponsor = db.get(User, payload.sponsor_user_id)
+    if sponsor is None:
+        raise CharterError("发起人不存在")
+    row = db.scalar(select(ProcessCharter).where(ProcessCharter.process_id == process.id))
+    if row is None:
+        row = ProcessCharter(process_id=process.id)
+        db.add(row)
+    fields = {
+        "purpose": payload.purpose,
+        "starts_at": payload.starts_at,
+        "ends_at": payload.ends_at,
+        "in_scope": payload.in_scope,
+        "out_of_scope": payload.out_of_scope,
+        "stop_condition": payload.stop_condition,
+    }
+    if not all(_filled(value) for value in fields.values()):
+        raise CharterError("范围说明的每一项都要写上")
+    row.purpose = fields["purpose"].strip()
+    row.starts_at = fields["starts_at"].strip()
+    row.ends_at = fields["ends_at"].strip()
+    row.in_scope = fields["in_scope"].strip()
+    row.out_of_scope = fields["out_of_scope"].strip()
+    row.stop_condition = fields["stop_condition"].strip()
+    row.sponsor_user_id = sponsor.id
+    row.updated_at = utcnow()
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process_charter",
+        process.id,
+        f"写入范围说明 {process.code}",
     )
     db.commit()
     return status(db)

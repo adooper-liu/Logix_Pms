@@ -25,6 +25,11 @@ export const METRICS = {
     formula: '状态为“待处理”或“处理中”的异常事件数',
     note: '不含已解决、已闭环',
   },
+  kpi_red_yellow: {
+    name: '红/黄 KPI',
+    formula: '最新数据点落在红线或黄线的指标数 / 启用指标数',
+    note: '没有数据点的指标不计入红/黄。达成率曲线在 KPI 页签',
+  },
   avg_improvement: {
     name: '平均目标改善',
     formula: '在办项目 improvement_pct 的算术平均',
@@ -152,7 +157,7 @@ export const METRICS = {
   overall_trend: {
     name: '整体达成率趋势',
     formula: '每个月先按维度求平均，再对维度求平均',
-    note: '与雷达图同口径，避免指标多的维度权重过大',
+    note: '先按维度平均，再对维度平均，避免指标多的维度权重大',
   },
   latest_value: {
     name: '当前值',
