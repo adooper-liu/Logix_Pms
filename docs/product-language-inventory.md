@@ -23,7 +23,7 @@
 | L-05 高 | `HEAT_LABEL/SEV_LABEL/EXC_LABEL/KN_LABEL/NODE_LABEL`在前端，流程卡另有severity表。`web/js/core/format.js:92`、`web/js/views/process_card.js:80` | 将业务中文消费收敛到对应后端域；色调/图标可留前端 | 确认每处现有消费者再删定义；meta与列表行标签覆盖全部使用值，不能仅搬到另一份JS |
 | L-06 高 | KPI颜色标签在monitor路由与kpi服务重复。`app/api/v1/monitor.py:82`、`app/services/kpi.py:29` | 一域一源；是否由“红/黄/绿”升级为“未达标/预警/达标”先核实际判定 | 后端确认计算/来源质量含义；GRAY不能自动译为“无风险”；新标签不冒称新增质量算法已实现 |
 | L-07 高 | 模型状态标签在process_model及deliverable重复。`app/services/process_model.py:29`、`app/services/deliverable.py:61` | 模型标签复用原模型域；映射到交付物状态仍是显式业务投影，不合并两种状态 | 后端避免循环依赖；历史被替代模型可识别，不把PUBLISHED和EFFECTIVE视为同一code |
-| L-08 高 | 网络失败提示“确认uvicorn正在运行”并拼异常。`web/js/core/api.js:43` | 用户：“暂时无法连接服务，请重试。”；开发诊断保留在受控日志 | 前端基础设施统一网络反馈，不自动重试写请求；测试断网不泄露内部地址/栈 |
+| L-08 高 | 网络失败提示“确认uvicorn正在运行”并拼异常。`web/js/core/api.js:43` | 查询：“暂时无法加载数据，请重试。”；写请求无法确认提交结果：“操作结果待确认，请先核对原记录。” | 前端区分读写/已知结果，后端提供可核原记录依据；不自动重试写请求，不泄露内部地址/栈 |
 | L-09 高 | 非字符串detail被JSON.stringify，403再加“权限不足”。`web/js/core/api.js:54` | 兼容原detail并渐进接稳定code/field_errors；字段错误就近，顶部概要 | 后端明确安全响应，前端不直接铺422数组或重复前缀；400/409原因不能仅按HTTP码猜 |
 | L-10 高 | 技术字段出现在用户报错，如“assignee_user_id 指向的用户不存在”。`app/services/execution.py:257` | 用户：“所选任务处理人不存在或不可用，请重新选择。”；是否“不可用”须与实际检查一致 | code/field定位assignee_user_id，技术名只在API文档；不扩大当前账户有效性校验的宣称 |
 | L-11 中 | 顶栏placeholder写“搜索流程/项目/工具/知识”，路由只对projects/toolbox/map/pcf派发。`web/index.html:67`、`web/js/core/router.js:165` | 按当前页声明真实搜索范围；无搜索能力隐藏或禁用并说明，不冒充全局搜索 | 前端页定义声明search能力；输入实际作用于声明对象，换页清理/恢复策略可测 |
@@ -35,7 +35,7 @@
 | L-17 中 | 组织界面“系统角色/治理角色”都与成员有关，但含义不同。`web/js/views/orgs.js:104`、`app/models/enums.py:151` | “系统角色”表示系统操作资格，“治理角色”表示业务职责；岗位与组织分别命名 | 原auth/governance/positions/org-units来源；不能因一个业务任命自动授MANAGER权限 |
 | L-18 中 | “表单/模板”可指运行输入、交付物类型或文件模板。`web/js/views/execution.js:92`、`app/models/enums.py:167`、`:195` | 分别说“任务表单”“表单类交付物”“工具模板/文件模板”；ONLINE为格式非业务成效 | 表单与资产领域分别维护；具体输入提示不把任务表单称Excel模板 |
 | L-19 中 | “基线”既用于项目baseline_value，又用于AssetBaseline及分析说明。`app/schemas/project.py:96`、`web/js/views/deliverables.js:1372`、`web/js/views/monitor.js:1227` | “基线值/现状基线/资产基线”按对象使用；现状冻结对照尚未实现 | 后端字段不改；不得靠新标签宣称目前已固定指标口径/正式样本 |
-| L-20 中 | 工作流同时提供项目办理与方法手册。`web/js/views/workflow.js:76`、`:155`、`:697` | 项目页“改善工作台”，教学页“五阶段方法手册”；五阶段是项目交付，不是长期流程寿命 | 保留现有workflow tab别名，具体见P-10；历史治理体系项目有独立口径，不能批量改阶段数字 |
+| L-20 中 | 工作流同时提供项目办理与方法手册，且workbench固定生成五阶段。`web/js/views/workflow.js:76`、`:155`、`:697`、`app/services/project_workflow.py:305` | 改善项目页“改善工作台”，教学页“五阶段方法手册”；治理体系项目回其自身详情/框架证据，不进入五阶段工作台 | 保留workflow旧tab别名和来源上下文；这是类型准入修正候选，不是恢复九阶段，也不批量改阶段数字 |
 | L-21 中 | 专业说明“事例/走法/必须核对”等口语存在。`web/js/views/monitor.js:117`、`:475` | 按真实模型含义选“纳入样本/模型路径/观察路径”；非增值不能自动叫“必须核对” | 业务核分类后才更名，不能通过润色改变增值判定或把模型时间写成实测 |
 | L-22 中 | 项目发起人字段有“发起人/部门”“发起人/赞助人”。`web/js/views/projects.js:462`、`:635` | Sponsor统一“项目发起人”；department另标“所属部门”，不把赞助人误解为付款方 | 对照Project.sponsor/department各自值，不拼成一个新字段；清单F-04 |
 | L-23 中 | 知识资源用法示例为“审批时长下降40%，连续4周稳定”。`web/js/views/knowledge.js:215` | 标明示例，写“记录观察窗口、样本、前后值与证据来源”，数值仅用于教学 | 无证据不得预填收益；已保存用户说明不重写，样例改动不等于收益算法实现 |
@@ -50,10 +50,10 @@
 | 编号 | 对象.字段 / 当前依据 | 建议界面名与含义 | 格式、空值及核对要求 |
 |---|---|---|---|
 | F-01 | Project.name，`app/schemas/project.py:73` | 项目名称；不叫流程名称 | schema max160，前端和API校验一致；实际必填/空串规则再核 |
-| F-02 | Project.owner / owner_user_id，同文件`:82` | 项目负责人 / 负责人账号；前者展示，后者归属权限依据 | 未绑定不自动按同名人授权；现有按名绑定兼容须明确提示，不靠文案修改权限 |
+| F-02 | Project.owner / owner_user_id，同文件`:82` | 项目负责人 / 负责人账号；前者展示，后者归属权限依据 | 未绑定账号时不可仅凭姓名读取授权；当前写入按唯一姓名解析账号的兼容行为保留并明确提示，不靠文案修改权限 |
 | F-03 | ProcessArch.owner_user_id，`app/models/process.py` | 流程负责人账号；负责长期流程 | 与项目负责人可以不同，不建立两套Owner缓存；核当前组织/任命边界 |
 | F-04 | Project.sponsor / department / org_unit_id，`app/schemas/project.py:88` | 项目发起人 / 所属部门说明 / 所属组织 | 文本部门不代替组织ID授权；发起人文本不证明授权已确认 |
-| F-05 | Project.current_stage，同文件`:78`、`:143` | 项目阶段 | 改善项目1–5；当前Update schema允许到9且有治理体系项目，应核服务按project_type处理，不能直接改全局校验 |
+| F-05 | Project.current_stage，同文件`:78`、`:143` | 项目阶段 | 改善项目1–5；Update schema当前允许到9不代表治理体系仍9阶段，当前setup_service只有“框架边界”1阶段，见`app/services/setup_program.py:19`；先核类型服务，不批量改全局校验 |
 | F-06 | Project.baseline_value / target_value / metric_unit，同文件`:95` | 基线值 / 目标值 / 指标单位 | 缺失不当0；项目卡值不是已冻结的正式验收样本 |
 | F-07 | Project.observation_until，同文件`:112` | 观察截止日期 | 纯日期，不new Date解析；截止不自动证明观察通过 |
 | F-08 | KpiDefinition.formula / numerator / denominator，`app/schemas/monitor.py:36`、`app/services/kpi.py:46` | 计算公式 / 分子 / 分母 | 当前规则为公式或同时提供分子分母；不是“全部必填”，描述公式不代表存在任意表达式执行器 |
@@ -89,7 +89,8 @@
 
 | 拟代码 / 场景 | 用户表达 | 参数/操作/安全边界 |
 |---|---|---|
-| `common.network_unavailable` | 暂时无法连接服务，请重试。 | 前端网络层；不拼内部异常，不自动重发写操作 |
+| `common.network_unavailable` | 暂时无法加载数据，请重试。 | 仅用于查询失败；写请求结果未知使用unknown_write_result，不拼内部异常 |
+| `auth.invalid_credentials` | 用户名或口令不正确。 | 登录401专用，不泄露用户存在性；业务请求会话失效另处理 |
 | `common.validation_failed` | 请检查标记的字段。 | field_errors逐项定位，保留列表索引，不回显敏感input |
 | `model.version_conflict` | 模型版本已更新，本次修改未保存。 | 提供已获授权的最新版本入口，保留草稿；仅真实版本冲突使用 |
 | `task.already_processed` | 任务状态已变化，请刷新后查看。 | 当前任务权限核验；不能同时弹“已完成” |
@@ -109,9 +110,12 @@
 
 ## 7. 执行顺序与验收状态
 
-- 第一片：项目名称/负责人/状态/方法标签，清除同域重复来源；同时核页面标题能力，不改变状态流转。
-- 第二片：公共错误解析及一个表单的字段错误，兼容原detail；覆盖断网、401/403/404、422、不同409原因、未知写结果。
-- 第三片：页面表优先的资产与执行主题拆分，逐主题按需加载；文字随主题一起收敛，不先建立新业务库。
-- 第四片：其余领域逐code/逐字段/逐示例完成清单，再加入持续检查。
+- S1：项目对象名称/负责人/状态/方法标签及页面标题，清除同域重复来源；完成项目类型分流核对，不改变原状态流转。
+- S2：公共错误解析及一个表单的字段错误，兼容原detail；覆盖查询与写入未知结果、登录401与会话失效、403/404、422及不同409原因。
+- S3：资产主题（含治理发现独立职责与原入口跳转），按需加载与原权限不变。
+- S4：执行主题，隔离任务办理/实例/配置/集成，保留启动快照与旧深链。
+- S5：其余领域逐code/逐字段/逐示例完成清单并加入持续检查。
+
+S1–S5与[页面表](page-responsibility-and-decomposition.md)使用同一工作顺序，属于本次语言/信息架构整治，不重定义BPM薄轮次对照的第一批范围。
 
 本版没有实施以上切片。后端改动pytest，前端改动verify_frontend并确认当前代码服务，schema变更Alembic check；提交前scripts/check.py。全绿只证明相应测试，不能证明全部专业语义/示例/真实业务效果正确。
