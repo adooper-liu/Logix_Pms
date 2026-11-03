@@ -69,7 +69,9 @@
 
 未定值不妨碍总体原则确认，但阻止直接按文档“全量开工”。第一份实施计划应以薄对照的最小端到端行为及失败用例为单元，不再扩大需求。
 
-## 5. 验证记录与限制
+## 5. 历史验证记录与限制（原作者自审时点）
+
+以下记录保留原验证时点，不代表340e91e或本次终审重新运行的结果。后续独立评审与原助手终审分别见[brief](reviews/document-review-brief.md)、[附录](reviews/document-review-findings.md)、[终审](reviews/document-review-final.md)；后者不得借历史CI或链接检查宣称当前业务验收通过。
 
 - `git diff --check`：本轮执行，退出0，无空白错误；此项不检查业务语义。
 - `docker compose --profile full config --quiet`：本轮退出0，无输出；只证明现有配置可解析，未启动服务/迁移/worker。
@@ -81,15 +83,10 @@
 
 **评审后的状态：已识别的跨产物冲突已在正文中修正；形成一套可继续细化开发计划的设计基线。不是“所有设计已证明无误”，更不是产品闭环已经实现。**
 
-## 6. 下一步：另一模型审定（用户指定流程）
+## 6. 后续状态：结束本轮评审，进入分片计划
 
-用户要求：**先由另一模型审定文档与 Brief，通过后再实施。** 当前阶段禁止把未审定文档当作编码授权。
+用户已明确“评审到此为止，请修正问题，并开始下一步实施计划与brief”。原独立报告与作者核证记录保留，未完成覆盖、正式仲裁和代码验证不追认为完成，不再自动派模型补评。
 
-| 步骤 | 动作 | 产物 |
-|---|---|---|
-| 1 | 实施模型整理 Brief / 追溯表 / 开发计划 / R1 复审 / 审定交接 | 见 [bpm-requirements-traceability.md](bpm-requirements-traceability.md)、[bpm-first-batch-brief.md](bpm-first-batch-brief.md)、[bpm-first-batch-dev-plan.md](bpm-first-batch-dev-plan.md)、[bpm-r1-implementability-review.md](bpm-r1-implementability-review.md)、[bpm-review-handoff.md](bpm-review-handoff.md) |
-| 2 | 审定模型按 [bpm-review-handoff.md](bpm-review-handoff.md) 阅读并填写 §5 模板 | `APPROVED` / `APPROVED WITH CONDITIONS` / `NOT READY` |
-| 3 | 用户确认审定结论 | 可选：将结论存为 `docs/bpm-review-record-YYYYMMDD.md` |
-| 4 | 实施模型按审定记录的顺序交付切片 | PR + pytest / check.py 证据 |
+当前实施安排见[主任务brief](implementation-next-brief.md)与[M1a三类型计划](superpowers/plans/2026-11-03-process-classification.md)。用户已纠偏：主线是三类型/八阶段主体功能与框架对齐，语言页面为配套；自动效果申报局部修复暂停保留，不能决定总体优先级。其余规格范围与待定契约继续按主线承接，不追认全部已审定。
 
-审定模型应显式处理 [§4 七项决定](#4-剩余必须进入开发计划的决定) 与开发计划 §2 默认值的差距，不得仅做链接检查即批准。
+旧第一批brief/总体计划保留为范围背景；[原助手核证](reviews/document-review-final.md)是作者答辩与证据，不是独立P0/P1终局裁决。提交/测试/实现状态由真实后续输出更新。

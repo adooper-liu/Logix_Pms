@@ -118,11 +118,19 @@ BPMN标准、企业风格、业务真实性、引擎/分析支持分域；完整
 | **本文** | 产品语义、证据与分期契约；修改需明确改变哪条原则 | [§8 TR-PR-*](bpm-requirements-traceability.md#8-产品基本原则追溯bpm-product-principlesmd) |
 | [总路线](bpm-lifecycle-gap-and-roadmap.md) | 差距和 R0–R5 分组；非 API 清单 | [§1](bpm-requirements-traceability.md#1-路线文档追溯gap-and-roadmap) |
 | [落地规格](bpm-lifecycle-implementation-spec.md) | 对象、第一批边界、模块落点 | [§2–§3](bpm-requirements-traceability.md#2-落地规格追溯--总契约13) |
-| [文案规范](bpm-interface-content-standard.md) | 页面结构、术语、反馈 | [§4、§6](bpm-requirements-traceability.md#4-文案规范追溯interface-content-standard) |
+| [文案规范](bpm-interface-content-standard.md) | 产品语言、页面结构、术语、反馈的唯一表达规则 | [§4、§6](bpm-requirements-traceability.md#4-文案规范追溯interface-content-standard) |
+| [文字清单](product-language-inventory.md) | 当前差异、重点字段和字典来源；不是全量已实施目录 | DOC-IA；实施前补对应消费点 |
+| [页面职责表](page-responsibility-and-decomposition.md) | 23入口、主题边界、兼容和语言/页面S1–S5 | DOC-IA；不等于BPM B1切片 |
+| [全量评审任务书](document-review-handoff.md) | 核心16份与配套30份的阅读、证据、brief和终审要求 | 与第一批审定交接不同范围，不互相替代 |
+| [独立评审brief](reviews/document-review-brief.md)及[附录](reviews/document-review-findings.md) | 固定6ba817f的评审发现；实际覆盖深度以矩阵为准 | 不据“完成”字样自动视为满足全量任务书 |
+| [原助手终审](reviews/document-review-final.md) | DR逐条核证、当前计划差异、修订及未关闭项 | 终审不是编码或业务验收授权 |
 | 八份专项 | 见 §9.1；不重定义对象和阶段 | [§11.1–§11.8](bpm-requirements-traceability.md#11-八份专项追溯原则-91) |
 | [README](../README.md) | 代码定位与运行；不宣传未实现 | [§10](bpm-requirements-traceability.md#10-readme-追溯readmemd) |
 | [综合评审记录](bpm-artifacts-review.md) | 错位修正、未决决定；非新需求源 | [§9](bpm-requirements-traceability.md#9-综合评审记录追溯bpm-artifacts-reviewmd) |
-| [第一批 Brief](bpm-first-batch-brief.md) | B1 范围与审定通过标准 | [§12 TR-META-BRF](bpm-requirements-traceability.md#12-审定与实施包meta) |
+| [主任务实施brief](implementation-next-brief.md) | 三类型/八阶段/治理主体能力的承接矩阵与逐片进度 | 语言页面配套，不被局部修复替代 |
+| [三类型分类计划](superpowers/plans/2026-11-03-process-classification.md) | 主线M1a：分类正式维护、继承/例外/未知、查询与原页面消费 | 对应R1-01，不等于八阶段全完成 |
+| [工具保存详细计划](superpowers/plans/2026-11-03-tool-sheet-save-integrity.md) | 暂停保留的局部修复与历史验证记录 | 不再作为主线实施优先级 |
+| [第一批 Brief](bpm-first-batch-brief.md) | B1总体范围背景与未定依赖 | [§12 TR-META-BRF](bpm-requirements-traceability.md#12-审定与实施包meta) |
 | [第一批开发计划](bpm-first-batch-dev-plan.md) | 切片/API/DoD | [§12 TR-META-PLN](bpm-requirements-traceability.md#12-审定与实施包meta) |
 | [审定交接说明](bpm-review-handoff.md) | 审定顺序与结论模板 | [§12 TR-META-HOF](bpm-requirements-traceability.md#12-审定与实施包meta) |
 | [R1 可实施性复审](bpm-r1-implementability-review.md) | R1 vs 代码 | [§12 TR-META-R1](bpm-requirements-traceability.md#12-审定与实施包meta) |

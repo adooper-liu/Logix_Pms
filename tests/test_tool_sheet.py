@@ -129,6 +129,52 @@ def test_each_tool_uses_its_own_library_template(client):
     assert len(saved.json()["fields"]) == len(bpr["fields"])
 
 
+def test_step_sheet_preserves_context_without_usage(client):
+    from sqlalchemy import select
+
+    from app.core.database import SessionLocal
+    from app.models.tool import ToolUsage
+
+    process = _process(client)
+    created = client.post(
+        f"{API}/projects",
+        json={
+            "name": "步骤模板上下文回归",
+            "methodology": "BPI",
+            "owner": "流程管理科",
+            "process_id": process["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    try:
+        form = client.get(f"{API}/tools/SIPOC/sheet-form").json()
+        values = {field["key"]: "供应商到计划员" for field in form["fields"]}
+        with SessionLocal() as db:
+            before = set(db.scalars(select(ToolUsage.id)))
+        response = client.post(
+            f"{API}/tools/SIPOC/sheets",
+            json={
+                "process_id": process["id"],
+                "project_id": project_id,
+                "step_no": "2.1",
+                "values": values,
+            },
+        )
+        assert response.status_code == 201, response.text
+        saved = response.json()
+        assert saved["process_id"] == process["id"]
+        assert saved["project_id"] == project_id
+        assert saved["step_no"] == "2.1"
+        assert {row["key"]: row["value"] for row in saved["fields"]} == values
+        card = client.get(f"{API}/process-card/{process['id']}").json()
+        assert any(row["id"] == saved["id"] for row in card["sheets"])
+        with SessionLocal() as db:
+            assert set(db.scalars(select(ToolUsage.id))) == before
+    finally:
+        assert client.delete(f"{API}/projects/{project_id}").status_code == 200
+
+
 def test_generic_tool_sheet_does_not_create_objective(client):
     process = _process(client)
     before = client.get(f"{API}/strategy/summary?year=2026").json()["objective_count"]
