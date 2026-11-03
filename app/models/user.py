@@ -50,6 +50,10 @@ class User(Base):
         index=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 改密、管理员重置口令时 +1，使已发出的令牌失效
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

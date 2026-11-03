@@ -60,6 +60,12 @@ class Project(Base):
     )
     sponsor: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 空表示集团通用。非空时，只有该组织及其上级管理员、本组织下级能看见。
+    org_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("org_unit.id", ondelete="SET NULL", name="fk_project_org_unit"),
+        nullable=True,
+        index=True,
+    )
 
     objective: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

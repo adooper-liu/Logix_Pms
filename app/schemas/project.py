@@ -87,6 +87,7 @@ class ProjectBase(BaseModel):
     )
     sponsor: Optional[str] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
 
     objective: Optional[str] = None
     scope: Optional[str] = None
@@ -147,6 +148,7 @@ class ProjectUpdate(BaseModel):
     )
     sponsor: Optional[str] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
     objective: Optional[str] = None
     scope: Optional[str] = None
     metric_name: Optional[str] = None
@@ -199,6 +201,7 @@ class ProjectOut(ORMModel):
     owner_user_id: Optional[int] = None
     sponsor: Optional[str] = None
     department: Optional[str] = None
+    org_unit_id: Optional[int] = None
     objective: Optional[str] = None
     scope: Optional[str] = None
     metric_name: Optional[str] = None

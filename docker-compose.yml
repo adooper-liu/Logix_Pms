@@ -37,8 +37,10 @@ services:
     environment:
       # 容器内连 db 服务；外部托管数据库用 DATABASE_URL_DOCKER 覆盖整个连接串
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_dev_password}@db:5432/${POSTGRES_DB:-logix_pms}}
-      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
+      # 本地演示才设为 true，并同时打开 SEED_ON_STARTUP。生产必须保持 false。
+      ALLOW_DEV_SECRET: ${ALLOW_DEV_SECRET:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://127.0.0.1:8123,http://localhost:8123}
       # 附件落容器内卷；生产可换成 S3/对象存储
       ATTACHMENT_DIR: ${ATTACHMENT_DIR_DOCKER:-/app/var/attachments}
       ATTACHMENT_MAX_MB: ${ATTACHMENT_MAX_MB:-50}
@@ -54,6 +56,22 @@ services:
       - "8123:8123"
     volumes:
       - attachments:/app/var/attachments
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 超期升级和 Outbox 投递。多副本 API 时只保留一个 worker。
+  worker:
+    profiles: ["full"]
+    build: .
+    command: python -m scripts.worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_dev_password}@db:5432/${POSTGRES_DB:-logix_pms}}
+      SECRET_KEY: ${SECRET_KEY:-logix-pms-dev-secret-change-me}
+      ALLOW_DEV_SECRET: ${ALLOW_DEV_SECRET:-false}
+      SEED_ON_STARTUP: "false"
+      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-60}
     depends_on:
       db:
         condition: service_healthy

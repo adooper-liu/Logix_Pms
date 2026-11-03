@@ -20,6 +20,7 @@ else:
     _TMP_DIR = Path(tempfile.mkdtemp(prefix="logix_pms_test_"))
     os.environ["DATABASE_URL"] = f"sqlite:///{(_TMP_DIR / 'test.db').as_posix()}"
 os.environ["SEED_ON_STARTUP"] = "true"
+os.environ["ALLOW_DEV_SECRET"] = "true"
 # 测试直接建表，不跑迁移链：每个用例集都要快，且迁移本身有专门的用例验证
 os.environ["AUTO_MIGRATE"] = "false"
 # 附件落临时目录，禁止测试往仓库 var/ 里写文件

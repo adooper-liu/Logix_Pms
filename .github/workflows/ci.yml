@@ -53,5 +53,10 @@ jobs:
       - name: 静态检查
         run: ruff check .
 
+      - name: 依赖漏洞扫描
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
       - name: 测试（${{ matrix.name }}）
-        run: pytest -q
+        run: pytest -q --cov=app --cov-fail-under=80

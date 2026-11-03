@@ -62,24 +62,42 @@ def _sign(payload: str) -> str:
     return hmac.new(_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def create_token(user_id: int, ttl: int = TOKEN_TTL_SECONDS) -> Tuple[str, int]:
-    """返回 (token, 过期时间戳)。"""
+# 演示账号口令。生产改密、建用户、bootstrap 都拒绝再次使用。
+DEMO_PASSWORDS = frozenset({"admin123", "manager123", "chen123", "viewer123"})
+
+
+def validate_password_strength(password: str) -> Optional[str]:
+    """不合规时返回原因，合规返回 None。"""
+    if len(password) < 8:
+        return "口令至少 8 位"
+    if password in DEMO_PASSWORDS:
+        return "不能使用演示口令"
+    return None
+
+
+def create_token(
+    user_id: int, token_version: int = 0, ttl: int = TOKEN_TTL_SECONDS
+) -> Tuple[str, int]:
+    """返回 (token, 过期时间戳)。
+
+    载荷带 token_version。改密或管理员重置口令后版本 +1，旧票据立即失效。
+    """
     expires = int(time.time()) + ttl
-    payload = f"{user_id}.{expires}"
+    payload = f"{user_id}.{expires}.{int(token_version)}"
     raw = f"{payload}.{_sign(payload)}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii"), expires
 
 
-def parse_token(token: str) -> Optional[int]:
-    """校验令牌并返回 user_id；过期或签名不对返回 None。"""
+def parse_token(token: str) -> Optional[Tuple[int, int]]:
+    """校验令牌并返回 (user_id, token_version)；过期或签名不对返回 None。"""
     try:
         raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
         payload, signature = raw.rsplit(".", 1)
-        user_id_str, expires_str = payload.split(".")
+        user_id_str, expires_str, version_str = payload.split(".")
         if not hmac.compare_digest(signature, _sign(payload)):
             return None
         if int(expires_str) < int(time.time()):
             return None
-        return int(user_id_str)
+        return int(user_id_str), int(version_str)
     except (ValueError, UnicodeDecodeError, base64.binascii.Error):
         return None

@@ -2,9 +2,12 @@ fastapi>=0.110,<1.0
 uvicorn[standard]>=0.27
 sqlalchemy>=2.0,<3.0
 pydantic>=2.6,<3.0
-# PostgreSQL 驱动（psycopg 3，binary 版无需编译环境）
+# PostgreSQL driver (psycopg 3 binary, no compiler required)
 psycopg[binary]>=3.1,<4.0
-# 数据库迁移
+# schema migrations
 alembic>=1.13,<2.0
-# multipart/form-data 上传（交付物版本文件）
+# multipart upload for deliverable files
 python-multipart>=0.0.9
+# Fernet for integration secrets, and JWT verification for OIDC
+cryptography>=50,<51
+PyJWT>=2.9,<3

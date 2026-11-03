@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, CurrentUser, DbSession, ManagerUser
-from app.core.security import create_token, hash_password, using_dev_secret, verify_password
-from app.core.timeutil import utcnow
+from app.core.security import (
+    create_token,
+    hash_password,
+    using_dev_secret,
+    validate_password_strength,
+    verify_password,
+)
 from app.models.enums import Role
 from app.models.user import ROLE_LABELS, AuditLog, User
 from app.schemas.user import (
@@ -24,6 +31,8 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import audit as audit_service
+from app.services import login_guard
+from app.services import oidc as oidc_service
 from app.services import org_unit as org_service
 from app.services import ownership as ownership_service
 from app.services import position as position_service
@@ -32,20 +41,47 @@ router = APIRouter(prefix="/auth", tags=["认证与权限"])
 audit_router = APIRouter(prefix="/audit", tags=["审计"])
 
 
+def _reject_weak_password(password: str) -> None:
+    reason = validate_password_strength(password)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+
+
+def _bump_token_version(user: User) -> None:
+    user.token_version = int(user.token_version or 0) + 1
+    user.failed_login_count = 0
+    user.locked_until = None
+
+
 @router.post("/login", response_model=LoginResponse, summary="登录，换取访问令牌")
-def login(payload: LoginRequest, db: DbSession):
-    user = db.scalar(select(User).where(User.username == payload.username.strip()))
+def login(payload: LoginRequest, request: Request, db: DbSession):
+    ip = request.client.host if request.client else "unknown"
+    login_guard.assert_ip_allowed(ip)
+    username = payload.username.strip()
+    user = db.scalar(select(User).where(User.username == username))
+    if user is not None:
+        login_guard.assert_account_unlocked(user)
     if user is None or not verify_password(payload.password, user.password_hash):
         # 不区分「用户不存在」与「口令错误」，避免枚举账号
+        login_guard.note_ip(ip)
+        locked = (
+            login_guard.record_failure(db, user)
+            if user is not None
+            else login_guard.record_unknown(ip, username)
+        )
+        if locked:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="尝试次数过多，请稍后再试",
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或口令不正确")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用")
 
-    user.last_login_at = utcnow()
-    db.commit()
+    login_guard.record_success(db, user)
     db.refresh(user)
 
-    token, expires_at = create_token(user.id)
+    token, expires_at = create_token(user.id, int(user.token_version or 0))
     return LoginResponse(token=token, expires_at=expires_at, user=UserOut.model_validate(user))
 
 
@@ -58,7 +94,9 @@ def me(user: CurrentUser):
 def change_password(payload: ChangePasswordRequest, user: CurrentUser, db: DbSession):
     if not verify_password(payload.old_password, user.password_hash):
         raise HTTPException(status_code=400, detail="原口令不正确")
+    _reject_weak_password(payload.new_password)
     user.password_hash = hash_password(payload.new_password)
+    _bump_token_version(user)
     db.commit()
     return {"detail": "口令已更新，请用新口令重新登录"}
 
@@ -103,6 +141,7 @@ def list_users(
     summary="新建用户（管理员）",
 )
 def create_user(payload: UserCreate, admin: AdminUser, db: DbSession):
+    _reject_weak_password(payload.password)
     if db.scalar(select(User).where(User.username == payload.username)):
         raise HTTPException(status_code=409, detail=f"用户名 {payload.username} 已存在")
     if payload.org_unit_id is not None:
@@ -181,7 +220,9 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
         # owner 文本是展示标签，跟着账号改名走；权限仍只看 owner_user_id
         ownership_service.sync_owner_display_name(db, obj)
     if password:
+        _reject_weak_password(password)
         obj.password_hash = hash_password(password)
+        _bump_token_version(obj)
     audit_service.record(db, admin, "UPDATE", "user", obj.id, f"修改用户 {obj.username}")
     db.commit()
     db.refresh(obj)
@@ -191,6 +232,11 @@ def update_user(user_id: int, payload: UserUpdate, admin: AdminUser, db: DbSessi
 @audit_router.get("/verify", summary="校验审计哈希链（流程管理科及以上）")
 def verify_audit(user: ManagerUser, db: DbSession):
     return audit_service.verify_chain(db)
+
+
+@audit_router.get("/anchor", summary="导出审计链尾（流程管理科及以上）")
+def audit_anchor(user: ManagerUser, db: DbSession):
+    return audit_service.latest_anchor(db)
 
 
 @audit_router.get("", response_model=AuditPage, summary="审计日志（流程管理科及以上）")
@@ -216,6 +262,43 @@ def list_audit(
         stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit)
     ).all()
     return AuditPage(total=total, items=[AuditOut.model_validate(r) for r in rows])
+
+
+@router.get("/oidc/login", summary="跳转到单点登录")
+def oidc_login():
+    if not oidc_service.enabled():
+        raise HTTPException(status_code=404, detail="未配置单点登录")
+    verifier = oidc_service.new_verifier()
+    nonce = oidc_service.new_verifier()
+    state = oidc_service.pack_state(verifier, nonce)
+    url = oidc_service.authorization_url(state, nonce, verifier, oidc_service._discovery())
+    return RedirectResponse(url)
+
+
+@router.get("/oidc/callback", summary="单点登录回调")
+def oidc_callback(code: str, state: str, db: DbSession):
+    if not oidc_service.enabled():
+        raise HTTPException(status_code=404, detail="未配置单点登录")
+    try:
+        unpacked = oidc_service.unpack_state(state)
+        discovery = oidc_service._discovery()
+        tokens = oidc_service.exchange_code(code, unpacked["v"], discovery)
+        claims = oidc_service.decode_id_token(
+            tokens["id_token"], unpacked["n"], discovery["jwks_uri"]
+        )
+        username = oidc_service.username_from_claims(claims)
+    except oidc_service.OidcError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    user = db.scalar(select(User).where(User.username == username))
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=403, detail="账号未开通或已停用")
+    token, _expires = create_token(user.id, int(user.token_version or 0))
+    page = (
+        "<!doctype html><meta charset='utf-8'><script>"
+        f"localStorage.setItem('psm_token', {json.dumps(token)});"
+        "location.replace('/');</script>"
+    )
+    return HTMLResponse(page)
 
 
 @router.get("/security-check", summary="安全配置自检")

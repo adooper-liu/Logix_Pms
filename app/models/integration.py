@@ -34,7 +34,7 @@ class IntegrationEndpoint(Base):
     name: Mapped[str] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(16), default="WEBHOOK")  # WEBHOOK / ERP / OA
     url: Mapped[str] = mapped_column(String(500))
-    secret: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     events: Mapped[list] = mapped_column(JSON, default=list)  # 空数组 = 订阅全部
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -88,7 +88,7 @@ class InboundWebhook(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
-    secret: Mapped[str] = mapped_column(String(128))
+    secret: Mapped[str] = mapped_column(Text)
     process_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey(
             "process_arch.id",

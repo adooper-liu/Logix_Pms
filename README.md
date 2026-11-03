@@ -81,10 +81,11 @@ POSTGRES_PORT=55432 docker compose up -d db
 
 ```bash
 pip install -r requirements-dev.txt
+# 本地演示先复制 .env.example 为 .env（里面已打开 ALLOW_DEV_SECRET 与 SEED_ON_STARTUP）
 uvicorn app.main:app --reload --port 8123
 ```
 
-首次启动会自动建表并灌入种子数据。
+首次启动会自动建表。演示数据只在 `.env` 里同时打开 `ALLOW_DEV_SECRET` 和 `SEED_ON_STARTUP` 时灌入；生产用 `python -m scripts.bootstrap`。
 
 > Windows 上如果 `--port 8000` 报 `WinError 10013`，是 8000 落在系统保留的 TCP 端口区间里
 > （Hyper-V / WSL 常见），换端口即可。用 `netsh interface ipv4 show excludedportrange protocol=tcp`
@@ -93,7 +94,8 @@ uvicorn app.main:app --reload --port 8123
 ### 或者：整栈容器化
 
 ```bash
-docker compose --profile full up -d --build
+# 本地演示需要显式允许开发密钥，并打开演示数据。生产不要带这两项。
+ALLOW_DEV_SECRET=true SEED_ON_STARTUP=true docker compose --profile full up -d --build
 ```
 
 应用与数据库都在容器里。`api` 会等 `db` 健康检查通过再启动，启动时自动执行
@@ -193,10 +195,13 @@ python scripts/run_escalations.py --username manager
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://psm:psm_dev_password@localhost:5433/logix_pms` | 指向 Docker 里的 PostgreSQL |
 | `POSTGRES_PORT` | `5433` | docker compose 的宿主机端口，改的话要同步改 `DATABASE_URL` |
-| `SECRET_KEY` | 开发用默认值 | **生产必须替换**，`/auth/security-check` 会提示 |
-| `TOKEN_TTL_SECONDS` | `43200`（12 小时） | 令牌有效期 |
-| `SEED_ON_STARTUP` | `true` | 启动时库为空则自动灌种子数据 |
-| `CORS_ORIGINS` | `*` | 逗号分隔；生产请收紧 |
+| `SECRET_KEY` | 开发用默认值 | **生产必须替换**。未替换时进程拒绝启动，除非 `ALLOW_DEV_SECRET=true` |
+| `ALLOW_DEV_SECRET` | `false` | 仅本地演示设为 `true`。为 false 时不灌演示账号，并关闭 `/docs` |
+| `TOKEN_TTL_SECONDS` | `43200`（12 小时） | 令牌有效期。改密或管理员重置口令后旧令牌立即失效 |
+| `SEED_ON_STARTUP` | `false` | 仅当同时 `ALLOW_DEV_SECRET=true` 且库为空时才灌演示数据 |
+| `LOGIN_MAX_FAILURES` | `5` | 连续失败后锁定账号 |
+| `LOGIN_LOCKOUT_SECONDS` | `900` | 锁定时长（秒） |
+| `CORS_ORIGINS` | `http://127.0.0.1:8123,http://localhost:8123` | 逗号分隔；生产改成实际域名 |
 | `SQL_ECHO` | `false` | 打印 SQL |
 | `AUTO_MIGRATE` | `true` | 启动时执行 `alembic upgrade head`；设为 `false` 则直接 `create_all`（测试用） |
 | `ATTACHMENT_DIR` | `./var/attachments` | 交付物文件落盘目录；Docker 里映射为命名卷 `attachments` |
@@ -235,7 +240,7 @@ python scripts/import_pcf.py \
 
 触发方式：
 
-- **启动时自动灌**：`SEED_ON_STARTUP=true`（默认），且库里既没有流程架构、也没有账号；
+- **启动时自动灌**：`SEED_ON_STARTUP=true` 且 `ALLOW_DEV_SECRET=true`，并且库里既没有流程架构、也没有账号；
 - **手动灌**：`python -m scripts.seed`；`--reset` 会清空重灌（丢业务数据），
   `--benchmarks` 只重建对标框架。
 
@@ -254,6 +259,7 @@ docker compose --profile full up -d --build
 
 ```dotenv
 SECRET_KEY=<用 python -c "import secrets; print(secrets.token_urlsafe(48))" 生成>
+ALLOW_DEV_SECRET=false
 POSTGRES_PASSWORD=<强口令>
 SEED_ON_STARTUP=false
 CORS_ORIGINS=https://pms.example.com

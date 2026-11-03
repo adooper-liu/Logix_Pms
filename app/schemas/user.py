@@ -40,13 +40,13 @@ class LoginResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     display_name: str = Field(max_length=64)
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     role: Role = Role.VIEWER
     department: Optional[str] = None
     org_unit_id: Optional[int] = None
@@ -60,7 +60,7 @@ class UserUpdate(BaseModel):
     org_unit_id: Optional[int] = None
     position_id: Optional[int] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 class AuditOut(ORMModel):

@@ -21,6 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.secrets import decrypt_secret
 from app.core.timeutil import utcnow
 from app.models.integration import IntegrationDelivery, IntegrationEndpoint
 from app.schemas.integration import (
@@ -186,7 +187,7 @@ def deliver_pending(db: Session, limit: int = 50) -> DeliveryRunResult:
             "X-Logix-Delivery": str(delivery.id),
         }
         if endpoint.secret:
-            headers["X-Logix-Signature"] = _signature(endpoint.secret, body)
+            headers["X-Logix-Signature"] = _signature(decrypt_secret(endpoint.secret) or "", body)
         code, error = _post_json(endpoint.url, body, headers)
         delivery.attempts += 1
         delivery.response_code = code

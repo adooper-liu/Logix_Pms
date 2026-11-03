@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import hash_password, validate_password_strength
 from app.core.timeutil import utcnow
 from app.models import AuthorizationException, AuthorizationRule
 from app.models.adoption import (
@@ -1747,8 +1747,9 @@ def ensure_admin(
     username = username.strip()
     if len(username) < 3:
         raise ValueError("管理员用户名至少 3 个字符")
-    if len(password) < 8:
-        raise ValueError("管理员口令至少 8 个字符")
+    reason = validate_password_strength(password)
+    if reason:
+        raise ValueError(reason)
 
     user = db.scalar(select(User).where(User.username == username))
     if user is not None:
@@ -1756,6 +1757,7 @@ def ensure_admin(
             raise ValueError(f"账号 {username} 已存在且不是管理员，拒绝覆盖")
         if reset_password:
             user.password_hash = hash_password(password)
+            user.token_version = int(user.token_version or 0) + 1
             db.commit()
         return {
             "username": username,

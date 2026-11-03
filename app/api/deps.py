@@ -38,12 +38,15 @@ def get_current_user(
 ) -> User:
     if creds is None or not creds.credentials:
         raise _unauthorized("未登录，请先获取令牌")
-    user_id = parse_token(creds.credentials)
-    if user_id is None:
+    parsed = parse_token(creds.credentials)
+    if parsed is None:
         raise _unauthorized("令牌无效或已过期，请重新登录")
+    user_id, token_version = parsed
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise _unauthorized("用户不存在或已停用")
+    if int(user.token_version or 0) != token_version:
+        raise _unauthorized("令牌已失效，请重新登录")
     return user
 
 
