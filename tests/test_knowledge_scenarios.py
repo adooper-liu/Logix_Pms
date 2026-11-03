@@ -426,7 +426,9 @@ def test_archive_candidates_and_archive(client, viewer_client):
         recommended = client.post(
             f"{API}/knowledge/recommend", json={"scenario_codes": ["RACI"], "limit": 20}
         ).json()["items"]
-        assert all(row["id"] != item["id"] for row in recommended), "归档条目仍被推荐"
+        assert all(row["kind"] != "knowledge" or row["id"] != item["id"] for row in recommended), (
+            "归档条目仍被推荐"
+        )
         remaining = client.get(f"{API}/knowledge/archive-candidates").json()
         assert all(row["id"] != item["id"] for row in remaining)
     finally:

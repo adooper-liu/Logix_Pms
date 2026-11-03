@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 API = "/api/v1"
 
 
@@ -144,12 +146,22 @@ def test_capacity_rules(client):
     assert mismatch.status_code == 400
     assert "不属于" in mismatch.json()["detail"]
 
+    periods = {
+        row["period"]
+        for row in client.get(f"{API}/workload/capacity").json()
+        if row["org_unit_id"] == existing["org_unit_id"]
+        and row["position_id"] == existing["position_id"]
+    }
+    year = 2026
+    while date(year, 11, 1).isoformat() in periods:
+        year += 1
+    period = date(year, 11, 1).isoformat()
     created = client.post(
         f"{API}/workload/capacity",
         json={
             "org_unit_id": existing["org_unit_id"],
             "position_id": existing["position_id"],
-            "period": "2026-11-01",
+            "period": period,
             "headcount": 2,
             "available_hours_per_person": 160,
             "attendance_rate": 0.9,
@@ -157,7 +169,7 @@ def test_capacity_rules(client):
         },
     )
     assert created.status_code == 201, created.text
-    assert created.json()["period"] == "2026-11-01"
+    assert created.json()["period"] == period
     assert created.json()["available_minutes"] == 2 * 160 * 60 * 0.9 * 0.95
 
 
