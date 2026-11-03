@@ -19,64 +19,59 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("kpi_definition", sa.Column("data_flow_id", sa.Integer(), nullable=True))
-    op.add_column("kpi_definition", sa.Column("inbound_webhook_id", sa.Integer(), nullable=True))
-    op.create_index("ix_kpi_definition_data_flow_id", "kpi_definition", ["data_flow_id"])
-    op.create_index(
-        "ix_kpi_definition_inbound_webhook_id", "kpi_definition", ["inbound_webhook_id"]
-    )
-    op.create_foreign_key(
-        "fk_kpi_definition_data_flow",
-        "kpi_definition",
-        "data_flow",
-        ["data_flow_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_foreign_key(
-        "fk_kpi_definition_inbound_webhook",
-        "kpi_definition",
-        "inbound_webhook",
-        ["inbound_webhook_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.add_column("exception_event", sa.Column("source_kpi_id", sa.Integer(), nullable=True))
-    op.add_column("exception_event", sa.Column("source_instance_id", sa.Integer(), nullable=True))
-    op.create_index("ix_exception_event_source_kpi_id", "exception_event", ["source_kpi_id"])
-    op.create_index(
-        "ix_exception_event_source_instance_id", "exception_event", ["source_instance_id"]
-    )
-    op.create_foreign_key(
-        "fk_exception_event_source_kpi",
-        "exception_event",
-        "kpi_definition",
-        ["source_kpi_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_foreign_key(
-        "fk_exception_event_source_instance",
-        "exception_event",
-        "process_instance",
-        ["source_instance_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    # SQLite 不能直接 ALTER 加外键，必须走 batch 重建表。
+    with op.batch_alter_table("kpi_definition") as batch_op:
+        batch_op.add_column(sa.Column("data_flow_id", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("inbound_webhook_id", sa.Integer(), nullable=True))
+        batch_op.create_index("ix_kpi_definition_data_flow_id", ["data_flow_id"])
+        batch_op.create_index("ix_kpi_definition_inbound_webhook_id", ["inbound_webhook_id"])
+        batch_op.create_foreign_key(
+            "fk_kpi_definition_data_flow",
+            "data_flow",
+            ["data_flow_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        batch_op.create_foreign_key(
+            "fk_kpi_definition_inbound_webhook",
+            "inbound_webhook",
+            ["inbound_webhook_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+    with op.batch_alter_table("exception_event") as batch_op:
+        batch_op.add_column(sa.Column("source_kpi_id", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("source_instance_id", sa.Integer(), nullable=True))
+        batch_op.create_index("ix_exception_event_source_kpi_id", ["source_kpi_id"])
+        batch_op.create_index("ix_exception_event_source_instance_id", ["source_instance_id"])
+        batch_op.create_foreign_key(
+            "fk_exception_event_source_kpi",
+            "kpi_definition",
+            ["source_kpi_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        batch_op.create_foreign_key(
+            "fk_exception_event_source_instance",
+            "process_instance",
+            ["source_instance_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_exception_event_source_instance", "exception_event", type_="foreignkey"
-    )
-    op.drop_constraint("fk_exception_event_source_kpi", "exception_event", type_="foreignkey")
-    op.drop_index("ix_exception_event_source_instance_id", table_name="exception_event")
-    op.drop_index("ix_exception_event_source_kpi_id", table_name="exception_event")
-    op.drop_column("exception_event", "source_instance_id")
-    op.drop_column("exception_event", "source_kpi_id")
-    op.drop_constraint("fk_kpi_definition_inbound_webhook", "kpi_definition", type_="foreignkey")
-    op.drop_constraint("fk_kpi_definition_data_flow", "kpi_definition", type_="foreignkey")
-    op.drop_index("ix_kpi_definition_inbound_webhook_id", table_name="kpi_definition")
-    op.drop_index("ix_kpi_definition_data_flow_id", table_name="kpi_definition")
-    op.drop_column("kpi_definition", "inbound_webhook_id")
-    op.drop_column("kpi_definition", "data_flow_id")
+    with op.batch_alter_table("exception_event") as batch_op:
+        batch_op.drop_constraint("fk_exception_event_source_instance", type_="foreignkey")
+        batch_op.drop_constraint("fk_exception_event_source_kpi", type_="foreignkey")
+        batch_op.drop_index("ix_exception_event_source_instance_id")
+        batch_op.drop_index("ix_exception_event_source_kpi_id")
+        batch_op.drop_column("source_instance_id")
+        batch_op.drop_column("source_kpi_id")
+    with op.batch_alter_table("kpi_definition") as batch_op:
+        batch_op.drop_constraint("fk_kpi_definition_inbound_webhook", type_="foreignkey")
+        batch_op.drop_constraint("fk_kpi_definition_data_flow", type_="foreignkey")
+        batch_op.drop_index("ix_kpi_definition_inbound_webhook_id")
+        batch_op.drop_index("ix_kpi_definition_data_flow_id")
+        batch_op.drop_column("inbound_webhook_id")
+        batch_op.drop_column("data_flow_id")

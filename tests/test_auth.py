@@ -279,6 +279,46 @@ def test_duplicate_username_rejected(client):
     assert r.status_code == 409
 
 
+def test_login_locks_after_repeated_failures(client, anon_client):
+    created = client.post(
+        f"{API}/auth/users",
+        json={
+            "username": "lock_user",
+            "display_name": "锁定用户",
+            "password": "lock123456",
+            "role": "VIEWER",
+        },
+    )
+    assert created.status_code == 201, created.text
+    for _ in range(4):
+        failed = anon_client.post(
+            f"{API}/auth/login", json={"username": "lock_user", "password": "wrong-pass"}
+        )
+        assert failed.status_code == 401
+    locked = anon_client.post(
+        f"{API}/auth/login", json={"username": "lock_user", "password": "wrong-pass"}
+    )
+    assert locked.status_code == 429
+    still = anon_client.post(
+        f"{API}/auth/login", json={"username": "lock_user", "password": "lock123456"}
+    )
+    assert still.status_code == 429
+
+
+def test_demo_password_rejected_for_new_users(client):
+    rejected = client.post(
+        f"{API}/auth/users",
+        json={
+            "username": "demo_pw_user",
+            "display_name": "演示口令",
+            "password": "admin123",
+            "role": "VIEWER",
+        },
+    )
+    assert rejected.status_code == 400
+    assert "演示口令" in rejected.json()["detail"]
+
+
 def test_change_own_password(client):
     created = client.post(
         f"{API}/auth/users",
@@ -311,6 +351,8 @@ def test_change_own_password(client):
         ).status_code
         == 200
     )
+    # 改密前签发的令牌必须立刻失效
+    assert client.get(f"{API}/auth/me", headers=headers).status_code == 401
 
 
 # ------------------------------------------------------------------ 审计留痕

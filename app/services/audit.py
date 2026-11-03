@@ -38,7 +38,11 @@ def record(
 ) -> AuditLog:
     """登记一条写操作，并接上哈希链。调用方负责 commit。"""
     db.flush()
-    previous = db.scalar(select(AuditLog).order_by(AuditLog.id.desc()).limit(1))
+    stmt = select(AuditLog).order_by(AuditLog.id.desc()).limit(1)
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        stmt = stmt.with_for_update()
+    previous = db.scalar(stmt)
     prev_hash = previous.hash if previous else None
     entry = AuditLog(
         user_id=user.id if user else None,
@@ -55,6 +59,18 @@ def record(
     db.add(entry)
     db.flush()
     return entry
+
+
+def latest_anchor(db: Session) -> dict:
+    """导出链尾，供放到业务库之外做锚定。"""
+    row = db.scalar(select(AuditLog).order_by(AuditLog.id.desc()).limit(1))
+    if row is None:
+        return {"id": None, "hash": None, "created_at": None}
+    return {
+        "id": row.id,
+        "hash": row.hash,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def verify_chain(db: Session, limit: int = 10000) -> dict:

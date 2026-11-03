@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession, ManagerUser
+from app.core.secrets import encrypt_secret
 from app.models.integration import (
     InboundEvent,
     InboundWebhook,
@@ -68,7 +69,7 @@ def create_endpoint(payload: IntegrationEndpointCreate, db: DbSession, user: Man
         name=payload.name,
         kind=payload.kind,
         url=url,
-        secret=payload.secret,
+        secret=encrypt_secret(payload.secret),
         events=events,
         is_active=payload.is_active,
     )
@@ -106,6 +107,8 @@ def update_endpoint(
         data["url"] = integration_service.validate_url(data["url"])
     if "events" in data and data["events"] is not None:
         data["events"] = integration_service.validate_events(data["events"])
+    if "secret" in data:
+        data["secret"] = encrypt_secret(data["secret"])
     for key, value in data.items():
         setattr(endpoint, key, value)
     audit_service.record(
@@ -280,7 +283,7 @@ def create_inbound_hook(payload: InboundWebhookCreate, db: DbSession, user: Mana
     hook = InboundWebhook(
         code=code,
         name=name,
-        secret=secret,
+        secret=encrypt_secret(secret),
         process_id=payload.process_id,
         run_as_user_id=payload.run_as_user_id,
         actions=actions,
@@ -339,7 +342,7 @@ def update_inbound_hook(
         )
     secret = inbound_service.generate_secret() if rotate else None
     if secret is not None:
-        hook.secret = secret
+        hook.secret = encrypt_secret(secret)
     audit_service.record(
         db,
         user,

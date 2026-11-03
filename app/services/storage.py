@@ -132,10 +132,69 @@ class LocalStorage:
 _storage: Optional[LocalStorage] = None
 
 
-def get_storage() -> LocalStorage:
+class S3Storage:
+    """S3 兼容对象存储。client 是 boto3 client，测试可以传入假对象。"""
+
+    def __init__(self, bucket: str, client):
+        self.bucket = bucket
+        self.client = client
+
+    def save(self, key: str, stream: BinaryIO, max_bytes: int) -> Tuple[str, int]:
+        data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise StorageError(f"文件超过大小上限（{max_bytes // (1024 * 1024)} MB）")
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+        return hashlib.sha256(data).hexdigest(), len(data)
+
+    def open(self, key: str) -> BinaryIO:
+        import io
+
+        body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+        return io.BytesIO(body)
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def exists(self, key: str) -> bool:
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            if isinstance(response, dict):
+                code = response.get("Error", {}).get("Code")
+                status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                if code in {"404", "NoSuchKey", "NotFound"} or status_code == 404:
+                    return False
+            raise
+        return True
+
+
+def _s3_client():
+    try:
+        import boto3
+    except ImportError as exc:
+        raise StorageError("ATTACHMENT_BACKEND=s3 需要安装 boto3") from exc
+    if not settings.s3_bucket:
+        raise StorageError("S3_BUCKET 未配置")
+    return boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint or None,
+        aws_access_key_id=settings.s3_access_key or None,
+        aws_secret_access_key=settings.s3_secret_key or None,
+        region_name=settings.s3_region or None,
+    )
+
+
+def get_storage() -> AttachmentStorage:
     """按配置返回存储实现。测试会先改 ATTACHMENT_DIR 再导入 app。"""
     global _storage
-    if _storage is None or str(_storage.root) != settings.attachment_dir:
+    if settings.attachment_backend == "s3":
+        return S3Storage(settings.s3_bucket, _s3_client())
+    if (
+        _storage is None
+        or not isinstance(_storage, LocalStorage)
+        or str(_storage.root) != settings.attachment_dir
+    ):
         _storage = LocalStorage(Path(settings.attachment_dir))
     return _storage
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
     MANAGER_ROLES,
+    CurrentUser,
     DbSession,
     ManagerUser,
     WriteUser,
@@ -65,6 +66,8 @@ from app.services import evidence as evidence_service
 from app.services import improvement as improvement_service
 from app.services import kpi as kpi_service
 from app.services import methodology as methodology_service
+from app.services import org_access
+from app.services import org_unit as org_service
 from app.services import project_workflow as workbench_service
 from app.services import setup_program as setup_service
 from app.services import startup as startup_service
@@ -198,6 +201,7 @@ def _refresh_shared_measures(db: DbSession) -> None:
 @router.get("", response_model=Page[ProjectOut], summary="项目列表（多维筛选）")
 def list_projects(
     db: DbSession,
+    user: CurrentUser,
     methodology: Optional[Methodology] = None,
     status_: Optional[ProjectStatus] = Query(default=None, alias="status"),
     stage: Optional[int] = Query(default=None, ge=1, le=9),
@@ -230,6 +234,7 @@ def list_projects(
         stmt = stmt.where(
             or_(Project.name.like(like), Project.code.like(like), Project.objective.like(like))
         )
+    stmt = org_access.restrict(stmt, db, user, Project.org_unit_id)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
@@ -269,6 +274,12 @@ def create_project(payload: ProjectCreate, db: DbSession, user: WriteUser):
     if user.role == Role.OWNER.value:
         data["owner_user_id"] = user.id
         data["owner"] = user.display_name
+        data["org_unit_id"] = user.org_unit_id
+    elif data.get("org_unit_id") is not None:
+        try:
+            org_service.require_org(db, data["org_unit_id"])
+        except org_service.OrgError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not data.get("owner"):
         raise HTTPException(status_code=400, detail="必须指定 Owner（owner 或 owner_user_id）")
     code = payload.code or improvement_service.next_project_code(db)
@@ -449,11 +460,12 @@ def create_setup_program(payload: SetupProgramCreate, db: DbSession, user: Manag
 @router.get(
     "/{project_id}", response_model=ProjectDetail, summary="项目详情（含五阶段进度与下一步）"
 )
-def get_project(project_id: int, db: DbSession):
+def get_project(project_id: int, db: DbSession, user: CurrentUser):
     _refresh_shared_measures(db)
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
+    org_access.ensure_visible(db, user, project.org_unit_id)
 
     steps = db.scalars(
         select(ProjectStep)

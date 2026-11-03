@@ -65,7 +65,36 @@ class Settings:
     api_prefix: str = "/api/v1"
 
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL", DEFAULT_DATABASE_URL))
-    seed_on_startup: bool = field(default_factory=lambda: _env_bool("SEED_ON_STARTUP", True))
+    # 默认不灌演示库。本地演示在 .env 里显式打开，并同时设置 ALLOW_DEV_SECRET=true。
+    seed_on_startup: bool = field(default_factory=lambda: _env_bool("SEED_ON_STARTUP", False))
+    # 默认密钥只能在明确打开这项时启动，避免把开发密钥带进生产。
+    allow_dev_secret: bool = field(default_factory=lambda: _env_bool("ALLOW_DEV_SECRET", False))
+    login_max_failures: int = field(default_factory=lambda: int(_env("LOGIN_MAX_FAILURES", "5")))
+    login_lockout_seconds: int = field(
+        default_factory=lambda: int(_env("LOGIN_LOCKOUT_SECONDS", "900"))
+    )
+    login_ip_max_attempts: int = field(
+        default_factory=lambda: int(_env("LOGIN_IP_MAX_ATTEMPTS", "100"))
+    )
+    login_ip_window_seconds: int = field(
+        default_factory=lambda: int(_env("LOGIN_IP_WINDOW_SECONDS", "600"))
+    )
+    oidc_issuer: str = field(default_factory=lambda: _env("OIDC_ISSUER", "").rstrip("/"))
+    oidc_client_id: str = field(default_factory=lambda: _env("OIDC_CLIENT_ID", ""))
+    oidc_client_secret: str = field(default_factory=lambda: _env("OIDC_CLIENT_SECRET", ""))
+    oidc_redirect_uri: str = field(
+        default_factory=lambda: _env(
+            "OIDC_REDIRECT_URI", "http://127.0.0.1:8123/api/v1/auth/oidc/callback"
+        )
+    )
+    attachment_backend: str = field(
+        default_factory=lambda: _env("ATTACHMENT_BACKEND", "local").strip().lower()
+    )
+    s3_endpoint: str = field(default_factory=lambda: _env("S3_ENDPOINT", ""))
+    s3_bucket: str = field(default_factory=lambda: _env("S3_BUCKET", ""))
+    s3_access_key: str = field(default_factory=lambda: _env("S3_ACCESS_KEY", ""))
+    s3_secret_key: str = field(default_factory=lambda: _env("S3_SECRET_KEY", ""))
+    s3_region: str = field(default_factory=lambda: _env("S3_REGION", "us-east-1"))
     # true：启动时执行 alembic 迁移（生产默认）
     # false：直接 create_all（测试/临时环境用，跳过迁移链）
     auto_migrate: bool = field(default_factory=lambda: _env_bool("AUTO_MIGRATE", True))
@@ -73,7 +102,11 @@ class Settings:
 
     cors_origins: Tuple[str, ...] = field(
         default_factory=lambda: tuple(
-            origin.strip() for origin in _env("CORS_ORIGINS", "*").split(",") if origin.strip()
+            origin.strip()
+            for origin in _env("CORS_ORIGINS", "http://127.0.0.1:8123,http://localhost:8123").split(
+                ","
+            )
+            if origin.strip()
         )
     )
 

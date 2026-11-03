@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.secrets import decrypt_secret
 from app.core.timeutil import utcnow
 from app.models.enums import Role
 from app.models.integration import InboundEvent, InboundWebhook
@@ -291,7 +292,7 @@ def receive(
     if not hook.secret:
         raise HTTPException(status_code=403, detail="入站 Webhook 未配置密钥")
 
-    verify_signature(hook.secret, timestamp, signature, raw_body)
+    verify_signature(decrypt_secret(hook.secret) or "", timestamp, signature, raw_body)
 
     try:
         data = json.loads(raw_body or b"{}")

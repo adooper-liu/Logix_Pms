@@ -8,7 +8,8 @@
     python -m scripts.bootstrap --reset-password    # 已存在同名管理员时重置口令
 
 生产部署前必须设置：
-    SEED_ON_STARTUP=false      # 否则空库首次启动会灌演示流程/项目
+    SEED_ON_STARTUP=false
+    ALLOW_DEV_SECRET=false
     SECRET_KEY=<随机串>
 """
 
