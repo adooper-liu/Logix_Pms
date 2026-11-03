@@ -17,6 +17,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from verify_process_classification import verify_process_classification
+from verify_tool_sheet import verify_tool_sheet_save
 
 # Windows 控制台默认是 GBK，中文输出会变乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -3136,6 +3137,7 @@ def main() -> int:
         check("工作流推进动作闭环", project_step_actions)
         check("立项向导内嵌工具详情", wizard_tool_modal)
         check("立项向导（真实入库）", project_wizard)
+        check("工具模板保存不自动申报效果", lambda: verify_tool_sheet_save(page, base))
         check("工具箱详情 + 按问题找工具", toolbox)
         check("交付物关联流程模型", deliverable_model_link)
         check("交付物与模板库", deliverables_view)

@@ -45,6 +45,10 @@
 | [bpm-lifecycle-gap-and-roadmap.md](bpm-lifecycle-gap-and-roadmap.md) | §1 | TR-RM-01～22 | |
 | [bpm-lifecycle-implementation-spec.md](bpm-lifecycle-implementation-spec.md) | §2–§3 | TR-SP + TR-R0～R5 | |
 | [bpm-interface-content-standard.md](bpm-interface-content-standard.md) | §4、§6 | TR-UX + TR-IA | |
+| [product-language-inventory.md](product-language-inventory.md) | §6 | 重点差异/字段/字典；非全量已实施目录 | |
+| [page-responsibility-and-decomposition.md](page-responsibility-and-decomposition.md) | §6 | 23入口及S1–S5候选，不等于B1切片 | |
+| [document-review-handoff.md](document-review-handoff.md) | 终审输入 | 全量文档评审范围，不受B1子集裁剪 | |
+| [独立评审brief](reviews/document-review-brief.md) / [附录](reviews/document-review-findings.md) / [终审](reviews/document-review-final.md) | 终审输入/裁决 | 实际覆盖与未关闭项分开 | |
 | [process-modeling-repository-gap.md](process-modeling-repository-gap.md) | §11.1 | TR-SPC-MDL-* | |
 | [process-analysis-method-chain.md](process-analysis-method-chain.md) | §11.2 | TR-SPC-ANA-* | |
 | [process-design-small-loop.md](process-design-small-loop.md) | §11.3 | TR-SPC-DES-* | |
@@ -61,7 +65,7 @@
 | [bpm-r1-implementability-review.md](bpm-r1-implementability-review.md) | §12 | TR-META-R1 | |
 | 本文 | §12 | TR-META-TRC | |
 
-**不在原则 §9、不纳入 BPM 审定闭环的 docs/**：如 `process-execution-gap-analysis.md`、`usage-guide.md` 等历史/工程资料 — 标记 **OUT-OF-SCOPE**（可引用，不作 B1 阻塞项）。
+**B1实施范围外不等于综合评审范围外。** `process-execution-gap-analysis.md`、`usage-guide.md`等历史/工程资料可以不产生B1实施项，但仍属[全量评审任务书](document-review-handoff.md)要求的审读/分类范围；实际错误若影响当前安全或业务判断仍单独立项，不因OUT-OF-SCOPE标签消失。
 
 ---
 
@@ -413,7 +417,7 @@
 | TR-SPC-ANA-08 | 8 | 分析交付包 | LATER |
 | TR-SPC-ANA-09 | 9 | 页面/后端落地 | LATER |
 | TR-SPC-ANA-10 | 10 | 演练示例 | N/A |
-| TR-SPC-ANA-B1 | 4–5 | 可早于项目/上线（无项目核验边界） | B1-min | TR-R2-03 |
+| TR-SPC-ANA-B1 | 4–5 | 可早于项目/上线（无项目核验边界） | B1-min；TR-R2-03 |
 
 ### 11.3 设计 — process-design-small-loop.md
 
@@ -421,13 +425,13 @@
 |---|---|---|---|
 | TR-SPC-DES-01 | 1 | 设计有效性未证明 | LATER |
 | TR-SPC-DES-02 | 2 | 能力对标 | LATER |
-| TR-SPC-DES-03 | 3 | BPR 原则 vs ECRS | LATER | TR-AR-C11 |
+| TR-SPC-DES-03 | 3 | BPR 原则 vs ECRS | LATER；TR-AR-C11 |
 | TR-SPC-DES-04 | 4 | 小闭环作业链 | LATER |
 | TR-SPC-DES-05 | 5 | 最小贯通实例 | LATER |
 | TR-SPC-DES-06 | 6 | 设计交付标准 | LATER |
 | TR-SPC-DES-07 | 7–8 | 理论/UI；后端增量 | LATER |
 | TR-SPC-DES-08 | 9 | 验证清单 | LATER |
-| TR-SPC-DES-B1 | 6 | 接收≠发布≠达标 | PRIN | TR-PR-07 |
+| TR-SPC-DES-B1 | 6 | 接收≠发布≠达标 | PRIN；TR-PR-07 |
 
 ### 11.4 绩效 — process-performance-decision-loop.md
 
@@ -436,7 +440,7 @@
 | TR-SPC-PRF-01 | 1–2 | 目标与差距 | LATER |
 | TR-SPC-PRF-02 | 3 | CSF→KPI 决策用途 | LATER |
 | TR-SPC-PRF-03 | 4 | 四维/计分卡不混 | LATER |
-| TR-SPC-PRF-04 | 5 | 数据可信可复算 | **B1-S2a,S2b** | TR-RM-08 |
+| TR-SPC-PRF-04 | 5 | 数据可信可复算 | **B1-S2a,S2b**；TR-RM-08 |
 | TR-SPC-PRF-05 | 6 | 绩效小闭环 | LATER |
 | TR-SPC-PRF-06 | 7 | 红灯≠自动立项 | LATER |
 | TR-SPC-PRF-07 | 8 | 三层监控 | LATER |
@@ -453,12 +457,12 @@
 | TR-SPC-TRN-03 | 4–5 | 三层分类；实践纵深 | LATER |
 | TR-SPC-TRN-04 | 6 | 一套事实多视角 | PRIN |
 | TR-SPC-TRN-05 | 7 | 转型小闭环 | LATER |
-| TR-SPC-TRN-06 | 8 | 保障原记录核验 | LATER | TR-R1-05 |
+| TR-SPC-TRN-06 | 8 | 保障原记录核验 | LATER；TR-R1-05 |
 | TR-SPC-TRN-07 | 9 | 能力契约先于连接器 | LATER |
-| TR-SPC-TRN-08 | 10 | 恢复非备份即过 | LATER | R3 |
+| TR-SPC-TRN-08 | 10 | 恢复非备份即过 | LATER；R3 |
 | TR-SPC-TRN-09 | 11 | 界面落点 | DOC-IA |
 | TR-SPC-TRN-10 | 12 | 实施顺序 | LATER |
-| TR-SPC-TRN-B1 | 8 | 保存记录≠方法有效 | **B1-S5** | TR-SP-06 |
+| TR-SPC-TRN-B1 | 8 | 保存记录≠方法有效 | **B1-S5**；TR-SP-06 |
 
 ### 11.6 技术 — bpm-technology-open-contracts.md
 
@@ -467,14 +471,14 @@
 | TR-SPC-TEC-01 | 1–2 | 原则与差距 | LATER |
 | TR-SPC-TEC-02 | 3–4 | 输出/输入资产 | LATER |
 | TR-SPC-TEC-03 | 5 | 四通道 | LATER |
-| TR-SPC-TEC-04 | 6 | 传输/执行/结果分离 | LATER | R3 |
-| TR-SPC-TEC-05 | 7 | RPA/挖掘/AI 边界 | LATER | TR-RM-06 |
+| TR-SPC-TEC-04 | 6 | 传输/执行/结果分离 | LATER；R3 |
+| TR-SPC-TEC-05 | 7 | RPA/挖掘/AI 边界 | LATER；TR-RM-06 |
 | TR-SPC-TEC-06 | 8 | 安全治理 | LATER |
 | TR-SPC-TEC-07 | 9 | 接入小闭环 | LATER |
 | TR-SPC-TEC-08 | 10 | 练习场景 | N/A |
 | TR-SPC-TEC-09 | 11 | 模块落点分批 | LATER |
 | TR-SPC-TEC-10 | 12 | 验收与边界 | LATER |
-| TR-SPC-TEC-B1 | 11–12 | Flowable 不在第一批 | PRIN | 非目标 |
+| TR-SPC-TEC-B1 | 11–12 | Flowable 不在第一批 | PRIN；非目标 |
 
 ### 11.7 组织 — process-organization-governance-loop.md
 
@@ -489,7 +493,7 @@
 | TR-SPC-ORG-07 | 7 | 界面呈现合力 | DOC-IA |
 | TR-SPC-ORG-08 | 8 | 工程边界 | LATER |
 | TR-SPC-ORG-09 | 9 | 顺序与验收 | LATER |
-| TR-SPC-ORG-B1 | 4–6 | 20 项保障不造任务 | LATER | TR-R1-05 |
+| TR-SPC-ORG-B1 | 4–6 | 20 项保障不造任务 | LATER；TR-R1-05 |
 
 ### 11.8 企业 — enterprise-process-strategy-loop.md
 
@@ -503,11 +507,11 @@
 | TR-SPC-ENT-06 | 6 | 组合管理 | LATER |
 | TR-SPC-ENT-07 | 7 | APQC 关系 | LATER |
 | TR-SPC-ENT-08 | 8 | 端到端治理 | LATER |
-| TR-SPC-ENT-09 | 9 | 九模块交接总表 | PRIN | 非九阶段 |
+| TR-SPC-ENT-09 | 9 | 九模块交接总表 | PRIN；非九阶段 |
 | TR-SPC-ENT-10 | 10 | 证据跨层不累加收益 | PRIN |
 | TR-SPC-ENT-11 | 11 | 界面后端接续 | LATER |
 | TR-SPC-ENT-12 | 12 | 优先顺序 | LATER |
-| TR-SPC-ENT-B1 | 12 | 第一批不变全量 | PRIN | Brief 非目标 |
+| TR-SPC-ENT-B1 | 12 | 第一批不变全量 | PRIN；Brief 非目标 |
 
 ---
 

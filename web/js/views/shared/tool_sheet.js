@@ -90,22 +90,11 @@ async function submitToolSheet(code) {
       values,
       make_objectives: !!(keep && keep.checked),
     });
-    if (state.toolbox.step) {
-      const note = saved.objective_codes && saved.objective_codes.length
-        ? '写成 ' + saved.objective_codes.join('、')
-        : saved.title;
-      await POST('/tools/' + encodeURIComponent(code) + '/usage', {
-        step_no: state.toolbox.step,
-        project_id: sheetProjectId(),
-        outcome: 'EFFECTIVE',
-        note: '步骤 ' + state.toolbox.step + ' 填写模板：' + note,
-      }).catch(() => {});
-    }
     const where = (saved.process_code || '') + ' ' + (saved.process_name || '');
     const made = saved.objective_codes && saved.objective_codes.length
-      ? '，写成 ' + saved.objective_codes.join('、')
+      ? '；已生成目标 ' + saved.objective_codes.join('、')
       : '';
-    toast('已挂到 ' + where.trim() + made);
+    toast('方法记录已保存，已关联' + where.trim() + made);
     closeModal();
     const refresh = RENDERERS[state.view];
     if (typeof refresh === 'function') refresh();
