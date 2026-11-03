@@ -1,7 +1,8 @@
 # BPM 产品基本原则与文档契约
 
 > 状态：综合评审基准。沿用用户已明确的产品边界；本文给出跨文档统一契约，不代表新增能力已经实现或获准上线。
-> 基线：`ca20f88`；2026-11-03。实施前须再核对代码。
+> 基线：`4607792`；2026-11-03。实施前须再核对 HEAD；编码授权以 [审定 Brief](bpm-first-batch-brief.md) 为准。  
+> **审定清单：** 本文每条契约在 [需求追溯表 §8](bpm-requirements-traceability.md#8-产品基本原则追溯bpm-product-principlesmd)（TR-PR-*）逐节可勾选；§9 所列产物在追溯表 [§0.4](bpm-requirements-traceability.md#04-产物全覆盖登记对齐-产品原则-9bpm-product-principlesmd) 登记。
 
 ## 1. 一条基本原则
 
@@ -85,7 +86,7 @@
 
 | 范围 | 定位 |
 |---|---|
-| 第一批开发候选 | 现有路由说明、薄轮次对照、必要原表引用/快照、只读追溯及本轮核验入口；业务API/迁移/权限与测试需先有开发计划 |
+| 第一批开发候选 | 现有路由说明、薄轮次对照、必要原表引用/快照、只读追溯及本轮核验入口；见 [Brief](bpm-first-batch-brief.md) / [开发计划](bpm-first-batch-dev-plan.md)，**审定通过后再编码** |
 | 后续专业能力 | 方法直接操作、ABC/CX、方案验证、治理差距、战略组合、保障/复盘等，分别以原对象扩展，逐项验证 |
 | R3引擎接入 | 已采纳Flowable方向；部署/定义映射、可靠命令/事件、并行活动与恢复在接入计划中确定 |
 | 未批准结构 | 独立发布包/执行范围/方案库/基线库/指标修订库/验收计划库/控制计划库等，不因文档提过就自动纳入实施 |
@@ -112,14 +113,51 @@ BPMN标准、企业风格、业务真实性、引擎/分析支持分域；完整
 
 ## 9. 产物分工与阅读顺序
 
-| 产物 | 唯一职责 |
-|---|---|
-| 本文 | 产品语义、证据与分期契约；修改需明确改变哪条原则，不靠“另一文档优先”掩盖冲突 |
-| [总路线](bpm-lifecycle-gap-and-roadmap.md) | 当前差距和R0–R5工作分组，含证据链解释；不充当建表/API清单 |
-| [落地规格](bpm-lifecycle-implementation-spec.md) | 统一对象、当前第一批边界、原模块落点及验收；未来新增结构以未决设计标识，不保留冲突的新增指令 |
-| [文案规范](bpm-interface-content-standard.md) | 页面信息结构、术语、真实反馈；当前发布和R3异步反馈分别说明 |
-| 八份专项 | 建模/分析/设计/绩效/转型/技术/组织/企业各自的方法作业与交付，引用共用契约，不重定义对象和阶段 |
-| README | 当前代码的定位和运行说明，不把待评审方案宣传为现有功能 |
-| [综合评审记录](bpm-artifacts-review.md) | 已识别错位、修改位置、剩余决定与真实验证范围，不作为新实施需求源 |
+| 产物 | 唯一职责 | 追溯表 |
+|---|---|---|
+| **本文** | 产品语义、证据与分期契约；修改需明确改变哪条原则 | [§8 TR-PR-*](bpm-requirements-traceability.md#8-产品基本原则追溯bpm-product-principlesmd) |
+| [总路线](bpm-lifecycle-gap-and-roadmap.md) | 差距和 R0–R5 分组；非 API 清单 | [§1](bpm-requirements-traceability.md#1-路线文档追溯gap-and-roadmap) |
+| [落地规格](bpm-lifecycle-implementation-spec.md) | 对象、第一批边界、模块落点 | [§2–§3](bpm-requirements-traceability.md#2-落地规格追溯--总契约13) |
+| [文案规范](bpm-interface-content-standard.md) | 页面结构、术语、反馈 | [§4、§6](bpm-requirements-traceability.md#4-文案规范追溯interface-content-standard) |
+| 八份专项 | 见 §9.1；不重定义对象和阶段 | [§11.1–§11.8](bpm-requirements-traceability.md#11-八份专项追溯原则-91) |
+| [README](../README.md) | 代码定位与运行；不宣传未实现 | [§10](bpm-requirements-traceability.md#10-readme-追溯readmemd) |
+| [综合评审记录](bpm-artifacts-review.md) | 错位修正、未决决定；非新需求源 | [§9](bpm-requirements-traceability.md#9-综合评审记录追溯bpm-artifacts-reviewmd) |
+| [第一批 Brief](bpm-first-batch-brief.md) | B1 范围与审定通过标准 | [§12 TR-META-BRF](bpm-requirements-traceability.md#12-审定与实施包meta) |
+| [第一批开发计划](bpm-first-batch-dev-plan.md) | 切片/API/DoD | [§12 TR-META-PLN](bpm-requirements-traceability.md#12-审定与实施包meta) |
+| [审定交接说明](bpm-review-handoff.md) | 审定顺序与结论模板 | [§12 TR-META-HOF](bpm-requirements-traceability.md#12-审定与实施包meta) |
+| [R1 可实施性复审](bpm-r1-implementability-review.md) | R1 vs 代码 | [§12 TR-META-R1](bpm-requirements-traceability.md#12-审定与实施包meta) |
+| [需求追溯表](bpm-requirements-traceability.md) | **审定主清单**（含本文 §1–§9 逐节） | [§0.4 登记](bpm-requirements-traceability.md#04-产物全覆盖登记对齐-产品原则-9bpm-product-principlesmd) |
 
-未生成的开发计划不应有虚假链接。历史工程文档不是本次改造规范，使用时核基线；新评审发现冲突须改正文和相关引用，不能只继续追加免责声明。
+### 9.1 八份专项（与追溯表 §11 一一对应）
+
+| 专项 | 文件 |
+|---|---|
+| 建模 | [process-modeling-repository-gap.md](process-modeling-repository-gap.md) |
+| 分析 | [process-analysis-method-chain.md](process-analysis-method-chain.md) |
+| 设计 | [process-design-small-loop.md](process-design-small-loop.md) |
+| 绩效 | [process-performance-decision-loop.md](process-performance-decision-loop.md) |
+| 转型 | [process-transformation-practice-system.md](process-transformation-practice-system.md) |
+| 技术 | [bpm-technology-open-contracts.md](bpm-technology-open-contracts.md) |
+| 组织 | [process-organization-governance-loop.md](process-organization-governance-loop.md) |
+| 企业 | [enterprise-process-strategy-loop.md](enterprise-process-strategy-loop.md) |
+
+历史工程文档（如 `process-execution-gap-analysis.md` 等）不是本次 BPM 闭环改造规范；使用时核基线。新评审发现冲突须改正文和相关引用，不能只继续追加免责声明。
+
+## 10. 本文条款与追溯 ID（供审定勾选）
+
+| 本文位置 | 追溯 ID | 要点 |
+|---|---|---|
+| §1 基本原则 | TR-PR-01 | 流程主对象；一轮改善；原记录协作 |
+| §2 概念表（10 行） | TR-PR-02-01～10 | 各概念「唯一用途 / 禁止混同」 |
+| §3 导航表（8 行） | TR-PR-03-01～08 | 保留既有去向；治理不编第九阶段 |
+| §4.1 四身份 | TR-PR-04-01～05 | 草稿可部分；缺项不伪造 |
+| §4.2 冻结 | TR-PR-04-06～10 | 不可原位覆盖；修订留痕 |
+| §4.3 样本 | TR-PR-04-11～12 | 不复制实例；关联键≠四身份 |
+| §5 权威表（8 行） | TR-PR-05-01～08 | publish/Gate/KPI/派生视图 |
+| §5 段末核验 | TR-PR-05-09 | SoD；方法已核验≠普遍有效 |
+| §6 分期 | TR-PR-06 | R0–R5≠批次；审定后编码 |
+| §7 模块闭环 | TR-PR-07 | 九域非串行；接收≠达标 |
+| §8 写法与能力属性 | TR-PR-08 | 四类信息；六属性非阶梯 |
+| §9 产物分工 | TR-PR-09 | 下游文档唯一职责；追溯表主清单 |
+
+完整 disposition（PRIN / B1 / LATER / DOC-IA）见追溯表 [§8 明细](bpm-requirements-traceability.md#81-节级明细tr-pr--)。

@@ -1,6 +1,6 @@
 # BPM 闭环落地规格
 
-> 状态：综合评审后的待评审规格，不是已实现功能；代码基线 `ca20f88`。
+> 状态：综合评审后的待评审规格，不是已实现功能；代码基线 `4607792`（实施前再核 HEAD）。
 > 统一契约：[产品基本原则](bpm-product-principles.md)。路线：[差距与路径](bpm-lifecycle-gap-and-roadmap.md)。表达：[文案规范](bpm-interface-content-standard.md)。
 > 本版已移除与薄轮次对照、既有入口、原记录复用不相容的新增指令，不再保留“旧提议仍可选”的双重规格。
 
@@ -22,7 +22,7 @@
 
 R0–R5是改造工作分组，不是执行批次或强制全串行依赖。第一批可跨R0/R2/R5做一条最小证据链；基础异常和验收可以使用现有可靠数据，不以接完Flowable为一切后续工作的前提。
 
-开发计划尚未生成，不链接不存在文件。当前文档、README修改均未提交；实施前按用户授权建立可追溯基线，不能默认为已授权提交。
+第一批**审定与实施**见 [Brief](bpm-first-batch-brief.md)、[开发计划](bpm-first-batch-dev-plan.md)、[需求追溯表](bpm-requirements-traceability.md)、[审定交接](bpm-review-handoff.md)；**审定通过前不得编码**。R1 相对代码复审见 [bpm-r1-implementability-review.md](bpm-r1-implementability-review.md)。
 
 ## 2. 页面与导航契约
 
@@ -300,14 +300,14 @@ As-Is/To-Be角色不等于发布状态。前置分析可引用在原ProcessModel
 
 | 能力域 | 作业规格 | 独立交付与反馈 |
 |---|---|---|
-| 建模 | [标准与仓库](process-modeling-repository-gap.md) | 表达/用途/版本可接收，使用反馈进入修订 |
-| 分析 | [方法与证据作业链](process-analysis-method-chain.md) | 事实/原因/损失和未知交给设计，不强求同一根因 |
-| 设计 | [设计小闭环](process-design-small-loop.md) | 改善机制/风险/可实施/验证，接收不等于已上线 |
-| 绩效 | [决策与验证](process-performance-decision-loop.md) | 可信测量、决定、行动效果；不只图表 |
-| 转型 | [实践纵深与融合](process-transformation-practice-system.md) | 路径、组合实践、真实采用、持续成果，不重建项目阶段 |
-| 技术 | [双向开放契约](bpm-technology-open-contracts.md) | 可输出/接入/调用/替换；传输/执行/业务结果分别确认 |
-| 组织 | [治理与冲突](process-organization-governance-loop.md) | 有权有责/资源可兑现、现实议题协调与验证 |
-| 企业级 | [战略闭环](enterprise-process-strategy-loop.md) | 解码/组合/结果返回战略，多模块多周期协同 |
+| 建模 | [标准与仓库](process-modeling-repository-gap.md) | 追溯 [§11.1](bpm-requirements-traceability.md)；表达/用途/版本可接收 |
+| 分析 | [方法与证据作业链](process-analysis-method-chain.md) | 追溯 §11.2；事实/原因交给设计 |
+| 设计 | [设计小闭环](process-design-small-loop.md) | 追溯 §11.3；接收≠已上线 |
+| 绩效 | [决策与验证](process-performance-decision-loop.md) | 追溯 §11.4；可信测量与 B1 KPI 交叉 |
+| 转型 | [实践纵深与融合](process-transformation-practice-system.md) | 追溯 §11.5；路径/采用/持续成果 |
+| 技术 | [双向开放契约](bpm-technology-open-contracts.md) | 追溯 §11.6；R3 与开放边界 |
+| 组织 | [治理与冲突](process-organization-governance-loop.md) | 追溯 §11.7；权责/资源/协调 |
+| 企业级 | [战略闭环](enterprise-process-strategy-loop.md) | 追溯 §11.8；战略组合与回传 |
 
 专项内的M/A/D/P/T/G/E编号均为作业指引。首期/首批等表述仅指该专项将来最小切片，不覆盖本规格第一批边界；新增专业算法/接口都需开发计划。多方法共用原数据和各自适用口径，不能重复算收益。
 
@@ -319,4 +319,4 @@ As-Is/To-Be角色不等于发布状态。前置分析可引用在原ProcessModel
 
 业务需配置：目标/范围、授权/审核人、质量/风险阈值、窗口/样本、资源、恢复和个人绩效约定。技术需在开发计划明确：冻结版本策略、round修订/幂等/并发、NULL去重、原验收字段、权限过滤、迁移及样本修订。未确定时保持草稿/未核实，不以默认值冒充批准。
 
-截至本次：没有业务代码/迁移/新表实现；Flowable尚未接入；第一批开发计划未生成；文档均未提交。综合评审修正文档内部冲突，不宣称完成实现或生产验收。
+截至基线 `4607792`：没有 `ProcessImprovementRound` 等业务实现；Flowable 尚未接入。Brief/开发计划/审定交接已起草，**待另一模型审定**后方可实施。综合评审修正文档内部冲突，不宣称完成实现或生产验收。

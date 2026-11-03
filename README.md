@@ -4,7 +4,7 @@
 
 当前是 FastAPI + 原生 ES 模块的全栈应用，不只是后端或静态原型。流程是长期业务对象，项目只交付其中一轮改善；八阶段生命周期用于进入现有模块，项目 `current_stage` 保持 1–5，项目结项后流程继续运行。`index-sample.html` 仅保留为历史设计对照。
 
-**现有能力与待评审设计分开**：薄轮次对照、Flowable接入及各模块小闭环改造尚未实现。统一原则与产物索引见 [docs/bpm-product-principles.md](docs/bpm-product-principles.md)，综合评审见 [docs/bpm-artifacts-review.md](docs/bpm-artifacts-review.md)；文档生成不等于功能完成。
+**现有能力与待评审设计分开**：薄轮次对照、Flowable 接入及各模块小闭环改造尚未实现。统一原则见 [docs/bpm-product-principles.md](docs/bpm-product-principles.md)，综合评审见 [docs/bpm-artifacts-review.md](docs/bpm-artifacts-review.md)。**第一批改造**先审定再编码：追溯表 [docs/bpm-requirements-traceability.md](docs/bpm-requirements-traceability.md)，Brief [docs/bpm-first-batch-brief.md](docs/bpm-first-batch-brief.md)，审定交接 [docs/bpm-review-handoff.md](docs/bpm-review-handoff.md)。文档生成不等于功能完成。
 
 ---
 

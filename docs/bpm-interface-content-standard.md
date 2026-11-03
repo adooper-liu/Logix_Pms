@@ -1,7 +1,7 @@
 # 产品语言、页面文案与交互表达规范
 
-> 状态：待评审规范；2026-11-03补充产品语言治理，静态核对基线 `4607792`，不代表页面改造已完成。服从[产品基本原则](bpm-product-principles.md)。本规范不借文案创建新状态/接口或宣传未实现能力；当前轻量发布与未来R3部署的词汇分开。
-> 配套：[落地规格](bpm-lifecycle-implementation-spec.md)、[闭环路线](bpm-lifecycle-gap-and-roadmap.md)、[文字清单与差异](product-language-inventory.md)、[页面职责与拆分](page-responsibility-and-decomposition.md)。
+> 状态：待评审规范；2026-11-03 补充产品语言治理，静态核对基线 `4607792`，不代表页面改造已完成。服从 [产品基本原则](bpm-product-principles.md)。本规范不借文案创建新状态/接口或宣传未实现能力；当前轻量发布与未来 R3 部署的词汇分开。
+> 配套：[落地规格](bpm-lifecycle-implementation-spec.md)、[闭环路线](bpm-lifecycle-gap-and-roadmap.md)、[文字清单与差异](product-language-inventory.md)、[页面职责与拆分](page-responsibility-and-decomposition.md)。BPM 审定 disposition 见 [需求追溯表 §4–§6](bpm-requirements-traceability.md)（本地草案，未入远程时以 handoff 为准）。
 > 本文是唯一表达规范；清单只登记证据、目标和落实状态，不另定义一套规则。统一术语、字段、字典、状态、动作、提示、错误、示例与帮助，不要求所有页面机械地把全部字段铺在首屏。
 
 ## 1. 表达原则
