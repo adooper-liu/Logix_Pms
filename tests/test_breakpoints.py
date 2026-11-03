@@ -166,6 +166,7 @@ def test_task_complete_requires_approver_or_exception(client):
     finally:
         client.post(f"{API}/authorization/rules/{rule_id}/retire")
         client.post(f"{API}/execution/instances/{instance_id}/cancel")
+        client.delete(f"{API}/execution/instances/{instance_id}")
 
 
 def test_exception_suggestion_inserts_only_after_confirm(client):

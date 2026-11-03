@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, Table, create_engine, select
 
 import app.models  # noqa: F401  确保所有模型已注册
 from alembic import command
@@ -47,6 +49,32 @@ def test_upgrade_creates_schema_matching_models(tmp_path):
 
     diff = _schema_diff(url)
     assert diff == [], f"迁移与模型不一致（说明模型改了但没生成迁移）：{diff}"
+
+
+def test_governance_finding_type_preserves_review_code(tmp_path):
+    url = _sqlite_url(tmp_path)
+    command.upgrade(_config(url), "head")
+    engine = create_engine(url)
+    try:
+        table = Table("governance_finding", MetaData(), autoload_with=engine)
+        code = "AUTHORIZATION_EXCEPTION_DUE_REVIEW"
+        assert table.c.type.type.length >= len(code)
+        with engine.begin() as conn:
+            conn.execute(
+                table.insert().values(
+                    type=code,
+                    severity="MEDIUM",
+                    entity_type="authorization_exception",
+                    entity_id=1,
+                    title="到期例外待复盘",
+                    status="OPEN",
+                    detected_at=datetime(2026, 11, 3),
+                    last_seen_at=datetime(2026, 11, 3),
+                )
+            )
+            assert conn.scalar(select(table.c.type)) == code
+    finally:
+        engine.dispose()
 
 
 def test_upgrade_is_idempotent(tmp_path):

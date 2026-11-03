@@ -66,9 +66,14 @@ def _create_project(client, owner: str = "流程管理科") -> dict:
     return r.json()
 
 
-def _instance(client, project_id: int, step_no: str) -> dict:
+def _instance(client, project_id: int, step_no: str, definition_id: int | None = None) -> dict:
     rows = client.get(f"{API}/projects/{project_id}/deliverables").json()
-    return next(row for row in rows if row["step_no"] == step_no)
+    return next(
+        row
+        for row in rows
+        if row["step_no"] == step_no
+        and (definition_id is None or row["definition_id"] == definition_id)
+    )
 
 
 # ------------------------------------------------------------------ 模板库
@@ -91,14 +96,18 @@ def test_template_create_default_and_permissions(client, manager_client, viewer_
 
     second = _create_template(manager_client, "SIPOC", "XLSX", name="SIPOC 分区表", is_default=True)
     assert second["is_default"] is True
-    rows = manager_client.get(f"{API}/tool-templates", params={"tool_code": "SIPOC"}).json()
+    rows = manager_client.get(
+        f"{API}/tool-templates", params={"tool_code": "SIPOC", "format": "XLSX"}
+    ).json()
     assert [row["is_default"] for row in rows].count(True) == 1
     assert next(row for row in rows if row["id"] == first["id"])["is_default"] is False
 
     # 取消默认后自动从同工具同格式里补一个，不能出现「无默认」
     r = manager_client.patch(f"{API}/tool-templates/{second['id']}", json={"is_default": False})
     assert r.status_code == 200
-    rows = manager_client.get(f"{API}/tool-templates", params={"tool_code": "SIPOC"}).json()
+    rows = manager_client.get(
+        f"{API}/tool-templates", params={"tool_code": "SIPOC", "format": "XLSX"}
+    ).json()
     assert [row["is_default"] for row in rows].count(True) == 1
 
     r = manager_client.post(
@@ -219,7 +228,7 @@ def test_copy_file_template_to_project(client, manager_client):
     _make_effective(manager_client, template["id"], version["id"])
 
     project = _create_project(client)
-    instance = _instance(client, project["id"], "2.3")
+    instance = _instance(client, project["id"], "2.3", definition_id)
 
     r = manager_client.post(
         f"{API}/tool-templates/{template['id']}/copy",
@@ -290,7 +299,7 @@ def test_copy_online_template_and_context(client, manager_client):
     _make_effective(manager_client, template["id"], version["id"])
 
     project = _create_project(client)
-    instance = _instance(client, project["id"], "4.3")
+    instance = _instance(client, project["id"], "4.3", definition_id)
 
     # 在线模板必须先走 ONLINE 版本，不能直接上传
     r = manager_client.post(
@@ -391,7 +400,8 @@ def test_step_recommendations_include_tools_and_templates(client, manager_client
     assert tools["SIPOC"]["level_label"] == "必用"
     assert any(t["id"] == template["id"] for t in tools["SIPOC"]["templates"])
     assert tools["SWIMLANE"]["level"] == "RECOMMENDED"
-    assert tools["SWIMLANE"]["templates"] == []
+    swimlane = tools["SWIMLANE"]["templates"]
+    assert any(t["code"] == "TPL-SWIMLANE" and t["format"] == "ONLINE" for t in swimlane)
     assert [t["id"] for t in rec["deliverable_templates"]] == [extra["id"]]
 
     assert client.get(f"{API}/workflow/steps/9.9/recommendations").status_code == 404

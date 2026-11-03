@@ -16,7 +16,7 @@ class GovernanceFinding(Base):
     __tablename__ = "governance_finding"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    type: Mapped[str] = mapped_column(String(32), index=True)
+    type: Mapped[str] = mapped_column(String(64), index=True)
     severity: Mapped[str] = mapped_column(String(16), index=True)  # HIGH / MEDIUM / LOW
     entity_type: Mapped[str] = mapped_column(String(32))
     entity_id: Mapped[int] = mapped_column(Integer)
