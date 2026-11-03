@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
@@ -53,13 +54,30 @@ def test_upgrade_creates_schema_matching_models(tmp_path):
 
 def test_governance_finding_type_preserves_review_code(tmp_path):
     url = _sqlite_url(tmp_path)
-    command.upgrade(_config(url), "head")
+    cfg = _config(url)
+    command.upgrade(cfg, "q2b3c4d5e6f7")
     engine = create_engine(url)
+    code = "AUTHORIZATION_EXCEPTION_DUE_REVIEW"
     try:
         table = Table("governance_finding", MetaData(), autoload_with=engine)
-        code = "AUTHORIZATION_EXCEPTION_DUE_REVIEW"
+        with engine.begin() as conn:
+            conn.execute(
+                table.insert().values(
+                    type="REVIEW_OVERDUE",
+                    severity="MEDIUM",
+                    entity_type="tool_template",
+                    entity_id=1,
+                    title="原治理记录",
+                    status="OPEN",
+                    detected_at=datetime(2026, 11, 3),
+                    last_seen_at=datetime(2026, 11, 3),
+                )
+            )
+        command.upgrade(cfg, "head")
+        table = Table("governance_finding", MetaData(), autoload_with=engine)
         assert table.c.type.type.length >= len(code)
         with engine.begin() as conn:
+            assert conn.scalar(select(table.c.type)) == "REVIEW_OVERDUE"
             conn.execute(
                 table.insert().values(
                     type=code,
@@ -72,7 +90,14 @@ def test_governance_finding_type_preserves_review_code(tmp_path):
                     last_seen_at=datetime(2026, 11, 3),
                 )
             )
-            assert conn.scalar(select(table.c.type)) == code
+            assert conn.scalar(select(table.c.type).where(table.c.type == code)) == code
+        with pytest.raises(RuntimeError, match="保留 r3c4d5e6f7a8"):
+            command.downgrade(cfg, "q2b3c4d5e6f7")
+        with engine.connect() as conn:
+            assert set(conn.scalars(select(table.c.type))) == {"REVIEW_OVERDUE", code}
+            assert conn.scalar(
+                select(Table("alembic_version", MetaData(), autoload_with=conn))
+            ) == ("r3c4d5e6f7a8")
     finally:
         engine.dispose()
 

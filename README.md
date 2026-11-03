@@ -430,9 +430,15 @@ alembic downgrade -1
 > 注意：`alembic.ini` 必须保持**纯 ASCII**。configparser 在 Windows 下按系统 locale
 > （中文机器是 GBK）读取该文件，写中文注释会直接抛 `UnicodeDecodeError`。
 
-迁移链的正确性由 [tests/test_migrations.py](tests/test_migrations.py) 守着，核心断言只有一条：
-**迁移建出来的 schema 必须和 ORM 模型完全一致**。在此基础上还验证了幂等升级、`downgrade base`
-能干净回退、以及 `current_revision` 助手。
+迁移链的正确性由 [tests/test_migrations.py](tests/test_migrations.py) 守着，核心断言是
+**迁移建出来的 schema 必须和 ORM 模型完全一致**，并验证幂等升级、空库降级再升级和
+`current_revision` 助手；空库可回退不代表任意生产数据都能缩回旧 schema。
+
+`r3c4d5e6f7a8` 将治理类型扩至64字符。已有超过32字符的类型（如授权例外待复盘）时，
+降级会在任何DDL前明确拒绝，不截断类型或删除审计记录。回退应用时保留该数据库版本，
+在旧版启动前设置 `AUTO_MIGRATE=false`（Compose部署需显式传入容器），并验证旧版读写兼容性。
+若必须回退数据库，先停写并保留当前完整备份，将升级前完整备份恢复到独立数据库，
+核对并处理升级后的新增业务数据后再经批准切换；不要直接覆盖当前库或仅删掉长类型记录。
 
 多副本部署时建议把 `AUTO_MIGRATE` 设为 `false`，在发布流程里单独跑一次 `alembic upgrade head`，
 避免多个实例同时执行迁移。

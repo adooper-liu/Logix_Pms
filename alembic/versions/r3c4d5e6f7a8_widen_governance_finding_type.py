@@ -31,7 +31,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name == "postgresql":
+    bind = op.get_bind()
+    too_long = bind.scalar(
+        sa.text("SELECT COUNT(*) FROM governance_finding WHERE length(type) > 32")
+    )
+    if too_long:
+        raise RuntimeError(
+            "存在超过32字符的治理类型；请保留 r3c4d5e6f7a8 数据库版本。"
+            "应用回退时设置 AUTO_MIGRATE=false；若必须回退数据库，请从升级前完整备份"
+            "恢复到独立数据库并核对升级后的新增数据，不得截断或删除治理记录。"
+        )
+    if bind.dialect.name == "postgresql":
         op.create_unique_constraint(
             "process_charter_process_id_key", "process_charter", ["process_id"]
         )
