@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     false,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +58,12 @@ class ProcessArch(Base):
         index=True,
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    process_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    classification_basis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    classification_inherit: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true()
+    )
+    classification_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # 价值-痛点矩阵三个维度，1–5 分
     strategic_importance: Mapped[float] = mapped_column(Float, default=3.0)

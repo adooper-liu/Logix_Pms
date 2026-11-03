@@ -6,12 +6,24 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { go, urlParams, setUrlState } from '../core/router.js';
-import { GET, POST, PATCH, DEL, download } from '../core/api.js';
+import { GET, POST, PATCH, PUT, DEL, download } from '../core/api.js';
 import { openDocumentCopy } from '../core/template-copy.js';
 import { actions } from '../core/actions.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
+on('map.classify', ({ id }) => openClassification(Number(id)));
+on('map.saveClassification', ({ id }) => saveClassification(Number(id)));
+on('map.typeFilter', (_data, el) => {
+  state.map.path = [];
+  state.map.tree = null;
+  const params = { ...urlParams() };
+  delete params.process;
+  if (el.value) params.process_type = el.value;
+  else delete params.process_type;
+  setUrlState('map', params, { push: true });
+  RENDERERS.map();
+});
 on('map.select', ({ code }) => mapSelect(code));
 on('map.go', ({ index }) => mapGo(Number(index)));
 on('map.row', ({ code, kids }) => mapClick(code, kids === '1'));
@@ -45,7 +57,7 @@ if (typeof window !== 'undefined') {
     if (state.view !== 'map' || !state.map.openCode) return;
     if (document.getElementById('mask').classList.contains('show')) return;
     state.map.openCode = null;
-    setUrlState('map', {}, { push: false });
+    setUrlState('map', state.map.typeFilter ? { process_type: state.map.typeFilter } : {}, { push: false });
   });
 }
 on('map.deleteProcess', ({ id, code }) => deleteProcess(Number(id), code));
@@ -181,9 +193,9 @@ const renderMap = () => {
       ? `只计 L3，并且负责人已经绑到账号。这里是这 ${shown.length} 条`
       : current
       ? `${LEVEL_LABELS[current.level] || ''} · ${(current.children || []).length} 个${childWord}` +
-        (kw ? ` · 匹配 ${shown.length} 项` : '')
+        (kw || state.map.typeFilter ? ` · 匹配 ${shown.filter((row) => row.classification_matches_filter !== false).length} 项` : '')
       : `L1 价值链 · ${tree.length} 条主线` +
-        (kw ? ` · 匹配 ${shown.length} 项` : '');
+        (kw || state.map.typeFilter ? ` · 匹配 ${shown.filter((row) => row.classification_matches_filter !== false).length} 项` : '');
     const drillHint = !ownerList && !current && !kw ? '点击任一行，逐级下钻' : '';
 
     const crumbs = ['<a data-act="map.go" data-index="-1">全部价值链</a>']
@@ -213,6 +225,8 @@ const renderMap = () => {
               <button class="map-open" type="button" data-act="map.row"
                 data-code="${esc(n.code)}" data-kids="${hasKids ? '1' : '0'}">
                 <b>${esc(n.name)}</b></button>
+              <span class="tag t-blu">${esc(n.process_type_label || '')}</span>
+              ${n.classification_matches_filter === false ? `<span class="tiny">${esc(state.map.classificationMeta.context_label)}</span>` : ''}
               ${n.is_improvement_target ? '<span class="tag t-red">待改善</span>' : ''}
               ${n.is_draft ? '<span class="tag t-pur">PCF 草稿</span>' : ''}
             </div>
@@ -350,6 +364,11 @@ const renderMap = () => {
                       data-parent="${current ? current.id : ''}">+ ${
                       esc(LEVEL_LABELS[(current ? current.level : 0) + 1])}</button>`
                   : ''}
+                <select class="sel sel-sm" data-act="map.typeFilter" aria-label="流程类型筛选">
+                  <option value="">全部类型</option>
+                  ${Object.entries(state.map.classificationMeta.process_types).map(([code, label]) => `<option value="${code}"${state.map.typeFilter === code ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+                  <option value="UNCLASSIFIED"${state.map.typeFilter === 'UNCLASSIFIED' ? ' selected' : ''}>${esc(state.map.classificationMeta.unknown_label)}</option>
+                </select>
                 <button class="btn-sm${improvementOnly ? ' on' : ''}"
                   data-act="map.toggleImprovement">
                   ${improvementOnly ? '显示全部' : '只看待改善'}</button>
@@ -378,6 +397,15 @@ const renderMap = () => {
 
   const start = async () => {
     const params = urlParams();
+    const typeFilter = params.process_type || '';
+    if (state.map.typeFilter !== typeFilter) {
+      state.map.typeFilter = typeFilter;
+      state.map.tree = null;
+      state.map.path = [];
+    }
+    if (!state.map.classificationMeta) {
+      state.map.classificationMeta = await GET('/process-map/classification-meta');
+    }
     if (params.process) state.map.pendingJump = params.process;
     else if (state.map.openCode) {
       state.map.openCode = null;
@@ -400,7 +428,7 @@ const renderMap = () => {
       }
     }
     if (!state.map.tree) {
-      const tree = await GET('/process-map/tree');
+      const tree = await GET('/process-map/tree' + (typeFilter ? '?process_type=' + encodeURIComponent(typeFilter) : ''));
       state.map.tree = tree;
       state.map.names = {};
       const walk = (list) => list.forEach((n) => {
@@ -473,7 +501,7 @@ function mapClick(code, hasKids) {
     })();
     if (!node) return;
     state.map.openCode = code;
-    setUrlState('map', { process: code }, { push: true });
+    setUrlState('map', { ...(state.map.typeFilter ? { process_type: state.map.typeFilter } : {}), process: code }, { push: true });
     const orgRow = (state.map.orgs || []).find(
       (org) => String(org.id) === String(node.org_unit_id),
     );
@@ -509,6 +537,10 @@ function mapClick(code, hasKids) {
           <h4 class="form-block-hd">3. 说明与评估</h4>
           <div class="field"><label>流程说明</label>
             <textarea readonly>${esc(node.description || '')}</textarea></div>
+          <div class="field"><label>流程类型</label><input readonly value="${esc(node.process_type_label || '')}">
+            <div class="hint">${node.classification_is_inherited ? esc(state.map.classificationMeta.inherited_label) + ' ' + esc(node.classification_source_code) : ''}${node.classification_is_override ? ' · ' + esc(state.map.classificationMeta.override_label) : ''}</div>
+          </div>
+          <div class="field"><label>分类依据</label><textarea readonly>${esc(node.classification_basis || '')}</textarea></div>
           <div class="row2">
             <div class="field"><label>${metricHelp('priority_score', '综合优先级得分')}</label>
               <input value="${num(node.priority_score, 1)}" readonly>
@@ -540,6 +572,7 @@ function mapClick(code, hasKids) {
           + ` data-act="map.deleteProcess" data-id="${node.id}" data-code="${esc(node.code)}">删除</button>`
         : ''}
        <button class="btn btn-g" data-act="map.close">关闭</button>
+       ${canManage() ? `<button class="btn btn-g" data-act="map.classify" data-id="${node.id}">维护分类</button>` : ''}
        ${canManage() ? `<button class="btn btn-g" data-act="map.editProcess" data-id="${node.id}">编辑</button>` : ''}
        ${canWrite() ? `<button class="btn btn-g" data-act="map.startProject" data-id="${node.id}"
          data-name="${esc(node.name)}">以此流程立项</button>` : ''}
@@ -2026,6 +2059,43 @@ async function newChildModal(parentId) {
   await loadActivityBenchmarkCategories(framework);
   if (inheritL4) applyInheritParentScores(true);
   else syncScorePreview();
+}
+
+async function openClassification(id) {
+  try {
+    const [node, meta] = await Promise.all([GET('/process-map/' + id), GET('/process-map/classification-meta')]);
+    state.map.classificationEdit = node;
+    const selected = node.process_type || (node.classification_inherit ? 'INHERIT' : 'UNCLASSIFIED');
+    const options = { INHERIT: meta.inherit_label, ...meta.process_types, UNCLASSIFIED: meta.blocked_label };
+    openModal('维护分类 · ' + node.code, `
+      <div class="note">分类表示业务用途，不改变流程层级、模型或优先级。明确分类或阻断继承须填写依据。</div>
+      <div class="field"><label>流程类型</label><select id="classificationType">${Object.entries(options).map(([code, label]) => `<option value="${code}"${selected === code ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
+      <div class="field"><label>分类依据</label><textarea id="classificationBasis" maxlength="2000">${esc(node.classification_basis || '')}</textarea></div>
+      <div id="classificationError" class="errbar hide"></div>`,
+      `<button class="btn btn-g" data-act="map.close">取消</button><button class="btn btn-p" data-act="map.saveClassification" data-id="${id}">保存分类</button>`);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function saveClassification(id) {
+  const node = state.map.classificationEdit;
+  if (!node || node.id !== id) return;
+  const type = document.getElementById('classificationType').value;
+  const basis = document.getElementById('classificationBasis').value.trim();
+  try {
+    await PUT('/process-map/' + id + '/classification', {
+      process_type: ['INHERIT', 'UNCLASSIFIED'].includes(type) ? null : type,
+      classification_basis: basis,
+      classification_inherit: type !== 'UNCLASSIFIED',
+      expected_revision: node.classification_revision,
+    });
+    closeModal();
+    state.map.tree = null;
+    toast('流程分类已保存');
+    RENDERERS.map();
+  } catch (e) {
+    const error = document.getElementById('classificationError');
+    if (error) { error.textContent = e.message; error.classList.remove('hide'); }
+  }
 }
 
 async function newProcessModal() {

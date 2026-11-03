@@ -387,6 +387,8 @@ const renderProcessCard = () => {
           </div>
           <div class="between mt">
             <div><b>${esc(c.process.code)} ${esc(c.process.name)}</b>
+              <span class="tag t-blu">${esc(c.process.process_type_label || '')}</span>
+              ${c.process.classification_is_inherited ? `<span class="tiny">来源 ${esc(c.process.classification_source_code || '')}</span>` : ''}
               <span class="tiny muted">层级 L${c.process.level} · Owner ${esc(c.process.owner || '—')}
                 · ${esc(c.process.org_unit_name || c.process.department || '—')}</span></div>
             <div class="gap">

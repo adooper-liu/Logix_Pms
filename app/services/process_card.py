@@ -44,6 +44,7 @@ from app.services import deliverable as deliverable_service
 from app.services import governance as governance_service
 from app.services import improvement as improvement_service
 from app.services import kpi as kpi_service
+from app.services import process_classification as classification_service
 from app.services import process_document as document_service
 from app.services import process_model as model_service
 from app.services import raci as raci_service
@@ -349,6 +350,13 @@ def build(db: Session, process_id: int) -> ProcessCardOut:
 
     return ProcessCardOut(
         process=CardProcessOut(
+            process_type=process.process_type,
+            classification_basis=process.classification_basis,
+            classification_inherit=process.classification_inherit,
+            classification_revision=process.classification_revision,
+            **classification_service.resolve_all(list(db.scalars(select(ProcessArch)).all()))[
+                process.id
+            ],
             id=process.id,
             code=process.code,
             name=process.name,
