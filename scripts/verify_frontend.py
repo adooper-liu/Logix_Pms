@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-from verify_tool_sheet import verify_tool_sheet_save
 from verify_process_classification import verify_process_classification
+from verify_tool_sheet import verify_tool_sheet_save
 
 # Windows 控制台默认是 GBK，中文输出会变乱码
 if hasattr(sys.stdout, "reconfigure"):
