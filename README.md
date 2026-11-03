@@ -1,8 +1,10 @@
 # Logix PMS · 流程管理系统
 
-把 **BPR / BPI / 精益** 三大方法论整合成一套可落地的标准工作流，覆盖「识别问题 → 诊断 → 设计 → 落地 → 运营」的全生命周期。
+整合 **BPR / BPI / 精益** 等改善方法，提供流程架构、建模、运行、绩效与治理能力；一次改善项目沿「识别 → 诊断 → 设计 → 落地 → 运营」五阶段交付。
 
-这是后端服务（第一阶段交付物）：数据库模型 + REST API + 内容底稿。前端原型见 `index-sample.html`。
+当前是 FastAPI + 原生 ES 模块的全栈应用，不只是后端或静态原型。流程是长期业务对象，项目只交付其中一轮改善；八阶段生命周期用于进入现有模块，项目 `current_stage` 保持 1–5，项目结项后流程继续运行。`index-sample.html` 仅保留为历史设计对照。
+
+**现有能力与待评审设计分开**：薄轮次对照、Flowable接入及各模块小闭环改造尚未实现。统一原则与产物索引见 [docs/bpm-product-principles.md](docs/bpm-product-principles.md)，综合评审见 [docs/bpm-artifacts-review.md](docs/bpm-artifacts-review.md)；文档生成不等于功能完成。
 
 ---
 
@@ -15,7 +17,7 @@
 │  ├── 流程 Owner 机制                                              │
 │  └── 流程 KPI 体系（效率/质量/成本/灵活性）                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  执行层：五阶段标准工作流（How）—— 共 24 个步骤                    │
+│  项目交付：五阶段标准工作流（How）—— 共 24 个步骤                │
 │  ├── 阶段1 识别与优先级排序（4 步）                                │
 │  ├── 阶段2 诊断与根因分析（4 步）                                  │
 │  ├── 阶段3 方案设计与选择（5 步）                                  │
@@ -47,7 +49,7 @@
 [docs/process-management-best-practices.md](docs/process-management-best-practices.md)；
 各模块的定位、应用场景与使用路径见 [docs/usage-guide.md](docs/usage-guide.md)。
 
-启动路径的九阶段证据口径、当前实例与页面依赖见
+启动证据文档保留了旧九阶段的历史口径，不能当作当前八阶段导航或项目推进规范；历史实例见
 [docs/startup-evidence-example.md](docs/startup-evidence-example.md)；
 简历正文见 [docs/resume.md](docs/resume.md)；
 过硬演示包（简历主张 → 能点开的证据）见
@@ -59,74 +61,173 @@
 
 ## 快速开始
 
-### 1. 启动 PostgreSQL（Docker）
+本地有两条常用路径，按用途选一种，不要同时启动两套应用：
+
+| 用途 | 运行方式 | 前置环境 |
+|---|---|---|
+| **使用 / 演示（推荐）** | Docker 整栈：PostgreSQL + API + worker | Docker Desktop（Linux 容器模式） |
+| **修改代码 / 开发调试** | Docker PostgreSQL + 本机 Python，worker 按需运行 | Docker Desktop + Python 3.12+（建议 3.12） |
+
+前端由 FastAPI 直接托管，**不需要 Node.js、npm 或单独启动前端服务**。
+以下 Windows 命令使用 **PowerShell**，均从仓库根目录执行（例如先运行
+`Set-Location D:\Logix_Pms`）；Bash 替代命令会单独标注。
+本节用于本地演示，正式部署请看[切换生产环境](#切换生产环境)。
+
+### 共同准备：本地演示配置
+
+只在 `.env` 不存在时复制，**不要覆盖已有配置**：
+
+```powershell
+if (!(Test-Path .env)) {
+    Copy-Item .env.example .env
+}
+```
+
+Bash 对应命令：
 
 ```bash
+[ -f .env ] || cp .env.example .env
+```
+
+打开 `.env`，确认本地演示需要的两项已启用（示例文件已启用）：
+
+```dotenv
+ALLOW_DEV_SECRET=true
+SEED_ON_STARTUP=true
+```
+
+- 默认开发密钥只有在 `ALLOW_DEV_SECRET=true` 时才能启动；这项也控制 `/docs` 的开放。
+- 保留已有 `SECRET_KEY`、数据库连接和数据；**不要随意更换密钥**，集成密钥解密也依赖它。
+- API 默认在启动时执行 `alembic upgrade head`。两个演示开关都启用且库为空时才灌演示数据；
+  已有数据库不会因此重灌或重置账号口令。
+- 环境变量优先于 `.env`；若修改文件后仍未生效，检查当前终端是否设置过同名变量。
+- 开发密钥、演示开关和下文的已知演示口令只用于本地，不要直接用于生产。
+
+### 方式一：Docker 整栈运行
+
+先启动 Docker Desktop，确认 Docker 与 Compose 可用：
+
+```powershell
+docker version
+docker compose version
+```
+
+若本机已运行 uvicorn 或 worker，先在对应终端按 `Ctrl+C` 停止。完成上述 `.env` 配置后：
+
+```powershell
+docker compose --profile full up -d --build
+docker compose --profile full ps
+docker compose logs --tail 100 api
+```
+
+以上 Docker 命令也可在 Bash 执行。首次构建需要下载基础镜像和 Python 依赖。
+`full` 模式包含三个服务：
+
+| 服务 | 作用 |
+|---|---|
+| `db` | PostgreSQL 16，数据库保存在 `pgdata` 命名卷 |
+| `api` | 后端 API 与前端页面；等待数据库健康后执行迁移和初始化 |
+| `worker` | 定期扫描超期任务、投递 Outbox Webhook；只保留一个 worker |
+
+应用端口为 **8123**，附件保存在 `attachments` 命名卷。按下文检查健康并登录。
+日常停止、再次启动或更新代码后的重建：
+
+```powershell
+docker compose --profile full stop             # 停止服务，保留数据
+docker compose --profile full up -d            # 再次启动
+docker compose --profile full up -d --build    # 更新代码后重建应用镜像
+```
+
+**不要把 `docker compose down -v` 当作日常停止命令：`-v` 会删除数据库与附件数据卷。**
+
+### 方式二：本机开发运行
+
+安装 Python 3.12+，在仓库根目录创建虚拟环境并安装开发依赖。
+以下示例使用 Windows Python Launcher 选择 3.12；若使用其他符合要求的 Python，替换解释器命令。
+已有虚拟环境可跳过创建，拉取包含新依赖的代码后仍需重新安装依赖：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+直接调用虚拟环境中的 Python，无需激活脚本或修改 PowerShell 执行策略。
+确认 `.env` 中本机数据库连接与实际账号、口令和端口一致；默认值为：
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://psm:psm_dev_password@localhost:5433/logix_pms
+POSTGRES_PORT=5433
+```
+
+**宿主机端口为 5433，不是容器内的 5432**。如果换宿主机端口，同时修改 `.env` 中的
+`POSTGRES_PORT` 和 `DATABASE_URL`；已有数据库的口令不会因修改 Compose 环境变量自动重置。
+
+若之前启动过整栈，先停止容器 API 和 worker，再只启动数据库：
+
+```powershell
+docker compose --profile full stop api worker
 docker compose up -d db
+docker compose ps db
 ```
 
-镜像 `postgres:16`，数据落在命名卷 `pgdata` 里，`docker compose down` 不会丢数据
-（要清空加 `-v`）。
+数据库健康后启动应用，保持终端运行：
 
-**宿主机端口是 5433，不是 5432**——本机 5432 常已被单独安装的 PostgreSQL 占用，
-两者会同时监听、`localhost` 优先命中本地那个，导致「密码明明对却认证失败」。
-需要换端口时：
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8123
+```
+
+Python 修改会自动重载，前端 JS/CSS 修改后刷新浏览器即可。
+需要自动超期升级和 Webhook 投递时，**等 API 完成迁移和初始化后**，另开终端回到仓库根目录运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.worker
+```
+
+不测试后台任务可以不启动 worker；不要与容器 worker 同时运行。
+在 Bash（Linux/macOS）下，虚拟环境与 Python 命令替换为：
 
 ```bash
-POSTGRES_PORT=55432 docker compose up -d db
-# 并同步修改 DATABASE_URL 里的端口
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements-dev.txt
+# 完成共同配置并启动数据库后
+.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8123
+# 按需在另一个终端执行，且等 API 初始化完成
+.venv/bin/python -m scripts.worker
 ```
 
-### 2. 启动应用
+Git Bash 使用 Windows 虚拟环境路径 `.venv/Scripts/python.exe`。
+从本机开发切回整栈时，先用 `Ctrl+C` 停止本机 uvicorn 和 worker，再执行方式一的启动命令。
+**不要让本机与容器 API 同时监听 8123**：可能端口冲突，也可能请求命中本机旧进程而非新容器。
 
-```bash
-pip install -r requirements-dev.txt
-# 本地演示先复制 .env.example 为 .env（里面已打开 ALLOW_DEV_SECRET 与 SEED_ON_STARTUP）
-uvicorn app.main:app --reload --port 8123
+### 可选：不使用 Docker 的 SQLite 本地体验
+
+先按方式二准备 Python 环境和共同配置，将 `.env` 中的 `DATABASE_URL` 改为：
+
+```dotenv
+DATABASE_URL=sqlite:///./logix_pms.db
 ```
 
-首次启动会自动建表。演示数据只在 `.env` 里同时打开 `ALLOW_DEV_SECRET` 和 `SEED_ON_STARTUP` 时灌入；生产用 `python -m scripts.bootstrap`。
+跳过 Docker 数据库启动，仍用方式二的 uvicorn 命令启动即可。SQLite 是仓库根目录下的
+独立文件，**不会复制 PostgreSQL 的数据**；适合轻量体验和测试，不代表 PostgreSQL 的并发行为。
+切回 PostgreSQL 时恢复原连接串，并重启 API 与 worker。
 
-> Windows 上如果 `--port 8000` 报 `WinError 10013`，是 8000 落在系统保留的 TCP 端口区间里
-> （Hyper-V / WSL 常见），换端口即可。用 `netsh interface ipv4 show excludedportrange protocol=tcp`
-> 查看被排除的区间。
+### 访问、健康检查与登录
 
-### 或者：整栈容器化
+PowerShell 健康检查（Bash 可用 `curl -fsS http://127.0.0.1:8123/health`）：
 
-```bash
-# 本地演示需要显式允许开发密钥，并打开演示数据。生产不要带这两项。
-ALLOW_DEV_SECRET=true SEED_ON_STARTUP=true docker compose --profile full up -d --build
+```powershell
+Invoke-RestMethod http://127.0.0.1:8123/health
 ```
 
-应用与数据库都在容器里。`api` 会等 `db` 健康检查通过再启动，启动时自动执行
-`alembic upgrade head`，宿主机访问 8123 即可。
-
-首次构建要拉基础镜像 `python:3.12-slim`，网络不好时会等一会儿；之后有层缓存就很快。
-
-> ⚠️ **端口优先级坑**：容器把 8123 发布到 `0.0.0.0`，而本地 `uvicorn` 默认绑 `127.0.0.1:8123`。
-> 两者同时存在时，`localhost` 会命中本地的 uvicorn，容器的请求根本进不来（排查时看
-> `docker logs logix-pms-api` 有没有你自己的请求就知道了）。用整栈模式时先停掉本地 uvicorn，
-> 或者临时 `docker compose stop api` 只保留数据库容器。
-
-只想要数据库时：
-
-```bash
-docker compose up -d db          # 只起 PostgreSQL
-docker compose stop api          # 停掉应用容器，回到本地 uvicorn 开发
-```
-
-### 不想用 Docker？
-
-```bash
-DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
-```
-
-代码里没有 PostgreSQL 专有写法，退回单文件 SQLite 也能跑（测试默认就用 SQLite）。
+PostgreSQL 方式启动后的**预期字段**为 `status: ok`、`database: postgresql`、
+`database_ok: true`；数据库不可用时健康检查返回 HTTP 503。确认后打开前端登录。
 
 | 地址 | 内容 |
 |---|---|
 | <http://127.0.0.1:8123/> | 前端应用（已接后端 API，需登录） |
-| <http://127.0.0.1:8123/docs> | 交互式 API 文档 |
+| <http://127.0.0.1:8123/docs> | 交互式 API 文档，仅 `ALLOW_DEV_SECRET=true` 时开放 |
 | <http://127.0.0.1:8123/sample> | 最初那份纯静态原型，保留作为设计对照 |
 | <http://127.0.0.1:8123/health> | 健康检查（无需登录），会返回当前数据库类型 |
 
@@ -138,6 +239,11 @@ DATABASE_URL=sqlite:///./logix_pms.db uvicorn app.main:app --port 8123
 | `manager` | `manager123` | MANAGER | 全部业务写权限，可看审计日志，不能管用户 |
 | `chen` | `chen123` | OWNER | 只能改自己名下（`陈经理`）的项目与流程模型 |
 | `viewer` | `viewer123` | VIEWER | 只读 |
+
+> 空库初始化后才有上述演示账号；已有数据库不会因打开演示开关而重置口令。
+> 若拒绝使用默认密钥，检查 `ALLOW_DEV_SECRET`；若数据库连不上，检查 `db` 健康状态、5433端口及实际口令；若8123冲突，先停止另一套API。
+>
+> 本地启动步骤按当前配置静态核对，本次文档修订未实机启动两条路径；首次运行请按健康检查与日志确认迁移/初始化结果。
 
 种子数据：8 个流程项目、148 个流程节点（L1–L4 全展开）、2 个流程实例、4 个运行时任务、2 个表单定义、1 条分支规则、3 条站内通知、1 个集成端点（示例、停用）、33 个工具、24 个标准步骤、24 份步骤契约、32 个交付物定义（每个项目自动生成 32 个交付物实例）、5 个演示组织单元与 4 个演示账号（已挂到演示组织）、
 16 个 KPI × 6 个月时序、5 条标准工时卡、3 条产能记录、3 个战略目标、1 份变更申请、7 个治理角色、14 条 RACI、5 个数据域、3 条数据流、8 条异常事件、9 篇知识条目、4 个演示用户、
@@ -154,9 +260,7 @@ python -m scripts.seed --benchmarks          # 只补灌 SCOR / APQC PCF v8.0 �
 python -m scripts.seed --benchmarks --reset  # 只重建对标数据，不动业务数据
 ```
 
-> 工具模板库不预置演示模板：模板属于组织资产，请按团队实际格式通过
-> `/tool-templates` 上传并审批后使用。组织单元同理，生产环境由管理员通过
-> `/org-units` 维护，不进入 `scripts.bootstrap` 的参考数据。
+> 参考初始化会补工具对应的在线填写模板（`TPL-*`，已有同码不覆盖）。团队自有文件模板、格式与审批仍由组织维护；有模板不表示对应专业算法已实现。组织单元由管理员通过 `/org-units` 维护，不作为参考组织自动生成。
 
 跑测试：
 
@@ -166,7 +270,7 @@ TEST_DATABASE_URL="postgresql+psycopg://psm:psm_dev_password@localhost:5433/logi
   pytest -v                                            # 对 PostgreSQL 跑（会先 drop 全部表）
 ```
 
-前端联调自检（无头浏览器跑两段：15 个视图渲染 + 全量交互路径，收集 JS 报错与失败请求，并截图）：
+前端联调自检（无头浏览器执行视图渲染与交互路径，收集 JS 报错、失败请求和截图；覆盖清单以脚本为准）：
 
 ```bash
 uvicorn app.main:app --port 8123      # 另开一个终端
@@ -378,7 +482,7 @@ web/            前端（原生 ES 模块，无构建步骤）
 scripts/
   seed.py             命令行灌库
   bootstrap.py        生产初始化：参考数据 + 首个管理员，不灌演示数据
-  verify_frontend.py  无头浏览器联调自检（15 个视图 + 交互路径 + 主题切换 + 截图）
+  verify_frontend.py  无头浏览器自检（视图/交互/主题/截图，覆盖以脚本为准）
   pcf_zh.py           APQC PCF 中文参考译文覆盖层工具（覆盖率/校验/切片/合并/标点归一化）
   pcf_zh_align.py     把译文里的活动名引用对齐到分类树正式译名（官方译名优先）
   pcf_zh_audit.py     中文覆盖层一致性审计（同英文多译文、交叉引用、标点口径、孤儿键）
@@ -408,7 +512,7 @@ index-sample.html  最初的纯静态原型，保留作为设计对照（挂在 
 
 ```text
 main.js
-  └─ views/*        十五个视图，各自 import 需要的 core
+  └─ views/*        视图按 main.js 注册，依赖各自需要的 core
        └─ core/router.js    注册表 + 页面切换（不 import 任何视图）
             └─ core/{api, auth, state, theme, ui, format}.js
 ```
@@ -417,9 +521,7 @@ main.js
 否则 router → views → auth → router 会绕成环。`api.js` 的 401 处理也是通过
 `setUnauthorizedHandler()` 回调注入，避免 api ↔ auth 互相依赖。
 
-**为什么 `main.js` 往 `window` 上挂函数**：模板里的 `onclick="openProject(3)"`
-在全局作用域求值，模块作用域隔离，不挂 window 就点不动。这段挂载是**唯一**的对外操作面，
-集中在一个 `Object.assign(window, …)` 里；将来改成事件委托时，删掉它即可，不用动各视图模块。
+**前端动作注册与最小调试面**：模板使用 `data-act` 和事件委托，跨模块动作由 `core/actions.js` 注册。`main.js` 只向 `window` 暴露 `{ go, closeModal, state, actions }` 供调试，不再靠铺开所有视图函数支持内联事件。不要按旧文档重复实施这轮已完成的模块化。
 
 **视觉壳与多主题**：所有颜色、圆角、阴影、间距都定义为 `base.css` 里 `:root` 的语义令牌，
 组件和视图只允许用 `var(--token)`，不允许写死 hex。顶栏的「主题」下拉由 `core/theme.js`
@@ -467,10 +569,10 @@ CI/Docker 改动，收益主要是开发体验。等出现复杂客户端状态�
 前端不维护映射表，避免「后端加了新枚举、前端忘了同步」。
 
 **测试守卫**：[tests/test_frontend_structure.py](tests/test_frontend_structure.py) 会在
-pytest 里检查 import 路径是否存在、十五个视图是否都注册且有 renderer、样式表是否被引用，
+pytest 里检查 import 路径、已登记视图及 renderer、样式引用等结构，
 把「模块路径写错只会在浏览器里静默 404」这类问题提前到测试阶段。
 
-**十五个模块与对应接口**：
+**主要业务模块与接口**（下表不是所有视图的完整注册清单，实际见 `web/js/main.js`）：
 
 | 视图 | 主要接口 | 能做什么 |
 |---|---|---|
@@ -1123,21 +1225,18 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 3. **通知与提醒**：站内通知已完成（任务指派/流程完成/异常超期/里程碑逾期，顶栏未读数）；
    邮件/短信/企业微信等外部推送仍待接入。
 4. **导入导出**：BPMN 2.0 结构导出/导入已完成；Excel 导入流程清单、并行网关/子流程仍待补。
-5. **生产部署**：镜像里用 uvicorn 单进程起服务，上生产需要加 gunicorn/多副本 + 反向代理 + HTTPS；
-   数据库连接的 SSL 与备份策略也还没配。
-6. **前端事件委托**：模板仍用 `onclick` 内联属性，`main.js` 因此要把几十个函数挂到 `window`。
-   改成 `data-action` + 事件委托后可以彻底去掉这层全局暴露；这是模块化之后剩下的最后一块耦合。
+5. **生产运行保障**：镜像默认一个 uvicorn worker，可用 `UVICORN_WORKERS` 配置；反向代理、HTTPS、数据库SSL、容量和真实备份恢复仍需按部署验证，支持配置不等于生产验收。
+6. **前端后续**：事件委托和最小window调试面已实现；待按实际任务增强方法操作与原产物核验，不再重复做“去除内联onclick”的旧待办。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
 8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、分支按规则自动路由、上游表单数据进入
    后续判断、启动按节点指派、结构化节点分派（角色/组织/默认处理人/节点时限）、任务时限
    与超期升级（扫描后自动改派）、实例挂起/恢复、任务事件历史、幂等启动/完成与条件更新、
    BPMN 2.0 导入导出、站内通知、ERP/OA 出站 Webhook 与 HMAC 入站 Webhook；下一步补并行
-   网关与子流程、ERP 拉取接口、定时投递 worker。
+   网关与子流程、ERP拉取接口及集成可靠性；定时worker已存在，不能把具备轮询投递等同完整业务对账。
 9. **交付物与标准文件**：本地卷存储、上传/下载、SHA-256、扩展名/魔数校验、
-   项目交付物（定义/实例/版本/审批）、流程标准文件（L1–L4 唯一源、复制到项目、
-   项目成果晋升、流程详情配套文件入口）、工具模板库与前端三页签均已完成；
-   还剩步骤页按项目流程展示「本步骤标准文件」、S3/对象存储、孤儿文件巡检、
+   项目交付物、L1–L4标准文件、复制/晋升和工具模板等基础已存在；
+   后续仍需步骤标准引用、对象存储真实部署验证、孤儿文件巡检、
    服务端占位符生成（DOCX/XLSX/PPTX）与保留期策略。
 10. **组织范围与集团继承**：`org_unit` 树、标准文件/模板的组织归属、集团通用 +
     上级继承、标准文件的变体策略（锁定/参数可调/可扩展/可选/仅本地）、
