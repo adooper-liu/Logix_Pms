@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +58,28 @@ class ProcessArchUpdate(BaseModel):
     publish_policy: Optional[str] = Field(default=None, description="direct | review_required")
 
 
-class ProcessArchOut(ORMModel):
+class ProcessClassificationOut(BaseModel):
+    process_type: Optional[str] = None
+    classification_basis: Optional[str] = None
+    classification_inherit: bool = True
+    classification_revision: int = 0
+    effective_process_type: Optional[str] = None
+    process_type_label: str = "未明确"
+    classification_source_id: Optional[int] = None
+    classification_source_code: Optional[str] = None
+    classification_is_inherited: bool = False
+    classification_is_override: bool = False
+    classification_matches_filter: bool = True
+
+
+class ProcessClassificationUpdate(BaseModel):
+    process_type: Optional[Literal["CORE", "SUPPORT", "MANAGEMENT"]]
+    classification_basis: str = Field(max_length=2000)
+    classification_inherit: bool
+    expected_revision: int = Field(ge=0)
+
+
+class ProcessArchOut(ORMModel, ProcessClassificationOut):
     id: int
     code: str
     name: str

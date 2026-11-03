@@ -6,8 +6,10 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
+from app.schemas.process import ProcessClassificationOut
 
-class CardProcessOut(BaseModel):
+
+class CardProcessOut(ProcessClassificationOut):
     id: int
     code: str
     name: str

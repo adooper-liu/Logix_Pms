@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_process_classification import verify_process_classification
 
 # Windows 控制台默认是 GBK，中文输出会变乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -114,6 +115,7 @@ def main() -> int:
             assert page.locator('.nav a[data-view="cbok"]').is_visible()
             assert page.locator('.nav a[data-view="workflow"]').count() == 0
 
+        check("三类型分类维护与原流程消费", lambda: verify_process_classification(page, base))
         check("默认入口与两侧栏分组", default_entry_and_nav)
 
         # ---------------------------------------------------- 第一段：视图渲染

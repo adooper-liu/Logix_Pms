@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, ManagerUser, apply_owner_update, resolve_owner
@@ -26,10 +26,12 @@ from app.schemas.process import (
     ProcessArchOut,
     ProcessArchTree,
     ProcessArchUpdate,
+    ProcessClassificationUpdate,
 )
 from app.services import audit as audit_service
 from app.services import org_unit as org_service
 from app.services import pcf_draft as pcf_draft_service
+from app.services import process_classification as classification_service
 
 router = APIRouter(prefix="/process-map", tags=["流程地图"])
 
@@ -53,8 +55,14 @@ def _heat_level(p: ProcessArch) -> str:
     return "LOW"
 
 
-def _to_out(p: ProcessArch) -> ProcessArchOut:
+def _to_out(p: ProcessArch, classification: Optional[dict] = None) -> ProcessArchOut:
+    data = classification or {}
     return ProcessArchOut(
+        process_type=p.process_type,
+        classification_basis=p.classification_basis,
+        classification_inherit=p.classification_inherit,
+        classification_revision=p.classification_revision,
+        **data,
         id=p.id,
         code=p.code,
         name=p.name,
@@ -81,6 +89,20 @@ def _to_out(p: ProcessArch) -> ProcessArchOut:
     )
 
 
+@router.get("/classification-meta", summary="流程业务分类标签与来源说明")
+def classification_meta():
+    return classification_service.meta()
+
+
+def _classifications(db: DbSession) -> dict:
+    return classification_service.resolve_all(list(db.scalars(select(ProcessArch)).all()))
+
+
+def _check_type_filter(process_type: Optional[str]) -> None:
+    if process_type is not None and process_type not in classification_service.FILTERS:
+        raise HTTPException(status_code=422, detail="流程类型筛选值无效")
+
+
 @router.get("/tree", response_model=List[ProcessArchTree], summary="流程架构树（L1→L4 逐级下钻）")
 def get_tree(
     db: DbSession,
@@ -89,10 +111,27 @@ def get_tree(
     ),
     max_level: int = Query(default=4, ge=1, le=4),
     improvement_only: bool = Query(default=False, description="只看待改善的流程"),
+    process_type: Optional[str] = None,
 ):
+    _check_type_filter(process_type)
     rows = db.scalars(
         select(ProcessArch).options(selectinload(ProcessArch.org_unit)).order_by(ProcessArch.code)
     ).all()
+    classifications = classification_service.resolve_all(rows)
+    if process_type is not None:
+        by_id = {row.id: row for row in rows}
+        retained = set()
+        for row in rows:
+            matched = classification_service.matches(classifications[row.id], process_type)
+            classifications[row.id]["classification_matches_filter"] = matched
+            if matched and row.level <= max_level:
+                current = row
+                seen = set()
+                while current is not None and current.id not in seen:
+                    seen.add(current.id)
+                    retained.add(current.id)
+                    current = by_id.get(current.parent_id)
+        rows = [row for row in rows if row.id in retained]
     if improvement_only:
         rows = [r for r in rows if r.is_improvement_target]
     by_parent: dict = {}
@@ -103,7 +142,7 @@ def get_tree(
         children: List[ProcessArchTree] = []
         if node.level < max_level:
             children = [build(c) for c in by_parent.get(node.id, [])]
-        base = _to_out(node)
+        base = _to_out(node, classifications[node.id])
         return ProcessArchTree(**base.model_dump(), children=children)
 
     if root_code:
@@ -123,7 +162,10 @@ def list_processes(
     parent_id: Optional[int] = None,
     keyword: Optional[str] = None,
     improvement_only: bool = False,
+    process_type: Optional[str] = None,
 ):
+    _check_type_filter(process_type)
+    classifications = _classifications(db)
     stmt = select(ProcessArch).options(selectinload(ProcessArch.org_unit))
     if level is not None:
         stmt = stmt.where(ProcessArch.level == level)
@@ -141,7 +183,11 @@ def list_processes(
             )
         )
     rows = db.scalars(stmt.order_by(ProcessArch.code)).all()
-    return [_to_out(r) for r in rows]
+    return [
+        _to_out(r, classifications[r.id])
+        for r in rows
+        if classification_service.matches(classifications[r.id], process_type)
+    ]
 
 
 @router.get("/heatmap", response_model=List[HeatmapItem], summary="改善优先级热力图")
@@ -191,7 +237,51 @@ def get_process(process_id: int, db: DbSession):
     p = db.get(ProcessArch, process_id)
     if p is None:
         raise HTTPException(status_code=404, detail="流程不存在")
-    return _to_out(p)
+    return _to_out(p, _classifications(db)[p.id])
+
+
+@router.put(
+    "/{process_id}/classification",
+    response_model=ProcessArchOut,
+    summary="维护流程分类（含修订校验）",
+)
+def set_classification(
+    process_id: int, payload: ProcessClassificationUpdate, db: DbSession, user: ManagerUser
+):
+    obj = db.get(ProcessArch, process_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="流程不存在")
+    basis = payload.classification_basis.strip()
+    if (payload.process_type is not None or not payload.classification_inherit) and not basis:
+        raise HTTPException(status_code=422, detail="明确分类或暂不分类时必须填写分类依据")
+    changed = db.execute(
+        update(ProcessArch)
+        .where(
+            ProcessArch.id == process_id,
+            ProcessArch.classification_revision == payload.expected_revision,
+        )
+        .values(
+            process_type=payload.process_type,
+            classification_basis=basis or None,
+            classification_inherit=payload.classification_inherit,
+            classification_revision=ProcessArch.classification_revision + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="分类已被更新，请刷新后核对；本次输入未保存")
+    audit_service.record(
+        db,
+        user,
+        "UPDATE",
+        "process",
+        process_id,
+        f"维护流程 {obj.code} 分类：{payload.process_type or ('INHERIT' if payload.classification_inherit else 'UNCLASSIFIED')}；依据：{basis}",
+    )
+    db.commit()
+    db.refresh(obj)
+    return _to_out(obj, _classifications(db)[obj.id])
 
 
 @router.post(
@@ -221,7 +311,7 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
     audit_service.record(db, user, "CREATE", "process", obj.id, f"新增流程 {obj.code} {obj.name}")
     db.commit()
     db.refresh(obj)
-    return _to_out(obj)
+    return _to_out(obj, _classifications(db)[obj.id])
 
 
 @router.post(
@@ -305,7 +395,7 @@ def update_process(process_id: int, payload: ProcessArchUpdate, db: DbSession, u
     )
     db.commit()
     db.refresh(obj)
-    return _to_out(obj)
+    return _to_out(obj, _classifications(db)[obj.id])
 
 
 @router.delete("/{process_id}", response_model=DeleteResult, summary="删除流程节点（含下级）")
