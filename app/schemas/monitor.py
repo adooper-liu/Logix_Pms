@@ -42,6 +42,7 @@ class KpiDefinitionCreate(BaseModel):
     data_flow_id: Optional[int] = None
     inbound_webhook_id: Optional[int] = None
     quality_rule: Optional[str] = None
+    measurement: Optional[dict] = None
 
     # 红/黄/绿三条线
     red_threshold: Optional[float] = None
@@ -78,6 +79,7 @@ class KpiDefinitionUpdate(BaseModel):
     data_flow_id: Optional[int] = None
     inbound_webhook_id: Optional[int] = None
     quality_rule: Optional[str] = None
+    measurement: Optional[dict] = None
 
     red_threshold: Optional[float] = None
     yellow_threshold: Optional[float] = None
@@ -100,6 +102,8 @@ class KpiRecordCreate(BaseModel):
 
 
 class KpiRecordOut(ORMModel):
+    provenance: Optional[dict] = None
+    revision: int = 0
     id: int
     kpi_id: int
     period: date
@@ -131,7 +135,11 @@ class KpiDefinitionOut(ORMModel):
     inbound_webhook_id: Optional[int] = None
     intake: str = "DRAFT"
     intake_label: str = "未定来源"
+    quality: str = "UNKNOWN"
+    quality_label: str = "来源待核实"
+    quality_reasons: List[str] = []
     quality_rule: Optional[str] = None
+    measurement: Optional[dict] = None
 
     red_threshold: Optional[float] = None
     yellow_threshold: Optional[float] = None
@@ -158,6 +166,8 @@ class KpiMetaOut(BaseModel):
     frequency_labels: dict
     status_labels: dict
     dimension_labels: dict
+    measurement_labels: dict
+    quality_labels: dict
 
 
 class KpiKindSummary(BaseModel):
@@ -248,7 +258,25 @@ class ExceptionCreate(BaseModel):
     source_instance_id: Optional[int] = None
 
 
+class ExceptionResolution(BaseModel):
+    reviewer_user_id: int = Field(ge=1)
+    decision: str = Field(min_length=1, max_length=1000)
+    action_ref: str = Field(min_length=1, max_length=1000)
+    evidence: str = Field(min_length=1, max_length=2000)
+    expected_result: str = Field(min_length=1, max_length=1000)
+    review_due: date
+
+
+class ExceptionReview(BaseModel):
+    expected_revision: int = Field(ge=0)
+    decision: str = Field(pattern="^(ACCEPT|RETURN)$")
+    evidence: str = Field(min_length=1, max_length=2000)
+    result: str = Field(min_length=1, max_length=2000)
+
+
 class ExceptionUpdate(BaseModel):
+    expected_revision: Optional[int] = Field(default=None, ge=0)
+    resolution: Optional[ExceptionResolution] = None
     title: Optional[str] = None
     description: Optional[str] = None
     severity: Optional[ExceptionSeverity] = None
@@ -263,6 +291,9 @@ class ExceptionUpdate(BaseModel):
 
 
 class ExceptionOut(ORMModel):
+    resolution: Optional[dict] = None
+    revision: int = 0
+    review_label: str = "措施效果待核验"
     id: int
     code: str
     title: str

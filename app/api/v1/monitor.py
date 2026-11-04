@@ -32,6 +32,7 @@ from app.schemas.common import DeleteResult, as_columns
 from app.schemas.monitor import (
     ExceptionCreate,
     ExceptionOut,
+    ExceptionReview,
     ExceptionSuggestion,
     ExceptionSummary,
     ExceptionUpdate,
@@ -50,7 +51,7 @@ from app.schemas.monitor import (
 )
 from app.schemas.project import ProjectDraftOut
 from app.services import audit as audit_service
-from app.services import exception_intake
+from app.services import exception_intake, exception_review
 from app.services import improvement as improvement_service
 from app.services import integrations as integration_service
 from app.services import kpi as kpi_service
@@ -131,7 +132,7 @@ def _to_kpi_out(db, kpi: KpiDefinition) -> KpiDefinitionOut:
     status, status_label, intake = kpi_service.presentation(db, kpi, latest)
     achievement = (
         None
-        if intake == kpi_service.INTAKE_DRAFT
+        if intake == kpi_service.INTAKE_DRAFT or status == "GRAY"
         else _achievement(kpi.direction, latest, kpi.target_value)
     )
     return KpiDefinitionOut(
@@ -158,6 +159,11 @@ def _to_kpi_out(db, kpi: KpiDefinition) -> KpiDefinitionOut:
         intake=intake,
         intake_label=kpi_service.INTAKE_LABELS.get(intake, intake),
         quality_rule=kpi.quality_rule,
+        measurement=kpi.measurement,
+        quality=kpi_service.record_quality(kpi, records[-1] if records else None),
+        quality_label=kpi_service.QUALITY_LABELS.get(
+            kpi_service.record_quality(kpi, records[-1] if records else None), "来源待核实"
+        ),
         red_threshold=kpi.red_threshold,
         yellow_threshold=kpi.yellow_threshold,
         green_threshold=kpi.green_threshold,
@@ -302,6 +308,13 @@ def kpi_meta():
         frequency_labels=FREQUENCY_LABELS,
         status_labels=STATUS_LABELS,
         dimension_labels=DIMENSION_LABELS,
+        measurement_labels={
+            "UNKNOWN": "未约定来源",
+            "EXECUTION_ELAPSED": "实例完成端到端月均历时",
+            "INBOUND": "原入站回传（质量另核）",
+            "MANUAL": "人工来源（待核验）",
+        },
+        quality_labels=kpi_service.QUALITY_LABELS,
     )
 
 
@@ -426,6 +439,10 @@ def update_kpi(kpi_id: int, payload: KpiDefinitionUpdate, db: DbSession, user: M
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     apply_owner_update(db, data, obj.owner)
+    import json
+    from copy import deepcopy
+
+    before = {key: deepcopy(getattr(obj, key)) for key in data}
     fields = sorted(data)
     for field, value in data.items():
         setattr(obj, field, value)
@@ -441,7 +458,16 @@ def update_kpi(kpi_id: int, payload: KpiDefinitionUpdate, db: DbSession, user: M
         "UPDATE",
         "kpi",
         obj.id,
-        f"更新 KPI 定义卡 {obj.code} 到 v{obj.version}（{', '.join(fields)}）",
+        json.dumps(
+            {
+                "message": f"更新KPI {obj.code} v{obj.version}",
+                "fields": fields,
+                "before": before,
+                "after": {key: getattr(obj, key) for key in data},
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
     )
     db.commit()
     db.refresh(obj)
@@ -554,8 +580,8 @@ def add_record(kpi_id: int, payload: KpiRecordCreate, db: DbSession, user: Manag
 
 
 @router.get("/exceptions/summary", response_model=ExceptionSummary, summary="异常事件概览")
-def exception_summary(db: DbSession):
-    rows = db.scalars(select(ExceptionEvent)).all()
+def exception_summary(db: DbSession, user: CurrentUser):
+    rows = db.scalars(exception_review.visible_stmt(db, user)).all()
     open_rows = [
         e
         for e in rows
@@ -579,6 +605,7 @@ def exception_summary(db: DbSession):
 @router.get("/exceptions", response_model=List[ExceptionOut], summary="异常事件列表")
 def list_exceptions(
     db: DbSession,
+    user: CurrentUser,
     status_: Optional[ExceptionStatus] = Query(default=None, alias="status"),
     severity: Optional[ExceptionSeverity] = None,
     process_id: Optional[int] = None,
@@ -586,7 +613,7 @@ def list_exceptions(
     owner: Optional[str] = None,
     limit: int = Query(default=100, ge=1, le=500),
 ):
-    stmt = select(ExceptionEvent)
+    stmt = exception_review.visible_stmt(db, user)
     if status_ is not None:
         stmt = stmt.where(ExceptionEvent.status == status_.value)
     if severity is not None:
@@ -617,6 +644,7 @@ def exception_suggestions(db: DbSession, user: CurrentUser):
     summary="登记异常事件",
 )
 def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
+    exception_review.validate_source(db, user, payload)
     if payload.source_kpi_id is not None and db.scalar(
         select(ExceptionEvent.id).where(
             ExceptionEvent.source_kpi_id == payload.source_kpi_id,
@@ -678,10 +706,8 @@ def create_exception(payload: ExceptionCreate, db: DbSession, user: WriteUser):
 
 
 @router.get("/exceptions/{exception_id}", response_model=ExceptionOut, summary="异常事件详情")
-def get_exception(exception_id: int, db: DbSession):
-    obj = db.get(ExceptionEvent, exception_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail="异常事件不存在")
+def get_exception(exception_id: int, db: DbSession, user: CurrentUser):
+    obj = exception_review.require(db, user, exception_id)
     return _to_exception_out(obj)
 
 
@@ -726,14 +752,18 @@ def create_exception_improvement_draft(exception_id: int, db: DbSession, user: W
     "/exceptions/{exception_id}", response_model=ExceptionOut, summary="处理 / 关闭异常事件"
 )
 def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession, user: WriteUser):
-    obj = db.get(ExceptionEvent, exception_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail="异常事件不存在")
+    obj = exception_review.require(db, user, exception_id)
     ensure_can_edit_owned(user, obj.owner_user_id, obj.owner)
     previous_status = obj.status
     previous_owner_id = obj.owner_user_id
 
-    data = as_columns(payload.model_dump(exclude_unset=True))
+    data = as_columns(
+        payload.model_dump(exclude_unset=True, mode="json", exclude={"expected_revision"})
+    )
+    # 其余日期仍交Pydantic原类型，JSON只用于约定快照。
+    if "due_at" in data:
+        data["due_at"] = payload.due_at
+    exception_review.prepare_update(db, user, obj, data, payload.expected_revision)
     if user.role == Role.OWNER.value:
         # 责任人不由 OWNER 自己变更
         data.pop("owner", None)
@@ -782,6 +812,11 @@ def update_exception(exception_id: int, payload: ExceptionUpdate, db: DbSession,
     db.commit()
     db.refresh(obj)
     return _to_exception_out(obj)
+
+
+@router.post("/exceptions/{exception_id}/review", response_model=ExceptionOut)
+def review_exception(exception_id: int, payload: ExceptionReview, db: DbSession, user: WriteUser):
+    return _to_exception_out(exception_review.review(db, user, exception_id, payload))
 
 
 @router.delete("/exceptions/{exception_id}", response_model=DeleteResult, summary="删除异常事件")

@@ -22,7 +22,8 @@ def _seed_reimbursement(client) -> dict:
     return next(row for row in listing["items"] if row["code"] == "PR-2026-029")
 
 
-def test_candidates_scan_and_exclusion(client):
+def test_candidates_scan_and_exclusion(client, verified_kpi):
+    verified_kpi("EFF-05")
     kpi = _kpi(client, "EFF-05")
     seed = _seed_reimbursement(client)
     assert seed["source_kpi_id"] == kpi["id"]
@@ -45,7 +46,8 @@ def test_candidates_scan_and_exclusion(client):
     client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
-def test_red_kpi_creates_improvement_project(client):
+def test_red_kpi_creates_improvement_project(client, verified_kpi):
+    verified_kpi("EFF-05")
     kpi = _kpi(client, "EFF-05")  # 10 天 > 红线 7.6 → 红
     seed = _seed_reimbursement(client)
     assert (
@@ -106,7 +108,8 @@ def test_red_kpi_creates_improvement_project(client):
     client.patch(f"{API}/projects/{seed['id']}", json={"status": "PLANNING"})
 
 
-def test_closed_project_allows_new_draft(client):
+def test_closed_project_allows_new_draft(client, verified_kpi):
+    verified_kpi("EFF-05")
     kpi = _kpi(client, "EFF-05")
     seed = _seed_reimbursement(client)
     assert (
@@ -169,7 +172,7 @@ def test_kpi_without_data_or_target_is_rejected(client):
     )
     rejected_target = _draft(client, kpi_id)
     assert rejected_target.status_code == 400
-    assert "目标值" in rejected_target.json()["detail"]
+    assert "正式来源" in rejected_target.json()["detail"]
 
 
 def test_meta_labels_and_permissions(client, viewer_client):
@@ -245,10 +248,12 @@ def test_closed_exception_cannot_create_improvement(client):
         json={"title": "已闭环异常测试", "severity": "LOW"},
     ).json()
     eid = created["id"]
-    assert (
-        client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"}).status_code
-        == 200
-    )
+    from app.core.database import SessionLocal
+    from app.models.monitor import ExceptionEvent
+
+    with SessionLocal() as db:
+        db.get(ExceptionEvent, eid).status = "CLOSED"
+        db.commit()
     rejected = client.post(f"{API}/monitor/exceptions/{eid}/improvement-draft")
     assert rejected.status_code == 400
     assert "已解决或已闭环" in rejected.json()["detail"]

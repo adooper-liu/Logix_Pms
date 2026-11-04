@@ -28,8 +28,8 @@ def test_duration_kpi_comes_from_execution(client):
     )
     assert created.status_code == 201, created.text
     body = created.json()
-    assert body["intake"] == "EXECUTION"
-    assert body["intake_label"] == "实例完成"
+    assert body["intake"] == "DRAFT"
+    assert body["intake_label"] == "未定来源"
 
 
 def test_rate_kpi_without_hook_is_not_official(client):
@@ -183,6 +183,7 @@ def test_exception_suggestion_inserts_only_after_confirm(client):
             "title": "来源测试异常",
             "severity": "HIGH",
             "source_kpi_id": source_id,
+            "process_id": next(row["process_id"] for row in kpis if row["id"] == source_id),
         },
     )
     assert first.status_code == 201, first.text
@@ -193,6 +194,7 @@ def test_exception_suggestion_inserts_only_after_confirm(client):
             "title": "来源测试异常再次",
             "severity": "HIGH",
             "source_kpi_id": source_id,
+            "process_id": next(row["process_id"] for row in kpis if row["id"] == source_id),
         },
     )
     assert second.status_code == 409

@@ -53,10 +53,10 @@ def test_seeded_kpis_have_definition_cards(client):
         assert kpi["source_system"] and kpi["granularity"] and kpi["quality_rule"]
 
     by_code = {kpi["code"]: kpi for kpi in seeded}
-    # 越小越好：10 天 > 红线 7.6，且单位是时长、绑了流程 → 正式来源，红
-    assert by_code["EFF-05"]["intake"] == "EXECUTION"
-    assert by_code["EFF-05"]["status"] == "RED"
-    assert by_code["EFF-05"]["status_label"] == "红"
+    # 演示历史数不因时间单位被视作正式运行证据。
+    assert by_code["EFF-05"]["intake"] == "DRAFT"
+    assert by_code["EFF-05"]["status"] == "GRAY"
+    assert by_code["EFF-05"]["status_label"] == "未定来源"
     # 百分数没有入站钩子，不进红黄
     assert by_code["QUA-02"]["intake"] == "DRAFT"
     assert by_code["QUA-02"]["status"] == "GRAY"
@@ -86,7 +86,7 @@ def test_create_and_update_bump_definition_version(client):
     assert data["kind_label"] == "过程"
     assert data["frequency_label"] == "每月"
     assert data["status"] == "GRAY"  # 还没有数据点：灰色等待信号
-    assert data["status_label"] == "灰（未取数）"
+    assert data["status_label"] == "未定来源"
 
     updated = client.patch(
         f"{API}/monitor/kpis/{data['id']}",
@@ -105,7 +105,7 @@ def test_create_and_update_bump_definition_version(client):
     assert record.status_code == 201, record.text
     detail = client.get(f"{API}/monitor/kpis/{data['id']}").json()
     assert detail["version"] == 2
-    assert detail["status"] == "YELLOW"  # 4.5 介于绿线 4 与红线 8 之间
+    assert detail["status"] == "GRAY"  # 人工补录未核实，不因阈值成为正式绩效
 
 
 def test_definition_requires_formula_or_ratio(client):

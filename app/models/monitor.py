@@ -5,7 +5,18 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -66,6 +77,7 @@ class KpiDefinition(Base):
         index=True,
     )
     quality_rule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    measurement: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # 红/黄/绿三条线：红=最差边界，绿=达标边界，黄为两者之间
     red_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -117,6 +129,8 @@ class KpiRecord(Base):
 
     period: Mapped[date] = mapped_column(Date, index=True)
     value: Mapped[float] = mapped_column(Float)
+    provenance: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     kpi: Mapped["KpiDefinition"] = relationship("KpiDefinition", back_populates="records")
@@ -180,5 +194,7 @@ class ExceptionEvent(Base):
 
     root_cause: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     action_taken: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolution: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     __table_args__ = (Index("ix_exception_status_severity", "status", "severity"),)
