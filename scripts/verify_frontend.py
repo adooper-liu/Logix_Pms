@@ -16,6 +16,11 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_lifecycle import (
+    verify_lifecycle,
+    verify_lifecycle_handoffs,
+    verify_lifecycle_original_actions,
+)
 from verify_process_classification import verify_process_classification
 from verify_tool_sheet import verify_tool_sheet_save
 
@@ -55,7 +60,12 @@ def check(name: str, fn) -> None:
         print(f"OK   {name}")
     except Exception as exc:  # noqa: BLE001 —— 自检脚本，任何异常都算失败
         failures.append(name)
-        print(f"FAIL {name}: {type(exc).__name__}: {exc}")
+        import traceback
+
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        print(
+            f"FAIL {name}: {type(exc).__name__}: {exc}\n  at {frame.filename}:{frame.lineno}: {frame.line}"
+        )
 
 
 def main() -> int:
@@ -116,6 +126,9 @@ def main() -> int:
             assert page.locator('.nav a[data-view="cbok"]').is_visible()
             assert page.locator('.nav a[data-view="workflow"]').count() == 0
 
+        check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
+        check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
+        check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
         check("三类型分类维护与原流程消费", lambda: verify_process_classification(page, base))
         check("默认入口与两侧栏分组", default_entry_and_nav)
 
@@ -176,7 +189,11 @@ def main() -> int:
             # 弹窗可能是嵌套栈，重复关闭直到栈清空（window 只暴露 closeModal）
             page.evaluate("() => { for (let i = 0; i < 8; i += 1) window.closeModal(); }")
             page.wait_for_timeout(150)
-            page.click(f'.nav a[data-view="{view}"]')
+            nav = page.locator(f'.nav a[data-view="{view}"]')
+            if nav.count():
+                nav.click()
+            else:
+                page.evaluate("view => go(view, {skipOrigin:true})", view)
             try:
                 page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
@@ -373,8 +390,9 @@ def main() -> int:
             goto("pcf")
             page.wait_for_selector("#pcfRows .pcf-row", timeout=12000)
             text = page.inner_text("#view")
-            assert "L1 流程类" in text and "L5 任务" in text, text[:200]
-            assert "PCF 是分类，不是流程图" in text
+            assert page.locator(".pcf-count-chip").count() == 5, "L1–L5计数不完整"
+            assert "L1" in text and "L5" in text, text[:200]
+            assert "L1–L5 是类名，不是生命周期的顺序" in text
             assert page.locator("#pcfRows .pcf-row").count() >= 13
 
             page.fill("#pcfQ", "采购物料与服务")
@@ -549,7 +567,9 @@ def main() -> int:
             assert "SIPOC" in body and "必用" in body, f"推荐工具未渲染：{body[:200]!r}"
             assert "SWIMLANE" in body and "推荐" in body
             assert "验证" in body, "步骤推荐工具缺少验证标准"
-            assert "暂无预制模板" in body, "未上传模板时应显示空态"
+            assert "SIPOC 一页纸" in body and "泳道分工表" in body and "现行 1.0.0" in body, (
+                "在线种子模板及现行版本未显示"
+            )
             close_modal()
 
         # 步骤页 → 工具箱：只展示本步骤推荐工具，并标注使用要求
@@ -573,23 +593,26 @@ def main() -> int:
                 "Swimlane" in n or "泳道" in n for n in names
             )
 
-            # 工具详情应显示场景/验证标准，并在有步骤上下文时提供「用到步骤」
+            # 工具详情保留步骤上下文，填写方法不自动申报效果。
             page.click('#view .tb-card button:has-text("查看详情") >> nth=0')
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(600)
             body = page.inner_text("#mBody")
             assert "适用场景" in body, "工具详情缺少适用场景"
             assert "验证标准" in body and "不适用" in body, "工具详情缺少决策字段"
-            assert "用到步骤 2.1" in page.inner_text("#mFoot"), "工具详情缺少用到当前步骤入口"
+            assert page.locator('#mFoot [data-act="toolbox.fillSheet"]').count() == 1, (
+                "工具详情缺少原方法填写入口"
+            )
+            assert page.evaluate("state.toolbox.step") == "2.1", "工具详情丢失步骤上下文"
             close_modal()
             page.wait_for_timeout(400)
 
             page.click('#view button:has-text("显示全部工具")')
             page.wait_for_timeout(900)
-            names_all = page.eval_on_selector_all(
-                "#view .tb-nav-item .tb-nav-name", "els => els.map(e => e.textContent.trim())"
+            assert "step=" not in page.url and "只显示" not in page.inner_text("#view"), (
+                "清除后仍保留步骤筛选"
             )
-            assert len(names_all) > 2, f"清除过滤后左侧工具导航应显示更多工具：{names_all}"
+            assert page.locator('[data-act="toolbox.segment"]').count() > 2, "全工具目录索引未恢复"
 
         # 方法论匹配引擎（真实调用后端）
         def workflow_recommend() -> None:
@@ -723,22 +746,18 @@ def main() -> int:
 
         # 工具箱：详情 + 按问题找工具（预设问题 + 自由输入各测一次）
         def toolbox() -> None:
+            page.evaluate(
+                "() => {state.toolbox.open='';state.toolbox.selected='';state.toolbox.step='';state.toolboxFilter=null;}"
+            )
             goto("toolbox")
+            page.locator('[data-act="toolbox.quick"][data-scenario="RACI"]').click()
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
-            assert "我遇到了什么问题" in view, "工具箱首屏没有问题入口"
-            assert "按问题" in view and "全部资源" in view, "工具箱缺少问题导航或全部资源区"
+            assert "我遇到了什么问题" in view, "工具箱没有问题入口"
+            assert "全部资源" in view and page.locator(".tb-nav-card").count() == 1, (
+                "工具箱缺少索引或资源区"
+            )
             assert "新建工具" in view and "新建案例/模板" in view, "管理员工具箱缺少新建入口"
-
-            # 左栏四个折叠区共用一套互斥手风琴：点开一个，其他必须收起
-            for label in ("按阶段", "按资源类型", "工具目录", "按问题"):
-                page.click(f'#view .kb-nav-fold summary:has-text("{label}")')
-                page.wait_for_timeout(1200)
-                opened = page.eval_on_selector_all(
-                    "#view .kb-nav-fold",
-                    "els => els.filter((el) => el.open).length",
-                )
-                assert opened == 1, f"左栏「{label}」展开后同时有 {opened} 个折叠区打开"
 
             page.click('#view button[data-act="toolbox.newTool"]')
             page.wait_for_selector("#mask.show")
@@ -748,8 +767,8 @@ def main() -> int:
             close_modal()
             page.wait_for_timeout(400)
 
-            page.click('#view .kb-pain[data-scenario="RACI"]')
-            page.wait_for_timeout(1600)
+            # 快捷问题已选中，不重复点击（再次点击会清除选择）。
+            page.wait_for_timeout(400)
             res = page.inner_text("#view")
             assert "匹配结果" in res and "验证标准" in res, f"快捷痛点未出结果：{res[:200]!r}"
             assert "适配" in res, "匹配结果缺少适配度"
@@ -779,43 +798,26 @@ def main() -> int:
             res2 = page.inner_text("#view")
             assert "RACI" in res2, f"自由输入应匹配到 RACI：{res2[:240]!r}"
 
-            # 工具类别属于「工具目录」，不属于「按资源类型」
-            page.click('#view .kb-nav-fold summary:has-text("按资源类型")')
+            # 阶段/目录筛选及从详情回到问题区，都走当前原页面动作。
+            page.locator('[data-act="toolbox.stageLink"]').nth(1).click()
+            page.wait_for_timeout(700)
+            assert "stage=2" in page.url and page.locator(".tb-detail-card").count() == 0
+            # 回问题区使用原清空动作，再单独验证目录，避免合法交集为空。
+            page.locator('[data-act="toolbox.quick"][data-scenario="CYCLE"]').click()
             page.wait_for_timeout(500)
-            assert not page.locator(
-                '#view button[data-act="toolbox.toggleCategory"]'
-            ).first.is_visible(), "工具类别不应出现在「按资源类型」折叠区"
-            page.click('#view .kb-nav-fold summary:has-text("工具目录")')
+            page.locator('[data-act="toolbox.clear"]').first.click()
             page.wait_for_timeout(500)
-            assert page.locator(
-                '#view button[data-act="toolbox.toggleCategory"]'
-            ).first.is_visible(), "「工具目录」折叠区缺少工具类别筛选"
-            # 四象限是辅助筛选，不是主入口
-            page.click('#view button[data-act="toolbox.toggleCategory"][data-category="DIAGNOSE"]')
-            page.wait_for_timeout(1200)
-            assert "方法论工具箱" in page.inner_text("#view")
-            assert "category=" in page.url, f"URL 没有记录四象限筛选：{page.url}"
-
-            # 工具详情 → 按问题/按阶段：必须退出工具详情，不能停留在工具界面
-            # 上一步点工具类别后「工具目录」已经是展开状态，直接点工具项
-            nav_item = page.locator("#view .tb-nav-item").first
-            assert nav_item.count(), "工具目录没有工具项"
-            nav_item.click()
-            page.wait_for_timeout(1200)
-            assert page.locator("#view .tb-detail-card").count(), "点击工具项后没有进入工具详情"
-            page.click('#view .kb-nav-fold summary:has-text("按问题")')
-            page.wait_for_timeout(1200)
-            assert page.locator("#view .tb-detail-card").count() == 0, (
-                "切到「按问题」后仍停留在工具详情"
-            )
-            assert "我遇到了什么问题" in page.inner_text("#view"), (
-                "切到「按问题」后没有回到问题区块"
-            )
-            page.click('#view .kb-nav-fold summary:has-text("按阶段")')
-            page.wait_for_timeout(1200)
-            assert page.locator("#view .tb-detail-card").count() == 0, (
-                "切到「按阶段」后仍停留在工具详情"
-            )
+            page.locator('[data-act="toolbox.segment"]').first.click()
+            page.wait_for_timeout(700)
+            assert "segment=" in page.url, "目录选择没有记录URL"
+            page.locator(".tb-mini").first.click()
+            page.wait_for_selector("#mask.show")
+            page.wait_for_selector("#mBody .tb-detail", timeout=8000)
+            assert "标准操作步骤" in page.inner_text("#mBody"), "目录没有打开原工具详情"
+            close_modal()
+            page.locator('[data-act="toolbox.quick"][data-scenario="CYCLE"]').click()
+            page.wait_for_timeout(700)
+            assert page.locator(".tb-detail-card").count() == 0, "选问题没有退出工具详情"
 
         # 项目交付物：把已发布流程模型登记为 2.1 的证据，不复制文件
         def deliverable_model_link() -> None:
@@ -833,9 +835,14 @@ def main() -> int:
                     body: JSON.stringify({nodes: [{node_key: 'a', name: 'E2E活动',
                       node_type: 'TASK', lane: 'L', duration_minutes: 10}], edges: []}),
                   });
-                  const pub = await fetch('/api/v1/processes/' + proc.id + '/design/publish', {
-                    method: 'POST', headers: h, body: JSON.stringify({}),
-                  }).then((r) => r.json());
+                  await fetch('/api/v1/processes/' + proc.id + '/design/submit-review', {
+                    method: 'POST', headers: h, body: JSON.stringify({note:'E2E模型证据评审'}),
+                  });
+                  const published = await fetch('/api/v1/processes/' + proc.id + '/design/publish', {
+                    method: 'POST', headers: h, body: JSON.stringify({change_note:'E2E关联证据发布', self_publish_reason:'隔离自检环境核验模型证据关联'}),
+                  });
+                  if (!published.ok) throw new Error(await published.text());
+                  const pub = await published.json();
                   const proj = await fetch('/api/v1/projects', {
                     method: 'POST', headers: h,
                     body: JSON.stringify({name: 'E2E 模型来源项目 ' + suffix,
@@ -901,9 +908,9 @@ def main() -> int:
             page.wait_for_timeout(900)
             assert "请先选择" in page.inner_text("#view"), "未选流程时应提示先选流程"
             assert "企业流程地图" in page.inner_text("#view .page-head"), "标准文件页头应链到地图"
-            assert page.locator('#view button[data-act="dlv.newDocument"]').evaluate_all(
-                "els => els.length > 0 && els.every(e => e.disabled)"
-            ), "未选流程时新建应禁用"
+            assert page.locator('#view button:has-text("+ 新建标准文件")').is_disabled(), (
+                "未选流程时新建应禁用"
+            )
             # 先选流程，再允许新建与空态
             proc = page.locator('#view select[data-act="dlv.docProcess"]')
             options = proc.evaluate(
@@ -936,7 +943,10 @@ def main() -> int:
 
             page.click('#view .tabs button:has-text("工具模板库")')
             page.wait_for_timeout(900)
-            assert "模板库还没有模板" in page.inner_text("#view"), "模板库空态未渲染"
+            page.wait_for_selector('#tplGrid [data-act="dlv.openTemplate"]', timeout=8000)
+            assert page.locator('#tplGrid [data-act="dlv.openTemplate"]').count() > 0, (
+                "种子模板列表未渲染"
+            )
             page.click('#view button:has-text("新建模板")')
             page.wait_for_selector("#mask.show")
             body = page.inner_text("#mBody")
@@ -1243,7 +1253,11 @@ def main() -> int:
             ]
             assert page.input_value("#pfLevel") == "1"
             close_modal()
-            page.click('#view .tree-item:has-text("采购需求提报")')
+            page.click('#view .tree-item[data-code="L1-03"]')
+            page.wait_for_timeout(300)
+            page.click('#view .tree-item[data-code="L2-003"]')
+            page.wait_for_timeout(300)
+            page.click('#view .tree-item[data-code="L3-032"]')
             page.wait_for_timeout(700)
             assert page.locator('#view button:has-text("+ L4 活动")').count() >= 1, (
                 "进入 L3 后没有「+ L4 活动」入口"
@@ -1529,17 +1543,19 @@ def main() -> int:
             )
             assert side_box and rightmost < side_box["x"], (rightmost, side_box)
             # 名称保存（保持原值，避免改写演示数据）
+            open_prop_section("基本")
             page.click('#bpmnSidebar button:has-text("保存名称")')
             page.wait_for_timeout(1200)
             assert "名称已更新" in page.inner_text("#toast")
+            open_prop_section("执行")
             assert page.locator("#bpmnSidebar .bpmn-assign").count() == 1
             page.fill("#baDue", "24")
-            page.click('#bpmnSidebar button:has-text("保存执行配置")')
+            page.click('#bpmnSidebar [data-act="designer.saveAssignment"]')
             page.wait_for_timeout(1200)
-            assert "节点执行配置已保存" in page.inner_text("#toast")
+            assert "节点分派已保存" in page.inner_text("#toast")
             # 还原为空，避免自检留下演示配置
             page.fill("#baDue", "")
-            page.click('#bpmnSidebar button:has-text("保存执行配置")')
+            page.click('#bpmnSidebar [data-act="designer.saveAssignment"]')
             page.wait_for_timeout(1200)
             # 属性栏可收起，并可从右侧折叠条重新打开
             page.click('#bpmnSidebar button:has-text("收起")')
@@ -1598,7 +1614,7 @@ def main() -> int:
             page.wait_for_selector("#uiDialogOk", timeout=5000)
             page.click("#uiDialogOk")
             page.wait_for_timeout(5000)
-            assert "已自动布局并保存" in page.inner_text("#toast")
+            assert "已按泳道横向布局并保存" in page.inner_text("#toast"), page.inner_text("#toast")
             assert page.locator('#bpmnCanvas [data-element-id^="Lane_"]').count() >= 1, (
                 "自动布局后泳道丢失"
             )
@@ -1973,8 +1989,11 @@ def main() -> int:
                 assert "待评审" in page.inner_text("#view"), page.inner_text("#view")[:200]
 
                 page.click('#view button:has-text("发布到运行时")')
-                page.wait_for_selector("#uiDialogOk", timeout=5000)
-                page.click("#uiDialogOk")
+                page.wait_for_selector("#pubChangeNote", timeout=8000)
+                page.fill("#pubChangeNote", "E2E首次发布")
+                if page.locator("#pubSelfReason").count():
+                    page.fill("#pubSelfReason", "隔离自检环境验证发布流程")
+                page.click('[data-act="designer.confirmPublish"]')
                 page.wait_for_timeout(1600)
                 assert page.inner_text("#pageTitle") == "流程执行", "发布后没有进入执行页"
                 page.wait_for_selector("#mask.show", timeout=8000)
@@ -2068,7 +2087,11 @@ def main() -> int:
                 f"KPI 定义卡字段缺失：{modal[:160]!r}"
             )
             assert "红线" in modal and "绿线" in modal, "KPI 定义卡缺少红/黄/绿阈值"
-            assert "生效版本" in modal and "数据来源系统" in modal, "KPI 定义卡缺少版本或来源"
+            assert (
+                "生效版本" in modal
+                and page.locator("#nkFlow").count() == 1
+                and page.locator("#nkHook").count() == 1
+            ), "KPI 定义卡缺少版本或数据来源选择"
             kinds = page.eval_on_selector_all(
                 "#nkKind option", "els => els.map(e => e.textContent)"
             )
@@ -2232,7 +2255,10 @@ def main() -> int:
         def knowledge() -> None:
             goto("toolbox")
             page.wait_for_timeout(900)
-            page.click('#view button[data-act="toolbox.section"][data-section="resources"]')
+            if page.locator(".kb-res-filters").count() == 0:
+                page.locator(
+                    '#view button[data-act="toolbox.section"][data-section="resources"]'
+                ).first.click()
             page.wait_for_timeout(1400)
             view = page.inner_text("#view")
             assert "全部资源" in view and "资源类型" in view, "全部资源区块没有展开"
@@ -2257,7 +2283,7 @@ def main() -> int:
             page.wait_for_timeout(400)
 
             # 场景 → ① 推荐：点「责任不清」应切回问题匹配并带出案例/模板
-            page.click('#view .kb-pain[data-scenario="RACI"]')
+            page.click('[data-act="toolbox.quick"][data-scenario="RACI"]')
             page.wait_for_timeout(1600)
             view = page.inner_text("#view")
             assert "匹配结果" in view, "场景匹配没有切回 ①"
@@ -2297,25 +2323,21 @@ def main() -> int:
             page.wait_for_timeout(1000)
             assert "流程标准文件" in page.inner_text("#view .tabs button.on"), "刷新后页签丢失"
 
-        # 知识库：按阶段选择后，左侧折叠互斥，中间推荐只保留该阶段命中项
-        # 工具箱：按阶段筛选后互斥展开 ②，① 折叠
+        # 阶段索引展开资源区，问题编辑区折叠，刷新恢复筛选。
         def knowledge_stage_filter() -> None:
-            goto("toolbox")
-            page.wait_for_timeout(700)
-            page.click('#view .kb-nav-fold summary:has-text("按阶段")')
-            page.wait_for_timeout(200)
-            page.click("#view .kb-stage-link >> nth=1")
-            page.wait_for_timeout(1400)
-            assert "stage=" in page.url, f"阶段选择没有写入 URL：{page.url}"
-            details = page.locator("#view .kb-nav-fold")
-            assert details.count() == 4, "左侧导航不是四个折叠区"
-            assert not details.nth(0).evaluate("el => el.open"), "选择阶段后「按问题」应折叠"
-            assert details.nth(1).evaluate("el => el.open"), "选择阶段后「按阶段」应展开"
-            view = page.inner_text("#view")
-            assert "资源类型" in view and "案例 / 模板" in view, (
-                f"阶段筛选没有展开全部资源：{view[:200]}"
+            page.evaluate(
+                "() => {state.toolbox.stage=null;state.toolbox.step='';state.toolboxFilter=null;}"
             )
-            assert page.locator("#toolQ").count() == 0, "选择阶段后 ① 应折叠"
+            goto("toolbox")
+            page.locator('[data-act="toolbox.stageLink"]').nth(1).click()
+            page.wait_for_timeout(1000)
+            assert "stage=2" in page.url, f"阶段选择没有写入 URL：{page.url}"
+            assert page.locator('[data-act="toolbox.stageLink"][data-stage="2"].on').count() == 1
+            assert "资源类型" in page.inner_text("#view"), "阶段筛选没有展开全部资源"
+            assert page.locator("#toolQ").count() == 0, "选择阶段后问题编辑区应折叠"
+            page.reload(wait_until="networkidle")
+            assert "stage=2" in page.url
+            assert page.locator('[data-act="toolbox.stageLink"][data-stage="2"].on').count() == 1
 
         # 项目组合：阶段筛选下拉必须显示阶段名称
         def projects_stage_names() -> None:
@@ -2332,7 +2354,7 @@ def main() -> int:
         def knowledge_tool_jump() -> None:
             goto("toolbox")
             page.wait_for_timeout(900)
-            page.click('#view .kb-pain[data-scenario="RACI"]')
+            page.click('[data-act="toolbox.quick"][data-scenario="RACI"]')
             page.wait_for_timeout(1500)
             btn = page.locator('#view .tb-card button[data-act="toolbox.goKnowledge"]').first
             assert btn.count(), "工具卡缺少「相关案例/模板」入口"
@@ -2385,7 +2407,7 @@ def main() -> int:
             page.wait_for_timeout(400)
             page.fill("#pfCode", "L3-E2E")
             page.fill("#pfName", "自检用临时流程")
-            page.fill("#pfOwner", "自检员")
+            page.select_option("#pfOwnerUser", index=1)
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(1500)
             assert "已创建" in page.inner_text("#toast"), page.inner_text("#toast")
@@ -2474,10 +2496,10 @@ def main() -> int:
             assert page.locator(".side").bounding_box()["width"] > 200
             page.evaluate("() => localStorage.removeItem('pms_nav_collapsed')")
 
-        # 驾驶舱入口：快捷链接、指标卡、阶段行都要真的能跳转
+        # 驾驶舱：原项目、优先级、KPI及异常下钻。
         def dashboard_entries() -> None:
             goto("dashboard")
-            page.wait_for_selector("#view .kpi.stat", timeout=8000)
+            page.wait_for_selector("#view .db-shell", timeout=8000)
             assert "我的当前推进" in page.inner_text("#view"), "驾驶舱缺少当前推进卡"
             continue_btn = page.locator('#view button[data-act="dashboard.openProject"]')
             if continue_btn.count():
@@ -2487,45 +2509,38 @@ def main() -> int:
                 assert "概览" in page.inner_text("#mBody"), "继续推进未打开项目详情"
                 close_modal()
             else:
-                page.click('#view a:has-text("项目组合")')
+                page.click('[data-act="dashboard.goProjects"]')
                 page.wait_for_timeout(700)
                 assert page.inner_text("#pageTitle") == "流程项目组合"
 
             goto("dashboard")
-            page.click("#view a.kpi.stat >> nth=0")
-            page.wait_for_timeout(900)
-            assert page.inner_text("#pageTitle") == "流程项目组合"
-            assert page.locator('#view select[data-key="status"]').input_value() == "ACTIVE"
-            assert "status=ACTIVE" in page.url, f"URL 没有记录筛选：{page.url}"
-
-            goto("dashboard")
-            page.click("#view a.stage-row >> nth=0")
-            page.wait_for_timeout(900)
-            assert page.inner_text("#pageTitle") == "流程项目组合"
-            assert page.locator('#view select[data-key="stage"]').input_value() == "1"
-            assert "stage=1" in page.url, f"URL 没有记录阶段筛选：{page.url}"
-
-            goto("dashboard")
-            page.click("#view .card:has(h3:has-text('改善优先级')) .project-open >> nth=0")
+            page.click('[data-act="dashboard.openProcess"] >> nth=0')
             page.wait_for_timeout(1200)
             assert page.inner_text("#pageTitle") == "企业流程地图"
             page.wait_for_selector("#mask.show")
             assert "综合优先级得分" in page.inner_text("#mask")
             close_modal()
 
-            goto("dashboard")
-            page.click("#view a.kpi.stat >> nth=2")
-            page.wait_for_timeout(900)
-            assert page.inner_text("#pageTitle") == "运营驾驶舱"
-            assert "异常事件台账" in page.inner_text("#view")
+            for key, tab, marker in [
+                ("kpi_alert", "kpi", "KPI 明细"),
+                ("open_exceptions", "exceptions", "异常事件台账"),
+            ]:
+                goto("dashboard")
+                page.click(f'[data-act="dashboard.kpi"][data-key="{key}"]')
+                page.wait_for_timeout(900)
+                assert page.inner_text("#pageTitle") == "运营驾驶舱"
+                assert f"tab={tab}" in page.url
+                assert marker in page.inner_text("#view")
 
         # 战略目标：年度目标与「目标 → 流程 → KPI」承接
         def strategy_view() -> None:
             goto("strategy")
             page.wait_for_timeout(800)
             view = page.inner_text("#view")
-            assert "战略目标" in view and "年度目标" in view, "战略目标页未渲染"
-            assert "已承接流程" in view, "战略目标页缺少承接汇总"
+            assert "战略目标" in view and "目标 → 流程 → KPI" in view, "战略目标页未渲染"
+            assert page.locator(".so-tree").count() == 1 and "承接" in view, (
+                "战略目标页缺少目标树或承接记录"
+            )
             page.click('#view button:has-text("+ 新建目标")')
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(400)
@@ -2567,7 +2582,9 @@ def main() -> int:
             tip = page.locator("#view .page-head .metric-help.has-tip")
             assert tip.count() == 1, "开始页没有把计数口径收进说明"
             tip_text = tip.first.get_attribute("data-tip") or ""
-            assert "流程地图" in tip_text and "十层核对" in tip_text, tip_text
+            assert "流程地图" in tip_text and "L1、L2" in tip_text and "治理角色" in tip_text, (
+                tip_text
+            )
             assert page.locator("#view .start-current").count() == 1, "开始页应展开框架边界"
             assert "这一步要留下什么" in view
             jumps = page.locator("#view .start-current button.ev-jump")
@@ -2747,23 +2764,25 @@ def main() -> int:
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
             assert "制度与授权设计" in view and "退出门" in view, "第4层工作区未展开"
-            assert "制度、授权与例外（本流程范围）" in view, "第4层缺少制度/授权工作区"
+            assert all(text in view for text in ["已生效制度/SOP", "授权规则", "例外台账"]), (
+                "第4层缺少制度/授权工作区"
+            )
             assert "layer=4" in page.url, f"URL 没有记录当前层：{page.url}"
 
             page.go_back()
             page.wait_for_selector('#view .pilot-layer.on[data-layer="1"]', timeout=8000)
             page.wait_for_timeout(500)
             back_view = page.inner_text("#view")
-            assert "制度、授权与例外（本流程范围）" not in back_view, "后退没有回到上一层"
+            assert "已生效制度/SOP" not in back_view, "后退没有回到上一层"
 
             page.go_forward()
             page.wait_for_selector('#view .pilot-layer.on[data-layer="4"]', timeout=8000)
             page.wait_for_timeout(500)
-            assert "制度、授权与例外（本流程范围）" in page.inner_text("#view"), "前进没有恢复第4层"
+            assert "已生效制度/SOP" in page.inner_text("#view"), "前进没有恢复第4层"
             page.reload(wait_until="networkidle")
             page.wait_for_selector('#view .pilot-layer.on[data-layer="4"]', timeout=8000)
             page.wait_for_timeout(500)
-            assert "制度、授权与例外（本流程范围）" in page.inner_text("#view"), "刷新没有恢复第4层"
+            assert "已生效制度/SOP" in page.inner_text("#view"), "刷新没有恢复第4层"
             page.screenshot(path=str(out_dir / "pilot-layer4.png"), full_page=True)
 
             page.click('#view button:has-text("+ 新增待办")')

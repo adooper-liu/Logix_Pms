@@ -6,7 +6,8 @@
 
 import { esc, tipHelp } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
-import { renderAsync, go } from '../core/router.js';
+import { loadLifecycle, lifecycleHtml } from '../core/lifecycle.js';
+import { renderAsync, go, urlParams } from '../core/router.js';
 import { GET } from '../core/api.js';
 import { state, TITLES } from '../core/state.js';
 
@@ -102,31 +103,10 @@ function stepBody(step) {
         ? `<p class="start-kicker">这一步只回答</p><p class="start-goal">${esc(step.goal)}</p>`
         : ''}
       ${points ? `<ul class="start-points">${points}</ul>` : ''}
-      ${lifecycleStrip()}
       ${step.next_hint ? `<p class="start-hint">${esc(step.next_hint)}</p>` : ''}
       ${stepActionsHtml(step)}
     </div>
     ${evidencePanel(step)}`;
-}
-
-function lifecycleStrip() {
-  const steps = [
-    ['strategy', '战略对齐', '战略目标'],
-    ['pcf', '流程架构', 'APQC'],
-    ['designer', '建模', '设计器'],
-    ['monitor', '分析', '流程分析', 'tab=analysis'],
-    ['designer', '设计', '设计器'],
-    ['execution', '执行', '流程执行'],
-    ['dashboard', '监控度量', '驾驶舱'],
-    ['projects', '变革优化', '项目组合'],
-    ['authorization', '治理', '授权矩阵'],
-  ];
-  const buttons = steps.map(([view, title, where, params]) => `
-    <button type="button" class="life-step" data-act="start.go" data-view="${view}"${
-      params ? ` data-params="${params}"` : ''}>
-      <b>${esc(title)}</b><span class="tiny">${esc(where)}</span>
-    </button>`).join('');
-  return `<p class="start-kicker">公司体系按这个顺序走</p><div class="life-row">${buttons}</div>`;
 }
 
 function statusTag(step) {
@@ -167,7 +147,7 @@ function pathRollupCard(data) {
     </div>`;
 }
 
-function paint(data) {
+function paint(data, lifecycle, processes) {
   const step = (data.steps || [])[0];
   const ready = step && step.status === 'READY';
   viewEl().innerHTML = `
@@ -178,9 +158,10 @@ function paint(data) {
             '数的是全公司这张流程地图：至少一条 L3 同时有 L1、L2 上级并对上 PCF，'
             + '并且至少一个治理角色启用且有成员。')}</h2>
         </div>
-        <span class="tag ${ready ? 't-grn' : 't-yel'}">${ready ? '框架边界已划清' : '框架边界还没划清'}</span>
+        <span class="tag ${ready ? 't-grn' : 't-yel'}">${ready ? '最低框架条件已满足' : '最低框架条件待补充'}</span>
       </div>
     </div>
+    ${lifecycleHtml(lifecycle, processes)}
     ${step ? currentCard(step) : ''}
     ${pathRollupCard(data)}`;
 }
@@ -213,10 +194,10 @@ on('start.guidedPcf', () => {
 const renderStart = () => {
   renderAsync(
     'start',
-    () => GET('/start/status'),
-    (data) => {
+    () => Promise.all([GET('/start/status'), loadLifecycle(urlParams()), GET('/process-map/flat')]),
+    ([data, lifecycle, processes]) => {
       state.start.data = data;
-      paint(data);
+      paint(data, lifecycle, processes);
     },
   );
 };

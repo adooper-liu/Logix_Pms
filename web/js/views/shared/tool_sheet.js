@@ -8,6 +8,8 @@ import { GET, POST } from '../../core/api.js';
 import { canWrite } from '../../core/auth.js';
 
 function sheetProjectId() {
+  const params = urlParams();
+  if (params.lifecycle) return params.project ? Number(params.project) : null;
   const trail = state.navTrail || [];
   for (let index = trail.length - 1; index >= 0; index -= 1) {
     const project = (trail[index].params || {}).project;

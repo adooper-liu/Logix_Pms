@@ -183,6 +183,7 @@ const renderToolbox = () => {
   if ('stage' in params) tb.stage = Number(params.stage) || null;
   if ('segment' in params) tb.segment = params.segment || '';
   if ('step' in params) tb.step = params.step;
+  else if (params.lifecycle) tb.step = '';
   if ('sort' in params) tb.sort = params.sort;
   if ('open' in params) {
     tb.open = params.open;

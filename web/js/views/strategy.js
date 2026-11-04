@@ -163,6 +163,11 @@ const renderStrategy = () => {
       state.strategyObjectives = d.objectives;
       const s = d.summary;
       const params = urlParams();
+      if (params.lifecycle && params.process) {
+        const byId = new Map(d.processes.map((row) => [row.id, row]));
+        const scope = new Set(ancestorChain(Number(params.process), byId).map((row) => row.id));
+        d.objectives = d.objectives.filter((obj) => (obj.links || []).some((link) => scope.has(link.process_id)));
+      }
       const wanted = Number(params.objective) || state.strategy.selectedId;
       const selected = d.objectives.find((row) => row.id === wanted) || d.objectives[0] || null;
       state.strategy.selectedId = selected ? selected.id : null;
@@ -195,6 +200,7 @@ const renderStrategy = () => {
               <div class="so-tree">${treeHtml}</div>
             </div>
           </div>
+          <div class="tiny muted">${urlParams().lifecycle ? '当前目标列表已按流程及祖先承接筛选；以下年度汇总仍为全公司范围。' : ''}</div>
           ${detailHtml(selected)}
           ${asideHtml(selected, d.tools, d.processes)}
         </div>`;

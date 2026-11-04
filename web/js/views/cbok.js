@@ -7,20 +7,10 @@
 
 import { esc } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
-import { go } from '../core/router.js';
+import { renderAsync, go, urlParams } from '../core/router.js';
+import { GET } from '../core/api.js';
+import { loadLifecycle, lifecycleHtml } from '../core/lifecycle.js';
 import { state } from '../core/state.js';
-
-const LIFECYCLE = [
-  ['strategy', '战略对齐'],
-  ['pcf', '流程架构'],
-  ['designer', '建模'],
-  ['monitor', '分析', 'tab=analysis'],
-  ['designer', '设计'],
-  ['execution', '执行'],
-  ['dashboard', '监控度量'],
-  ['projects', '变革优化'],
-  ['authorization', '治理'],
-];
 
 const AREAS = [
   {
@@ -121,7 +111,7 @@ const LANE = { process: '一条流程', company: '公司体系' };
 
 on('cbok.area', ({ id }) => {
   state.cbok.area = id || 'read';
-  paint();
+  renderCbok();
 });
 
 on('cbok.jump', ({ view, params }) => {
@@ -146,12 +136,6 @@ function rail(current) {
     }
     return `<button type="button" data-act="cbok.jump" data-view="${view}"><b>${esc(title)}</b><div class="tiny">${esc(sub)}</div></button>`;
   }).join('')}</div>`;
-}
-
-function lifecycleRow() {
-  return `<div class="life-row">${LIFECYCLE.map(([view, title, params]) => `
-    <button type="button" class="life-step" data-act="cbok.jump" data-view="${view}"${
-      params ? ` data-params="${params}"` : ''}><b>${esc(title)}</b></button>`).join('')}</div>`;
 }
 
 function readPane() {
@@ -191,7 +175,7 @@ function areaPane(area) {
     </div>`;
 }
 
-function paint() {
+function paint(data, processes) {
   const currentId = state.cbok.area || 'read';
   const area = AREAS.find((item) => item.id === currentId);
   state.cbok.area = area ? area.id : 'read';
@@ -207,8 +191,8 @@ function paint() {
   viewEl().innerHTML = `
     <div class="card page-head">
       <h2>CBOK 知识域<span class="module-badge">ABPMP 4.0 · 九项落在哪一页</span></h2>
-      <p class="desc">生命周期是公司体系的顺序。知识域 1 到 7 在「把一条流程建好」，8 和 9 留在公司体系。流程架构对 APQC。手册正文不转载。</p>
-      ${lifecycleRow()}
+      <p class="desc">生命周期是长期流程的管理导航，不是阶段推进器。知识域 1 到 7 在「把一条流程建好」，8 和 9 留在公司体系。流程架构对 APQC。手册正文不转载。</p>
+      ${lifecycleHtml(data, processes)}
       ${rail('cbok')}
     </div>
     <div class="study-layout">
@@ -217,6 +201,6 @@ function paint() {
     </div>`;
 }
 
-const renderCbok = () => paint();
+const renderCbok = () => renderAsync('cbok', () => Promise.all([loadLifecycle(urlParams()), GET('/process-map/flat')]), ([data, processes]) => paint(data, processes));
 
 export { renderCbok };

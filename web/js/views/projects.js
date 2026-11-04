@@ -228,6 +228,7 @@ const renderProjects = () => {
   if (f.stage) qs.push('stage=' + f.stage);
   if (f.projectType) qs.push('project_type=' + f.projectType);
   if (state.projects.keyword) qs.push('keyword=' + encodeURIComponent(state.projects.keyword));
+  if (urlParams().lifecycle && urlParams().process) qs.push('process_id=' + encodeURIComponent(urlParams().process));
   qs.push('page_size=100');
 
   renderAsync('projects',

@@ -55,14 +55,24 @@ function cockpitParams(extra) {
 }
 
 on('cockpit.tab', ({ view, tab }) => {
-  go(view, { params: cockpitParams(tab ? { tab } : {}), push: true });
+  const current = urlParams();
+  const params = cockpitParams(tab ? { tab } : {});
+  if (current.lifecycle) {
+    params.lifecycle = current.lifecycle;
+    if (current.project) params.project = current.project;
+  }
+  go(view, { params, push: true });
 });
 
 on('cockpit.process', (_data, el) => {
   state.cockpit.processId = Number(el.value) || null;
   const params = urlParams();
   if (state.cockpit.processId) params.process = String(state.cockpit.processId);
-  else delete params.process;
+  else {
+    params.process = '';
+    params.project = '';
+    params.lifecycle = '';
+  }
   const view = state.view === 'monitor' ? 'monitor' : 'dashboard';
   setUrlState(view, params, { push: false });
   if (RENDERERS[view]) RENDERERS[view]();

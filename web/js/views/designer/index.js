@@ -86,7 +86,11 @@ export async function openDesigner(processId) {
   go('designer', { params: { process: processId }, push: true });
 }
 
+let designerLoadRevision = 0;
+
 export function renderDesigner() {
+  const revision = ++designerLoadRevision;
+  const current = () => revision === designerLoadRevision && state.view === 'designer';
   const load = async () => {
     const params = urlParams();
     if (params.process) state.designer.processId = Number(params.process);
@@ -95,10 +99,14 @@ export function renderDesigner() {
     }
     // 每次进入都拉清单：seed --reset 后 id 会变，缓存会指向已删除流程
     const rows = await GET('/process-map/flat');
+    if (!current()) return;
     state.designer.processes = rows.filter((r) => r.level >= 3);
     const list = state.designer.processes;
     const preferred = () => list.find((r) => r.code === 'L3-032') || list[0] || null;
     const inList = list.some((r) => r.id === state.designer.processId);
+    if (params.lifecycle && params.process && !inList) {
+      throw new Error('所选流程不可用于本步建模，未切换其他流程');
+    }
     if (!state.designer.processId || !inList) {
       // URL/状态里的旧 process（常见于重灌后）自动落到演示流程
       const pick = preferred();
@@ -125,6 +133,7 @@ export function renderDesigner() {
           GET('/governance/roles?active_only=true'),
           GET('/governance/meta'),
         ]);
+      if (!current() || state.designer.processId !== id) return;
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
       state.designer.analysis = analysis;
