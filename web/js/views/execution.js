@@ -5,6 +5,7 @@ import { state } from '../core/state.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
+import { executionReadinessHtml } from './shared/execution_readiness.js';
 
 /* ============================================================ 9. 流程执行 */
 
@@ -180,6 +181,7 @@ const renderExecution = () => {
       let forms = [];
       let rules = [];
       let config = null;
+      let readiness = null;
       let assignments = [];
       let modelEdges = [];
       let orgs = [];
@@ -196,7 +198,7 @@ const renderExecution = () => {
         const pid = stillThere ? ex.configProcess : processes[0].id;
         ex.configProcess = pid;
         let design = null;
-        [forms, rules, config, assignments, orgs, roleMeta, assignees, design] = await Promise.all([
+        [forms, rules, config, assignments, orgs, roleMeta, assignees, design, readiness] = await Promise.all([
           GET('/execution/forms?process_id=' + pid),
           GET('/execution/rules?process_id=' + pid),
           GET('/execution/config?process_id=' + pid),
@@ -205,6 +207,7 @@ const renderExecution = () => {
           GET('/auth/meta'),
           GET('/execution/assignees'),
           GET('/processes/' + pid + '/design').catch(() => null),
+          GET('/execution/readiness?process_id=' + pid),
         ]);
         modelEdges = (design && design.edges) || [];
       }
@@ -218,7 +221,7 @@ const renderExecution = () => {
         ]);
       }
       return {
-        tasks, instances, processes, forms, rules, config, assignments, modelEdges,
+        tasks, instances, processes, forms, rules, config, assignments, modelEdges, readiness,
         orgs, roleMeta, assignees, endpoints, deliveries, inboundHooks, inboundActions,
       };
     }),
@@ -562,6 +565,8 @@ const renderExecution = () => {
         </div>`;
     }
 
+    midBody += executionReadinessHtml(d.readiness);
+
     const rightPanel = `
       <div class="cfg-side-card">
         <div class="tiny muted mb">当前流程</div>
@@ -590,7 +595,7 @@ const renderExecution = () => {
       </div>`;
 
     const configPane = !canManage()
-      ? '<div class="card"><div class="empty">需要流程管理科或管理员权限</div></div>'
+      ? `<div class="card"><div class="field"><label>准备核对流程</label>${processSelect}</div></div>${executionReadinessHtml(d.readiness)}`
       : !d.processes.length
         ? '<div class="card"><div class="empty">还没有可配置的流程。请先在设计器建模。</div></div>'
       : `

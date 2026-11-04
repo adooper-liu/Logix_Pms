@@ -433,22 +433,84 @@ def _advance(
     raise HTTPException(status_code=400, detail="流程疑似存在无法退出的自动节点环路")
 
 
+def legacy_start_replay(db, user, payload, key):
+    """旧全局幂等键只回放原发起者；归属/参数不明拒绝，不默开第二单。"""
+    import hashlib
+    import json
+
+    from app.models.execution import IdempotencyRecord
+
+    if not key or not key.strip():
+        return None
+    row = db.scalar(
+        select(IdempotencyRecord).where(
+            IdempotencyRecord.scope == "instance.start", IdempotencyRecord.key == key.strip()
+        )
+    )
+    if row is None:
+        return None
+    original = db.get(ProcessInstance, (row.response or {}).get("id"))
+    old_payload = payload.model_dump(mode="json", exclude={"round_id"})
+    digest = hashlib.sha256(
+        json.dumps(old_payload, sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()
+    if (
+        row.status != "SUCCESS"
+        or original is None
+        or original.started_by_id != user.id
+        or payload.round_id is not None
+        or row.request_hash != digest
+    ):
+        raise HTTPException(409, "旧启动幂等键归属或参数无法核对，请先查询原业务实例")
+    return InstanceOut.model_validate(row.response)
+
+
+def validate_start_context(db, process, user, payload):
+    from app.services import improvement_round, org_access
+
+    if payload.project_id is not None:
+        project = db.get(Project, payload.project_id)
+        if project is None:
+            raise HTTPException(400, "project_id指向项目不存在")
+        org_access.ensure_visible(db, user, project.org_unit_id)
+        if project.process_id != process.id:
+            raise HTTPException(400, "项目与执行流程不一致")
+    if payload.round_id:
+        round_row = improvement_round.require(db, user, process.id, payload.round_id)
+        if round_row.project_id != payload.project_id:
+            raise HTTPException(400, "轮次与执行项目不一致")
+        return round_row
+    return None
+
+
 def start_instance(
     db: Session,
     process: ProcessArch,
     user: User,
     payload: InstanceStartRequest,
 ) -> ProcessInstance:
+    from app.services import execution_readiness, process_model
+
+    process_model.lock_process(db, process)
+    version = execution_readiness.published(db, process)
+    round_row = validate_start_context(db, process, user, payload)
+    if round_row:
+        if version is None or round_row.released_model_version_id != version.id:
+            raise HTTPException(400, "轮次发布版本与当前运行版不一致")
+        if not execution_readiness.get(db, user, process.id)["confirmed"]:
+            raise HTTPException(409, "本轮当前上线准备尚未本人确认或已失效")
     snapshot = _snapshot(db, process)
+    snapshot["model_version_id"] = version.id if version else None
+    snapshot["round_id"] = payload.round_id
     start = _start_node(snapshot)
-    if payload.project_id is not None and db.get(Project, payload.project_id) is None:
-        raise HTTPException(status_code=400, detail="project_id 指向的项目不存在")
     instance = ProcessInstance(
         code=_next_instance_code(db),
         process_id=process.id,
         process_name=process.name,
         project_id=payload.project_id,
         status=InstanceStatus.RUNNING.value,
+        model_version_id=version.id if version else None,
+        round_id=payload.round_id,
         definition_version=process.published_model_version or process.model_version,
         snapshot=snapshot,
         variables=payload.variables or {},
@@ -1166,6 +1228,8 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
         status_label=INSTANCE_LABELS.get(instance.status, instance.status),
         current_node_key=instance.current_node_key,
         current_node_name=instance.current_node_name,
+        model_version_id=instance.model_version_id,
+        round_id=instance.round_id,
         definition_version=instance.definition_version,
         started_by_name=instance.started_by_name,
         started_at=instance.started_at,

@@ -41,11 +41,13 @@ from app.schemas.execution import (
     WorklogCreate,
     WorklogOut,
 )
+from app.schemas.execution_readiness import ReadinessConfirm, ReadinessIn, ReadinessOut
 from app.schemas.mining import MiningOut
 from app.services import audit as audit_service
 from app.services import escalation as escalation_service
 from app.services import execution as execution_service
 from app.services import execution_flow as flow_service
+from app.services import execution_readiness as readiness_service
 from app.services import forms as forms_service
 from app.services import idempotency as idempotency_service
 from app.services import integrations as integration_service
@@ -55,6 +57,21 @@ from app.services import process_mining as mining_service
 from app.services import process_model as model_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
+
+
+@router.get("/readiness", response_model=ReadinessOut)
+def get_readiness(process_id: int, db: DbSession, user: CurrentUser):
+    return readiness_service.get(db, user, process_id)
+
+
+@router.put("/readiness", response_model=ReadinessOut)
+def update_readiness(process_id: int, payload: ReadinessIn, db: DbSession, user: ManagerUser):
+    return readiness_service.update_config(db, user, process_id, payload)
+
+
+@router.post("/readiness/confirm", response_model=ReadinessOut)
+def confirm_readiness(process_id: int, payload: ReadinessConfirm, db: DbSession, user: WriteUser):
+    return readiness_service.confirm(db, user, process_id, payload)
 
 
 @router.get("/meta", summary="执行配置与工时类型标签")
@@ -558,14 +575,18 @@ def start_instance(
     user: WriteUser,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
-    digest = idempotency_service.request_hash(payload)
-    record = idempotency_service.begin(db, "instance.start", idempotency_key, digest)
-    if record is not None and record.status == "SUCCESS":
-        return InstanceOut.model_validate(record.response)
-
     process = db.get(ProcessArch, payload.process_id)
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
+    execution_service.validate_start_context(db, process, user, payload)
+    legacy = execution_service.legacy_start_replay(db, user, payload, idempotency_key)
+    if legacy is not None:
+        return legacy
+    digest = idempotency_service.request_hash(payload)
+    record = idempotency_service.begin(db, f"instance.start.u{user.id}", idempotency_key, digest)
+    if record is not None and record.status == "SUCCESS":
+        return InstanceOut.model_validate(record.response)
+
     instance = flow_service.start_instance(db, process, user, payload)
     audit_service.record(
         db,

@@ -163,6 +163,8 @@ class InstanceOut(BaseModel):
     status_label: str
     current_node_key: Optional[str] = None
     current_node_name: Optional[str] = None
+    model_version_id: Optional[int] = None
+    round_id: Optional[int] = None
     definition_version: int = 0
     started_by_name: Optional[str] = None
     started_at: UtcDateTime
@@ -191,6 +193,7 @@ class InstanceDetail(BaseModel):
 
 
 class InstanceStartRequest(BaseModel):
+    round_id: Optional[int] = Field(default=None, ge=1)
     process_id: int
     project_id: Optional[int] = None
     variables: Optional[Dict] = None

@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_execution_readiness import verify_execution_readiness
 from verify_improvement_round import verify_improvement_round
 from verify_lifecycle import (
     verify_lifecycle,
@@ -132,6 +133,7 @@ def main() -> int:
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
+        check("M6执行与上线准备", lambda: verify_execution_readiness(page, base))
         check("M5薄轮次固定与对照", lambda: verify_improvement_round(page, base))
         check("M4建模分析设计原作业", lambda: verify_workbench(page, base))
         check("M4原作业身份守卫", lambda: verify_workbench_guards(page, base))

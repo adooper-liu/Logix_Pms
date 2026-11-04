@@ -25,6 +25,7 @@ class PilotMetaOut(BaseModel):
     issue_status_labels: Dict[str, str]
     priority_labels: Dict[str, str]
     severity_labels: Dict[str, str]
+    applicability_labels: Dict[str, str]
 
 
 class PilotLayerEvidenceOut(BaseModel):
@@ -33,6 +34,9 @@ class PilotLayerEvidenceOut(BaseModel):
     value: int
     required: bool
     met: bool
+    applicability: str = "REQUIRED"
+    applicability_label: str = ""
+    applicability_reason: str = ""
     view: str = ""
     view_params: Dict[str, str] = Field(default_factory=dict)
 
@@ -134,6 +138,7 @@ class PilotLayerOut(ORMModel):
     context_summary: Optional[str] = None
     notes: Optional[str] = None
     evidence_items: List[PilotLayerEvidenceOut] = []
+    applicability_revision: int = 0
     actions: List[PilotActionOut] = []
     resources: Optional[PilotLayerResourcesOut] = None
     tasks: List[PilotTaskOut] = []
@@ -186,6 +191,11 @@ class PilotPathUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=160)
     status: Optional[PilotPathStatus] = None
     owner_user_id: Optional[int] = None
+
+
+class PilotApplicabilityIn(BaseModel):
+    expected_revision: int = Field(ge=0)
+    requirements: dict[str, dict[str, str]]
 
 
 class PilotLayerUpdate(BaseModel):
