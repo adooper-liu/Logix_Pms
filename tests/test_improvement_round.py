@@ -65,6 +65,8 @@ def round_sources(client):
         projects = {row.project_id for row in rows if row.project_id}
         for row in rows:
             db.delete(row)
+            # 自引用RESTRICT必须逐条从新修订向旧修订提交，不能让ORM按主键重排批量DELETE。
+            db.flush()
         db.flush()
         for row in db.scalars(select(KpiRecord).where(KpiRecord.kpi_id == kpi["id"])).all():
             db.delete(row)
