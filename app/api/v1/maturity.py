@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import DbSession, ManagerUser
+from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser, require_manager
 from app.models.enums import MaturityDimension
 from app.schemas.maturity import (
     CoverageSummaryOut,
@@ -87,9 +87,17 @@ def create_assessment(payload: MaturityAssessmentCreate, db: DbSession, user: Ma
 )
 def list_gates(
     db: DbSession,
+    user: CurrentUser,
     project_id: int = Query(ge=1),
     limit: int = Query(default=100, ge=1, le=200),
 ):
+    from app.models.project import Project
+    from app.services import org_access
+
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "项目不存在")
+    org_access.ensure_visible(db, user, project.org_unit_id)
     return [
         maturity_service.gate_out(db, row)
         for row in maturity_service.list_gates(db, project_id, limit=limit)
@@ -102,7 +110,9 @@ def list_gates(
     status_code=status.HTTP_201_CREATED,
     summary="签收阶段门禁（Manager）",
 )
-def create_gate(payload: GateAttestationCreate, db: DbSession, user: ManagerUser):
+def create_gate(payload: GateAttestationCreate, db: DbSession, user: WriteUser):
+    if payload.purpose == "STAGE_GATE":
+        require_manager(user)
     try:
         row = maturity_service.create_gate(db, payload.model_dump(), user)
     except maturity_service.MaturityError as exc:

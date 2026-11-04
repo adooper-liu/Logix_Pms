@@ -1,6 +1,6 @@
 # 主任务实施 Brief：三类型、八阶段与主体能力对齐
 
-> M1a–M4已依次经PR#14、#16–#18合并；M5经PR#19合并9246f4e；M6经PR#20合并c3072bc（71e90f3＋4440bb3），SQLite/PostgreSQL CI通过。当前已从合并基线进入feat/monitor-decision-loop，M7范围及首批RED记录见§11。
+> M1a–M4已依次经PR#14、#16–#18合并；M5经PR#19合并9246f4e；M6经PR#20合并c3072bc；M7提交70da711经PR#21合并52bbb41，SQLite/PostgreSQL CI通过。当前M8位于feat/round-outcome-governance，范围及首个RED见§12。
 
 ## 1. 主任务与完成标准
 
@@ -183,3 +183,15 @@ M6最终发布：4440bb3修正后，当前代码全站前端再次`全部检查�
 首批7项测试已运行并全部RED：当时小时KPI未约定仍被自动判EXECUTION、measurement字段被忽略、不支持参数被错误接受。现已落实原定义measurement、原样本provenance/revision和原异常resolution/revision；自动取数仅显式UTC自然端到端月均，历史/人工/未核入站均UNKNOWN，不因有钩子或单位变正式。原异常措施解决与效果核验分开，指定非编辑者本人ACCEPT才关闭，重开清有效核验。真实浏览器已验证原指标约定保存、缺样本灰、原处置及真实chen本人核验；独立SQLite Alembic check无漂移。首轮完整check.py输出`603 passed, 4 warnings in 122.79s`，格式/lint通过；全量前端当前隔离SQLite/端口/静态文件核对后完整exit0，`全部检查通过。`、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m7-full-p4566vfp`。分支复核7项Important均以API/真实浏览器或受控延迟边界复现后修正：运行样本与冻结单位/公式等字段全比较；措施编辑更新编辑者，关闭后改依据自动回处理中；来源实例项目范围进入列表/详情/核验过滤；异常加载绑定发起时流程；指标加载/选项/保存绑定modal代号，不覆盖或关闭新表单；原测量约定审计保留前后值。修复后完整check.py输出`606 passed, 4 warnings in 129.86s`，格式/lint通过；独立SQLite Alembic check仍无新增迁移；最终全站前端以新临时SQLite/端口核当前代码后完整通过，exit0、`全部检查通过。`、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m7-reviewed-zk_8abix`；14项M7 API、24项迁移/原轮次/入站兼容定向通过。日志仍有预期404/422/409/400及受保护实例清理409；原只读调色板无评审中模型时跳过、外部draw.io只测协议，未声称外部集成成功。M7待发布，不把测试通过当业务效果验收。
 
 当前能力边界：运行月均为本期已完成实例子集，混合模型/轮次不用于正式同轮对照；等待/P95/工作日历及外部入站真实性核验不支持并明确限制。开放实例仍沿原队列/工作量查看，不混入已完成周期。原动作引用/人工效果依据是可核声明，不自动证明因果或替代M8有权四结论。
+
+M7随后按授权提交/推送70da711，PR#21经CI运行41817195549的SQLite 3m21s、PostgreSQL 4m9s双库pass后于2026-11-04合并52bbb41。前述“待发布”是门禁时点，M7片已合并，不代表正式组织效果或全套绩效能力验收。
+
+## 12. 当前单元 M8：变革优化与持续治理
+
+已从52bbb41建立feat/round-outcome-governance。按[原结论与持续治理计划](superpowers/plans/2026-11-04-round-outcome-governance.md)承接R1-05/R5：原Gate用途与同轮核验、原培训操作验证、控制复盘/复制、五因素20保障只读核验；不建四阶段引擎/20平行任务。
+
+首个TDD红例已实测：向原/maturity/gates传IMPROVEMENT_MET及不存在round_id，当时字段被忽略并201创建普通STAGE_GATE。现原Gate增加purpose/round及原依据快照，普通阶段PASS与四用途隔离；非指定者403，旧revision409，缺发布/必要准备/正式后侧样本拒绝。上线投影随准备指纹变化待复核，不改项目阶段。
+
+原ProcessTrainingRecord增加操作场景/原模型/轮次/责任期限及本人核验，签到不等能力。原PDCA ToolSheet保存周期复盘/下一责任动作和本人核验，不增控制计划主库。原ReplicationPack保存来源轮次/版本hash快照及指定接收决定，接收只形成本地准备，不自动发布当地模型或结项。原流程卡持续治理模块显示20项原来源；来源存在只标待专项核验，不凭数量全绿，不计算未知分母采用率。
+
+首批8项定向通过，真实浏览器验证原PDCA复盘保存刷新、培训操作约定和复制原字段；独立临时SQLite Alembic upgrade/check输出`No new upgrade operations detected.`。一次整分支复核9项Important已纳入同一修复轮：旧方法读取/核验共用轮次范围、复制列表详情过滤来源、20项文件引用过滤；准备决定撤回使当前上线投影失效；前后正式样本质量双核；培训模型匹配轮次角色并保留原决定历史；复盘核验追加保留；草稿资产快照同步且只选有效版本，已发布包不可降级原位改并继承接收。原保障视图补责任账号/复核日期/核验者/决定引用和回原来源按钮，未知仍待核，不用一张复盘证明整个文化/资源已完成。真实manager独立浏览器已核控制复盘与培训操作，API定向现9项通过。修复后完整check.py为`615 passed, 4 warnings in 153.64s`，格式/lint通过；独立临时SQLite再次Alembic check无新增迁移；原API定向9项通过。最终全量前端以新临时SQLite/端口核当前代码后完整exit0，`全部检查通过。`、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m8-release-bfmihnea`；真实manager核验控制/操作、明确构造原轮次错误签收403且输入保留，不跳过该场景。迁移/本片/复制定向16项通过。预期404/403/422/409/400及实例清理409保留；外部diagrams.net403，仅协议可测，不称外站成功。M8待发布；实际资源到位、文化转变、外部/生产恢复及组织业务效果未验证，不把软件办理能力当成真实达标。

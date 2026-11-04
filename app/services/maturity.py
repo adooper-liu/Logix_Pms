@@ -113,6 +113,9 @@ def gate_out(db: Session, row: GateAttestation) -> GateAttestationOut:
     project = db.get(Project, row.project_id)
     return GateAttestationOut(
         id=row.id,
+        purpose=row.purpose,
+        round_id=row.round_id,
+        evidence_snapshot=row.evidence_snapshot,
         project_id=row.project_id,
         project_code=project.code if project else None,
         stage_no=row.stage_no,
@@ -129,6 +132,14 @@ def gate_out(db: Session, row: GateAttestation) -> GateAttestationOut:
 
 
 def create_gate(db: Session, data: dict, user: User) -> GateAttestation:
+    if data.get("purpose", "STAGE_GATE") != "STAGE_GATE":
+        from app.services import round_outcome
+
+        return round_outcome.create(db, user, data)
+    if data.get("round_id") is not None:
+        from fastapi import HTTPException
+
+        raise HTTPException(400, "普通项目阶段门禁不绑定轮次结果")
     project = db.get(Project, data["project_id"])
     if project is None:
         raise MaturityError("项目不存在")
@@ -159,6 +170,7 @@ def latest_gate(db: Session, project_id: int, stage_no: int) -> Optional[GateAtt
         .where(
             GateAttestation.project_id == project_id,
             GateAttestation.stage_no == stage_no,
+            GateAttestation.purpose == "STAGE_GATE",
         )
         .order_by(GateAttestation.signed_at.desc(), GateAttestation.id.desc())
         .limit(1)

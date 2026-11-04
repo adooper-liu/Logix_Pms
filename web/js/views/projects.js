@@ -921,10 +921,14 @@ async function submitGate(projectId) {
   }
 }
 
+let replicationForm=null;
 async function openReplicationModal(projectId) {
-  let packs;
+  const loading=openModal('加载原复制来源','加载中…');
+  let packs,rounds=[],people=[];
   try {
-    packs = await GET('/replication-packs?source_project_id=' + projectId);
+    const project=(await GET('/projects/'+projectId)).project;
+    [packs,rounds,people]=await Promise.all([GET('/replication-packs?source_project_id=' + projectId),project.process_id?GET('/processes/'+project.process_id+'/improvement-rounds'):Promise.resolve([]),GET('/execution/assignees')]);
+    if(!modalAlive(loading))return;
   } catch (e) {
     return toast(e.message, true);
   }
@@ -935,16 +939,18 @@ async function openReplicationModal(projectId) {
         : row.status === 'REJECTED' ? 't-red' : 't-gry'}">${esc(row.status_label)}</span></td>
       <td class="tiny">知识 ${row.knowledge.length} · 制度 ${row.documents.length}
         · 模板 ${row.templates.length}</td>
-      <td class="tiny">${esc(row.benefit_evidence || '—')}</td>
-      <td>${row.status === 'DRAFT' ? `<button class="btn-sm"
+      <td class="tiny">${esc(row.benefit_evidence || '—')}<br>${esc(row.receipt_label || '')}${row.source_snapshot?' · 原轮次 #'+row.source_snapshot.round_id:''}</td>
+      <td>${row.receiver_user_id===AUTH.user?.id&&row.status==='PUBLISHED'?`<button class="btn-sm" data-act="projects.receivePack" data-id="${row.id}">本人本地接收</button>`:''}${row.status === 'DRAFT' ? `<button class="btn-sm"
         data-act="projects.publishPack" data-id="${row.id}" data-project="${projectId}">发布</button>` : '—'}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="muted">还没有复制资产包</td></tr>';
-  openModal('复制资产包', `
+  const gen=openModal('复制资产包', `
     <div class="note mb">资产包记录适用条件、收益证据、失败经验与关联资产；
       发布前必须有适用条件和收益证据。</div>
     <table class="tbl"><thead><tr><th>标题 / 条件</th><th>状态</th><th>资产</th>
       <th>收益证据</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>
     <h3 class="mt">新建资产包</h3>
+    <div class="field"><label>固定来源轮次（不声明已达标）</label><select id="rpRound"><option value="">普通参考包，不作正式效果推广</option>${rounds.filter(r=>r.project_id===projectId).map(r=>`<option value="${r.id}">#${r.id} ${esc(r.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>指定非编制者接收</label><select id="rpReceiver"><option value="">待指定</option>${people.filter(u=>u.id!==AUTH.user?.id).map(u=>`<option value="${u.id}">${esc(u.display_name)}</option>`).join('')}</select></div>
     <div class="field"><label>标题 *</label><input id="rpTitle"></div>
     <div class="field"><label>适用条件 *</label><textarea id="rpConditions" rows="2"></textarea></div>
     <div class="field"><label>收益证据</label><textarea id="rpBenefit" rows="2"></textarea></div>
@@ -957,13 +963,22 @@ async function openReplicationModal(projectId) {
   `<button class="btn btn-g" data-act="projects.close">关闭</button>
    <button class="btn btn-p" data-act="projects.submitReplication"
      data-id="${projectId}">创建草稿</button>`, true);
+  replicationForm={gen,projectId,packs,busy:false};
 }
+
+on('projects.receivePack',async({id})=>{
+ const c=replicationForm,row=c?.packs.find(r=>r.id===Number(id));if(!row||!modalAlive(c.gen))return;
+ const gen=openModal('本人核对本地采用范围','<div class="note">接受仅形成当地准备依据，不发布模型、不结束项目。</div><div class="field"><label>目标流程原ID</label><input id="rrProcess" type="number"></div><div class="field"><label>决定</label><select id="rrDecision"><option value="ACCEPT">接收为本地准备</option><option value="REJECT">拒绝采用</option></select></div><div class="field"><label>本人依据/理由</label><textarea id="rrEvidence"></textarea></div>','<button class="btn btn-g" data-act="projects.close">取消</button><button class="btn btn-p" data-act="projects.submitReceipt">保存本人接收决定</button>');replicationForm={...c,gen,row};
+});
+on('projects.submitReceipt',async()=>{const c=replicationForm;if(!c?.row||!modalAlive(c.gen)||state.view!=='projects')return;try{await POST('/replication-packs/'+c.row.id+'/receipt',{expected_revision:c.row.revision,target_process_id:Number(document.getElementById('rrProcess').value),decision:document.getElementById('rrDecision').value,evidence:document.getElementById('rrEvidence').value});if(modalAlive(c.gen))openReplicationModal(c.projectId);toast('本人接收已记录，仍须本地准备');}catch(e){toast(e.message,true);}});
 
 function parseIds(value) {
   return (value || '').split(',').map((row) => Number(row.trim())).filter((row) => row > 0);
 }
 
 async function submitReplication(projectId) {
+  const c=replicationForm;
+  if(!c||c.projectId!==projectId||!modalAlive(c.gen)||state.view!=='projects'||c.busy)return;
   const val = (id) => {
     const el = document.getElementById(id);
     return el ? el.value.trim() : '';
@@ -971,9 +986,12 @@ async function submitReplication(projectId) {
   if (!val('rpTitle') || !val('rpConditions')) {
     return toast('标题与适用条件不能为空', true);
   }
+  c.busy=true;
   try {
     await POST('/replication-packs', {
       source_project_id: projectId,
+      round_id:Number(val('rpRound'))||null,
+      receiver_user_id:Number(val('rpReceiver'))||null,
       title: val('rpTitle'),
       conditions: val('rpConditions'),
       benefit_evidence: val('rpBenefit') || null,
@@ -983,15 +1001,15 @@ async function submitReplication(projectId) {
       template_ids: parseIds(val('rpTemplates')),
     });
     toast('复制资产包已创建');
-    openReplicationModal(projectId);
+    if(modalAlive(c.gen))openReplicationModal(projectId);
   } catch (e) {
     toast(e.message, true);
-  }
+  } finally {c.busy=false;}
 }
 
 async function publishPack(packId, projectId) {
   try {
-    await PATCH('/replication-packs/' + packId, { status: 'PUBLISHED' });
+    await PATCH('/replication-packs/' + packId, { status: 'PUBLISHED',expected_revision:replicationForm?.packs.find(r=>r.id===packId)?.revision });
     toast('资产包已发布');
     openReplicationModal(projectId);
   } catch (e) {

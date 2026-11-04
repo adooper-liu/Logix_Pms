@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -129,6 +130,8 @@ class ProcessTrainingRecord(Base):
     )
     topic: Mapped[str] = mapped_column(String(200))
     completed_on: Mapped[date] = mapped_column(Date)
+    operation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

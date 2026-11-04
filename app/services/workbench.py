@@ -210,6 +210,10 @@ def create(db, user, pid, payload):
 
 def review(db, user, pid, sheet_id, payload):
     row = db.get(ToolSheet, sheet_id)
+    if row and (row.work_context or {}).get("kind") == "CONTROL_REVIEW":
+        from app.services import governance_evidence
+
+        return governance_evidence.review(db, user, pid, sheet_id, payload)
     if row is None or row.process_id != pid or not row.work_context:
         raise HTTPException(404, "原作业记录不存在")
     visible_chain(db, user, row)

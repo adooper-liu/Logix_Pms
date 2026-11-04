@@ -22,6 +22,7 @@ from app.api.v1 import (
     deliverables,
     designer,
     execution,
+    governance_evidence,
     improvement_round,
     integrations,
     knowledge,
@@ -62,6 +63,7 @@ protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(dashboard.router)
 protected.include_router(process_map.router)
 protected.include_router(process_card.router)
+protected.include_router(governance_evidence.router)
 protected.include_router(process_documents.router)
 protected.include_router(process_tasks.router)
 protected.include_router(benchmark.router)

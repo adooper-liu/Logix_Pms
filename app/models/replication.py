@@ -20,6 +20,12 @@ class ReplicationPack(Base):
         ForeignKey("project.id", ondelete="SET NULL"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(200))
+    source_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    receiver_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL", name="fk_pack_receiver"), nullable=True
+    )
+    receipt: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     benefit_evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failure_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
