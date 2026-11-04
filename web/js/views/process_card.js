@@ -14,6 +14,7 @@ import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/rout
 import { GET, POST } from '../core/api.js';
 import { canManage } from '../core/auth.js';
 import { actions as appActions } from '../core/actions.js';
+import { contextHtml } from './shared/process_context.js';
 
 on('process_card.select', (_data, el) => {
   state.processCard.processId = Number(el.value) || null;
@@ -73,6 +74,7 @@ on('process_card.submitTask', () => submitTask());
 on('process_card.findings', () => openFindingsModal());
 on('process_card.selectModule', ({ module }) => {
   state.processCard.activeModule = module;
+  setUrlState('process_card', {process: state.processCard.processId, module}, {push:true});
   RENDERERS.process_card();
 });
 
@@ -84,6 +86,7 @@ const renderProcessCard = () => {
     'process_card',
     async () => {
       const params = urlParams();
+      if (params.module) state.processCard.activeModule = params.module;
       const processes = (await GET('/process-map/flat')).filter(
         (row) => row.level === 3 || row.level === 4,
       );
@@ -94,7 +97,7 @@ const renderProcessCard = () => {
       }
       state.processCard.processId = processId;
       // 把默认选中的流程也写进 URL，分享/刷新后落到同一条流程
-      setUrlState('process_card', { process: processId || '' }, { push: false });
+      setUrlState('process_card', { process: processId || '', module:state.processCard.activeModule || '' }, { push: false });
       if (!processId) {
         return { processes, card: null };
       }
@@ -111,7 +114,8 @@ const renderProcessCard = () => {
       ).catch(() => []);
       state.processCard.level = card.process.level;
       const pilot = (paths || []).find((row) => row.process_id === processId) || null;
-      return { processes, card, assessments, coverage, tasks, pilot };
+      const charter = card.process.level === 3 ? await GET('/start/charters/'+processId) : null;
+      return { processes, card, assessments, coverage, tasks, pilot, charter };
     },
     (d) => {
       const options = d.processes.map((row) =>
@@ -327,6 +331,7 @@ const renderProcessCard = () => {
         findingRows, '',
       );
       const modules = [
+        {key:'context',group:'战略与设计',label:'边界与交接',count:(c.handoffs || []).length,html:contextHtml(c,d.charter),guide:false},
         { key: 'strategy', group: '战略与设计', label: '战略承接', count: c.objectives.length,
           html: strategyCard, guide: !c.objectives.length },
         { key: 'raci', group: '战略与设计', label: '权责矩阵', count: c.raci.length,

@@ -6,12 +6,15 @@ from fastapi import APIRouter, HTTPException
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser
 from app.schemas.startup import (
+    CharterContextOut,
     CharterIn,
     CharterOptionsOut,
+    CharterUpdate,
     StartupPilotConfirmIn,
     StartupSkipIn,
     StartupStatusOut,
 )
+from app.services import charter as charter_service
 from app.services import startup as startup_service
 
 router = APIRouter(prefix="/start", tags=["启动向导"])
@@ -76,6 +79,22 @@ def revoke_pilot(db: DbSession, user: ManagerUser):
 )
 def charter_options(db: DbSession, user: CurrentUser):
     return startup_service.charter_options(db)
+
+
+@router.get(
+    "/charters/{process_id}", response_model=CharterContextOut, summary="流程范围、客户结果及原依据"
+)
+def get_charter(process_id: int, db: DbSession, user: CurrentUser):
+    return charter_service.context(db, process_id, user)
+
+
+@router.put(
+    "/charters/{process_id}", response_model=CharterContextOut, summary="修订原流程章程（MANAGER+）"
+)
+def update_charter(process_id: int, payload: CharterUpdate, db: DbSession, user: ManagerUser):
+    if process_id != payload.process_id:
+        raise HTTPException(400, "流程身份不一致")
+    return charter_service.save(db, user, payload)
 
 
 @router.post(

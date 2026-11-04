@@ -55,6 +55,8 @@ class ProcessCharter(Base):
         ForeignKey("app_user.id", ondelete="RESTRICT", name="fk_process_charter_sponsor"),
         index=True,
     )
+    details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

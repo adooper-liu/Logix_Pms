@@ -40,6 +40,14 @@ class ToolSheet(Base):
         index=True,
     )
     step_no: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    template_version_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "tool_template_version.id", ondelete="RESTRICT", name="fk_sheet_template_version"
+        ),
+        nullable=True,
+    )
+    handoff: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     title: Mapped[str] = mapped_column(String(160))
     fields: Mapped[Any] = mapped_column(JSON, default=list)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

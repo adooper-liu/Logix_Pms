@@ -43,8 +43,9 @@ from app.schemas.tool import (
     ToolUsageSummary,
     ToolWorkflowStepOut,
 )
-from app.schemas.tool_sheet import SheetFormOut, ToolSheetCreate, ToolSheetOut
+from app.schemas.tool_sheet import HandoffConfirm, SheetFormOut, ToolSheetCreate, ToolSheetOut
 from app.services import audit as audit_service
+from app.services import handoff as handoff_service
 from app.services import knowledge_match, tool_lifecycle, tool_match
 from app.services import tool_sheet as tool_sheet_service
 from app.services.strategy import StrategyError
@@ -498,6 +499,8 @@ def save_tool_sheet(code: str, payload: ToolSheetCreate, db: DbSession, user: Wr
             step_no=payload.step_no,
             values=payload.values,
             make_objectives=payload.make_objectives,
+            handoff=payload.handoff,
+            template_version_id=payload.template_version_id,
         )
     except (ToolSheetError, StrategyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -511,6 +514,24 @@ def save_tool_sheet(code: str, payload: ToolSheetCreate, db: DbSession, user: Wr
     )
     db.commit()
     return saved
+
+
+@router.get(
+    "/{code}/sheets/{sheet_id}", response_model=ToolSheetOut, summary="原方法记录与交接确认"
+)
+def get_sheet(code: str, sheet_id: int, db: DbSession, user: CurrentUser):
+    return handoff_service.detail(db, user, code, sheet_id)
+
+
+@router.post(
+    "/{code}/sheets/{sheet_id}/confirm",
+    response_model=ToolSheetOut,
+    summary="指定参与者本人确认交接",
+)
+def confirm_sheet(
+    code: str, sheet_id: int, payload: HandoffConfirm, db: DbSession, user: WriteUser
+):
+    return handoff_service.confirm(db, user, code, sheet_id, payload)
 
 
 @router.post(
