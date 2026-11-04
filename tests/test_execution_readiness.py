@@ -285,6 +285,15 @@ def test_start_idempotency_does_not_replay_another_users_instance(
     assert other.json()["id"] != original.json()["id"]
 
 
+def test_process_with_direct_instance_model_reference_rejects_deletion(client, ready_process):
+    pid, _ = ready_process
+    started = client.post(API + "/execution/instances", json={"process_id": pid})
+    assert started.status_code == 201, started.text
+    deleted = client.delete(API + f"/process-map/{pid}")
+    assert deleted.status_code == 409, deleted.text
+    assert client.get(API + f"/processes/{pid}/design").status_code == 200
+
+
 def test_assignment_requires_routing_not_only_sla(client, ready_process):
     pid, _ = ready_process
     saved = client.put(

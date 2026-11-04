@@ -183,8 +183,12 @@ def test_form_version_freezes_on_instance(client):
         assert still["configuration"]["forms"]["task"]["name"] == "处理表单 v1"
     finally:
         if iid is not None:
-            client.delete(f"{API}/execution/instances/{iid}")
-        client.delete(f"{API}/process-map/{pid}")
+            cancelled = client.post(f"{API}/execution/instances/{iid}/cancel")
+            assert cancelled.status_code == 200, cancelled.text
+            deleted = client.delete(f"{API}/execution/instances/{iid}")
+            assert deleted.status_code == 200, deleted.text
+        deleted = client.delete(f"{API}/process-map/{pid}")
+        assert deleted.status_code == 200, deleted.text
 
 
 def test_publish_rollback_respects_change_gate(client):

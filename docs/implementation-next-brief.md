@@ -170,4 +170,6 @@ M5随后按授权经PR#19合并；PostgreSQL CI发现修订链RESTRICT下测试�
 
 最终门禁：`.venv`环境`python scripts/check.py`输出`591 passed, 4 warnings in 153.45s`，格式/lint通过；独立临时SQLite再次Alembic check无新增迁移；迁移用例6项通过。最终全量前端以新临时SQLite/端口验证当前静态文件后完整执行，`全部检查通过。`、exit0、`SERVER_500: []`，20视图、M6及既有专项、原实例实际办理均通过。专项另补逐任务覆盖UI通过。日志保留预期404/422/409/400和受保护实例清理409，未声称没有失败HTTP；原只读调色板因无评审中模型实际跳过，外部draw.io只测协议，生产真并发/恢复未验证。截图`D:/Dev/Cache/Temp/logix-m6-reviewed-7eqew54w`，本会话任务`bxuvio3tg`与`bv3zzcynp`；发布CI仍以远端实际结果为准。
 
+**发布门禁补正：** 71e90f3已推送PR#20；首轮CI SQLite通过，PostgreSQL在旧`test_form_version_freezes_on_instance`清理失败：运行中实例DELETE为409被忽略，随后删除被实例直接固定的模型触发RESTRICT，连带PCF计数多1。现补原流程删除409保留保护，测试先取消→删除实例→删除流程并逐步断言；新增SQLite回归已先复现错误删除200，再修正为409，23项定向通过。不是放松外键/删除历史，修复后完整check.py为`592 passed, 4 warnings in 147.78s`，格式/lint通过；双库CI仍须复跑后才合并。
+
 **漂移裁定边界：** schema以Alembic实测为准；产品仍唯一目录三类型、八阶段导航、项目五阶段，原对象增量无部署/条件平行主库。M6是既有轻量执行器上线准备片，不代表Flowable、并行/子流程/事件/恢复接入；正式运行样本、质量与有权四结论由M7/M8继续，生产真并发/恢复及组织业务效果未验证。

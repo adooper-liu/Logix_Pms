@@ -424,6 +424,16 @@ def delete_process(process_id: int, db: DbSession, user: ManagerUser):
     from app.services.improvement_round import guard_delete
 
     guard_delete(db, "process", ids)
+    from app.models.execution import ProcessInstance
+    from app.models.process import ProcessModelVersion
+
+    retained_models = select(ProcessModelVersion.id).where(ProcessModelVersion.process_id.in_(ids))
+    if db.scalar(
+        select(ProcessInstance.id)
+        .where(ProcessInstance.model_version_id.in_(retained_models))
+        .limit(1)
+    ):
+        raise HTTPException(409, "流程模型被运行实例固定引用，请归档而非删除")
 
     # 显式清理依赖数据。不能指望数据库级联：SQLite 默认不强制外键，
     # 而 SQLAlchemy 的 ORM 级联只覆盖有 relationship 的对象（这里没有）。
