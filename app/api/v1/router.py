@@ -22,6 +22,7 @@ from app.api.v1 import (
     deliverables,
     designer,
     execution,
+    improvement_round,
     integrations,
     knowledge,
     lifecycle,
@@ -94,6 +95,7 @@ protected.include_router(data_governance.router)
 protected.include_router(decisions.router)
 protected.include_router(lifecycle.router)
 protected.include_router(workbench.router)
+protected.include_router(improvement_round.router)
 protected.include_router(startup.router)
 protected.include_router(pilot.router)
 protected.include_router(knowledge.router)

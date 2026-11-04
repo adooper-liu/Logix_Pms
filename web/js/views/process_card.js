@@ -14,6 +14,7 @@ import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/rout
 import { GET, POST } from '../core/api.js';
 import { canManage } from '../core/auth.js';
 import { actions as appActions } from '../core/actions.js';
+import { roundsHtml } from './shared/improvement_round.js';
 import { contextHtml } from './shared/process_context.js';
 
 on('process_card.select', (_data, el) => {
@@ -97,7 +98,7 @@ const renderProcessCard = () => {
       }
       state.processCard.processId = processId;
       // 把默认选中的流程也写进 URL，分享/刷新后落到同一条流程
-      setUrlState('process_card', { process: processId || '', module:state.processCard.activeModule || '' }, { push: false });
+      setUrlState('process_card', { process: processId || '', module:state.processCard.activeModule || '',round:params.round || '' }, { push: false });
       if (!processId) {
         return { processes, card: null };
       }
@@ -115,7 +116,8 @@ const renderProcessCard = () => {
       state.processCard.level = card.process.level;
       const pilot = (paths || []).find((row) => row.process_id === processId) || null;
       const charter = card.process.level === 3 ? await GET('/start/charters/'+processId) : null;
-      return { processes, card, assessments, coverage, tasks, pilot, charter };
+      const rounds=await GET('/processes/'+processId+'/improvement-rounds');
+      return { processes, card, assessments, coverage, tasks, pilot, charter,rounds };
     },
     (d) => {
       const options = d.processes.map((row) =>
@@ -331,6 +333,7 @@ const renderProcessCard = () => {
         findingRows, '',
       );
       const modules = [
+        {key:'rounds',group:'运行与结果',label:'轮次对照',count:d.rounds.length,html:roundsHtml(c,d.rounds),guide:false},
         {key:'context',group:'战略与设计',label:'边界与交接',count:(c.handoffs || []).length,html:contextHtml(c,d.charter),guide:false},
         { key: 'strategy', group: '战略与设计', label: '战略承接', count: c.objectives.length,
           html: strategyCard, guide: !c.objectives.length },

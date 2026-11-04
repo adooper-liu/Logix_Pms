@@ -97,6 +97,7 @@ from app.models.execution import (
     TaskWorklog,
 )
 from app.models.governance import GovernanceFinding
+from app.models.improvement_round import ProcessImprovementRound
 from app.models.integration import (
     InboundEvent,
     InboundWebhook,
@@ -139,6 +140,7 @@ from app.models.workload import (
 
 __all__ = [
     # 模型
+    "ProcessImprovementRound",
     "ProcessArch",
     "ProcessModelVersion",
     "ProcessNode",
