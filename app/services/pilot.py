@@ -180,18 +180,11 @@ LAYER_DEFINITIONS: List[Dict] = [
     {
         "layer_no": 6,
         "title": "表单/工具",
-        "goal": "表单能填写；路径来自执行实例或记入的日志；机器人有一次挂了端点的运行；"
-        "并写下案例，以及区块链、人工智能或物联网用在哪一段。",
-        "inputs": ["表单", "执行实例或日志行", "机器人运行", "案例", "技术用途"],
-        "process": [
-            "建最小字段集",
-            "从执行实例或记入的日志挖路径",
-            "登记机器人，并记下一次挂了集成端点的运行",
-            "登记案例和技术用途",
-        ],
-        "outputs": ["表单", "路径变体", "机器人运行", "案例", "技术用途"],
-        "exit_criteria": "表单、路径变体、机器人登记、挂了端点的运行、案例、技术用途都大于 0。"
-        "日志行是记进本系统的，不会自动从 ERP 或 OA 拉下来。运行记录不代替机器人去执行。",
+        "goal": "按实际采用范围核对表单、日志或自动化；不使用RPA或新技术的流程无需强造登记。",
+        "inputs": ["实际采用的表单/工具", "可追溯日志或运行依据", "适用性说明"],
+        "process": ["核对采用范围", "必要时登记原表单/日志/自动化", "分别核技术结果与业务接收"],
+        "outputs": ["适用工具及原依据", "未采用/待核项说明"],
+        "exit_criteria": "本层默认参考项，不以填表/机器人次数证明上线；若选择必需需满足原证据，核心发布及执行准备在原模块核验。技术登记/端点成功不等于实际业务成功。",
         "evidence": [
             "forms",
             "bindings",
@@ -295,6 +288,9 @@ def _scope_view(
     return scoped
 
 
+APPLICABILITY_LABELS = {"REQUIRED": "必需", "OPTIONAL": "可选参考", "NOT_APPLICABLE": "不适用"}
+
+
 def require_path(db: Session, path_id: int) -> PilotPath:
     row = db.get(PilotPath, path_id)
     if row is None:
@@ -358,7 +354,9 @@ def _layer_status(items: List[PilotLayerEvidenceOut], blocked: bool) -> str:
         return PilotLayerStatus.BLOCKED.value
     required = [item for item in items if item.required]
     met = sum(1 for item in required if item.met)
-    if required and met == len(required):
+    if not required:
+        return PilotLayerStatus.DONE.value
+    if met == len(required):
         return PilotLayerStatus.DONE.value
     if met > 0:
         return PilotLayerStatus.IN_PROGRESS.value
@@ -513,7 +511,10 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
         process_counts = {key: 0 for key in process_evidence.PROCESS_EVIDENCE_LABELS}
     _layer4_counts, layer4_resources = _layer4_resources(db, path)
     # 第 4 层制度/授权以本流程范围清单为准（与 collect 同源口径，展示用资源明细）
-    layer_rows = _ensure_layers(db, path)
+    layer_rows = {
+        row.layer_no: row
+        for row in db.scalars(select(PilotLayer).where(PilotLayer.path_id == path.id)).all()
+    }
     tasks = db.scalars(select(PilotTask).where(PilotTask.path_id == path.id)).all()
     issues = db.scalars(select(PilotIssue).where(PilotIssue.path_id == path.id)).all()
     tasks_by_layer: Dict[int, List[PilotTask]] = {}
@@ -539,7 +540,13 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
                         key, startup_service.EVIDENCE_LABELS.get(key, key)
                     ),
                     value=layer_evidence.get(key, 0),
-                    required=key != "open_authorization_exceptions",
+                    required=key != "open_authorization_exceptions" and layer_no != 6,
+                    applicability="OPTIONAL"
+                    if layer_no == 6 or key == "open_authorization_exceptions"
+                    else "REQUIRED",
+                    applicability_reason="按实际采用范围核对；技术登记不等于业务成功"
+                    if layer_no == 6
+                    else "",
                     met=startup_service.evidence_met(key, layer_evidence.get(key, 0)),
                     view=view,
                     view_params=_scope_view(view, params, path, process),
@@ -553,9 +560,35 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
         )
         status = _layer_status(items, blocked)
         gate_open = status == PilotLayerStatus.DONE.value
+        row = layer_rows.get(layer_no)
+        if row and row.applicability:
+            items = [
+                item.model_copy(
+                    update={
+                        "required": (row.applicability.get(item.key) or {}).get(
+                            "mode", "OPTIONAL" if layer_no == 6 else "REQUIRED"
+                        )
+                        == "REQUIRED",
+                        "applicability": (row.applicability.get(item.key) or {}).get(
+                            "mode", item.applicability
+                        ),
+                        "applicability_reason": (row.applicability.get(item.key) or {}).get(
+                            "reason", item.applicability_reason
+                        ),
+                    }
+                )
+                for item in items
+            ]
+            status = _layer_status(items, blocked)
+            gate_open = status == PilotLayerStatus.DONE.value
+        items = [
+            item.model_copy(
+                update={"applicability_label": APPLICABILITY_LABELS[item.applicability]}
+            )
+            for item in items
+        ]
         if gate_open:
             done_count += 1
-        row = layer_rows[layer_no]
         layers.append(
             PilotLayerOut(
                 layer_no=layer_no,
@@ -569,8 +602,9 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
                 status_label=LAYER_STATUS_LABELS.get(status, status),
                 gate_open=gate_open,
                 current=layer_no == path.current_layer,
-                context_summary=row.context_summary,
-                notes=row.notes,
+                context_summary=row.context_summary if row else None,
+                notes=row.notes if row else None,
+                applicability_revision=row.revision if row else 0,
                 evidence_items=items,
                 actions=[
                     PilotActionOut(
@@ -602,14 +636,14 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
     derived = next(
         (layer.layer_no for layer in layers if not layer.gate_open), len(LAYER_DEFINITIONS)
     )
-    if path.status != PilotPathStatus.COMPLETED.value:
-        path.current_layer = derived
+    current_layer = (
+        derived if path.status != PilotPathStatus.COMPLETED.value else path.current_layer
+    )
     layers = [
-        layer.model_copy(update={"current": layer.layer_no == path.current_layer})
-        for layer in layers
+        layer.model_copy(update={"current": layer.layer_no == current_layer}) for layer in layers
     ]
 
-    current = LAYER_BY_NO.get(path.current_layer)
+    current = LAYER_BY_NO.get(current_layer)
     return PilotPathOut(
         id=path.id,
         name=path.name,
@@ -620,7 +654,7 @@ def path_detail(db: Session, path: PilotPath) -> PilotPathOut:
         owner=path.owner,
         status=path.status,
         status_label=PATH_STATUS_LABELS.get(path.status, path.status),
-        current_layer=path.current_layer,
+        current_layer=current_layer,
         current_layer_title=current["title"] if current else None,
         progress=round(done_count * 100 / len(LAYER_DEFINITIONS), 1),
         baseline_version=path.baseline_version,

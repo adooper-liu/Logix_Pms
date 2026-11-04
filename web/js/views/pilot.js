@@ -6,9 +6,10 @@
  */
 
 import { esc, num } from '../core/format.js';
-import { viewEl, on, openModal, closeModal, confirmDialog, toast } from '../core/ui.js';
+import { viewEl, on, openModal, closeModal, modalAlive, confirmDialog, toast } from '../core/ui.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
-import { GET, POST, PATCH, DEL } from '../core/api.js';
+import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
+import { canManage } from '../core/auth.js';
 import { state } from '../core/state.js';
 
 const LAYER_TONE = {
@@ -742,6 +743,34 @@ function nextList(detail, selectedNo) {
     </details>`;
 }
 
+let applicabilityForm = null;
+on('pilot.editApplicability', () => {
+  const detail = state.pilot.data;
+  const layer = detail?.layers.find(row => row.layer_no === 6);
+  if (!layer || !canManage()) return;
+  const labels = state.pilot.meta.applicability_labels;
+  const gen = openModal('表单/工具适用性', `<p class="note">只核对原第6层参考项，不能豁免核心发布与执行准备；技术登记不代表业务成功。</p>${layer.evidence_items.map(item => `<div class="field"><label>${esc(item.label)}</label><select id="paMode-${esc(item.key)}">${Object.entries(labels).map(([mode, label]) => `<option value="${mode}"${mode === item.applicability ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select><textarea id="paReason-${esc(item.key)}">${esc(item.applicability_reason)}</textarea></div>`).join('')}`,
+    '<button class="btn btn-g" data-act="ui.close">取消</button><button class="btn btn-p" data-act="pilot.saveApplicability">保存适用性</button>', true);
+  applicabilityForm = { pathId: detail.id, revision: layer.applicability_revision, layer, gen, busy: false };
+});
+on('pilot.saveApplicability', async () => {
+  const c = applicabilityForm;
+  if (!c || !modalAlive(c.gen) || state.view !== 'pilot' || Number(state.pilot.pathId) !== c.pathId || Number(urlParams().path) !== c.pathId || state.pilot.data?.id !== c.pathId) return toast('路径上下文已变化，请重新打开适用性', true);
+  if (c.busy) return;
+  const requirements = Object.fromEntries(c.layer.evidence_items.map(item => [item.key, {
+    mode: document.getElementById('paMode-' + item.key).value,
+    reason: document.getElementById('paReason-' + item.key).value.trim(),
+  }]));
+  c.busy = true;
+  try {
+    await PUT('/pilot/paths/' + c.pathId + '/layers/6/applicability', { expected_revision: c.revision, requirements });
+    if (modalAlive(c.gen)) closeModal();
+    if (state.view === 'pilot' && Number(state.pilot.pathId) === c.pathId && Number(urlParams().path) === c.pathId && state.pilot.data?.id === c.pathId) RENDERERS.pilot();
+    toast('原层适用性已保存');
+  } catch (e) { toast(e.message, true); }
+  finally { c.busy = false; }
+});
+
 function evidenceList(layer) {
   return layer.evidence_items.map((item) => {
     const tone = item.met ? 'ok' : item.required ? 'miss' : 'opt';
@@ -755,7 +784,8 @@ function evidenceList(layer) {
       : `<b>${item.value}</b>`;
     return `
       <div class="between pilot-line ${tone}">
-        <span>${item.met ? '✓' : '○'} ${esc(item.label)}${suffix}</span>
+        <span>${item.met ? '✓' : '○'} ${esc(item.label)}${suffix}
+          <small>${esc(item.applicability_label)} · ${esc(item.applicability_reason)}</small></span>
         ${value}
       </div>`;
   }).join('') || '<div class="tiny muted">本层没有必需证据</div>';
@@ -1024,7 +1054,7 @@ function workBand(detail, layer) {
     layer.resources ? layerResources(layer.resources) : '',
     layer.layer_no === 2 ? charterBox(detail) : '',
     layer.layer_no === 6
-      ? rpaBox(detail) + eventBox(detail) + runBox(detail) + caseBox(detail) + techBox(detail)
+      ? (canManage() ? '<button class="btn-sm" data-act="pilot.editApplicability">维护工具适用性</button>' : '') + rpaBox(detail) + eventBox(detail) + runBox(detail) + caseBox(detail) + techBox(detail)
       : '',
     layer.layer_no === 10 ? trainingBox(detail) : '',
   ].join('');

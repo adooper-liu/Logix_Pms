@@ -4,7 +4,7 @@
 
 当前是 FastAPI + 原生 ES 模块的全栈应用，不只是后端或静态原型。流程是长期业务对象，项目只交付其中一轮改善；八阶段生命周期用于进入现有模块，项目 `current_stage` 保持 1–5，项目结项后流程继续运行。`index-sample.html` 仅保留为历史设计对照。
 
-**现有能力与待评审设计分开**：薄轮次对照、Flowable 接入及各模块小闭环改造尚未实现。统一原则见 [docs/bpm-product-principles.md](docs/bpm-product-principles.md)，综合评审见 [docs/bpm-artifacts-review.md](docs/bpm-artifacts-review.md)。**第一批改造**先审定再编码：追溯表 [docs/bpm-requirements-traceability.md](docs/bpm-requirements-traceability.md)，Brief [docs/bpm-first-batch-brief.md](docs/bpm-first-batch-brief.md)，审定交接 [docs/bpm-review-handoff.md](docs/bpm-review-handoff.md)。文档生成不等于功能完成。
+**现有能力与待交付能力分开**：三类型维护、八阶段任务入口、原章程/SIPOC交接、原模型/方法作业和薄轮次固定对照已分片实现；M6沿原执行器补上线准备与实例身份。Flowable、正式运行取数/数据质量和有权四结论尚未贯通，不能据此宣称八阶段业务闭环全部完成。主线状态和证据见 [实施 Brief](docs/implementation-next-brief.md)。统一原则见 [docs/bpm-product-principles.md](docs/bpm-product-principles.md)，综合评审见 [docs/bpm-artifacts-review.md](docs/bpm-artifacts-review.md)。第一批追溯与历史审定边界保留于 [docs/bpm-requirements-traceability.md](docs/bpm-requirements-traceability.md)、[docs/bpm-first-batch-brief.md](docs/bpm-first-batch-brief.md)、[docs/bpm-review-handoff.md](docs/bpm-review-handoff.md)。文档生成不等于功能完成。
 
 ---
 
@@ -1235,8 +1235,10 @@ ruff 格式化、ruff 静态检查、前端模块结构检查。钩子全部是 
 6. **前端后续**：事件委托和最小window调试面已实现；待按实际任务增强方法操作与原产物核验，不再重复做“去除内联onclick”的旧待办。
    M2已覆盖任务/方法/原产物/核验/下一步与上下文承接；2026-11-04校正旧自检入口与夹具后完整脚本退出0，`check.py`为542项通过。监控页“全部流程”已显式清除身份；只读调色板本轮因无评审中流程跳过，外部diagrams.net返回403，不能把协议检查当成外站集成成功，详见[实施brief](docs/implementation-next-brief.md)。
    M3边界与交接沿原章程/SIPOC实现，已经PR#17合并；待办：模板库旧有效版选择仍只按状态不核日期，固定来源不代表使用时有效；双方决定详情当前显示姓名/依据/时间和整体异议，待补逐方决定标签。生产PostgreSQL真并发与组织授权政策仍未验收，详见实施brief。
-   M4在原模型/ToolSheet上办理建模—分析—设计，已经PR#18合并；M5薄轮次实现仍未发布。待办：回滚删除未冻结工作版后可能复用版本号（原行为，已冻结引用保留）；作业响应未输出created_by_id供前端作者提示，后端仍独立拒绝自验。真实PostgreSQL并发冻结/保存压力验收未做，不能用顺序/边界注入测试替代。
+   M4在原模型/ToolSheet上办理建模—分析—设计，已经PR#18合并；M5薄轮次经PR#19合并。待办：回滚删除未冻结工作版后可能复用版本号（原行为，已冻结引用保留）；作业响应未输出created_by_id供前端作者提示，后端仍独立拒绝自验。真实PostgreSQL并发冻结/保存压力验收未做，不能用顺序/边界注入测试替代。
    M5待办/边界：原KPI记录缺直接模型版本，当前样本为人工核对来源声明；真正运行取数、质量及有权四结论仍须M6–M8衔接。轮次UI前侧仅单指标，多指标草稿禁止用此表单覆盖；原API支持最多10指标。样本下拉异步切指标仍待更细请求代号；UI尚未发送幂等键，网络结果不明重试需先查轮次，避免重复新建。共享原行锁的删除/新增引用保护须补真实PostgreSQL压力与SQLite并发验收，不以边界注入代替。
+   M6边界：原上线准备保留指定非编辑者本人决定、配置/发布指纹及失效提示；原第6层参考工具可按实际采用范围约定，技术登记不代替业务成功。旧实例不猜回填模型主键；普通启动兼容，显式轮次启动需当前准备确认。Flowable、并行/事件/恢复与生产真并发验收尚未交付；准备确认不等于运行有效或改善达标，M7/M8继续承接。
+   M6保留次要项：十层GET纯读后，原路径完成动作仍可能显示旧current_layer；待在原advance显式保存最终层号，不影响独立上线准备确认。旧幂等键按原发起者/参数核对后回放，归属不明返回409，不自动重复开单；组织对既有本人决定的到期/离岗复核政策尚未制定，不能冒称已验收。
 7. **对标框架前端**：流程地图已支持页面级框架切换、覆盖率展示与分类明细；还剩
    映射关系的可视化维护入口（目前映射 CRUD 只通过 API 提供）。
 8. **流程执行后续**：已完成单令牌顺序执行、表单/规则、分支按规则自动路由、上游表单数据进入

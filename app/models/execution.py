@@ -49,6 +49,18 @@ class ProcessInstance(Base):
     status: Mapped[str] = mapped_column(String(16), default="RUNNING", index=True)
     current_node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     current_node_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    model_version_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "process_model_version.id", ondelete="RESTRICT", name="fk_instance_model_identity"
+        ),
+        nullable=True,
+        index=True,
+    )
+    round_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_improvement_round.id", ondelete="RESTRICT", name="fk_instance_round"),
+        nullable=True,
+        index=True,
+    )
     definition_version: Mapped[int] = mapped_column(Integer, default=0)
     suspended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     suspend_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -303,6 +315,8 @@ class ProcessExecutionConfig(Base):
     process_id: Mapped[int] = mapped_column(
         ForeignKey("process_arch.id", ondelete="CASCADE"), unique=True, index=True
     )
+    readiness: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    readiness_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 新任务到期时间 = 创建时间 + 小时数；NULL 表示不设时限
     default_task_due_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # 到期后再过多少小时升级；NULL 表示不自动升级

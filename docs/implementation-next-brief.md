@@ -1,6 +1,6 @@
 # 主任务实施 Brief：三类型、八阶段与主体能力对齐
 
-> M1a经PR#14合并2d18ed7；文档/工具修复PR#15合并432451c；M2 PR#16合并c26ac3c；M3 PR#17合并ba0f921；M4提交98f9225经PR#18合并28c9b59，双数据库CI通过。当前M5位于feat/round-contract-comparison，未提交。
+> M1a–M4已依次经PR#14、#16–#18合并；M5经PR#19合并9246f4e（d994d19及PostgreSQL测试清理修复e84b1e8），SQLite/PostgreSQL CI通过。当前M6位于feat/execution-readiness，实施及发布门禁记录见§10。
 
 ## 1. 主任务与完成标准
 
@@ -153,3 +153,21 @@ python scripts/verify_frontend.py http://127.0.0.1:60315 <临时截图目录>
 最终后端`check.py`为`578 passed, 4 warnings in 124.95s`，格式/lint通过；11项轮次API定向通过；独立临时SQLite Alembic check无漂移。真实浏览器新增同流程切轮次旧弹窗零提交回归通过；全量前端完整执行“全部检查通过”、exit0，M5及既有专项、20视图/交互通过；日志仅预期负例404/409/400与清理409，无500。证据本会话`b9cjq1j6t.output`与`bqzv01088.output`，截图`D:/Dev/Cache/Temp/logix-m5-reviewed-2uhxf5sm`。M5未提交/推送，M6尚未开始。
 
 保留次要项见README：快速切KPI时样本下拉仍缺更细响应代号，后端错指标拒绝；UI尚未发送幂等键，网络结果不明需先查询避免重复建轮。后端幂等重放按用户/流程/轮次/动作隔离并先核当前权限；共享锁及RESTRICT仍须实际PostgreSQL/SQLite并发验收。所有四结论保持待原业务核验；指定审核者是事先约定记录，不把系统管理员或本人选择当独立正式批准。
+
+M5随后按授权经PR#19合并；PostgreSQL CI发现修订链RESTRICT下测试清理顺序错误，e84b1e8按新到旧逐条清理，不放松保留规则。双库CI通过后才合并9246f4e；此前“未提交/M6未开始”是历史时点。
+
+## 10. 当前单元 M6：执行及上线准备
+
+承接R1-04及R3现有执行支持边界，[实施计划](superpowers/plans/2026-11-04-execution-readiness.md)。原ProcessExecutionConfig增加准备约定/revision及指定非编辑者本人决定；只读核对真实当前发布模型、结构化任务表单/分派/时限，必需缺项拒绝确认，不适用须依据。确认固定原发布主键/模型与配置指纹，后续变化显示待复核，不洗绿成运行有效或改善达标。
+
+原执行页直接维护、指定本人确认和显示缺项/限制；默认约定可按原任务逐项覆盖，N/A须依据，不能为混合任务强造配置或整体豁免。分派核验区分SLA行与实际路由，停用处理人会使必要分派及确认失效。非管理角色只见核对入口，不获配置写权限。原ProcessInstance增加model_version_id/round_id并固定入启动快照，旧数据不猜回填；普通启动保持兼容，显式轮次需同流程/项目/当前发布且准备有效。幂等启动按用户隔离，重放前核当前引用可见性。
+
+原第6层工具默认可选参考，可在原层维护必需/可选/不适用与依据；不造RPA/技术登记，不豁免核心模型/改善目标。path_detail/list不再创建层记录或写current_layer；层号只在显式办理动作保存。
+
+首轮check.py：`587 passed, 4 warnings in 134.23s`，格式/lint通过；首批8项M6 API定向通过。独立临时SQLite `upgrade head` + `alembic check`：`No new upgrade operations detected.`；既有data_flow/kpi_definition互引警告保留。首轮完整前端exit0，20视图、M6/既有专项和原实例启动→处理→完成通过，服务日志`SERVER_500: []`。随后补真实chen浏览器本人确认及422失败保留输入，捕获并修正Owner被旧配置面板挡住。第二轮全站因脚本硬编码CSS类顺序失败，遗留弹窗连带阻断后续；已改类token选择器，失败轮不算通过。
+
+独立分支复核4项Important已用回归复现并修复：SLA-only不再当必要分派，处理人停用进入指纹失效；原任务级适用性覆盖；旧启动幂等键兼容原payload hash、归属不明409不重复开单；pilot守卫核选中路径与URL，不只核已绘制旧详情。定向API现12项通过，浏览器旧路径提交先红后绿；最终全量门禁进行中。保留次要项：原十层完成动作可能显示旧current_layer，已记README；不影响独立上线准备。旧本人决定是否随离岗到期须组织政策，不擅自回写历史。
+
+最终门禁：`.venv`环境`python scripts/check.py`输出`591 passed, 4 warnings in 153.45s`，格式/lint通过；独立临时SQLite再次Alembic check无新增迁移；迁移用例6项通过。最终全量前端以新临时SQLite/端口验证当前静态文件后完整执行，`全部检查通过。`、exit0、`SERVER_500: []`，20视图、M6及既有专项、原实例实际办理均通过。专项另补逐任务覆盖UI通过。日志保留预期404/422/409/400和受保护实例清理409，未声称没有失败HTTP；原只读调色板因无评审中模型实际跳过，外部draw.io只测协议，生产真并发/恢复未验证。截图`D:/Dev/Cache/Temp/logix-m6-reviewed-7eqew54w`，本会话任务`bxuvio3tg`与`bv3zzcynp`；发布CI仍以远端实际结果为准。
+
+**漂移裁定边界：** schema以Alembic实测为准；产品仍唯一目录三类型、八阶段导航、项目五阶段，原对象增量无部署/条件平行主库。M6是既有轻量执行器上线准备片，不代表Flowable、并行/子流程/事件/恢复接入；正式运行样本、质量与有权四结论由M7/M8继续，生产真并发/恢复及组织业务效果未验证。

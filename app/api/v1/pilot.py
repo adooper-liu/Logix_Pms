@@ -12,6 +12,7 @@ from app.schemas.pilot import (
     CaseIn,
     CodeLabelOut,
     EventLogIn,
+    PilotApplicabilityIn,
     PilotIssueCreate,
     PilotIssueOut,
     PilotIssueUpdate,
@@ -48,6 +49,47 @@ def _gate(exc: pilot_service.PilotGateError) -> None:
     ) from exc
 
 
+@router.put("/paths/{path_id}/layers/{layer_no}/applicability", response_model=PilotPathOut)
+def set_applicability(
+    path_id: int, layer_no: int, payload: PilotApplicabilityIn, db: DbSession, user: ManagerUser
+):
+    from sqlalchemy import select, update
+
+    from app.models.pilot import PilotLayer
+
+    try:
+        path = pilot_service.require_path(db, path_id)
+    except pilot_service.PilotError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if layer_no != 6:
+        raise HTTPException(400, "本片仅允许第6层参考工具适用性，不豁免核心要求")
+    keys = set(pilot_service.LAYER_BY_NO[6]["evidence"])
+    if not set(payload.requirements) <= keys:
+        raise HTTPException(400, "适用性必须引用本层原证据key")
+    for value in payload.requirements.values():
+        if (
+            value.get("mode") not in ("REQUIRED", "OPTIONAL", "NOT_APPLICABLE")
+            or not value.get("reason", "").strip()
+        ):
+            raise HTTPException(400, "请填写合法适用性与依据")
+    row = db.scalar(
+        select(PilotLayer).where(PilotLayer.path_id == path_id, PilotLayer.layer_no == 6)
+    )
+    if row is None:
+        raise HTTPException(400, "原层记录不存在，请先维护原路径")
+    result = db.execute(
+        update(PilotLayer)
+        .where(PilotLayer.id == row.id, PilotLayer.revision == payload.expected_revision)
+        .values(applicability=payload.requirements, revision=payload.expected_revision + 1)
+    )
+    if result.rowcount != 1:
+        raise HTTPException(409, "层适用性已变化，请刷新")
+    audit_service.record(db, user, "UPDATE", "pilot_layer", row.id, "维护原第6层工具适用性")
+    db.commit()
+    db.expire(row)
+    return pilot_service.path_detail(db, path)
+
+
 @router.get("/meta", response_model=PilotMetaOut, summary="十层单页中文标签")
 def pilot_meta():
     return PilotMetaOut(
@@ -57,6 +99,7 @@ def pilot_meta():
         issue_status_labels=pilot_service.ISSUE_STATUS_LABELS,
         priority_labels=pilot_service.PRIORITY_LABELS,
         severity_labels=pilot_service.SEVERITY_LABELS,
+        applicability_labels=pilot_service.APPLICABILITY_LABELS,
     )
 
 
