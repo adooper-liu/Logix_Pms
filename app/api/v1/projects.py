@@ -754,6 +754,9 @@ def delete_project(project_id: int, db: DbSession, user: ManagerUser):
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
+    from app.services.improvement_round import guard_delete
+
+    guard_delete(db, "project", [project_id])
     code, name = project.code, project.name
 
     # 步骤由 ORM 的 delete-orphan 级联处理；KPI 数据点与异常事件引用项目，

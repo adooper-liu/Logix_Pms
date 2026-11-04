@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_improvement_round import verify_improvement_round
 from verify_lifecycle import (
     verify_lifecycle,
     verify_lifecycle_handoffs,
@@ -131,6 +132,7 @@ def main() -> int:
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
+        check("M5薄轮次固定与对照", lambda: verify_improvement_round(page, base))
         check("M4建模分析设计原作业", lambda: verify_workbench(page, base))
         check("M4原作业身份守卫", lambda: verify_workbench_guards(page, base))
         check("M4本人核验弹窗守卫", lambda: verify_work_review_guards(page, base))
@@ -474,21 +476,35 @@ def main() -> int:
             page.wait_for_selector("#view .card h3:has-text('SCOR')", timeout=8000)
             page.wait_for_selector("#view .map-bench-pill", state="visible", timeout=8000)
             text = page.inner_text("#view")
-            assert "24/28" in text, f"SCOR 覆盖率渲染异常：{text[:160]!r}"
+
+            def coverage_count(code):
+                token = page.evaluate("localStorage.getItem('psm_token')")
+                data = page.request.get(
+                    base + "/api/v1/benchmark/frameworks/" + code + "/coverage?process_level=3",
+                    headers={"Authorization": "Bearer " + token},
+                ).json()
+                return str(data["mapped_processes"]) + "/" + str(data["total_processes"])
+
+            scor_count = coverage_count("SCOR")
+            assert scor_count in text, f"SCOR 覆盖率与原API不一致：{scor_count} {text[:160]!r}"
             assert "L3-010" in text, "SCOR 应显示研发类未覆盖流程"
 
             page.select_option("#view select[title='切换对标框架']", "APQC_PCF")
             page.wait_for_selector("#view .card h3:has-text('跨行业')", timeout=8000)
-            page.wait_for_selector("#view :text('28/28')", timeout=8000)
+            page.wait_for_selector(
+                '#view :text("' + coverage_count("APQC_PCF") + '")', timeout=8000
+            )
             text = page.inner_text("#view")
-            assert "所有 L3 流程" in text, f"APQC 应全量覆盖：{text[:160]!r}"
+            assert "RNDUI-" in text or "所有 L3 流程" in text, "APQC未覆盖实际当前流程时应列出缺项"
             assert "主框架" in text, "APQC 跨行业版应标记为主框架"
             assert "分类框架来源与署名" in text, "应展示 APQC 署名"
 
             # 消费电子行业配置也能覆盖公司流程
             page.select_option("#view select[title='切换对标框架']", "APQC_PCF_CE")
             page.wait_for_selector("#view .card h3:has-text('消费电子')", timeout=8000)
-            page.wait_for_selector("#view :text('28/28')", timeout=8000)
+            page.wait_for_selector(
+                '#view :text("' + coverage_count("APQC_PCF_CE") + '")', timeout=8000
+            )
             assert "消费电子" in page.inner_text("#view")
 
             page.select_option("#view select[title='切换对标框架']", "APQC_PCF")

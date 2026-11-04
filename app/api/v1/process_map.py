@@ -189,7 +189,8 @@ def list_processes(
     return [
         _to_out(r, classifications[r.id])
         for r in rows
-        if classification_service.matches(classifications[r.id], process_type)
+        if r.id in classifications
+        and classification_service.matches(classifications[r.id], process_type)
     ]
 
 
@@ -419,6 +420,10 @@ def delete_process(process_id: int, db: DbSession, user: ManagerUser):
         current = stack.pop()
         ids.append(current.id)
         stack.extend(by_parent.get(current.id, []))
+
+    from app.services.improvement_round import guard_delete
+
+    guard_delete(db, "process", ids)
 
     # 显式清理依赖数据。不能指望数据库级联：SQLite 默认不强制外键，
     # 而 SQLAlchemy 的 ORM 级联只覆盖有 relationship 的对象（这里没有）。

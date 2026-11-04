@@ -68,6 +68,25 @@ def test_flat_new_process_between_classification_and_list(client, monkeypatch):
             client.delete(f"{API}/{ident}")
 
 
+def test_flat_process_removed_between_output_and_classification(client, monkeypatch):
+    from app.api.v1 import process_map
+
+    original = process_map.classification_service.resolve_all
+    removed = []
+
+    def missing_snapshot(rows):
+        snapshot = original(rows)
+        if rows:
+            removed.append(rows[-1].id)
+            snapshot.pop(rows[-1].id)
+        return snapshot
+
+    monkeypatch.setattr(process_map.classification_service, "resolve_all", missing_snapshot)
+    response = client.get(API + "/flat")
+    assert response.status_code == 200, response.text
+    assert not any(row["id"] in removed for row in response.json())
+
+
 def test_classification_meta_and_unknown_history(client, classification_tree):
     meta = client.get(f"{API}/classification-meta")
     assert meta.status_code == 200

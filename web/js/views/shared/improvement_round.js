@@ -1,0 +1,64 @@
+/* 薄轮次只固定原引用和当时值；不另建改善阶段。 */
+import { GET,POST,PATCH } from '../../core/api.js';
+import { esc,dtShort } from '../../core/format.js';
+import { on,openModal,closeModal,toast,modalAlive } from '../../core/ui.js';
+import { state } from '../../core/state.js';
+import { urlParams,setUrlState,RENDERERS } from '../../core/router.js';
+import { canManage,AUTH } from '../../core/auth.js';
+let current=null;
+let form=null;
+const path=pid=>'/processes/'+pid+'/improvement-rounds';
+const permitted=card=>canManage() || AUTH.user?.id===card.process.owner_user_id;
+
+export function roundsHtml(card,rows) {
+  const requested=Number(urlParams().round);
+  const row=requested?rows.find(r=>r.id===requested):null;
+  current={pid:card.process.id,rows,row,canWrite:permitted(card)};
+  return `<section id="roundComparison"><div class="between"><h3>轮次对照 · 固定原依据</h3>${current.canWrite?'<button class="btn-sm" data-act="round.new">新建前侧草稿</button>':''}</div>
+    <p class="tiny muted">同一流程/项目/模型/口径/样本；只保存当时事实，不自动确认上线、运行或改善达标。</p>
+    <label>明确选择轮次 <select class="sel" data-act="round.select"><option value="">请选择，不默认写入最新轮次</option>${rows.map(r=>`<option value="${r.id}"${row?.id===r.id?' selected':''}>#${r.id} ${esc(r.name)} · ${esc(r.basis_label)}</option>`).join('')}</select></label>
+    ${row?`<div class="card mt"><div class="between"><b>${esc(row.name)} · ${esc(row.basis_label)}</b><span class="tiny">修订锁 ${row.revision}${row.supersedes_id?' · 前修订 #'+row.supersedes_id:''}</span></div>
+    <p class="tiny">流程 #${row.process_id} · 项目 ${row.project_id||'尚未立项'} · 现状模型 #${row.asis_model_version_id||'待补'} · 方案 #${row.tobe_model_version_id||'待补'} · 发布 #${row.released_model_version_id||'待补'}</p>
+    <p class="tiny">${esc(row.scope_note)}</p><p class="tiny">前侧 ${esc(row.baseline_window.start)} — ${esc(row.baseline_window.end)}${row.after_window?' · 后侧 '+esc(row.after_window.start)+' — '+esc(row.after_window.end):''}</p>
+    ${row.metric_contracts.map(c=>`<details><summary>${esc(c.code+' '+c.name)} · 原v${c.version}</summary><p class="tiny">公式：${esc(c.formula||c.numerator+' / '+c.denominator)} · 单位 ${esc(c.unit||'未记录')}<br>来源语义：${esc(c.source_semantics)}；${esc(c.source_evidence)}<br>hash ${esc(c.hash)}</p></details>`).join('')}
+    <div class="grid g2"><div><h4>固定前侧当时值</h4>${sampleHtml(row.baseline_samples)}</div><div><h4>固定后侧当时值</h4>${sampleHtml(row.after_samples||[])}</div></div>
+    <p class="tiny">验收约定：${row.acceptance_snapshot?esc(row.acceptance_snapshot.target)+'；红线 '+esc(row.acceptance_snapshot.red_lines)+'；观察 '+esc(row.acceptance_snapshot.observation_rule)+' · 锁定 '+esc(dtShort(row.acceptance_locked_at)):'未锁定（必须在后侧观察前约定）'}</p>
+    <p class="tiny muted">${row.missing.map(esc).join('；')}</p><div class="gap">${row.verification.map(v=>`<span class="tag t-gry">${esc(v.label)}：${esc(v.state_label)}</span>`).join('')}</div>
+    ${current.canWrite?`<div class="gap mt">${!row.baseline_confirmed_at?'<button class="btn-sm" data-act="round.edit">编辑前侧草稿</button><button class="btn-sm" data-act="round.action" data-action="lock-baseline">固定前侧依据</button>':`<button class="btn-sm" data-act="round.action" data-action="revise">创建新修订</button>${!row.project_id?'<button class="btn-sm" data-act="round.bind" data-action="bind-project">关联原项目</button>':''}${!row.tobe_model_version_id?'<button class="btn-sm" data-act="round.bind" data-action="bind-design">固定方案模型</button>':''}${!row.released_model_version_id?'<button class="btn-sm" data-act="round.bind" data-action="bind-published">追加真实发布版本</button>':''}${!row.acceptance_locked_at?'<button class="btn-sm" data-act="round.acceptance">锁定验收约定</button>':''}${row.acceptance_locked_at&&!row.after_samples?'<button class="btn-sm" data-act="round.after">固定后侧样本</button>':''}`}</div>`:''}</div>`:'<div class="empty">尚未选择轮次；无项目可以先准备前侧依据，固定不改变原业务对象。</div>'}</section>`;
+}
+function sampleHtml(rows){return rows.map(s=>`<p class="tiny">#${s.record_id} · ${esc(s.period)} · ${s.value}<br>${esc(s.source_evidence)} · ${esc(s.quality_note)}<br>${esc(s.identity_basis)}</p>`).join('')||'<p class="tiny muted">未固定</p>';}
+function refresh(rid){setUrlState('process_card',{process:current.pid,module:'rounds',round:rid},{push:false});RENDERERS.process_card();}
+function safe(c){return c&&modalAlive(c.gen)&&state.view==='process_card'&&state.processCard.processId===c.pid&&(Number(urlParams().round)||null)===(c.selectedRound??(c.row?.id||null));}
+function options(rows,value,label){return rows.map(r=>`<option value="${r.id}"${String(r.id)===String(value)?' selected':''}>${esc(label(r))}</option>`).join('');}
+on('round.select',(_d,el)=>{setUrlState('process_card',{process:current.pid,module:'rounds',round:el.value},{push:true});RENDERERS.process_card();});
+on('round.new',()=>draftModal(null));on('round.edit',()=>draftModal(current.row));
+async function draftModal(row){
+  if(row?.metric_contracts.length>1)return toast('此草稿含多指标；请使用完整契约API编辑，单指标表单不会覆盖其余指标',true);
+  const c={...current,selectedRound:current.row?.id||null};const gen=openModal('加载原指标/模型','<div class="empty">加载中…</div>');
+  try{
+    const [models,kpis]=await Promise.all([GET('/processes/'+c.pid+'/design/versions'),GET('/monitor/kpis')]);
+    if(!modalAlive(gen)||state.processCard.processId!==c.pid)return;
+    const eligible=models.filter(m=>m.frozen_at||m.published_at);const metrics=kpis.filter(k=>k.process_id===c.pid);
+    const first=row?.metric_contracts?.[0];
+    const g=openModal(row?'编辑前侧草稿':'新建薄轮次前侧',`<p class="note">界面先办理一项原指标；API支持最多10指标。样本无自动模型身份，来源/质量须人工核对，不伪造实测。</p>
+      <div class="field"><label>轮次名称 *</label><input id="rdName" value="${esc(row?.name||'')}"></div><div class="field"><label>业务范围 *</label><textarea id="rdScope">${esc(row?.scope_note||'')}</textarea></div>
+      <div class="field"><label>已固定现状模型</label><select id="rdModel"><option value="">待补</option>${options(eligible,row?.asis_model_version_id,m=>'v'+m.version+' #'+m.id)}</select></div>
+      <div class="field"><label>原指标 *</label><select id="rdMetric" data-act="round.metric">${options(metrics,first?.kpi_id,k=>k.code+' '+k.name)}</select></div>
+      <div class="row2"><div class="field"><label>前侧开始</label><input type="date" id="rdStart" value="${esc(row?.baseline_window.start||'')}"></div><div class="field"><label>前侧结束</label><input type="date" id="rdEnd" value="${esc(row?.baseline_window.end||'')}"></div></div>
+      <div class="field"><label>取数语义 *</label><textarea id="rdSemantics">${esc(first?.source_semantics||'')}</textarea></div><div class="field"><label>原来源依据 *</label><textarea id="rdSource">${esc(first?.source_evidence||'')}</textarea></div>
+      <div class="row2"><div class="field"><label>时区</label><input id="rdTimezone" value="${esc(first?.timezone||'UTC')}"></div><div class="field"><label>日历 *</label><input id="rdCalendar" value="${esc(first?.calendar||'')}"></div></div>
+      <div class="field"><label>筛选/群组</label><input id="rdFilters" value="${esc(first?.filters||'')}"></div><div class="field"><label>排除项</label><input id="rdExclusions" value="${esc(first?.exclusions||'')}"></div>
+      <div class="field"><label>原样本（可多选）</label><select multiple size="6" id="rdSamples"></select></div><div class="field"><label>样本质量说明 *</label><textarea id="rdQuality">${esc(row?.baseline_samples?.[0]?.quality_note||'')}</textarea></div>`,
+      '<button class="btn btn-g" data-act="round.close">取消</button><button class="btn btn-p" data-act="round.save">保存前侧草稿</button>');
+    form={...c,gen:g,row,mode:'draft',key:crypto.randomUUID()};await loadSamples(row?.baseline_samples);
+  }catch(e){if(modalAlive(gen))toast(e.message,true);}
+}
+async function loadSamples(selected=[]){const c=form;const select=document.getElementById('rdMetric');if(!select||!select.value)return;const rows=await GET('/monitor/kpis/'+select.value+'/records');if(!safe(c))return;document.getElementById('rdSamples').innerHTML=rows.map(r=>`<option value="${r.id}"${selected?.some(s=>s.record_id===r.id)?' selected':''}>#${r.id} ${esc(r.period)} · ${r.value}${r.project_id?' · 项目#'+r.project_id:''}</option>`).join('');}
+on('round.metric',()=>loadSamples());on('round.close',()=>closeModal());
+on('round.save',async()=>{const c=form;if(!safe(c))return toast('流程上下文已变化，请重新打开',true);const val=id=>document.getElementById(id)?.value.trim()||'';const payload={project_id:c.row?.project_id||null,name:val('rdName'),scope_note:val('rdScope'),asis_model_version_id:Number(val('rdModel'))||null,baseline_window:{start:val('rdStart'),end:val('rdEnd')},metrics:[{kpi_id:Number(val('rdMetric')),source_semantics:val('rdSemantics'),source_evidence:val('rdSource'),timezone:val('rdTimezone'),calendar:val('rdCalendar'),filters:val('rdFilters'),exclusions:val('rdExclusions')}],baseline_samples:[...document.getElementById('rdSamples').selectedOptions].map(o=>({record_id:Number(o.value),source_evidence:val('rdSource'),quality_note:val('rdQuality')}))};
+  try{let result;if(c.row){payload.expected_revision=c.row.revision;result=await PATCH(path(c.pid)+'/'+c.row.id,payload);}else result=await POST(path(c.pid),payload);if(modalAlive(c.gen))closeModal();toast('前侧草稿已保存，尚未固定');if(state.processCard.processId===c.pid)refresh(result.id);}catch(e){toast(e.message,true);}});
+on('round.action',async({action})=>{const c=current;if(!c?.row)return;try{const r=await POST(path(c.pid)+'/'+c.row.id+'/'+action,{expected_revision:c.row.revision});toast(action==='revise'?'新修订已建立，旧依据保留':'前侧依据已固定');if(state.processCard.processId===c.pid)refresh(r.id);}catch(e){toast(e.message,true);}});
+on('round.bind',async({action})=>{const c={...current};const gen=openModal('加载原引用','<div class="empty">加载中…</div>');try{const rows=action==='bind-project'?(await GET('/projects?process_id='+c.pid+'&page_size=200')).items:await GET('/processes/'+c.pid+'/design/versions');if(!modalAlive(gen))return;const g=openModal('追加原引用',`<p class="note">已固定引用不能原位替换；发布动作与本追加分开，缺关联可重试。</p><div class="field"><label>原对象</label><select id="raRef">${options(rows,null,r=>r.code?r.code+' '+r.name:'v'+r.version+' · '+r.status_label)}</select></div>`,'<button class="btn btn-g" data-act="round.close">取消</button><button class="btn btn-p" data-act="round.append">追加原引用</button>');form={...c,gen:g,action};}catch(e){toast(e.message,true);}});
+on('round.acceptance',async()=>{const c={...current};const loading=openModal('加载原审核者','<div class="empty">加载中…</div>');const people=await GET('/start/charter-options');if(!safe({...c,gen:loading}))return;const field=(id,label)=>`<div class="field"><label>${label} *</label><textarea id="${id}"></textarea></div>`;const gen=openModal('后侧观察前锁定验收约定',`<p class="note">仅记录事先约定，不代表有权业务批准；后侧窗口必须从锁定后开始。</p>${field('raTarget','目标')}${field('raRed','红线')}${field('raObservation','观察/可比规则')}<div class="field"><label>指定审核者</label><select id="raReviewer">${options(people.users,null,r=>r.display_name)}</select></div><div class="field"><label>后侧开始</label><input type="date" id="raStart"></div><div class="field"><label>后侧结束</label><input type="date" id="raEnd"></div>`,'<button class="btn btn-g" data-act="round.close">取消</button><button class="btn btn-p" data-act="round.append">锁定事先约定</button>');form={...c,gen,action:'lock-acceptance'};});
+on('round.after',()=>{const c={...current};const gen=openModal('固定后侧原样本',`<p class="note">输入原KPI记录ID，多个用逗号分隔；按冻结hash/发布模型角色核对，不读取新定义替换旧口径。</p><div class="field"><label>原记录ID</label><input id="raRecords"></div><div class="field"><label>原来源依据</label><textarea id="raSource"></textarea></div><div class="field"><label>质量说明</label><textarea id="raQuality"></textarea></div>`,'<button class="btn btn-g" data-act="round.close">取消</button><button class="btn btn-p" data-act="round.append">固定后侧样本</button>');form={...c,gen,action:'capture-after'};});
+on('round.append',async()=>{const c=form;if(!safe(c))return toast('流程上下文已变化，请重新打开',true);const val=id=>document.getElementById(id)?.value.trim()||'';const payload={expected_revision:c.row.revision};if(c.action.startsWith('bind-'))payload.reference_id=Number(val('raRef'));else if(c.action==='lock-acceptance')Object.assign(payload,{target:val('raTarget'),red_lines:val('raRed'),observation_rule:val('raObservation'),reviewer_user_id:Number(val('raReviewer')),after_window:{start:val('raStart'),end:val('raEnd')}});else {const ids=val('raRecords').split(/[,，\s]+/).filter(Boolean).map(Number);const source=val('raSource'),quality=val('raQuality');const records=await Promise.all(c.row.metric_contracts.map(x=>GET('/monitor/kpis/'+x.kpi_id+'/records')));if(!safe(c))return;payload.samples=ids.map(id=>{const record=records.flat().find(r=>r.id===id);const contract=c.row.metric_contracts.find(x=>x.kpi_id===record?.kpi_id);return {record_id:id,contract_hash:contract?.hash,source_evidence:source,quality_note:quality};});}try{const result=await POST(path(c.pid)+'/'+c.row.id+'/'+c.action,payload);if(modalAlive(c.gen))closeModal();toast('原引用/约定已固定，结论仍待原业务核验');if(state.processCard.processId===c.pid)refresh(result.id);}catch(e){toast(e.message,true);}});
