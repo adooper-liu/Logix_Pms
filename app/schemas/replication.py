@@ -11,6 +11,8 @@ from app.schemas.common import ORMModel
 
 
 class ReplicationPackCreate(BaseModel):
+    round_id: Optional[int] = Field(default=None, ge=1)
+    receiver_user_id: Optional[int] = Field(default=None, ge=1)
     source_project_id: Optional[int] = None
     title: str = Field(min_length=1, max_length=200)
     conditions: Optional[str] = None
@@ -22,6 +24,7 @@ class ReplicationPackCreate(BaseModel):
 
 
 class ReplicationPackUpdate(BaseModel):
+    expected_revision: Optional[int] = Field(default=None, ge=0)
     title: Optional[str] = Field(default=None, min_length=1, max_length=200)
     conditions: Optional[str] = None
     benefit_evidence: Optional[str] = None
@@ -39,7 +42,19 @@ class ReplicationAssetOut(BaseModel):
     title: str
 
 
+class ReplicationReceiptIn(BaseModel):
+    expected_revision: int = Field(ge=0)
+    target_process_id: int = Field(ge=1)
+    decision: str = Field(pattern="^(ACCEPT|REJECT)$")
+    evidence: str = Field(min_length=1, max_length=2000)
+
+
 class ReplicationPackOut(ORMModel):
+    source_snapshot: Optional[dict] = None
+    receiver_user_id: Optional[int] = None
+    receipt: Optional[dict] = None
+    revision: int = 0
+    receipt_label: str = "接收待确认；不代表本地上线"
     id: int
     source_project_id: Optional[int] = None
     source_project_code: Optional[str] = None

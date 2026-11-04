@@ -45,6 +45,12 @@ class MaturityAssessmentOut(ORMModel):
 
 
 class GateAttestationCreate(BaseModel):
+    purpose: str = Field(
+        default="STAGE_GATE",
+        pattern="^(STAGE_GATE|DATA_READY|GO_LIVE_READY|RUN_EFFECTIVE|IMPROVEMENT_MET)$",
+    )
+    round_id: Optional[int] = Field(default=None, ge=1)
+    expected_revision: Optional[int] = Field(default=None, ge=0)
     project_id: int
     stage_no: int = Field(ge=1, le=5)
     gate_code: str = Field(default="STAGE_GATE", max_length=32)
@@ -55,6 +61,9 @@ class GateAttestationCreate(BaseModel):
 
 
 class GateAttestationOut(ORMModel):
+    purpose: str = "STAGE_GATE"
+    round_id: Optional[int] = None
+    evidence_snapshot: Optional[dict] = None
     id: int
     project_id: int
     project_code: Optional[str] = None

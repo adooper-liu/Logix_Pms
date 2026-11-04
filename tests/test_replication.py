@@ -46,7 +46,7 @@ def test_replication_pack_lifecycle(client):
     assert published.json()["status_label"] == "已发布"
 
     rejected = client.patch(f"{API}/replication-packs/{pack['id']}", json={"status": "REJECTED"})
-    assert rejected.status_code == 400
-    assert "拒绝理由" in rejected.json()["detail"]
+    assert rejected.status_code == 409  # 已发布修订不可原位撤回/改内容
+    assert "修订" in rejected.json()["detail"]
 
     assert client.delete(f"{API}/projects/{project['id']}").status_code == 200

@@ -220,6 +220,11 @@ def samples(db, user, row, inputs, window, role, model_id, metric_contracts):
 
 
 def out(row):
+    from sqlalchemy.orm import object_session
+
+    from app.services.round_outcome import projections
+
+    db = object_session(row)
     missing = []
     if not row.baseline_confirmed_at:
         missing.append("前侧依据尚未固定")
@@ -240,16 +245,7 @@ def out(row):
         **fields,
         missing=missing,
         basis_label="前侧已固定" if row.baseline_confirmed_at else "前侧草稿（未确认）",
-        verification=[
-            {
-                "key": key,
-                "label": label,
-                "state": "PENDING",
-                "state_label": "待原业务核验",
-                "reason": "固定引用与当时值不代替有权原核验决定",
-            }
-            for key, label in CONCLUSIONS.items()
-        ],
+        verification=projections(db, row),
     )
 
 

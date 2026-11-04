@@ -42,11 +42,38 @@ def _assets(db: Session, ids: List[int], model, title_field: str) -> List[Replic
     return result
 
 
+def ensure_visible(db, user, row):
+    from app.services import improvement_round, org_access
+
+    project = db.get(Project, row.source_project_id) if row.source_project_id else None
+    if project:
+        org_access.ensure_visible(db, user, project.org_unit_id)
+    snapshot = row.source_snapshot or {}
+    if snapshot.get("round_id"):
+        improvement_round.require(db, user, snapshot["process_id"], snapshot["round_id"])
+    for ident in row.document_ids or []:
+        document = db.get(ProcessDocument, ident)
+        if document:
+            org_access.ensure_visible(db, user, document.org_unit_id)
+    for ident in row.template_ids or []:
+        template = db.get(ToolTemplate, ident)
+        if template:
+            org_access.ensure_visible(db, user, template.org_unit_id)
+    return row
+
+
 def pack_out(db: Session, row: ReplicationPack) -> ReplicationPackOut:
     project = db.get(Project, row.source_project_id) if row.source_project_id else None
     owner = db.get(User, row.owner_user_id) if row.owner_user_id else None
     return ReplicationPackOut(
         id=row.id,
+        source_snapshot=row.source_snapshot,
+        receiver_user_id=row.receiver_user_id,
+        receipt=row.receipt,
+        revision=row.revision,
+        receipt_label="已接收为本地准备依据，尚未上线"
+        if row.receipt and row.receipt.get("decision") == "ACCEPT"
+        else "未接收；不代表本地上线",
         source_project_id=row.source_project_id,
         source_project_code=project.code if project else None,
         title=row.title,
@@ -88,7 +115,65 @@ def create_pack(db: Session, data: dict, user: User) -> ReplicationPack:
     validate_pack(db, data)
     if not (data.get("conditions") or "").strip():
         raise ReplicationError("复制资产包必须写明适用条件")
+    from app.services import improvement_round, org_access
+
+    snapshot = None
+    project = (
+        db.get(Project, data.get("source_project_id")) if data.get("source_project_id") else None
+    )
+    if project:
+        org_access.ensure_visible(db, user, project.org_unit_id)
+    if data.get("round_id"):
+        from copy import deepcopy
+
+        from app.models.improvement_round import ProcessImprovementRound
+
+        round_row = db.get(ProcessImprovementRound, data["round_id"])
+        if round_row is None or project is None or round_row.project_id != project.id:
+            raise ReplicationError("请选择来源项目的原轮次")
+        improvement_round.require(db, user, round_row.process_id, round_row.id)
+        snapshot = {
+            "round_id": round_row.id,
+            "round_revision": round_row.revision,
+            "process_id": round_row.process_id,
+            "released_model_version_id": round_row.released_model_version_id,
+            "metrics": deepcopy(round_row.metric_contracts),
+            "verification": improvement_round.out(round_row).verification,
+            "documents": [],
+            "templates": [],
+        }
+        from app.services import process_document, tool_template
+
+        for key, model in (("documents", ProcessDocument), ("templates", ToolTemplate)):
+            for ident in data.get("document_ids" if key == "documents" else "template_ids", []):
+                item = db.get(model, ident)
+                version = (
+                    process_document.effective_version_on(item)
+                    if key == "documents"
+                    else tool_template.effective_version(item)
+                )
+                if version is None:
+                    raise ReplicationError("请选择有明确有效原版本的复制资产")
+                snapshot[key].append(
+                    {
+                        "id": ident,
+                        "title": getattr(item, "title", None) or getattr(item, "name", ""),
+                        "versions": [
+                            {
+                                "id": version.id,
+                                "hash": improvement_round.digest(
+                                    {
+                                        c.name: str(getattr(version, c.name))
+                                        for c in version.__table__.columns
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                )
     row = ReplicationPack(
+        source_snapshot=snapshot,
+        receiver_user_id=data.get("receiver_user_id"),
         source_project_id=data.get("source_project_id"),
         title=data["title"],
         conditions=data.get("conditions"),
@@ -106,6 +191,13 @@ def create_pack(db: Session, data: dict, user: User) -> ReplicationPack:
 
 
 def update_pack(db: Session, row: ReplicationPack, data: dict) -> ReplicationPack:
+    from fastapi import HTTPException
+
+    expected = data.pop("expected_revision", None)
+    if expected is not None and expected != row.revision:
+        raise HTTPException(409, "复制包已变化")
+    if row.status == "PUBLISHED":
+        raise HTTPException(409, "已发布包修订不可改，请新建修订包")
     validate_pack(db, data)
     if data.get("status") == "REJECTED" and not (data.get("rejection_reason") or "").strip():
         raise ReplicationError("拒绝复制时必须填写拒绝理由")
@@ -114,6 +206,47 @@ def update_pack(db: Session, row: ReplicationPack, data: dict) -> ReplicationPac
         merged_evidence = data.get("benefit_evidence", row.benefit_evidence)
         if not (merged_conditions or "").strip() or not (merged_evidence or "").strip():
             raise ReplicationError("发布资产包前必须填写适用条件与收益证据")
+    if row.source_snapshot and any(
+        k in data for k in ("document_ids", "template_ids", "knowledge_ids")
+    ):
+        from copy import deepcopy
+
+        from app.services import improvement_round, process_document, tool_template
+
+        snapshot = deepcopy(row.source_snapshot)
+        for key, model, field in (
+            ("documents", ProcessDocument, "document_ids"),
+            ("templates", ToolTemplate, "template_ids"),
+        ):
+            snapshot[key] = []
+            for ident in data.get(field, getattr(row, field)) or []:
+                item = db.get(model, ident)
+                version = (
+                    process_document.effective_version_on(item)
+                    if key == "documents"
+                    else tool_template.effective_version(item)
+                )
+                if version is None:
+                    raise ReplicationError("复制资产需明确当前有效原版本")
+                snapshot[key].append(
+                    {
+                        "id": ident,
+                        "title": getattr(item, "title", None) or getattr(item, "name", ""),
+                        "versions": [
+                            {
+                                "id": version.id,
+                                "hash": improvement_round.digest(
+                                    {
+                                        c.name: str(getattr(version, c.name))
+                                        for c in version.__table__.columns
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                )
+        row.source_snapshot = snapshot
+    row.revision += 1
     for field, value in data.items():
         setattr(row, field, value)
     db.flush()

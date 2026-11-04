@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -53,6 +53,15 @@ class GateAttestation(Base):
         ForeignKey("project.id", ondelete="CASCADE"), index=True
     )
     stage_no: Mapped[int] = mapped_column(Integer, index=True)  # 1–5
+    round_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_improvement_round.id", ondelete="RESTRICT", name="fk_gate_round"),
+        nullable=True,
+        index=True,
+    )
+    purpose: Mapped[str] = mapped_column(
+        String(32), default="STAGE_GATE", server_default="STAGE_GATE"
+    )
+    evidence_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     gate_code: Mapped[str] = mapped_column(
         String(32), default="STAGE_GATE", server_default="STAGE_GATE"
     )

@@ -34,6 +34,7 @@ from app.schemas.pilot import (
 )
 from app.services import audit as audit_service
 from app.services import pilot as pilot_service
+from app.services.adoption_review import OperationIn, ReviewIn
 
 router = APIRouter(prefix="/pilot", tags=["十层单页"])
 
@@ -337,6 +338,33 @@ def save_rpa(payload: RpaIn, db: DbSession, user: WriteUser):
     except pilot_service.PilotError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RecordSavedOut(id=saved_id)
+
+
+@router.get("/training")
+def list_training(process_id: int, db: DbSession, user: CurrentUser):
+    from sqlalchemy import select
+
+    from app.models.adoption import ProcessTrainingRecord
+    from app.services import adoption_review
+
+    rows = db.scalars(
+        select(ProcessTrainingRecord).where(ProcessTrainingRecord.process_id == process_id)
+    ).all()
+    return [adoption_review.out(adoption_review.require(db, user, row.id)) for row in rows]
+
+
+@router.put("/training/{record_id}/operation")
+def save_operation(record_id: int, payload: OperationIn, db: DbSession, user: ManagerUser):
+    from app.services import adoption_review
+
+    return adoption_review.save(db, user, record_id, payload)
+
+
+@router.post("/training/{record_id}/operation/review")
+def review_operation(record_id: int, payload: ReviewIn, db: DbSession, user: WriteUser):
+    from app.services import adoption_review
+
+    return adoption_review.review(db, user, record_id, payload)
 
 
 @router.post("/training", response_model=RecordSavedOut, summary="登记一条培训到场（WRITE 角色）")

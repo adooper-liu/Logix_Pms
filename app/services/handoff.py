@@ -62,6 +62,10 @@ def require_sheet(db, user, code, sheet_id, _seen=None):
         project = db.get(Project, row.project_id)
         if project:
             org_access.ensure_visible(db, user, project.org_unit_id)
+    if (row.work_context or {}).get("round_id"):
+        from app.services import improvement_round
+
+        improvement_round.require(db, user, row.process_id, row.work_context["round_id"])
     if row.handoff:
         version_id = row.handoff.get("standard_version_id")
         if version_id:
