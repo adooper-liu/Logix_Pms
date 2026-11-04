@@ -347,6 +347,7 @@ def save_sheet(
 
 def _out(db: Session, row: ToolSheet, tool_name: str, codes: List[str]) -> ToolSheetOut:
     from app.services.handoff import label
+    from app.services.workbench import review_label
 
     process = db.get(ProcessArch, row.process_id)
     fields = row.fields if isinstance(row.fields, list) else []
@@ -369,6 +370,9 @@ def _out(db: Session, row: ToolSheet, tool_name: str, codes: List[str]) -> ToolS
         handoff=row.handoff,
         revision=row.revision,
         confirmation_label=label(row.handoff),
+        work_context=row.work_context,
+        review=row.review,
+        review_label=review_label(db, row),
     )
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
@@ -186,6 +186,17 @@ def ensure_baseline(db: Session, process: ProcessArch) -> Optional[ProcessModelV
     return row
 
 
+def lock_process(db, process):
+    # 同一流程的冻结/原写入口使用同一行锁，SQLite亦通过UPDATE串行化。
+    db.execute(
+        update(ProcessArch)
+        .where(ProcessArch.id == process.id)
+        .values(model_version=ProcessArch.model_version),
+        execution_options={"synchronize_session": False},
+    )
+    db.refresh(process)
+
+
 def save_draft(
     db: Session,
     process: ProcessArch,
@@ -195,21 +206,35 @@ def save_draft(
     bpmn_xml: Optional[str] = None,
     keep_bpmn: bool = False,
 ) -> ProcessModelVersion:
+    lock_process(db, process)
     ensure_baseline(db, process)
     latest = latest_version(db, process.id)
     if latest is not None and latest.status == IN_REVIEW:
         raise HTTPException(status_code=409, detail="当前草稿正在评审，不能修改；请先驳回")
 
     snapshot = snapshot_from_payload(payload)
-    if latest is not None and latest.status == DRAFT:
-        # 草稿是可变工作副本：重复保存只更新内容，不制造一串无意义的版本号
-        latest.snapshot = snapshot
+    if latest is not None and latest.status == DRAFT and latest.frozen_at is None:
+        # 与freeze竞争时由数据库条件裁决，旧ORM缓存不能覆盖已固定正文/XML。
+        values = {"snapshot": snapshot}
         if note:
-            latest.change_note = note
+            values["change_note"] = note
         if bpmn_xml is not None:
-            latest.bpmn_xml = bpmn_xml
+            values["bpmn_xml"] = bpmn_xml
         elif not (keep_bpmn and latest.bpmn_xml):
-            latest.bpmn_xml = render_bpmn(process, snapshot)
+            values["bpmn_xml"] = render_bpmn(process, snapshot)
+        result = db.execute(
+            update(ProcessModelVersion)
+            .where(
+                ProcessModelVersion.id == latest.id,
+                ProcessModelVersion.frozen_at.is_(None),
+                ProcessModelVersion.status == DRAFT,
+            )
+            .values(**values),
+            execution_options={"synchronize_session": False},
+        )
+        if result.rowcount != 1:
+            raise HTTPException(409, "原模型已固定或改变，请刷新后保存新工作版")
+        db.expire(latest)
         version = latest
     else:
         # 已发布后第一次编辑：版本号从已发布版本继续；发布前只保留一个草稿
@@ -486,6 +511,7 @@ def rollback(
     user: User,
     note: Optional[str] = None,
 ) -> ProcessModelVersion:
+    lock_process(db, process)
     if source.process_id != process.id:
         raise HTTPException(status_code=404, detail="模型版本不存在")
     pending = db.scalar(
@@ -500,11 +526,15 @@ def rollback(
         select(ProcessModelVersion).where(
             ProcessModelVersion.process_id == process.id,
             ProcessModelVersion.status == DRAFT,
+            ProcessModelVersion.frozen_at.is_(None),
         )
     ).all():
         db.delete(row)
     db.flush()
-    base = max(process.published_model_version or 0, source.version)
+    latest = latest_version(db, process.id)
+    base = max(
+        process.published_model_version or 0, source.version, latest.version if latest else 0
+    )
     row = ProcessModelVersion(
         process_id=process.id,
         version=base + 1,

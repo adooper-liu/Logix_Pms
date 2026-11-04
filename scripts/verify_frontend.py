@@ -24,6 +24,7 @@ from verify_lifecycle import (
 from verify_process_classification import verify_process_classification
 from verify_process_context import verify_process_context
 from verify_tool_sheet import verify_tool_sheet_save
+from verify_workbench import verify_work_review_guards, verify_workbench, verify_workbench_guards
 
 # Windows 控制台默认是 GBK，中文输出会变乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -130,6 +131,9 @@ def main() -> int:
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
+        check("M4建模分析设计原作业", lambda: verify_workbench(page, base))
+        check("M4原作业身份守卫", lambda: verify_workbench_guards(page, base))
+        check("M4本人核验弹窗守卫", lambda: verify_work_review_guards(page, base))
         check("M3战略边界与交接", lambda: verify_process_context(page, base))
         check("三类型分类维护与原流程消费", lambda: verify_process_classification(page, base))
         check("默认入口与两侧栏分组", default_entry_and_nav)

@@ -50,7 +50,11 @@ def prepare(db, user, tool, process, payload):
     return {**payload.model_dump(), "confirmations": {}}
 
 
-def require_sheet(db, user, code, sheet_id):
+def require_sheet(db, user, code, sheet_id, _seen=None):
+    seen = set(_seen or ())
+    if sheet_id in seen:
+        raise HTTPException(400, "原作业引用成环")
+    seen.add(sheet_id)
     row = db.get(ToolSheet, sheet_id)
     if row is None or row.tool_code != code:
         raise HTTPException(404, "方法记录不存在")
@@ -67,6 +71,12 @@ def require_sheet(db, user, code, sheet_id):
             document = db.get(ProcessDocument, version.document_id) if version else None
             if document:
                 org_access.ensure_visible(db, user, document.org_unit_id)
+    upstream = (row.work_context or {}).get("upstream_sheet_id")
+    if upstream:
+        parent = db.get(ToolSheet, upstream)
+        if parent is None or parent.process_id != row.process_id:
+            raise HTTPException(404, "原上游作业不存在")
+        require_sheet(db, user, parent.tool_code, parent.id, seen)
     return row
 
 

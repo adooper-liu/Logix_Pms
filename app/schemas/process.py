@@ -273,6 +273,11 @@ class ProcessModelOut(BaseModel):
     edges: List[ProcessEdgeOut] = []
 
 
+class FreezeModelRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    note: str = Field(min_length=1, max_length=200)
+
+
 class ProcessModelVersionOut(BaseModel):
     id: int
     version: int
@@ -286,6 +291,7 @@ class ProcessModelVersionOut(BaseModel):
     reviewed_at: Optional[UtcDateTime] = None
     published_by_name: Optional[str] = None
     published_at: Optional[UtcDateTime] = None
+    frozen_at: Optional[UtcDateTime] = None
     node_count: int = 0
     edge_count: int = 0
 

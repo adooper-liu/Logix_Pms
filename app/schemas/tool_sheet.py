@@ -83,3 +83,6 @@ class ToolSheetOut(BaseModel):
     handoff: Optional[dict] = None
     revision: int = 0
     confirmation_label: str = "未记录横向交接"
+    work_context: Optional[dict] = None
+    review: Optional[dict] = None
+    review_label: str = "未记录作业核验"

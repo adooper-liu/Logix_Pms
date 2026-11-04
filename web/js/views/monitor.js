@@ -2,6 +2,7 @@
 import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, promptDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { workbenchHtml } from './shared/workbench.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
@@ -664,7 +665,9 @@ const renderMonitor = () => {
       (needAnalysis || needKpi) ? GET('/monitor/kpis').catch(() => []) : Promise.resolve([]),
       loadCockpitProcesses(),
       GET('/tools').catch(() => []),
-    ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates, suggestions, forecast, balance, miningData, kpis, flowList, tools]) => ({
+      needAnalysis && cockpitPid ? GET('/processes/'+cockpitPid+'/workbench') : Promise.resolve(null),
+    ]).then(([radar, exceptions, summary, meta, workload, workloadMeta, candidates, suggestions, forecast, balance, miningData, kpis, flowList, tools, workbench]) => ({
+      workbench,
       radar, exceptions, summary, meta, workload, workloadMeta, candidates, suggestions, forecast, balance,
       flowList, mining: miningData.mining,
       analysis: miningData.analysis, model: miningData.model, kpis, tools,
@@ -1247,7 +1250,7 @@ const renderMonitor = () => {
           <div class="mt">${cockpitTabBar(tab)}</div>
           ${toolMountHtml(d.tools, monitorToolHost(tab), state.cockpit.processId)}
         </div>
-        ${tab === 'analysis' ? analysisHtml(d)
+        ${tab === 'analysis' ? workbenchHtml(d.workbench,'ANALYSIS','monitor')+analysisHtml(d)
           : tab === 'kpi' ? `${kpiSummary}${kpiPane}`
           : tab === 'exceptions' ? excPane
             : tab === 'workload' ? workloadPane
