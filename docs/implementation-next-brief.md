@@ -1,6 +1,6 @@
 # 主任务实施 Brief：三类型、八阶段与主体能力对齐
 
-> M1a–M4已依次经PR#14、#16–#18合并；M5经PR#19合并9246f4e（d994d19及PostgreSQL测试清理修复e84b1e8），SQLite/PostgreSQL CI通过。当前M6位于feat/execution-readiness，实施及发布门禁记录见§10。
+> M1a–M4已依次经PR#14、#16–#18合并；M5经PR#19合并9246f4e；M6经PR#20合并c3072bc（71e90f3＋4440bb3），SQLite/PostgreSQL CI通过。当前已从合并基线进入feat/monitor-decision-loop，M7范围及首批RED记录见§11。
 
 ## 1. 主任务与完成标准
 
@@ -173,3 +173,13 @@ M5随后按授权经PR#19合并；PostgreSQL CI发现修订链RESTRICT下测试�
 **发布门禁补正：** 71e90f3已推送PR#20；首轮CI SQLite通过，PostgreSQL在旧`test_form_version_freezes_on_instance`清理失败：运行中实例DELETE为409被忽略，随后删除被实例直接固定的模型触发RESTRICT，连带PCF计数多1。现补原流程删除409保留保护，测试先取消→删除实例→删除流程并逐步断言；新增SQLite回归已先复现错误删除200，再修正为409，23项定向通过。不是放松外键/删除历史，修复后完整check.py为`592 passed, 4 warnings in 147.78s`，格式/lint通过；双库CI仍须复跑后才合并。
 
 **漂移裁定边界：** schema以Alembic实测为准；产品仍唯一目录三类型、八阶段导航、项目五阶段，原对象增量无部署/条件平行主库。M6是既有轻量执行器上线准备片，不代表Flowable、并行/子流程/事件/恢复接入；正式运行样本、质量与有权四结论由M7/M8继续，生产真并发/恢复及组织业务效果未验证。
+
+M6最终发布：4440bb3修正后，当前代码全站前端再次`全部检查通过`、exit0、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m6-ci-fix-mzd9mx3a`；远端CI运行41807358791，SQLite 3m26s / PostgreSQL 4m17s均pass。PR#20于2026-11-04合并c3072bc，提交71e90f3＋4440bb3。上述首轮失败/未发布状态保留为历史，不覆盖成从未失败。
+
+## 11. 当前单元 M7：监控—异常—改善
+
+已从c3072bc进入feat/monitor-decision-loop，承接R4与[绩效小闭环](process-performance-decision-loop.md)，计划见[监控行动核验](superpowers/plans/2026-11-04-monitor-decision-loop.md)。先在原KpiDefinition明确来源事件/聚合/日历/样本/时效约定，再在原KpiRecord固定来源/身份/质量/修订并承接薄轮次后侧样本；原ExceptionEvent办理判断—责任行动—效果核验与改善，不增指标/样本/行动主库，不重做图表。
+
+首批7项测试已运行并全部RED：当时小时KPI未约定仍被自动判EXECUTION、measurement字段被忽略、不支持参数被错误接受。现已落实原定义measurement、原样本provenance/revision和原异常resolution/revision；自动取数仅显式UTC自然端到端月均，历史/人工/未核入站均UNKNOWN，不因有钩子或单位变正式。原异常措施解决与效果核验分开，指定非编辑者本人ACCEPT才关闭，重开清有效核验。真实浏览器已验证原指标约定保存、缺样本灰、原处置及真实chen本人核验；独立SQLite Alembic check无漂移。首轮完整check.py输出`603 passed, 4 warnings in 122.79s`，格式/lint通过；全量前端当前隔离SQLite/端口/静态文件核对后完整exit0，`全部检查通过。`、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m7-full-p4566vfp`。分支复核7项Important均以API/真实浏览器或受控延迟边界复现后修正：运行样本与冻结单位/公式等字段全比较；措施编辑更新编辑者，关闭后改依据自动回处理中；来源实例项目范围进入列表/详情/核验过滤；异常加载绑定发起时流程；指标加载/选项/保存绑定modal代号，不覆盖或关闭新表单；原测量约定审计保留前后值。修复后完整check.py输出`606 passed, 4 warnings in 129.86s`，格式/lint通过；独立SQLite Alembic check仍无新增迁移；最终全站前端以新临时SQLite/端口核当前代码后完整通过，exit0、`全部检查通过。`、`SERVER_500: []`，截图`D:/Dev/Cache/Temp/logix-m7-reviewed-zk_8abix`；14项M7 API、24项迁移/原轮次/入站兼容定向通过。日志仍有预期404/422/409/400及受保护实例清理409；原只读调色板无评审中模型时跳过、外部draw.io只测协议，未声称外部集成成功。M7待发布，不把测试通过当业务效果验收。
+
+当前能力边界：运行月均为本期已完成实例子集，混合模型/轮次不用于正式同轮对照；等待/P95/工作日历及外部入站真实性核验不支持并明确限制。开放实例仍沿原队列/工作量查看，不混入已完成周期。原动作引用/人工效果依据是可核声明，不自动证明因果或替代M8有权四结论。

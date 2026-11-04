@@ -80,6 +80,71 @@ def owner_client():
         yield c
 
 
+@pytest.fixture
+def verified_kpi(client):
+    """只在测试内构造已核来源；恢复原值，不给seed冒充正式来源。"""
+    from copy import deepcopy
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.core.database import SessionLocal
+    from app.core.timeutil import utcnow
+    from app.models.monitor import KpiDefinition
+    from app.services.kpi import latest_of, measurement_hash
+
+    saved = []
+
+    def mark(ident):
+        with SessionLocal() as db:
+            row = (
+                db.get(KpiDefinition, ident)
+                if isinstance(ident, int)
+                else db.scalar(select(KpiDefinition).where(KpiDefinition.code == ident))
+            )
+            record = latest_of(row.records)
+            saved.append(
+                (
+                    row.id,
+                    deepcopy(row.measurement),
+                    record.id if record else None,
+                    deepcopy(record.provenance) if record else None,
+                )
+            )
+            row.measurement = {
+                "source_kind": "EXECUTION_ELAPSED",
+                "event": "instance.completed",
+                "aggregation": "MEAN",
+                "timezone": "UTC",
+                "calendar": "ELAPSED",
+                "minimum_samples": 1,
+                "freshness_days": 45,
+                "purpose": "隔离测试",
+                "response_note": "测试核对",
+            }
+            if record:
+                record.provenance = {
+                    "source_kind": "EXECUTION_ELAPSED",
+                    "quality": "VALID",
+                    "measurement_hash": measurement_hash(row),
+                    "window_end": (utcnow() + timedelta(days=1)).isoformat(),
+                }
+            db.commit()
+
+    yield mark
+    from app.models.monitor import KpiRecord
+
+    with SessionLocal() as db:
+        for kid, measurement, rid, provenance in reversed(saved):
+            row = db.get(KpiDefinition, kid)
+            if row:
+                row.measurement = measurement
+            record = db.get(KpiRecord, rid) if rid else None
+            if record:
+                record.provenance = provenance
+        db.commit()
+
+
 @pytest.fixture(scope="session")
 def manager_client():
     with TestClient(app) as c:

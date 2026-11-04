@@ -39,6 +39,9 @@ KPI_FIELDS = (
     "data_flow_id",
     "inbound_webhook_id",
     "quality_rule",
+    "process_id",
+    "activity_id",
+    "measurement",
     "direction",
     "target_value",
     "red_threshold",
@@ -160,6 +163,39 @@ def samples(db, user, row, inputs, window, role, model_id, metric_contracts):
             raise HTTPException(400, "后侧样本口径hash不一致")
         if not spec.source_evidence.strip() or not spec.quality_note.strip():
             raise HTTPException(400, "请补原来源和质量核对说明")
+        provenance = record.provenance or {}
+        identity_basis = "人工核对来源声明（原KPI记录无直接模型身份）"
+        if provenance.get("source_kind") == "EXECUTION_ELAPSED":
+            from app.services.kpi import measurement_hash, record_quality
+
+            if record_quality(kpi, record) != "VALID":
+                raise HTTPException(400, "运行样本质量或身份未满足正式对照条件")
+            if (
+                provenance.get("model_version_id") != model_id
+                or provenance.get("project_id") != row.project_id
+            ):
+                raise HTTPException(400, "运行样本模型/项目与本侧不一致")
+            if role == "AFTER" and provenance.get("round_id") != row.id:
+                raise HTTPException(400, "运行样本轮次与本轮不一致")
+            if provenance.get("measurement_hash") != measurement_hash(kpi) or any(
+                contract.get(key) != getattr(kpi, key)
+                for key in (
+                    "measurement",
+                    "formula",
+                    "unit",
+                    "process_id",
+                    "activity_id",
+                    "frequency",
+                )
+            ):
+                raise HTTPException(400, "运行样本与冻结测量约定不一致")
+            if (
+                provenance.get("window_start", "")[:10] < window.start.isoformat()
+                or provenance.get("window_end", "")[:10]
+                > (window.end + __import__("datetime").timedelta(days=1)).isoformat()
+            ):
+                raise HTTPException(400, "运行样本实际窗口超出本侧范围")
+            identity_basis = "原实例固定身份与测量来源"
         result.append(
             {
                 "record_id": record.id,
@@ -173,7 +209,9 @@ def samples(db, user, row, inputs, window, role, model_id, metric_contracts):
                 "contract_hash": contract["hash"],
                 "source_evidence": spec.source_evidence,
                 "quality_note": spec.quality_note,
-                "identity_basis": "人工核对来源声明（原KPI记录无直接模型身份）",
+                "identity_basis": identity_basis,
+                "provenance": provenance,
+                "record_revision": record.revision,
             }
         )
     if {x["kpi_id"] for x in result} != set(by_kpi):

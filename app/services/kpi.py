@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy import or_, select
@@ -109,10 +109,59 @@ def status_for(
     return "YELLOW"
 
 
+def validate_measurement(kpi):
+    spec = kpi.measurement
+    if spec is None:
+        return
+    allowed = {
+        "source_kind",
+        "event",
+        "aggregation",
+        "timezone",
+        "calendar",
+        "minimum_samples",
+        "freshness_days",
+        "purpose",
+        "response_note",
+    }
+    if set(spec) - allowed or spec.get("source_kind") not in (
+        "EXECUTION_ELAPSED",
+        "INBOUND",
+        "MANUAL",
+        "UNKNOWN",
+    ):
+        raise KpiDefinitionError("测量约定来源或字段无效")
+    for key in ("minimum_samples", "freshness_days"):
+        if type(spec.get(key)) is not int or not 1 <= spec[key] <= 10000:
+            raise KpiDefinitionError("样本数/时效必须为1–10000的整数")
+    if not all(
+        isinstance(spec.get(key), str) and spec[key].strip() for key in ("purpose", "response_note")
+    ):
+        raise KpiDefinitionError("请明确测量用途和偏差响应约定")
+    if spec["source_kind"] == "EXECUTION_ELAPSED":
+        if (
+            spec.get("event"),
+            spec.get("aggregation"),
+            spec.get("timezone"),
+            spec.get("calendar"),
+        ) != ("instance.completed", "MEAN", "UTC", "ELAPSED"):
+            raise KpiDefinitionError("当前实例取数仅支持完成事件、月均端到端历时、UTC自然历时")
+        if (
+            kpi.process_id is None
+            or kpi.activity_id is not None
+            or _duration_seconds(kpi.unit) is None
+            or kpi.frequency != "MONTHLY"
+        ):
+            raise KpiDefinitionError("实例历时需绑定流程、时间单位及月频，不支持活动等待/投入")
+
+
 def intake_kind(db: Session, kpi: KpiDefinition) -> str:
-    """正式写入口。时长且绑了流程走实例；其余要有能回传指标的启用钩子。"""
-    if kpi.process_id is not None and _duration_seconds(kpi.unit) is not None:
+    """显式约定决定来源；单位只用于已选历时的换算。"""
+    spec = kpi.measurement or {}
+    if spec.get("source_kind") == "EXECUTION_ELAPSED":
         return INTAKE_EXECUTION
+    if spec and spec.get("source_kind") != "INBOUND":
+        return INTAKE_DRAFT
     if kpi.inbound_webhook_id is None:
         return INTAKE_DRAFT
     hook = db.get(InboundWebhook, kpi.inbound_webhook_id)
@@ -123,11 +172,52 @@ def intake_kind(db: Session, kpi: KpiDefinition) -> str:
     return INTAKE_INBOUND
 
 
+QUALITY_LABELS = {
+    "VALID": "来源与样本条件已核",
+    "UNKNOWN": "来源待核实",
+    "UNKNOWN_IDENTITY": "运行身份待核实",
+    "INSUFFICIENT": "样本不足",
+    "STALE": "样本已过期",
+    "CONTRACT_CHANGED": "测量约定已变化",
+    "MIXED": "混合运行身份不可直接对照",
+}
+
+
+def measurement_hash(kpi):
+    from app.services.improvement_round import digest
+
+    return digest(
+        {
+            key: getattr(kpi, key)
+            for key in ("measurement", "formula", "unit", "process_id", "activity_id", "frequency")
+        }
+    )
+
+
+def record_quality(kpi, record, now=None):
+    from app.core.timeutil import utcnow
+
+    p = record.provenance if record else None
+    if not p or p.get("source_kind") not in ("EXECUTION_ELAPSED", "INBOUND_VERIFIED"):
+        return "UNKNOWN"
+    if p.get("measurement_hash") != measurement_hash(kpi):
+        return "CONTRACT_CHANGED"
+    if p.get("quality") != "VALID":
+        return p.get("quality", "UNKNOWN")
+    end = datetime.fromisoformat(p["window_end"])
+    if (now or utcnow()) > end + timedelta(days=(kpi.measurement or {}).get("freshness_days", 1)):
+        return "STALE"
+    return "VALID"
+
+
 def presentation(db: Session, kpi: KpiDefinition, value: Optional[float]) -> tuple[str, str, str]:
     """红黄绿只统计已有正式来源的指标。未定来源即使有数也显示为未定来源。"""
     kind = intake_kind(db, kpi)
     if kind == INTAKE_DRAFT:
         return "GRAY", INTAKE_LABELS[INTAKE_DRAFT], kind
+    quality = record_quality(kpi, latest_of(kpi.records))
+    if quality != "VALID":
+        return "GRAY", QUALITY_LABELS.get(quality, quality), kind
     status = status_for(
         value,
         kpi.direction,
@@ -140,6 +230,7 @@ def presentation(db: Session, kpi: KpiDefinition, value: Optional[float]) -> tup
 
 def bind_sources(db: Session, kpi: KpiDefinition) -> None:
     """校验入站钩子，并把选中的数据流挂到这条指标上。"""
+    validate_measurement(kpi)
     if kpi.inbound_webhook_id is not None:
         hook = db.get(InboundWebhook, kpi.inbound_webhook_id)
         if hook is None or not hook.is_active:
@@ -324,6 +415,7 @@ def save_record(
     value: float,
     project_id: Optional[int],
     note: Optional[str],
+    provenance: Optional[dict] = None,
 ) -> KpiRecord:
     """写入指标数据点，并让挂着这条指标的项目当前值跟着变。"""
     project_cond = (
@@ -347,8 +439,39 @@ def save_record(
         )
         db.add(existing)
     else:
+        import json
+
+        from app.services import audit
+
+        audit.record(
+            db,
+            None,
+            "UPDATE",
+            "kpi_record",
+            existing.id,
+            json.dumps(
+                {
+                    "before": {
+                        "value": existing.value,
+                        "note": existing.note,
+                        "provenance": existing.provenance,
+                        "revision": existing.revision,
+                    },
+                    "reason": note,
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
         existing.value = value
         existing.note = note
+        existing.revision += 1
+    existing.provenance = provenance or {
+        "source_kind": "MANUAL",
+        "quality": "UNKNOWN",
+        "measurement_hash": measurement_hash(kpi),
+        "evidence": note,
+    }
     db.flush()
     align_open_projects(db)
     return existing
@@ -379,7 +502,7 @@ def record_completed_instance(db: Session, instance: ProcessInstance) -> None:
                 KpiDefinition.is_active.is_(True),
             )
         ).all()
-        if _duration_seconds(row.unit) is not None
+        if intake_kind(db, row) == INTAKE_EXECUTION
     ]
     if not kpis:
         return
@@ -395,13 +518,14 @@ def record_completed_instance(db: Session, instance: ProcessInstance) -> None:
             ProcessInstance.started_at.is_not(None),
         )
     ).all()
-    samples = [
-        (row.completed_at - row.started_at).total_seconds()
+    eligible = [
+        row
         for row in instances
         if row.completed_at is not None
         and row.started_at is not None
         and (row.completed_at - row.started_at).total_seconds() >= MIN_CYCLE_SECONDS
     ]
+    samples = [(row.completed_at - row.started_at).total_seconds() for row in eligible]
     if not samples:
         return
     for kpi in kpis:
@@ -417,17 +541,64 @@ def record_completed_instance(db: Session, instance: ProcessInstance) -> None:
                 KpiRecord.note == EXECUTION_NOTE,
             )
         )
+        identities = {(r.model_version_id, r.round_id, r.project_id) for r in eligible}
+        identity = next(iter(identities)) if len(identities) == 1 else (None, None, None)
+        quality = "VALID"
+        if len(identities) != 1:
+            quality = "MIXED"
+        elif identity[0] is None:
+            quality = "UNKNOWN_IDENTITY"
+        elif len(samples) < kpi.measurement["minimum_samples"]:
+            quality = "INSUFFICIENT"
+        provenance = {
+            "source_kind": "EXECUTION_ELAPSED",
+            "quality": quality,
+            "instance_ids": [r.id for r in eligible[:200]],
+            "sample_count": len(samples),
+            "process_id": instance.process_id,
+            "model_version_id": identity[0],
+            "round_id": identity[1],
+            "project_id": identity[2],
+            "measurement_hash": measurement_hash(kpi),
+            "contract_snapshot": kpi.measurement,
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+        }
         if existing is None:
-            db.add(
-                KpiRecord(
-                    kpi_id=kpi.id,
-                    period=period,
-                    value=value,
-                    project_id=None,
-                    note=EXECUTION_NOTE,
-                )
+            existing = KpiRecord(
+                kpi_id=kpi.id,
+                period=period,
+                value=value,
+                project_id=None,
+                note=EXECUTION_NOTE,
+                provenance=provenance,
             )
+            db.add(existing)
         else:
+            import json
+
+            from app.services import audit
+
+            audit.record(
+                db,
+                None,
+                "UPDATE",
+                "kpi_record",
+                existing.id,
+                json.dumps(
+                    {
+                        "before": {
+                            "value": existing.value,
+                            "provenance": existing.provenance,
+                            "revision": existing.revision,
+                        },
+                        "reason": "实例月均重新取数",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
             existing.value = value
+            existing.provenance = provenance
+            existing.revision += 1
         db.flush()
     align_open_projects(db)

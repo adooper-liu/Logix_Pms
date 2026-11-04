@@ -23,6 +23,7 @@ from verify_lifecycle import (
     verify_lifecycle_handoffs,
     verify_lifecycle_original_actions,
 )
+from verify_monitor_decision_loop import verify_monitor_decision_loop
 from verify_process_classification import verify_process_classification
 from verify_process_context import verify_process_context
 from verify_tool_sheet import verify_tool_sheet_save
@@ -133,6 +134,7 @@ def main() -> int:
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
+        check("M7监控异常改善", lambda: verify_monitor_decision_loop(page, base))
         check("M6执行与上线准备", lambda: verify_execution_readiness(page, base))
         check("M5薄轮次固定与对照", lambda: verify_improvement_round(page, base))
         check("M4建模分析设计原作业", lambda: verify_workbench(page, base))

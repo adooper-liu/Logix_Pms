@@ -1005,7 +1005,7 @@ def test_kpi_radar(client):
         "COST",
         "FLEXIBILITY",
     }
-    assert data["overall_achievement"] > 0
+    assert data["overall_achievement"] == 0  # 演示数据未核来源，不形成正式绩效
     assert all(d["status"] in {"GOOD", "WATCH", "RISK"} for d in data["dimensions"])
     assert len(data["series"]) == 16
     assert all(len(s["points"]) == 6 for s in data["series"])
@@ -1022,8 +1022,9 @@ def test_kpi_radar_filters_by_process(client):
     assert len(data["series"]) < 16
 
 
-def test_kpi_achievement_direction(client):
+def test_kpi_achievement_direction(client, verified_kpi):
     """越小越好的指标：目标 5 天、当前 8.2 天 → 达成率应低于 100%。"""
+    verified_kpi("EFF-01")
     kpis = client.get(f"{API}/monitor/kpis", params={"dimension": "EFFICIENCY"}).json()
     cycle = next(k for k in kpis if k["code"] == "EFF-01")
     assert cycle["latest_value"] == 8.2
@@ -1118,7 +1119,8 @@ def test_exception_lifecycle(client):
     assert resolved.json()["resolved_at"] is not None
 
     closed = client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"})
-    assert closed.json()["closed_at"] is not None
+    assert closed.status_code == 400
+    assert client.get(f"{API}/monitor/exceptions/{eid}").json()["closed_at"] is None
 
     assert client.delete(f"{API}/monitor/exceptions/{eid}").status_code == 200
 
@@ -1134,7 +1136,18 @@ def test_reopened_exception_clears_closure_timestamps(client):
     ).json()
     eid = created["id"]
     client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "RESOLVED"})
-    closed = client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"}).json()
+    # 历史已关闭数据可重开，但新关闭不能绕过M7核验。
+    from app.core.database import SessionLocal
+    from app.core.timeutil import utcnow
+    from app.models.monitor import ExceptionEvent
+
+    with SessionLocal() as db:
+        row = db.get(ExceptionEvent, eid)
+        row.status = "CLOSED"
+        row.resolved_at = utcnow()
+        row.closed_at = utcnow()
+        db.commit()
+    closed = client.get(f"{API}/monitor/exceptions/{eid}").json()
     assert closed["resolved_at"] and closed["closed_at"]
 
     reopened = client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "OPEN"}).json()
@@ -1143,9 +1156,9 @@ def test_reopened_exception_clears_closure_timestamps(client):
     assert reopened["closed_at"] is None, "重开后仍带着关闭时间"
 
     # 再次关闭时应写入新的时间戳
-    again = client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"}).json()
-    assert again["resolved_at"] and again["closed_at"]
-    assert again["closed_at"] != closed["closed_at"]
+    again = client.patch(f"{API}/monitor/exceptions/{eid}", json={"status": "CLOSED"})
+    assert again.status_code == 400
+    client.delete(f"{API}/monitor/exceptions/{eid}")
 
 
 def test_datetimes_serialized_with_utc_offset(client):

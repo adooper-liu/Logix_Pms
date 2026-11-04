@@ -700,7 +700,7 @@ const renderMonitor = () => {
         const prev = series.points.length > 1 ? series.points[series.points.length - 2].value : null;
         const delta = (latest !== null && prev !== null) ? latest - prev : null;
         let reach = null;
-        if (series.intake !== 'DRAFT' && latest !== null && series.target_value) {
+        if (series.status !== 'GRAY' && series.intake !== 'DRAFT' && latest !== null && series.target_value) {
           reach = series.direction === 'LOWER_BETTER'
             ? (latest > 0 ? (series.target_value / latest) * 100 : (latest === 0 ? 100 : null))
             : (latest / series.target_value) * 100;
@@ -1561,11 +1561,15 @@ function drawSpark(kpiId, values, direction) {
   ctx.fill();
 }
 
+let exceptionForm = null;
 async function openException(id) {
+  const processId=state.cockpit.processId;
+  const originView=state.view;
   const gen = openModal('加载中…', skeleton(4));
   try {
-    const e = await GET('/monitor/exceptions/' + id);
+    const [e,users] = await Promise.all([GET('/monitor/exceptions/' + id),GET('/execution/assignees')]);
     if (!modalAlive(gen)) return;
+    if(state.view!==originView || state.cockpit.processId!==processId){closeModal();return;}
     state.currentException = e;
     const canEdit = canManage()
       || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
@@ -1575,7 +1579,7 @@ async function openException(id) {
     const manager = canManage();
     const statusOpts = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((v) =>
       '<option value="' + v + '"' + (e.status === v ? ' selected' : '') + '>' + EXC_LABEL[v] + '</option>').join('');
-    openModal(e.title, `
+    const formGen = openModal(e.title, `
       <div class="row2">
         <div class="field"><label>事件编号</label><input value="${esc(e.code)}" readonly></div>
         <div class="field"><label>严重度</label><input value="${SEV_LABEL[e.severity]}" readonly></div>
@@ -1596,6 +1600,12 @@ async function openException(id) {
         <textarea id="exCause" placeholder="用 5 Why 追到可干预的根因"${canEdit ? '' : ' readonly'}>${esc(e.root_cause || '')}</textarea></div>
       <div class="field"><label>采取的措施</label>
         <textarea id="exAction" placeholder="做了什么、效果如何"${canEdit ? '' : ' readonly'}>${esc(e.action_taken || '')}</textarea></div>
+      <details${e.resolution ? ' open' : ''}><summary>处置与效果核验约定</summary><p class="note">措施执行不等于有效；保存改动清原核验，关闭须指定本人确认。</p>
+      <div class="field"><label>指定非编辑者核验</label><select id="exReviewer"${canEdit?'':' disabled'}><option value="">请选择</option>${users.filter(u=>u.id!==AUTH.user?.id || u.id===e.resolution?.reviewer_user_id).map(u=>`<option value="${u.id}"${u.id===e.resolution?.reviewer_user_id?' selected':''}>${esc(u.display_name)}</option>`).join('')}</select></div>
+      ${[['Decision','处置选择','decision'],['ActionRef','原动作引用','action_ref'],['Evidence','执行依据','evidence'],['Expected','预期效果','expected_result']].map(([id,label,key])=>`<div class="field"><label>${label}</label><textarea id="ex${id}"${canEdit?'':' readonly'}>${esc(e.resolution?.[key] || '')}</textarea></div>`).join('')}
+      <div class="field"><label>复核日期</label><input id="exReviewDue" type="date" value="${esc(e.resolution?.review_due || '')}"${canEdit?'':' readonly'}></div></details>
+      ${e.resolution?.review ? `<p class="note">${esc(e.resolution.review.name)} · ${esc(e.resolution.review.evidence)} · ${esc(e.resolution.review.result)}</p>` : ''}
+      ${canWrite() && e.resolution?.reviewer_user_id===AUTH.user?.id ? '<div class="field"><label>本人核验依据</label><textarea id="exReviewEvidence"></textarea></div><div class="field"><label>实际核验结果</label><textarea id="exReviewResult"></textarea></div>' : ''}
       ${e.resolved_at ? '<div class="note">解决时间：' + esc(dtShort(e.resolved_at)) +
         (e.closed_at ? ' · 关闭时间：' + esc(dtShort(e.closed_at)) : '') + '</div>' : ''}
       ${canEdit ? '' : '<div class="note">只读：仅流程管理科、系统管理员或该异常的责任人可以处理。</div>'}
@@ -1606,27 +1616,41 @@ async function openException(id) {
        <button class="btn btn-g" data-act="monitor.close">${canEdit ? '取消' : '关闭'}</button>
        ${canImprove ? `<button class="btn btn-g" data-act="monitor.improveException"
          data-id="${e.id}">转改善</button>` : ''}
-       ${canEdit ? `<button class="btn btn-p" data-act="monitor.saveException" data-id="${e.id}">保存</button>` : ''}`);
+       ${canEdit ? `<button class="btn btn-p" data-act="monitor.saveException" data-id="${e.id}">保存</button>` : ''}
+       ${canWrite() && e.resolution?.reviewer_user_id===AUTH.user?.id && e.status==='RESOLVED' ? '<button class="btn btn-p" data-act="monitor.reviewException">本人确认效果并关闭</button><button class="btn btn-g" data-act="monitor.reviewException" data-decision="RETURN">退回补证</button>' : ''}`);
+    exceptionForm={id:e.id,revision:e.revision,gen:formGen,processId,busy:false};
   } catch (err) {
     if (modalAlive(gen)) openModal('加载失败', '<div class="errbar"><div>' + esc(err.message) + '</div></div>');
   }
 }
 
+on('monitor.reviewException',async ({decision})=>{
+  const c=exceptionForm;
+  if(!c || !modalAlive(c.gen) || state.view!=='monitor' || state.cockpit.processId!==c.processId || c.busy)return;
+  c.busy=true;
+  try {await POST('/monitor/exceptions/'+c.id+'/review',{expected_revision:c.revision,decision:decision || 'ACCEPT',evidence:document.getElementById('exReviewEvidence').value,result:document.getElementById('exReviewResult').value});if(modalAlive(c.gen))closeModal();toast('本人核验已记录');if(state.view==='monitor')RENDERERS.monitor();}catch(e){toast(e.message,true);}finally{c.busy=false;}
+});
 async function saveException(id) {
+  const c=exceptionForm;
+  if(!c || c.id!==id || !modalAlive(c.gen) || state.view!=='monitor' || state.cockpit.processId!==c.processId || c.busy)return toast('上下文已变化，请重新打开异常',true);
   const g = (x) => document.getElementById(x).value;
+  const reviewer=Number(g('exReviewer'));
+  c.busy=true;
   try {
     await PATCH('/monitor/exceptions/' + id, {
+      expected_revision:c.revision,
+      ...(reviewer?{resolution:{reviewer_user_id:reviewer,decision:g('exDecision'),action_ref:g('exActionRef'),evidence:g('exEvidence'),expected_result:g('exExpected'),review_due:g('exReviewDue')}}:{}),
       owner: g('exOwner') || null,
       status: g('exStatus'),
       root_cause: g('exCause') || null,
       action_taken: g('exAction') || null,
     });
-    closeModal();
+    if(modalAlive(c.gen))closeModal();
     toast('异常事件已更新');
-    RENDERERS.monitor();
+    if(state.view==='monitor' && state.cockpit.processId===c.processId)RENDERERS.monitor();
   } catch (e) {
     toast(e.message, true);
-  }
+  } finally {c.busy=false;}
 }
 
 /* -------------------------------------------------- 异常 / KPI 的写入口 */
@@ -1709,10 +1733,15 @@ async function submitException() {
 }
 
 let editingKpi = null;
+let kpiForm = null;
+let kpiLoad = 0;
 
 async function editKpiModal(kpiId) {
+  const request=++kpiLoad,processId=state.cockpit.processId;
+  const gen=openModal('加载中…',skeleton(3));
   try {
     const kpi = await GET('/monitor/kpis/' + kpiId);
+    if(request!==kpiLoad || !modalAlive(gen) || state.view!=='monitor' || state.cockpit.processId!==processId)return;
     newKpiModal(kpi);
   } catch (e) {
     toast(e.message, true);
@@ -1720,6 +1749,7 @@ async function editKpiModal(kpiId) {
 }
 
 function newKpiModal(kpi = null) {
+  ++kpiLoad;
   editingKpi = kpi;
   const meta = state.monitorMeta
     || { kind_labels: {}, frequency_labels: {}, dimension_labels: {} };
@@ -1730,7 +1760,7 @@ function newKpiModal(kpi = null) {
   const numValue = (key) => (kpi && kpi[key] !== null && kpi[key] !== undefined
     ? kpi[key] : '');
 
-  openModal(kpi ? '编辑 KPI 定义卡 · ' + kpi.code : '新建 KPI 定义卡', `
+  const gen=openModal(kpi ? '编辑 KPI 定义卡 · ' + kpi.code : '新建 KPI 定义卡', `
     <div class="row2">
       <div class="field"><label>KPI 编码 *</label>
         <input id="nkCode" value="${esc(value('code'))}" placeholder="如 EFF-06">
@@ -1772,8 +1802,11 @@ function newKpiModal(kpi = null) {
         <div class="hint">选定后，来源系统跟这条数据流走。</div></div>
       <div class="field"><label>入站钩子</label>
         <select id="nkHook"><option value="">不指定</option></select>
-        <div class="hint">时长并且绑了流程时，当前值由实例完成写入。其他指标要选一条已启用、能回传指标的钩子，否则不进红黄和总览。补录只改已有的数。</div></div>
+        <div class="hint">时长并不决定取数，须显式约定来源；启用钩子只证明入口配置，不证明样本可信。补录仍标人工待核实。</div></div>
     </div>
+    <div class="field"><label>显式测量来源</label><select id="nkMeasureSource">${options(meta.measurement_labels, kpi?.measurement?.source_kind || 'UNKNOWN')}</select><div class="hint">单位不决定取数。实例仅支持UTC自然历时月均，不支持等待/投入/分位数；质量另核。</div></div>
+    <div class="row2"><div class="field"><label>最小样本数</label><input id="nkMinSamples" type="number" min="1" value="${kpi?.measurement?.minimum_samples || 3}"></div><div class="field"><label>窗口结束后有效天数</label><input id="nkFreshness" type="number" min="1" value="${kpi?.measurement?.freshness_days || 45}"></div></div>
+    <div class="field"><label>为何测</label><textarea id="nkPurpose">${esc(kpi?.measurement?.purpose || '')}</textarea></div><div class="field"><label>偏差由谁如何响应</label><textarea id="nkResponse">${esc(kpi?.measurement?.response_note || '')}</textarea></div>
     <div class="row2">
       <div class="field"><label>口径说明</label>
         <input id="nkDesc" value="${esc(value('description'))}" placeholder="数据怎么算、排除什么"></div>
@@ -1819,6 +1852,8 @@ function newKpiModal(kpi = null) {
      <button class="btn btn-p" data-act="monitor.submitKpi"
        data-kpi="${kpi ? kpi.id : ''}">${kpi ? '保存' : '创建'}</button>`);
 
+  const context={gen,processId:state.cockpit.processId,id:kpi?.id || null,busy:false};
+  kpiForm=context;
   Promise.all([
     GET('/process-map/flat'),
     GET('/execution/assignees'),
@@ -1826,6 +1861,7 @@ function newKpiModal(kpi = null) {
     GET('/integrations/inbound-hooks').catch(() => []),
   ])
     .then(([rows, users, flows, hooks]) => {
+      if(kpiForm!==context || !modalAlive(gen) || state.view!=='monitor' || state.cockpit.processId!==context.processId)return;
       const procSel = document.getElementById('nkProcess');
       if (procSel) {
         rows.filter((r) => r.level >= 2).forEach((r) => {
@@ -1883,6 +1919,8 @@ function newKpiModal(kpi = null) {
 }
 
 async function submitKpi(kpiId) {
+  const c=kpiForm;
+  if(!c || c.id!==kpiId || !modalAlive(c.gen) || state.view!=='monitor' || state.cockpit.processId!==c.processId || c.busy)return toast('指标上下文已变化，请重新打开',true);
   const val = (id) => {
     const el = document.getElementById(id);
     return el ? el.value : '';
@@ -1924,6 +1962,7 @@ async function submitKpi(kpiId) {
     data_flow_id: val('nkFlow') ? Number(val('nkFlow')) : null,
     inbound_webhook_id: val('nkHook') ? Number(val('nkHook')) : null,
     description: textOrNull('nkDesc'),
+    measurement: val('nkMeasureSource')==='UNKNOWN' ? null : {source_kind:val('nkMeasureSource'),event:'instance.completed',aggregation:'MEAN',timezone:'UTC',calendar:'ELAPSED',minimum_samples:Number(val('nkMinSamples')),freshness_days:Number(val('nkFreshness')),purpose:val('nkPurpose'),response_note:val('nkResponse')},
     quality_rule: textOrNull('nkQuality'),
     baseline_value: numOrNull('nkBase'),
     target_value: numOrNull('nkTarget'),
@@ -1939,6 +1978,7 @@ async function submitKpi(kpiId) {
   // 旧数据只有展示名、没有账号绑定：未选人时保留原文，避免保存后被清空
   if (!ownerId && editingKpi && editingKpi.owner) payload.owner = editingKpi.owner;
 
+  c.busy=true;
   try {
     if (kpiId) {
       await PATCH('/monitor/kpis/' + kpiId, payload);
@@ -1947,13 +1987,11 @@ async function submitKpi(kpiId) {
       await POST('/monitor/kpis', payload);
       toast('KPI 已创建');
     }
-    editingKpi = null;
-    closeModal();
-    state.monitor.tab = 'kpi';
-    RENDERERS.monitor();
+    if(kpiForm===c && modalAlive(c.gen)){editingKpi=null;closeModal();}
+    if(state.view==='monitor' && state.cockpit.processId===c.processId && kpiForm===c){state.monitor.tab='kpi';RENDERERS.monitor();}
   } catch (e) {
     toast(e.message, true);
-  }
+  } finally {c.busy=false;}
 }
 
 function addKpiRecordModal(kpiId, kpiName) {
