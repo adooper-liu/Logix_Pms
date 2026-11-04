@@ -630,7 +630,7 @@ const renderMonitor = () => {
   const needMining = tab === 'mining' || needAnalysis;
   const qs = state.monitor.status ? '?status=' + state.monitor.status : '';
   const cockpitPid = state.cockpit.processId;
-  const miningPromise = needMining && cockpitPid
+  const loadMining = () => needMining && cockpitPid
     ? Promise.all([
       GET('/execution/mining?process_id=' + cockpitPid).catch(() => null),
       needAnalysis
@@ -660,7 +660,7 @@ const renderMonitor = () => {
       needWorkload ? GET('/workforce/forecast?months=3').catch(() => null) : Promise.resolve(null),
       needWorkload && canManage()
         ? GET('/workforce/balance').catch(() => null) : Promise.resolve(null),
-      miningPromise,
+      loadMining(),
       (needAnalysis || needKpi) ? GET('/monitor/kpis').catch(() => []) : Promise.resolve([]),
       loadCockpitProcesses(),
       GET('/tools').catch(() => []),

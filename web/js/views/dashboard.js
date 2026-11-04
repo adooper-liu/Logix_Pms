@@ -85,7 +85,7 @@ const renderDashboard = () => {
       <div class="card page-head">
         <div class="between">
           <div><h2>运营驾驶舱<span class="module-badge">总览</span></h2>
-            <div class="desc">左边选下一条流程，中间接着推进，右边看今天越线的指标和异常</div></div>
+            <div class="desc">${urlParams().lifecycle ? '当前流程已保留；本页总览指标、项目推进和告警仍为全公司范围，流程选择只筛选改善优先级。进入指标/分析页核所选流程数据。' : '左边选下一条流程，中间接着推进，右边看今天越线的指标和异常'}</div></div>
           ${cockpitProcessSelect(payload.flowList)}
         </div>
         <div class="mt">${cockpitTabBar('overview')}</div>
@@ -121,6 +121,10 @@ function openExceptions() {
   state.monitor.tab = 'exceptions';
   const params = { tab: 'exceptions' };
   if (state.cockpit.processId) params.process = state.cockpit.processId;
+  if (urlParams().lifecycle) {
+    params.lifecycle = urlParams().lifecycle;
+    if (urlParams().project) params.project = urlParams().project;
+  }
   go('monitor', { params, push: true });
 }
 
@@ -128,6 +132,10 @@ function openKpi() {
   state.monitor.tab = 'kpi';
   const params = { tab: 'kpi' };
   if (state.cockpit.processId) params.process = state.cockpit.processId;
+  if (urlParams().lifecycle) {
+    params.lifecycle = urlParams().lifecycle;
+    if (urlParams().project) params.project = urlParams().project;
+  }
   go('monitor', { params, push: true });
 }
 

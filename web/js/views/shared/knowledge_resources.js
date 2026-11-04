@@ -4,7 +4,7 @@
  */
 import { esc, fmtDate, num } from '../../core/format.js';
 import { state } from '../../core/state.js';
-import { setUrlState } from '../../core/router.js';
+import { setUrlState, urlParams } from '../../core/router.js';
 import { canManage } from '../../core/auth.js';
 
 export const STATUS_TONE = {
@@ -40,6 +40,7 @@ export function syncToolboxUrl() {
     sort: tb.sort,
     open: tb.open || '',
     process: tb.attachProcess || '',
+    project: urlParams().project || '',
     status: tb.status || '',
     section: tb.section || 'none',
     nav: tb.navSection || 'none',

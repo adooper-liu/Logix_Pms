@@ -286,8 +286,9 @@ def test_process_analysis_keeps_six_records():
     assert "{ key: 'analysis', label: '流程分析'" in cockpit
     for label in ("现状拆解", "瓶颈识别", "根因分析", "价值流分析", "规则与上下文", "绩效基线"):
         assert label in monitor
+    assert "lifecycleHtml" in start
+    # 生命周期跳转由后端目录唯一维护，行为由test_lifecycle及浏览器专项验证。
     assert "tab=analysis" in cbok
-    assert "tab=analysis" in start
     assert "打开运营驾驶舱" not in cbok.split("id: 'analysis'")[1].split("id: 'design'")[0]
 
 

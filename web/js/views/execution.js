@@ -173,8 +173,8 @@ const renderExecution = () => {
   }
   return renderAsync('execution',
     () => Promise.all([
-      GET('/execution/tasks?only_open=true&limit=500'),
-      GET('/execution/instances?limit=200'),
+      GET('/execution/tasks?only_open=true&limit=500' + (params.lifecycle && params.process ? '&process_id=' + encodeURIComponent(params.process) : '')),
+      GET('/execution/instances?limit=200' + (params.lifecycle && params.process ? '&process_id=' + encodeURIComponent(params.process) : '')),
       GET('/execution/processes'),
     ]).then(async ([tasks, instances, processes]) => {
       let forms = [];
@@ -192,6 +192,7 @@ const renderExecution = () => {
       if (ex.tab === 'config' && processes.length) {
         // seed --reset 后 URL 里的旧 process id 会失效，回落到可执行列表首项
         const stillThere = processes.some((p) => p.id === ex.configProcess);
+        if (params.lifecycle && params.process && !stillThere) throw new Error('所选流程尚不支持运行配置，未切换其他流程');
         const pid = stillThere ? ex.configProcess : processes[0].id;
         ex.configProcess = pid;
         let design = null;

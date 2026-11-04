@@ -2,7 +2,8 @@
 
 import { esc } from '../../core/format.js';
 import { on } from '../../core/ui.js';
-import { go } from '../../core/router.js';
+import { go, urlParams } from '../../core/router.js';
+import { state } from '../../core/state.js';
 
 const TOOL_MOUNTS = {
   strategy: ['OGSM', 'SWOT', 'GOAL-TREE', 'DECISION-MATRIX'],
@@ -17,7 +18,13 @@ const TOOL_MOUNTS = {
 on('toolmount.open', ({ code, process }) => {
   if (!code) return;
   const params = { open: code, nav: 'tools' };
-  if (process) params.process = process;
+  const context = urlParams();
+  if (context.lifecycle) {
+    state.toolbox.step = '';
+    params.lifecycle = context.lifecycle;
+    if (context.process) params.process = context.process;
+    if (context.project) params.project = context.project;
+  } else if (process) params.process = process;
   go('toolbox', { params, push: true });
 });
 

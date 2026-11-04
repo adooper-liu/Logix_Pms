@@ -24,6 +24,7 @@ from app.api.v1 import (
     execution,
     integrations,
     knowledge,
+    lifecycle,
     maturity,
     monitor,
     notifications,
@@ -90,6 +91,7 @@ protected.include_router(replication.router)
 protected.include_router(authorization.router)
 protected.include_router(data_governance.router)
 protected.include_router(decisions.router)
+protected.include_router(lifecycle.router)
 protected.include_router(startup.router)
 protected.include_router(pilot.router)
 protected.include_router(knowledge.router)

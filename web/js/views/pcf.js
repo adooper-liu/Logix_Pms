@@ -2,14 +2,22 @@
 import { esc } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
-import { renderAsync, RENDERERS, go } from '../core/router.js';
+import { renderAsync, RENDERERS, go, urlParams } from '../core/router.js';
 import { GET } from '../core/api.js';
 
 on('pcf.framework', (_data, el) => setPcfFramework(el.value));
 on('pcf.search', (_data, el) => setPcfKeyword(el.value));
 on('pcf.select', ({ id }) => selectPcfNode(Number(id)));
 on('pcf.expand', ({ id }) => togglePcfBrowseNode(Number(id)));
-on('pcf.goMap', () => go('map'));
+on('pcf.goMap', async () => {
+  const params = urlParams();
+  if (params.lifecycle && params.process) {
+    try {
+      const process = await GET('/process-map/' + encodeURIComponent(params.process));
+      go('map', { params: { process: process.code }, push: true });
+    } catch (e) { viewEl().innerHTML = '<div class="errbar">' + esc(e.message) + '</div>'; }
+  } else go('map');
+});
 on('pcf.build', ({ external }) => {
   state.map.openGuidedPcf = true;
   state.map.guidedPcfExternal = external || '';
