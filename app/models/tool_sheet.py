@@ -46,6 +46,8 @@ class ToolSheet(Base):
         ),
         nullable=True,
     )
+    work_context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    review: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     handoff: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     title: Mapped[str] = mapped_column(String(160))

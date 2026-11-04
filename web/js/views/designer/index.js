@@ -25,6 +25,7 @@ import { createComments } from './comments.js';
 import { createSimulation } from './simulation.js';
 import { toolMountHtml } from '../shared/tool_mount.js';
 import { createCompensation } from './compensation.js';
+import { workbenchHtml } from '../shared/workbench.js';
 import { createDecisions } from './decisions.js';
 
 /** 深拷贝模型，用作「服务端已确认」的回滚基准。 */
@@ -133,7 +134,9 @@ export function renderDesigner() {
           GET('/governance/roles?active_only=true'),
           GET('/governance/meta'),
         ]);
+      const workbench = await GET('/processes/'+id+'/workbench');
       if (!current() || state.designer.processId !== id) return;
+      state.designer.workbench=workbench;
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
       state.designer.analysis = analysis;
@@ -407,6 +410,7 @@ function paintDesigner() {
         </div>
       </div>
     </div>
+    ${workbenchHtml(st.workbench,urlParams().lifecycle==='design'?'DESIGN':(urlParams().lifecycle==='modeling'?'MODELING':(st.workKind || 'MODELING')),'designer')}
     ${tab === 'analysis' ? analysisPane
       : tab === 'change' ? changePane
         : tab === 'raci' ? raciPane : modelPane}`;

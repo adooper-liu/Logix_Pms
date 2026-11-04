@@ -32,6 +32,7 @@ from app.schemas.process import (
     BpmnImportRequest,
     DesignAnalysis,
     DesignValidation,
+    FreezeModelRequest,
     ProcessEdgeOut,
     ProcessModelDiffOut,
     ProcessModelIn,
@@ -63,6 +64,7 @@ def _version_out(row: ProcessModelVersion) -> ProcessModelVersionOut:
         version=row.version,
         status=row.status,
         status_label=model_service.STATUS_LABELS.get(row.status, row.status),
+        frozen_at=row.frozen_at,
         change_note=row.change_note,
         change_request_id=row.change_request_id,
         created_by_name=row.created_by_name,
@@ -417,6 +419,40 @@ def _require_version(db: DbSession, process_id: int, version_id: int) -> Process
     if row is None or row.process_id != process_id:
         raise HTTPException(status_code=404, detail="模型版本不存在")
     return row
+
+
+@router.post(
+    "/processes/{process_id}/design/freeze",
+    response_model=ProcessModelVersionOut,
+    summary="固定原模型作业引用（不发布）",
+)
+def freeze_model(process_id: int, payload: FreezeModelRequest, db: DbSession, user: WriteUser):
+    process = _require_process(db, process_id)
+    ensure_can_edit_owned(user, process.owner_user_id, process.owner)
+    model_service.lock_process(db, process)
+    if process.model_version != payload.expected_version:
+        raise HTTPException(409, "模型已变化，请刷新后固定")
+    row = model_service.latest_version(db, process_id)
+    if row is None:
+        row = model_service.ensure_baseline(db, process)
+    if row is None:
+        raise HTTPException(400, "请先保存原流程模型")
+    from app.core.timeutil import utcnow
+
+    if not payload.note.strip():
+        raise HTTPException(400, "请写明固定用途")
+    if row.frozen_at is None:
+        row.frozen_at = utcnow()
+        audit_service.record(
+            db,
+            user,
+            "UPDATE",
+            "process_design",
+            process_id,
+            f"固定原模型v{row.version}：{payload.note.strip()}",
+        )
+        db.commit()
+    return _version_out(row)
 
 
 @router.get(
