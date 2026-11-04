@@ -111,6 +111,7 @@ def _library_form(db: Session, tool: Tool) -> Optional[SheetFormOut]:
         template_code=template.code,
         template_name=template.name,
         template_version=version.version_label if version is not None else None,
+        template_version_id=version.id if version is not None else None,
         source_note=f"来自工具模板库 {template.name}",
     )
 
@@ -291,10 +292,25 @@ def save_sheet(
     step_no: Optional[str],
     values: Dict[str, str],
     make_objectives: bool,
+    handoff=None,
+    template_version_id=None,
 ) -> ToolSheetOut:
     process = _require_process(db, process_id)
+    from app.services import handoff as handoff_service
+    from app.services import org_access
+
     project_id = _require_project(db, project_id)
+    if project_id is not None:
+        project = db.get(Project, project_id)
+        org_access.ensure_visible(db, user, project.org_unit_id)
+        if project.process_id != process_id:
+            raise ToolSheetError("项目与所选流程不一致")
+    handoff_data = handoff_service.prepare(db, user, tool, process, handoff)
     spec = form_for(db, tool)
+    if template_version_id is not None and template_version_id != spec.template_version_id:
+        from fastapi import HTTPException
+
+        raise HTTPException(409, "模板版本已变化，请重新打开填写，原输入尚未保存")
     if not spec.fields:
         raise ToolSheetError(spec.source_note or "工具模板库还没有这份可填写的模板")
     for field in spec.fields:
@@ -313,6 +329,8 @@ def save_sheet(
     ]
     row = ToolSheet(
         tool_code=tool.code,
+        template_version_id=spec.template_version_id,
+        handoff=handoff_data,
         process_id=process.id,
         project_id=project_id,
         objective_id=objective_id,
@@ -328,6 +346,8 @@ def save_sheet(
 
 
 def _out(db: Session, row: ToolSheet, tool_name: str, codes: List[str]) -> ToolSheetOut:
+    from app.services.handoff import label
+
     process = db.get(ProcessArch, row.process_id)
     fields = row.fields if isinstance(row.fields, list) else []
     return ToolSheetOut(
@@ -345,6 +365,10 @@ def _out(db: Session, row: ToolSheet, tool_name: str, codes: List[str]) -> ToolS
         fields=[SheetFieldOut(**item) for item in fields if isinstance(item, dict)],
         created_by=row.created_by,
         created_at=row.created_at,
+        template_version_id=row.template_version_id,
+        handoff=row.handoff,
+        revision=row.revision,
+        confirmation_label=label(row.handoff),
     )
 
 

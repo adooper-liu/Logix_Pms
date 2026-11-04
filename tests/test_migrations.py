@@ -132,6 +132,57 @@ def test_downgrade_to_base_removes_everything(tmp_path):
     assert _schema_diff(url) == []
 
 
+def test_m3_upgrade_preserves_legacy_charter_and_sheet(tmp_path):
+    url = _sqlite_url(tmp_path)
+    cfg = _config(url)
+    command.upgrade(cfg, "s4d5e6f7a8b9")
+    engine = create_engine(url)
+    try:
+        # 原行保持原内容，不能由迁移补客户/授权/交接确认。
+        charter = Table("process_charter", MetaData(), autoload_with=engine)
+        sheet = Table("tool_sheet", MetaData(), autoload_with=engine)
+        with engine.begin() as conn:
+            conn.execute(
+                charter.insert().values(
+                    process_id=123,
+                    purpose="原目的",
+                    starts_at="起",
+                    ends_at="止",
+                    in_scope="含",
+                    out_of_scope="不含",
+                    stop_condition="停",
+                    sponsor_user_id=456,
+                    created_at=datetime(2026, 11, 4),
+                    updated_at=datetime(2026, 11, 4),
+                )
+            )
+            conn.execute(
+                sheet.insert().values(
+                    tool_code="SIPOC",
+                    process_id=123,
+                    title="原方法",
+                    fields=[{"key": "input", "label": "输入", "value": "原输入"}],
+                    created_at=datetime(2026, 11, 4),
+                    updated_at=datetime(2026, 11, 4),
+                )
+            )
+        command.upgrade(cfg, "head")
+        charter = Table("process_charter", MetaData(), autoload_with=engine)
+        sheet = Table("tool_sheet", MetaData(), autoload_with=engine)
+        with engine.connect() as conn:
+            old = conn.execute(select(charter)).mappings().one()
+            assert old["purpose"] == "原目的" and old["details"] is None and old["revision"] == 0
+            old_sheet = conn.execute(select(sheet)).mappings().one()
+            assert old_sheet["fields"][0]["value"] == "原输入"
+            assert (
+                old_sheet["handoff"] is None
+                and old_sheet["template_version_id"] is None
+                and old_sheet["revision"] == 0
+            )
+    finally:
+        engine.dispose()
+
+
 def test_current_revision_helper(tmp_path):
     from app.core.migrations import current_revision
 

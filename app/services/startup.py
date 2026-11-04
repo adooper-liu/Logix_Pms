@@ -779,7 +779,9 @@ def charter_options(db: Session) -> dict:
     processes = db.scalars(
         select(ProcessArch).where(ProcessArch.level == 3).order_by(ProcessArch.code)
     ).all()
-    users = db.scalars(select(User).order_by(User.display_name)).all()
+    users = db.scalars(
+        select(User).where(User.is_active.is_(True)).order_by(User.display_name)
+    ).all()
     charters = db.scalars(select(ProcessCharter).order_by(ProcessCharter.id)).all()
     return {
         "processes": [
@@ -810,45 +812,9 @@ def charter_options(db: Session) -> dict:
 
 def save_charter(db: Session, user: User, payload) -> StartupStatusOut:
     """写入或更新一条 L3 的范围说明。负责人必须已经在流程地图上。"""
-    process = db.get(ProcessArch, payload.process_id)
-    if process is None or process.level != 3:
-        raise CharterError("范围说明只能挂在 L3 上")
-    if process.owner_user_id is None:
-        raise CharterError("先给这条 L3 指定负责人，再写范围说明")
-    sponsor = db.get(User, payload.sponsor_user_id)
-    if sponsor is None:
-        raise CharterError("发起人不存在")
-    row = db.scalar(select(ProcessCharter).where(ProcessCharter.process_id == process.id))
-    if row is None:
-        row = ProcessCharter(process_id=process.id)
-        db.add(row)
-    fields = {
-        "purpose": payload.purpose,
-        "starts_at": payload.starts_at,
-        "ends_at": payload.ends_at,
-        "in_scope": payload.in_scope,
-        "out_of_scope": payload.out_of_scope,
-        "stop_condition": payload.stop_condition,
-    }
-    if not all(_filled(value) for value in fields.values()):
-        raise CharterError("范围说明的每一项都要写上")
-    row.purpose = fields["purpose"].strip()
-    row.starts_at = fields["starts_at"].strip()
-    row.ends_at = fields["ends_at"].strip()
-    row.in_scope = fields["in_scope"].strip()
-    row.out_of_scope = fields["out_of_scope"].strip()
-    row.stop_condition = fields["stop_condition"].strip()
-    row.sponsor_user_id = sponsor.id
-    row.updated_at = utcnow()
-    audit_service.record(
-        db,
-        user,
-        "UPDATE",
-        "process_charter",
-        process.id,
-        f"写入范围说明 {process.code}",
-    )
-    db.commit()
+    from app.services import charter as charter_service
+
+    charter_service.save(db, user, payload, legacy=True)
     return status(db)
 
 

@@ -165,7 +165,6 @@ def list_processes(
     process_type: Optional[str] = None,
 ):
     _check_type_filter(process_type)
-    classifications = _classifications(db)
     stmt = select(ProcessArch).options(selectinload(ProcessArch.org_unit))
     if level is not None:
         stmt = stmt.where(ProcessArch.level == level)
@@ -183,6 +182,10 @@ def list_processes(
             )
         )
     rows = db.scalars(stmt.order_by(ProcessArch.code)).all()
+    # 先固定输出行，再解析分类；并发新建不会出现行已存在而分类快照没有的KeyError。
+    classifications = classification_service.resolve_all(
+        list(db.scalars(select(ProcessArch)).all())
+    )
     return [
         _to_out(r, classifications[r.id])
         for r in rows

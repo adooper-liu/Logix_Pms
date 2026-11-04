@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -110,6 +111,34 @@ class CharterOut(BaseModel):
     out_of_scope: str
     stop_condition: str
     sponsor_user_id: int
+
+
+class CharterDetails(BaseModel):
+    customer: Optional[str] = Field(default=None, max_length=500)
+    customer_result: Optional[str] = Field(default=None, max_length=1000)
+    objective_id: Optional[int] = Field(default=None, ge=1)
+    mandate_version_id: Optional[int] = Field(default=None, ge=1)
+    resource_version_id: Optional[int] = Field(default=None, ge=1)
+    resource_commitment: Optional[str] = Field(default=None, max_length=2000)
+    review_due: Optional[date] = None
+    verification_evidence: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CharterUpdate(CharterIn):
+    expected_revision: int = Field(ge=0)
+    details: CharterDetails = Field(default_factory=CharterDetails)
+
+
+class CharterContextOut(BaseModel):
+    process_id: int
+    process_code: str
+    owner_user_id: Optional[int] = None
+    owner: Optional[str] = None
+    charter: Optional[CharterOut] = None
+    details: CharterDetails = Field(default_factory=CharterDetails)
+    revision: int = 0
+    verification_label: str = "未记录核验依据"
+    reference_label: str = "原引用未核定"
 
 
 class CharterProcessOption(BaseModel):

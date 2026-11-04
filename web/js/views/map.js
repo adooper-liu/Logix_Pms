@@ -12,6 +12,7 @@ import { actions } from '../core/actions.js';
 
 /* ============================================================ 2. 企业流程地图 */
 
+on('map.context', ({id}) => { closeModal(); go('process_card',{params:{process:id,module:'context'},push:true}); });
 on('map.classify', ({ id }) => openClassification(Number(id)));
 on('map.saveClassification', ({ id }) => saveClassification(Number(id)));
 on('map.typeFilter', (_data, el) => {
@@ -576,6 +577,7 @@ function mapClick(code, hasKids) {
        ${canManage() ? `<button class="btn btn-g" data-act="map.editProcess" data-id="${node.id}">编辑</button>` : ''}
        ${canWrite() ? `<button class="btn btn-g" data-act="map.startProject" data-id="${node.id}"
          data-name="${esc(node.name)}">以此流程立项</button>` : ''}
+       ${node.level >= 3 ? `<button class="btn btn-g" data-act="map.context" data-id="${node.id}">边界与交接</button>` : ''}
        <button class="btn btn-p" data-act="map.openDesigner" data-process="${node.id}">去设计器分析</button>`,
       'sheet');
     loadProcessBenchmarkMaps(node.id);

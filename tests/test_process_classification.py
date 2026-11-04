@@ -41,6 +41,33 @@ def classify(client, ident, kind=None, basis="", inherit=True, revision=0):
     )
 
 
+def test_flat_new_process_between_classification_and_list(client, monkeypatch):
+    from app.api.v1 import process_map
+    from app.core.database import SessionLocal
+    from app.models.process import ProcessArch
+
+    original = process_map.classification_service.resolve_all
+    created = []
+
+    def insert_after_snapshot(rows):
+        snapshot = original(rows)
+        if not created:
+            with SessionLocal() as writer:
+                row = ProcessArch(code="CLS-RACE-" + uuid4().hex[:8], name="查询期间新建", level=3)
+                writer.add(row)
+                writer.commit()
+                created.append(row.id)
+        return snapshot
+
+    monkeypatch.setattr(process_map.classification_service, "resolve_all", insert_after_snapshot)
+    try:
+        response = client.get(API + "/flat")
+        assert response.status_code == 200, response.text
+    finally:
+        for ident in created:
+            client.delete(f"{API}/{ident}")
+
+
 def test_classification_meta_and_unknown_history(client, classification_tree):
     meta = client.get(f"{API}/classification-meta")
     assert meta.status_code == 200

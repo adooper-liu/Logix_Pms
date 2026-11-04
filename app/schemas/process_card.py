@@ -7,6 +7,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.schemas.process import ProcessClassificationOut
+from app.schemas.tool_sheet import ToolSheetOut
 
 
 class CardProcessOut(ProcessClassificationOut):
@@ -138,3 +139,4 @@ class ProcessCardOut(BaseModel):
     improvements: List[CardImprovementOut] = []
     findings: List[CardFindingOut] = []
     readiness: dict = {}
+    handoffs: List[ToolSheetOut] = []

@@ -26,6 +26,7 @@ on('strategy.initiate', ({ id }) => initiateProject(Number(id)));
 on('strategy.submitInitiate', ({ id }) => submitInitiate(Number(id)));
 on('strategy.unlink', ({ id, link }) => unlinkObjective(Number(id), Number(link)));
 on('strategy.archive', ({ id }) => archiveObjective(Number(id)));
+on('strategy.context', ({id}) => go('process_card',{params:{process:id,module:'context'},push:true}));
 on('strategy.openProcess', ({ code, id, level }) => {
   // L3/L4 落到单流程 360 视图；L1/L2 仍回地图看架构上下文。
   if (Number(level) >= 3 && Number(id)) {
@@ -270,6 +271,7 @@ function consumerHtml(obj, processes) {
           ? `<button class="btn-sm" data-act="strategy.openProcess"
               data-code="${esc(link.process_code)}" data-id="${link.process_id}"
               data-level="${link.process_level || ''}">核对流程</button>` : ''}
+        ${Number(link.process_level) === 3 ? `<button class="btn-sm" data-act="strategy.context" data-id="${link.process_id}">边界与交接</button>` : ''}
         ${canManage()
           ? `<button class="btn-sm" data-act="strategy.unlink"
               data-id="${obj.id}" data-link="${link.id}">移除</button>` : ''}

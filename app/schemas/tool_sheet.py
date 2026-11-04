@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,7 @@ class SheetFormOut(BaseModel):
     template_code: Optional[str] = None
     template_name: Optional[str] = None
     template_version: Optional[str] = None
+    template_version_id: Optional[int] = None
     source_note: str = ""
 
 
@@ -36,12 +37,31 @@ class SheetFieldOut(BaseModel):
     value: str
 
 
+class HandoffIn(BaseModel):
+    receiver_process_id: int = Field(ge=1)
+    provider_user_id: int = Field(ge=1)
+    receiver_user_id: int = Field(ge=1)
+    quality: str = Field(min_length=1, max_length=2000)
+    timing: str = Field(min_length=1, max_length=1000)
+    exception_path: str = Field(min_length=1, max_length=2000)
+    standard_version_id: Optional[int] = Field(default=None, ge=1)
+
+
+class HandoffConfirm(BaseModel):
+    side: Literal["provider", "receiver"]
+    decision: Literal["ACCEPT", "REJECT"]
+    evidence: str = Field(min_length=1, max_length=2000)
+    expected_revision: int = Field(ge=0)
+
+
 class ToolSheetCreate(BaseModel):
     process_id: int
     project_id: Optional[int] = None
     step_no: Optional[str] = Field(default=None, max_length=8)
     values: Dict[str, str] = Field(default_factory=dict)
     make_objectives: bool = False
+    template_version_id: Optional[int] = Field(default=None, ge=1)
+    handoff: Optional[HandoffIn] = None
 
 
 class ToolSheetOut(BaseModel):
@@ -59,3 +79,7 @@ class ToolSheetOut(BaseModel):
     fields: List[SheetFieldOut] = []
     created_by: Optional[str] = None
     created_at: Optional[UtcDateTime] = None
+    template_version_id: Optional[int] = None
+    handoff: Optional[dict] = None
+    revision: int = 0
+    confirmation_label: str = "未记录横向交接"
