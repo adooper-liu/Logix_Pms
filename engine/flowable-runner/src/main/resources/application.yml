@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: ${FLOWABLE_POC_JDBC_URL:jdbc:postgresql://poc-db:5432/flowable_poc}
+    username: flowable_poc
+    password: ${FLOWABLE_POC_DB_PASSWORD}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+flowable:
+  database-schema-update: true
+  history-level: full
+  check-process-definitions: false
+  process:
+    async-executor-activate: true
+  cmmn:
+    enabled: false
+  dmn:
+    enabled: false
+server:
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+poc:
+  token: ${FLOWABLE_POC_TOKEN:}
+  build-revision: ${BUILD_REVISION:unknown}
+logging:
+  level:
+    org.flowable: WARN

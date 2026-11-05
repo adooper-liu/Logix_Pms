@@ -8,6 +8,12 @@
 
 ---
 
+## 隔离 Flowable POC
+
+独立引擎实验的构建、合成样例、PostgreSQL测试和重启验收见
+[engine/flowable-runner/README.md](engine/flowable-runner/README.md)。
+它不连接 PMS 数据库、不接管 Legacy 实例，不代表现有执行页已支持并行、会签或消息/定时器。
+
 ## 三层体系 × 五阶段标准工作流
 
 ```text

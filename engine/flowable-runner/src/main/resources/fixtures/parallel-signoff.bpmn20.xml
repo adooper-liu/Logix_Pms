@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" targetNamespace="urn:logix:poc">
+  <process id="poc_parallel_signoff" name="Synthetic parallel and all-reviewers POC" isExecutable="true">
+    <startEvent id="start"/>
+    <sequenceFlow id="s1" sourceRef="start" targetRef="split"/>
+    <parallelGateway id="split"/>
+    <sequenceFlow id="s2" sourceRef="split" targetRef="quality"/>
+    <sequenceFlow id="s3" sourceRef="split" targetRef="plan"/>
+    <userTask id="quality" name="Synthetic quality confirmation" flowable:candidateUsers="poc-quality"/>
+    <userTask id="plan" name="Synthetic planning confirmation" flowable:candidateUsers="poc-plan"/>
+    <sequenceFlow id="s4" sourceRef="quality" targetRef="join"/>
+    <sequenceFlow id="s5" sourceRef="plan" targetRef="join"/>
+    <parallelGateway id="join"/>
+    <sequenceFlow id="s6" sourceRef="join" targetRef="review"/>
+    <userTask id="review" name="Synthetic all-reviewers signoff" flowable:assignee="${reviewer}">
+      <multiInstanceLoopCharacteristics isSequential="false" flowable:collection="reviewers" flowable:elementVariable="reviewer"/>
+    </userTask>
+    <sequenceFlow id="s7" sourceRef="review" targetRef="end"/>
+    <endEvent id="end"/>
+  </process>
+</definitions>

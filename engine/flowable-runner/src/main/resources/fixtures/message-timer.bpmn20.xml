@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:flowable="http://flowable.org/bpmn" targetNamespace="urn:logix:poc">
+  <message id="responseMessage" name="PocResponse"/>
+  <process id="poc_message_timer" name="Synthetic message or timeout POC" isExecutable="true">
+    <startEvent id="start"/>
+    <sequenceFlow id="s1" sourceRef="start" targetRef="race"/>
+    <eventBasedGateway id="race"/>
+    <sequenceFlow id="s2" sourceRef="race" targetRef="response"/>
+    <sequenceFlow id="s3" sourceRef="race" targetRef="timeout"/>
+    <intermediateCatchEvent id="response"><messageEventDefinition messageRef="responseMessage"/></intermediateCatchEvent>
+    <intermediateCatchEvent id="timeout"><timerEventDefinition><timeDuration xsi:type="tFormalExpression">${waitDuration}</timeDuration></timerEventDefinition></intermediateCatchEvent>
+    <sequenceFlow id="s4" sourceRef="response" targetRef="messageEnd"/>
+    <sequenceFlow id="s5" sourceRef="timeout" targetRef="timeoutEnd"/>
+    <endEvent id="messageEnd"><extensionElements><flowable:executionListener event="start" expression="${execution.setVariable('outcome', 'MESSAGE')}"/></extensionElements></endEvent>
+    <endEvent id="timeoutEnd"><extensionElements><flowable:executionListener event="start" expression="${execution.setVariable('outcome', 'TIMEOUT')}"/></extensionElements></endEvent>
+  </process>
+</definitions>

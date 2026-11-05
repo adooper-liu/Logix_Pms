@@ -28,3 +28,6 @@ _screenshots/
 # IDE
 .idea/
 .vscode/
+
+# Isolated Java POC build output
+engine/flowable-runner/target/
