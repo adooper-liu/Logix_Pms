@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" targetNamespace="urn:logix:poc">
+  <process id="poc_serial" name="Synthetic serial POC" isExecutable="true">
+    <startEvent id="start"/>
+    <sequenceFlow id="s1" sourceRef="start" targetRef="apply"/>
+    <userTask id="apply" name="Synthetic application" flowable:candidateUsers="poc-applicant"/>
+    <sequenceFlow id="s2" sourceRef="apply" targetRef="end"/>
+    <endEvent id="end"/>
+  </process>
+</definitions>

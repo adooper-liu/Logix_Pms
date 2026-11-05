@@ -1,0 +1,37 @@
+name: logix-flowable-poc
+services:
+  poc-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: flowable_poc
+      POSTGRES_USER: flowable_poc
+      POSTGRES_PASSWORD: ${FLOWABLE_POC_DB_PASSWORD:?Set dedicated POC database password}
+      TZ: UTC
+    volumes:
+      - flowable_poc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowable_poc -d flowable_poc"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  runner:
+    build:
+      context: .
+      args:
+        BUILD_REVISION: ${BUILD_REVISION:?Set source baseline SHA}
+    environment:
+      FLOWABLE_POC_DB_PASSWORD: ${FLOWABLE_POC_DB_PASSWORD:?Set dedicated POC database password}
+      FLOWABLE_POC_TOKEN: ${FLOWABLE_POC_TOKEN:?Set dedicated POC token}
+    ports:
+      - "127.0.0.1:${FLOWABLE_POC_PORT:-8135}:8080"
+    depends_on:
+      poc-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent -H \"Authorization: Bearer $$FLOWABLE_POC_TOKEN\" http://127.0.0.1:8080/poc/v1/health > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+volumes:
+  flowable_poc_pgdata:
