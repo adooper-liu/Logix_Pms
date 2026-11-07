@@ -63,6 +63,7 @@ export function createTransfer(ctx) {
           },
           body: JSON.stringify({
             xml,
+            execution_provider: state.designer.model.execution_provider || 'LEGACY',
             expected_version: state.designer.model ? state.designer.model.version : null,
           }),
         });

@@ -12,6 +12,8 @@ from app.schemas.compensation import CompensationRecordOut
 
 
 class ExecutableProcessOut(BaseModel):
+    provider: str = "LEGACY"
+    provider_label: str = "原轻量执行"
     id: int
     code: str
     name: str
@@ -103,6 +105,10 @@ class NextOption(BaseModel):
 
 
 class TaskOut(BaseModel):
+    provider: str = "LEGACY"
+    provider_label: str = "原轻量执行"
+    engine_task_id: Optional[str] = None
+    execution_id: Optional[str] = None
     id: int
     instance_id: int
     instance_code: str
@@ -154,6 +160,13 @@ class TaskEventOut(BaseModel):
 
 
 class InstanceOut(BaseModel):
+    provider: str = "LEGACY"
+    provider_label: str = "原轻量执行"
+    engine_instance_id: Optional[str] = None
+    deployment_id: Optional[int] = None
+    sync_status: str = "CURRENT"
+    sync_status_label: str = "已核对"
+    synced_at: Optional[UtcDateTime] = None
     id: int
     code: str
     process_id: Optional[int] = None
@@ -185,6 +198,7 @@ class InstanceSuspendRequest(BaseModel):
 
 
 class InstanceDetail(BaseModel):
+    active_tasks: List[TaskOut] = []
     instance: InstanceOut
     tasks: List[TaskOut] = []
     compensations: List[CompensationRecordOut] = []

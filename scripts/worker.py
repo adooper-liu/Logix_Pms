@@ -32,6 +32,26 @@ logger = logging.getLogger("logix.worker")
 
 
 def run_once() -> dict:
+    from app.core.config import settings
+
+    if settings.flowable_sandbox_enabled:
+        from app.models.engine import EngineCommand
+        from app.services import engine_execution, engine_projection
+
+        with SessionLocal() as db:
+            rows = db.scalars(
+                select(EngineCommand)
+                .where(
+                    (EngineCommand.status.in_(("PREPARED", "UNKNOWN")))
+                    | ((EngineCommand.status == "SUCCEEDED") & EngineCommand.error.is_not(None))
+                )
+                .limit(20)
+            ).all()
+            for command in rows:
+                user = db.get(User, command.user_id)
+                if user and user.is_active and user.role != "VIEWER":
+                    engine_execution.recover(db, user, command.id)
+            engine_projection.consume(db)
     with SessionLocal() as db:
         actor = db.scalar(
             select(User).where(

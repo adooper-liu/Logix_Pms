@@ -12,6 +12,7 @@ const UNSUPPORTED_REPLACE_FRAGMENTS = [
 ];
 
 function isUnsupportedReplaceEntry(key) {
+  if (state.designer.model?.execution_provider === 'FLOWABLE' && key.includes('parallel-gateway')) return false;
   return key.startsWith('replace-with-')
     && UNSUPPORTED_REPLACE_FRAGMENTS.some((fragment) => key.includes(fragment));
 }
@@ -61,6 +62,13 @@ PmsPaletteProvider.prototype.getPaletteEntries = function () {
         click: startCreate('bpmn:ManualTask'),
       },
     };
+    if (state.designer.model?.execution_provider === 'FLOWABLE') {
+      for (const key of ['create.task', 'create.exclusive-gateway', 'create.pms-wait-event', 'create.pms-handoff']) delete entries[key];
+      entries['create.pms-parallel'] = {
+        group: 'gateway', className: 'bpmn-icon-gateway-parallel', title: '创建并行分支或汇聚',
+        action: { dragstart: startCreate('bpmn:ParallelGateway'), click: startCreate('bpmn:ParallelGateway') },
+      };
+    }
     // 评审/只读时保留调色板可见，但禁止创建元素；导航工具仍可用
     if (!state.designer.editable) {
       Object.keys(entries).forEach((key) => {

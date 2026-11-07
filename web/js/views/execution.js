@@ -6,6 +6,7 @@ import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/rout
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
 import { executionReadinessHtml } from './shared/execution_readiness.js';
+import { executionWrite, engineConfigurationHtml } from './shared/engine_execution.js';
 
 /* ============================================================ 9. 流程执行 */
 
@@ -182,6 +183,7 @@ const renderExecution = () => {
       let rules = [];
       let config = null;
       let readiness = null;
+      let engine = null;
       let assignments = [];
       let modelEdges = [];
       let orgs = [];
@@ -210,6 +212,7 @@ const renderExecution = () => {
           GET('/execution/readiness?process_id=' + pid),
         ]);
         modelEdges = (design && design.edges) || [];
+        engine = await GET('/execution/engine/status?process_id=' + pid);
       }
       if (ex.tab === 'integrations') {
         [endpoints, deliveries, inboundHooks, inboundActions, assignees] = await Promise.all([
@@ -221,7 +224,7 @@ const renderExecution = () => {
         ]);
       }
       return {
-        tasks, instances, processes, forms, rules, config, assignments, modelEdges, readiness,
+        tasks, instances, processes, forms, rules, config, assignments, modelEdges, readiness, engine,
         orgs, roleMeta, assignees, endpoints, deliveries, inboundHooks, inboundActions,
       };
     }),
@@ -566,6 +569,7 @@ const renderExecution = () => {
     }
 
     midBody += executionReadinessHtml(d.readiness);
+    midBody += engineConfigurationHtml(d.engine, ex.configProcess);
 
     const rightPanel = `
       <div class="cfg-side-card">
@@ -1664,6 +1668,13 @@ async function loadStartNodes(processId) {
   const startBtn = document.querySelector('#mFoot [data-act="execution.submitStart"]');
   if (startBtn) startBtn.disabled = !(selected && selected.can_start);
   if (!box || !processId) return;
+  const variables = document.getElementById('exVars');
+  if (selected?.provider === 'FLOWABLE') {
+    if (variables) { variables.value = '{}'; variables.readOnly = true; }
+    box.innerHTML = '<div class="note">仅沙箱合成数据，不代表生产上线。使用部署时固定的分派与表单；由引擎决定后续路径。</div>';
+    return;
+  }
+  if (variables) variables.readOnly = false;
   if (selected && !selected.can_start) {
     box.innerHTML = '<div class="note">须先在设计器「发布到运行时」，才能配置启动指派并启动实例。</div>';
     return;
@@ -1727,7 +1738,7 @@ async function submitStartInstance() {
   };
   if (Object.keys(assignments).length) payload.assignments = assignments;
   try {
-    const instance = await POST('/execution/instances', payload);
+    const instance = await executionWrite('/execution/instances', payload);
     closeModal();
     toast('流程已启动：' + instance.code);
     state.execution.tab = 'tasks';
@@ -1776,7 +1787,7 @@ async function openTask(taskId, forceManual) {
       && task.instance_status !== 'SUSPENDED'
       && (task.status === 'PENDING' || task.status === 'CLAIMED')
     ) {
-      task = await POST('/execution/tasks/' + taskId + '/claim', {});
+      task = await executionWrite('/execution/tasks/' + taskId + '/claim', {});
     }
     [events, worklogs] = await Promise.all([
       GET('/execution/tasks/' + taskId + '/events'),
@@ -1938,7 +1949,7 @@ async function completeTask(taskId) {
     return toast('实际工时必须是非负数', true);
   }
   try {
-    await POST('/execution/tasks/' + taskId + '/complete', {
+    await executionWrite('/execution/tasks/' + taskId + '/complete', {
       form_data: formData,
       next_node_key: autoMode ? null : (nextEl ? nextEl.value : null),
       comment: commentEl ? commentEl.value.trim() || null : null,
@@ -1996,7 +2007,7 @@ async function submitWorklog(taskId) {
     return toast('请填写大于 0 的工时', true);
   }
   try {
-    await POST('/execution/tasks/' + taskId + '/worklogs', {
+    await executionWrite('/execution/tasks/' + taskId + '/worklogs', {
       work_type: document.getElementById('wlType').value || 'HANDLE',
       effort_minutes: minutes,
       note: document.getElementById('wlNote').value.trim() || null,
@@ -2055,6 +2066,9 @@ async function openInstance(instanceId) {
     </tr>`).join('') || emptyRow(5, '没有补偿待办');
 
   openModal(i.code + ' · ' + i.process_name, `
+    <div class="note">${esc(i.provider_label || '')} · ${esc(i.sync_status_label || '')}
+      ${i.provider === 'FLOWABLE' ? `<p>由引擎决定后续路径。${(detail.active_tasks || []).length}项活跃任务。</p>
+      <button class="btn btn-g" data-act="engine.reconcile" data-id="${i.id}">核对引擎状态</button>` : ''}</div>
     ${i.suspended_at
       ? `<div class="note mb">已挂起：${dtShort(i.suspended_at)}${
         i.suspend_reason ? ' · ' + esc(i.suspend_reason) : ''}</div>` : ''}
@@ -2158,7 +2172,7 @@ async function suspendInstance(instanceId) {  const reason = await promptDialog(
   });
   if (reason === null) return;
   try {
-    await POST('/execution/instances/' + instanceId + '/suspend', {
+    await executionWrite('/execution/instances/' + instanceId + '/suspend', {
       reason: reason.trim() || null,
     });
     closeModal();
@@ -2171,7 +2185,7 @@ async function suspendInstance(instanceId) {  const reason = await promptDialog(
 
 async function resumeInstance(instanceId) {
   try {
-    await POST('/execution/instances/' + instanceId + '/resume', {});
+    await executionWrite('/execution/instances/' + instanceId + '/resume', {});
     closeModal();
     toast('流程实例已恢复');
     RENDERERS.execution();
@@ -2185,7 +2199,7 @@ async function cancelInstance(instanceId) {
     { danger: true, okText: '取消实例' });
   if (!ok) return;
   try {
-    await POST('/execution/instances/' + instanceId + '/cancel', {});
+    await executionWrite('/execution/instances/' + instanceId + '/cancel', {});
     closeModal();
     toast('流程实例已取消');
     RENDERERS.execution();

@@ -25,6 +25,10 @@ server:
   error:
     include-message: never
     include-stacktrace: never
+sandbox:
+  enabled: ${FLOWABLE_SANDBOX_ENABLED:false}
+  token: ${FLOWABLE_SANDBOX_TOKEN:}
+  namespace: ${FLOWABLE_SANDBOX_NAMESPACE:logix-r3-sandbox}
 poc:
   token: ${FLOWABLE_POC_TOKEN:}
   build-revision: ${BUILD_REVISION:unknown}

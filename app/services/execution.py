@@ -491,6 +491,11 @@ def start_instance(
 ) -> ProcessInstance:
     from app.services import execution_readiness, process_model
 
+    if (
+        execution_readiness.published(db, process)
+        and execution_readiness.published(db, process).execution_provider == "FLOWABLE"
+    ):
+        raise HTTPException(409, "Flowable模型必须经受控持久命令启动")
     process_model.lock_process(db, process)
     version = execution_readiness.published(db, process)
     round_row = validate_start_context(db, process, user, payload)
@@ -524,6 +529,11 @@ def start_instance(
 
 
 def _ensure_task_action(db: Session, task: ProcessTask, user: User) -> None:
+    if task.provider == "FLOWABLE":
+        from app.services.engine_execution import allowed_task
+
+        allowed_task(db, task, user)
+        return
     if task.status not in OPEN_STATUSES:
         raise HTTPException(status_code=409, detail="任务已结束，不能再操作")
     if task.instance.status == InstanceStatus.SUSPENDED.value:
@@ -570,6 +580,8 @@ def _ensure_task_action(db: Session, task: ProcessTask, user: User) -> None:
 
 
 def claim_task(db: Session, task: ProcessTask, user: User) -> ProcessTask:
+    if task.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎任务必须经持久命令办理")
     lock_instance(db, task.instance_id)
     db.refresh(task)
     _ensure_task_action(db, task, user)
@@ -736,6 +748,8 @@ def complete_task(
     user: User,
     payload: TaskCompleteRequest,
 ) -> ProcessTask:
+    if task.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎任务必须经持久命令办理")
     lock_instance(db, task.instance_id)
     db.refresh(task)
     _ensure_task_action(db, task, user)
@@ -857,6 +871,8 @@ def assign_task(
     assignee_user_id: Optional[int],
     actor: Optional[User] = None,
 ) -> ProcessTask:
+    if task.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎任务必须经持久命令改派")
     lock_instance(db, task.instance_id)
     db.refresh(task)
     if task.status not in OPEN_STATUSES:
@@ -894,6 +910,8 @@ def delete_instance(db: Session, instance: ProcessInstance, actor: Optional[User
     """物理删除终态实例。运行中/挂起须先取消；日常清理优先走归档。"""
     from app.services import audit as audit_service
 
+    if instance.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎实例历史与命令须保留，请使用归档")
     if instance.status not in (
         InstanceStatus.COMPLETED.value,
         InstanceStatus.CANCELLED.value,
@@ -915,6 +933,8 @@ def delete_instance(db: Session, instance: ProcessInstance, actor: Optional[User
 def cancel_instance(
     db: Session, instance: ProcessInstance, actor: Optional[User] = None
 ) -> ProcessInstance:
+    if instance.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎实例必须经持久命令控制，历史记录须保留")
     lock_instance(db, instance.id)
     db.refresh(instance)
     if instance.status not in (
@@ -950,6 +970,8 @@ def cancel_instance(
 def suspend_instance(
     db: Session, instance: ProcessInstance, reason: Optional[str] = None
 ) -> ProcessInstance:
+    if instance.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎实例必须经持久命令控制，历史记录须保留")
     lock_instance(db, instance.id)
     db.refresh(instance)
     if instance.status != InstanceStatus.RUNNING.value:
@@ -964,6 +986,8 @@ def suspend_instance(
 def resume_instance(
     db: Session, instance: ProcessInstance, actor: Optional[User] = None
 ) -> ProcessInstance:
+    if instance.provider == "FLOWABLE":
+        raise HTTPException(409, "引擎实例必须经持久命令控制，历史记录须保留")
     lock_instance(db, instance.id)
     db.refresh(instance)
     if instance.status != InstanceStatus.SUSPENDED.value:
@@ -1102,8 +1126,24 @@ def executable_processes(db: Session) -> List[ExecutableProcessOut]:
         if form_count <= 0:
             readiness.append("未配表单（完成任务时无结构化字段）")
         can_start = published > 0 and node_count > 0
+        from app.services.execution_readiness import published as published_row
+
+        version = published_row(db, p)
+        provider = version.execution_provider if version else "LEGACY"
+        if provider == "FLOWABLE":
+            from app.core.config import settings
+            from app.services.engine_execution import deployment_status
+
+            can_start = bool(
+                settings.flowable_sandbox_enabled
+                and deployment_status(db, None, p.id)["allow_start"]
+            )
+            if not can_start:
+                readiness.insert(0, "Flowable沙箱尚未部署或启用，请核对运行配置")
         out.append(
             ExecutableProcessOut(
+                provider=provider,
+                provider_label="Flowable沙箱" if provider == "FLOWABLE" else "原轻量执行",
                 id=p.id,
                 code=p.code,
                 name=p.name,
@@ -1134,8 +1174,14 @@ def task_out(task: ProcessTask) -> TaskOut:
         )
         for e in _outgoing(instance.snapshot, task.node_key)
     ]
+    if instance.provider == "FLOWABLE":
+        options = []
     form = forms_service.form_for_snapshot(instance.snapshot, task.node_key)
     return TaskOut(
+        provider=task.provider,
+        provider_label="Flowable沙箱" if task.provider == "FLOWABLE" else "原轻量执行",
+        engine_task_id=task.engine_task_id,
+        execution_id=task.execution_id,
         id=task.id,
         instance_id=instance.id,
         instance_code=instance.code,
@@ -1219,6 +1265,13 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
         and earliest_due < utcnow()
     )
     return InstanceOut(
+        provider=instance.provider,
+        provider_label="Flowable沙箱" if instance.provider == "FLOWABLE" else "原轻量执行",
+        engine_instance_id=instance.engine_instance_id,
+        deployment_id=instance.deployment_id,
+        sync_status=instance.sync_status,
+        sync_status_label="已核对" if instance.sync_status == "CURRENT" else "结果待核对",
+        synced_at=instance.synced_at,
         id=instance.id,
         code=instance.code,
         process_id=instance.process_id,
@@ -1248,6 +1301,7 @@ def instance_out(instance: ProcessInstance) -> InstanceOut:
 
 def instance_detail(db: Session, instance: ProcessInstance) -> InstanceDetail:
     return InstanceDetail(
+        active_tasks=[task_out(t) for t in instance.tasks if t.status in OPEN_STATUSES],
         instance=instance_out(instance),
         tasks=[task_out(t) for t in instance.tasks],
         compensations=[

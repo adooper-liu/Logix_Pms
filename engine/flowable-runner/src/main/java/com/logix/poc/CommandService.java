@@ -13,8 +13,10 @@ class CommandService {
     private final CommandRepository records;
     private final FixtureService fixtures;
     private final ProcessEngine engine;
+    private final SandboxService sandbox;
     private final TransactionTemplate transaction;
-    CommandService(CommandRepository records, FixtureService fixtures, ProcessEngine engine, PlatformTransactionManager tx) {
+    CommandService(CommandRepository records, FixtureService fixtures, ProcessEngine engine, PlatformTransactionManager tx, SandboxService sandbox) {
+        this.sandbox = sandbox;
         this.records = records; this.fixtures = fixtures; this.engine = engine; this.transaction = new TransactionTemplate(tx);
     }
     PocDtos.CommandReceipt execute(PocDtos.CommandRequest request) {
@@ -36,6 +38,7 @@ class CommandService {
         }
     }
     private Map<String,Object> perform(PocDtos.CommandRequest r) {
+        if (r.action().startsWith("SB_")) return sandbox.perform(r);
         return switch (r.action()) {
             case "DEPLOY" -> { fields(r.payload(), Set.of("bpmn_sha256")); yield fixtures.deploy(r.target(), text(r.payload(), "bpmn_sha256")).asMap(); }
             case "START" -> start(r);

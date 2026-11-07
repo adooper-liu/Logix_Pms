@@ -14,9 +14,11 @@ from typing import List, Optional
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -46,6 +48,19 @@ class ProcessInstance(Base):
         ForeignKey("project.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    provider: Mapped[str] = mapped_column(String(16), default="LEGACY", server_default="LEGACY")
+    engine_namespace: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    engine_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    deployment_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey(
+            "engine_deployment.id", ondelete="RESTRICT", name="fk_instance_engine_deployment"
+        ),
+        nullable=True,
+    )
+    sync_status: Mapped[str] = mapped_column(
+        String(16), default="CURRENT", server_default="CURRENT"
+    )
+    synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="RUNNING", index=True)
     current_node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     current_node_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -84,7 +99,14 @@ class ProcessInstance(Base):
         order_by="ProcessTask.id",
     )
 
-    __table_args__ = (Index("ix_process_instance_status_started", "status", "started_at"),)
+    __table_args__ = (
+        Index("ix_process_instance_status_started", "status", "started_at"),
+        UniqueConstraint("id", "provider", name="uq_instance_id_provider"),
+        UniqueConstraint(
+            "engine_namespace", "engine_instance_id", name="uq_instance_engine_identity"
+        ),
+        CheckConstraint("provider IN ('LEGACY','FLOWABLE')", name="ck_instance_provider"),
+    )
 
 
 class ProcessTask(Base):
@@ -93,9 +115,11 @@ class ProcessTask(Base):
     __tablename__ = "process_task"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    instance_id: Mapped[int] = mapped_column(
-        ForeignKey("process_instance.id", ondelete="CASCADE"), index=True
-    )
+    instance_id: Mapped[int] = mapped_column(Integer, index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="LEGACY", server_default="LEGACY")
+    engine_namespace: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    engine_task_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    execution_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     node_key: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(128))
     task_type: Mapped[str] = mapped_column(String(16), default="TASK")
@@ -170,14 +194,21 @@ class ProcessTask(Base):
     __table_args__ = (
         Index("ix_process_task_status_assignee", "status", "assignee_user_id"),
         Index("ix_process_task_instance_status", "instance_id", "status"),
-        # 单令牌语义的数据库兜底：一个实例同一时刻最多一个 OPEN 任务。
-        # 并行网关上线时需要删除这个索引，改为按令牌约束。
+        ForeignKeyConstraint(
+            ["instance_id", "provider"],
+            ["process_instance.id", "process_instance.provider"],
+            ondelete="CASCADE",
+            name="fk_task_instance_provider",
+        ),
+        UniqueConstraint("engine_namespace", "engine_task_id", name="uq_task_engine_identity"),
+        CheckConstraint("provider IN ('LEGACY','FLOWABLE')", name="ck_task_provider"),
+        # Legacy保留单令牌约束；Flowable按精确引擎任务身份投影。
         Index(
             "uq_process_task_one_open",
             "instance_id",
             unique=True,
-            postgresql_where=text("status IN ('PENDING','CLAIMED')"),
-            sqlite_where=text("status IN ('PENDING','CLAIMED')"),
+            postgresql_where=text("provider = 'LEGACY' AND status IN ('PENDING','CLAIMED')"),
+            sqlite_where=text("provider = 'LEGACY' AND status IN ('PENDING','CLAIMED')"),
         ),
     )
 
@@ -314,6 +345,11 @@ class ProcessExecutionConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     process_id: Mapped[int] = mapped_column(
         ForeignKey("process_arch.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    engine_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    engine_deployment_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("engine_deployment.id", ondelete="RESTRICT", name="fk_config_engine_deployment"),
+        nullable=True,
     )
     readiness: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     readiness_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

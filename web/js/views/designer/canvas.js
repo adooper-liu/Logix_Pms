@@ -137,6 +137,7 @@ export function createCanvas(ctx) {
     try {
       const response = await POST('/processes/' + st.processId + '/bpmn', {
         xml,
+        execution_provider: st.model.execution_provider || 'LEGACY',
         expected_version: st.model ? st.model.version : null,
       });
       st.model = response;

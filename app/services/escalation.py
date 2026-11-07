@@ -56,6 +56,7 @@ def scan_escalations(
         select(ProcessTask)
         .options(joinedload(ProcessTask.instance))
         .where(
+            ProcessTask.provider == "LEGACY",
             ProcessTask.status.in_(OPEN_STATUSES),
             ProcessTask.due_at.is_not(None),
             ProcessTask.escalated_at.is_(None),
@@ -104,6 +105,7 @@ def scan_escalations(
             update(ProcessTask)
             .where(
                 ProcessTask.id == task.id,
+                ProcessTask.provider == "LEGACY",
                 ProcessTask.status.in_(OPEN_STATUSES),
                 ProcessTask.escalated_at.is_(None),
                 ProcessTask.row_version == task.row_version,

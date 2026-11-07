@@ -60,6 +60,8 @@ router = APIRouter(tags=["流程设计器"])
 def _version_out(row: ProcessModelVersion) -> ProcessModelVersionOut:
     snapshot = row.snapshot or {}
     return ProcessModelVersionOut(
+        execution_provider=row.execution_provider,
+        execution_provider_label=model_service.PROVIDER_LABELS[row.execution_provider],
         id=row.id,
         version=row.version,
         status=row.status,
@@ -100,6 +102,11 @@ def _load_model(db: DbSession, process_id: int) -> ProcessModelOut:
     else:
         model_status = None
     return ProcessModelOut(
+        execution_provider_labels=model_service.PROVIDER_LABELS,
+        execution_provider=latest.execution_provider if latest else "LEGACY",
+        execution_provider_label=model_service.PROVIDER_LABELS[
+            latest.execution_provider if latest else "LEGACY"
+        ],
         process_id=process_id,
         process_name=process.name if process else None,
         version=process.model_version if process else 0,
@@ -181,9 +188,7 @@ def save_design(process_id: int, payload: ProcessModelIn, db: DbSession, user: W
         bad = ", ".join(f"{e.source_key}→{e.target_key}" for e in dangling[:3])
         raise HTTPException(status_code=400, detail=f"连线引用了不存在的节点：{bad}")
 
-    validation = designer.validate_model(payload.nodes, payload.edges)
-    if validation["errors"]:
-        raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
+    model_service.validate_payload(payload, payload.bpmn_xml)
 
     version = model_service.save_draft(db, process, payload, user)
     audit_service.record(
@@ -315,7 +320,7 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             ),
         )
 
-    parsed = bpmn_service.import_bpmn(payload.xml)
+    parsed = bpmn_service.import_bpmn(payload.xml, payload.execution_provider)
     # bpmn-js 等外部编辑器不认识 PMS 的测算扩展时，可能把 pms:* 丢掉；
     # 对同 id 的节点/同起止的连线，用当前草稿里的 PMS 字段兜底，避免一次保存把指标清零。
     previous = model_service.current_snapshot(db, process_id)
@@ -335,7 +340,7 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             "approval_levels",
             "is_value_added",
         ):
-            node[field] = old.get(field, node[field])
+            node[field] = old.get(field, node.get(field, 0))
         # 负责人/活动 ID 以快照为准：新属性栏通过 PATCH 写快照，画布里的旧
         # pms:ownerRole / 无活动扩展可能还没同步，不能反过来覆盖刚保存的值。
         if old:
@@ -352,11 +357,13 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
             edge["match_conditions"] = old.get("match_conditions")
 
     model_payload = ProcessModelIn(
-        nodes=parsed["nodes"], edges=parsed["edges"], expected_version=payload.expected_version
+        nodes=parsed["nodes"],
+        edges=parsed["edges"],
+        expected_version=payload.expected_version,
+        execution_provider=payload.execution_provider,
+        bpmn_xml=payload.xml,
     )
-    validation = designer.validate_model(model_payload.nodes, model_payload.edges)
-    if validation["errors"]:
-        raise HTTPException(status_code=400, detail="；".join(validation["errors"]))
+    model_service.validate_payload(model_payload, payload.xml)
 
     version = model_service.save_draft(
         db,
@@ -381,12 +388,16 @@ def import_bpmn(process_id: int, payload: BpmnImportRequest, db: DbSession, user
 
 @router.post(
     "/processes/{process_id}/design/analyze",
-    response_model=DesignAnalysis,
+    response_model=DesignAnalysis | None,
     summary="测算已保存的流程模型",
 )
 def analyze_saved(process_id: int, db: DbSession):
     if db.get(ProcessArch, process_id) is None:
         raise HTTPException(status_code=404, detail="流程不存在")
+    version = model_service.latest_version(db, process_id)
+    if version and version.execution_provider == "FLOWABLE":
+        # 不把串行概率测算冒充并行引擎历时；保留旧API形状并明确无测算结果。
+        return None
     nodes, edges = model_service.rows_from_snapshot(
         process_id, model_service.current_snapshot(db, process_id)
     )

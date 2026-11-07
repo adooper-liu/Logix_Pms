@@ -1,0 +1,41 @@
+name: logix-r3-sandbox
+services:
+  engine-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: flowable_poc
+      POSTGRES_USER: flowable_poc
+      POSTGRES_PASSWORD: ${FLOWABLE_POC_DB_PASSWORD:?Dedicated sandbox password required}
+      TZ: UTC
+    volumes:
+      - r3_engine_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowable_poc -d flowable_poc"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  runner:
+    build:
+      context: .
+      args:
+        BUILD_REVISION: ${BUILD_REVISION:?Source revision required}
+    environment:
+      FLOWABLE_POC_JDBC_URL: jdbc:postgresql://engine-db:5432/flowable_poc
+      FLOWABLE_POC_DB_PASSWORD: ${FLOWABLE_POC_DB_PASSWORD:?Dedicated sandbox password required}
+      FLOWABLE_POC_TOKEN: ${FLOWABLE_POC_TOKEN:?Separate POC token required}
+      FLOWABLE_SANDBOX_ENABLED: "true"
+      FLOWABLE_SANDBOX_TOKEN: ${FLOWABLE_SANDBOX_TOKEN:?Dedicated adapter token required}
+      FLOWABLE_SANDBOX_NAMESPACE: logix-r3-sandbox
+    ports:
+      - "127.0.0.1:8136:8080"
+    depends_on:
+      engine-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent -H \"Authorization: Bearer $$FLOWABLE_SANDBOX_TOKEN\" http://127.0.0.1:8080/sandbox/v1/info > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+volumes:
+  r3_engine_pgdata:

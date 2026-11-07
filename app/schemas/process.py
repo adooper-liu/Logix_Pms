@@ -247,6 +247,9 @@ class ProcessEdgeOut(ORMModel):
 class ProcessModelIn(BaseModel):
     """覆盖式保存整个流程模型（先删后插），前端一次提交整张图。"""
 
+    execution_provider: str = Field(default="LEGACY", pattern="^(LEGACY|FLOWABLE)$")
+    bpmn_xml: Optional[str] = None
+
     nodes: List[ProcessNodeIn]
     edges: List[ProcessEdgeIn] = []
     expected_version: Optional[int] = Field(
@@ -256,6 +259,9 @@ class ProcessModelIn(BaseModel):
 
 
 class ProcessModelOut(BaseModel):
+    execution_provider_labels: Dict[str, str] = {}
+    execution_provider: str = "LEGACY"
+    execution_provider_label: str = "原轻量执行"
     process_id: int
     process_name: Optional[str] = None
     version: int = 0
@@ -279,6 +285,8 @@ class FreezeModelRequest(BaseModel):
 
 
 class ProcessModelVersionOut(BaseModel):
+    execution_provider: str = "LEGACY"
+    execution_provider_label: str = "原轻量执行"
     id: int
     version: int
     status: str
@@ -377,6 +385,7 @@ class ProcessNodeMetricsUpdate(BaseModel):
 
 
 class BpmnImportRequest(BaseModel):
+    execution_provider: str = Field(default="LEGACY", pattern="^(LEGACY|FLOWABLE)$")
     xml: str = Field(description="BPMN 2.0 XML 文本")
     expected_version: Optional[int] = Field(
         default=None, description="客户端看到的模型版本；不一致时返回 409"
