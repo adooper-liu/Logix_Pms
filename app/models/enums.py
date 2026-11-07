@@ -81,6 +81,7 @@ class NodeType(str, Enum):
     APPROVAL = "APPROVAL"  # 审批
     WAIT = "WAIT"  # 等待/排队
     DECISION = "DECISION"  # 判断分支
+    PARALLEL = "PARALLEL"  # Flowable并行网关
     HANDOFF = "HANDOFF"  # 跨部门移交
 
 

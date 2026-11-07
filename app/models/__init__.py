@@ -34,6 +34,7 @@ from app.models.deliverable import (
     DeliverableVersion,
     StepContract,
 )
+from app.models.engine import EngineCommand, EngineCursor, EngineDeployment, EngineInbox
 from app.models.enums import (
     AssetVariationPolicy,
     AuditAction,
@@ -140,6 +141,10 @@ from app.models.workload import (
 
 __all__ = [
     # 模型
+    "EngineCommand",
+    "EngineCursor",
+    "EngineDeployment",
+    "EngineInbox",
     "ProcessImprovementRound",
     "ProcessArch",
     "ProcessModelVersion",

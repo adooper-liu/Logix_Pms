@@ -63,6 +63,16 @@ class Settings:
     app_name: str = "Logix PMS · 流程管理系统"
     app_version: str = "0.1.0"
     api_prefix: str = "/api/v1"
+    flowable_sandbox_enabled: bool = field(
+        default_factory=lambda: _env_bool("FLOWABLE_SANDBOX_ENABLED", False)
+    )
+    flowable_sandbox_url: str = field(
+        default_factory=lambda: _env("FLOWABLE_SANDBOX_URL", "http://127.0.0.1:8136")
+    )
+    flowable_sandbox_token: str = field(default_factory=lambda: _env("FLOWABLE_SANDBOX_TOKEN", ""))
+    flowable_sandbox_namespace: str = field(
+        default_factory=lambda: _env("FLOWABLE_SANDBOX_NAMESPACE", "logix-r3-sandbox")
+    )
 
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL", DEFAULT_DATABASE_URL))
     # 默认不灌演示库。本地演示在 .env 里显式打开，并同时设置 ALLOW_DEV_SECRET=true。

@@ -93,6 +93,9 @@ def variants(db: Session, process_id: int, limit: int = 20) -> MiningOut:
     handoff_bucket: Dict[Tuple[str, str], List[float]] = defaultdict(list)
     unsequenced = 0
     for instance in instances:
+        if instance.provider == "FLOWABLE":
+            unsequenced += 1
+            continue  # 并行完成先后不是业务因果路径，首片不套用串行挖掘口径。
         tasks = sorted(
             (task for task in instance.tasks if task.status == "COMPLETED"),
             key=lambda row: (_task_stamp(row), row.id),

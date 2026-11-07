@@ -48,7 +48,8 @@ def basis(db, process):
     ).all()
     nodes = db.scalars(
         select(ProcessNode).where(
-            ProcessNode.process_id == process.id, ProcessNode.node_type.notin_(("START", "END"))
+            ProcessNode.process_id == process.id,
+            ProcessNode.node_type.notin_(("START", "END", "PARALLEL")),
         )
     ).all()
     configured = {a.node_key: a for a in assignments}

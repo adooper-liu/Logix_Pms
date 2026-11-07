@@ -59,7 +59,7 @@ class IsolationConfigTest {
         assertFalse(context.containsBean("dmnEngine"));
         assertTrue(context.getEnvironment().getProperty("spring.datasource.url").contains("flowable_poc"));
         assertTrue(engine.getRepositoryService().createDeploymentQuery().list().stream()
-            .allMatch(d -> d.getName().startsWith("poc:")));
+            .allMatch(d -> d.getName().startsWith("poc:") || d.getName().startsWith("sandbox:test-sandbox:")));
     }
 
     @Test void compose_has_no_pms_mount_or_public_database() throws Exception {

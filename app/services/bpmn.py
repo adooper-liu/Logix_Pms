@@ -393,7 +393,12 @@ def _parse_bounds(root: ET.Element) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def import_bpmn(xml_text: str) -> Dict[str, List[Dict]]:
+def import_bpmn(xml_text: str, execution_provider: str = "LEGACY") -> Dict[str, List[Dict]]:
+    if execution_provider == "FLOWABLE":
+        from app.services.engine_bpmn import inspect_xml
+
+        checked = inspect_xml(xml_text)
+        return {"nodes": checked["nodes"], "edges": checked["edges"]}
     root = _parse_bpmn(xml_text)
     process_el = next((el for el in root.iter() if _local(el.tag) == "process"), None)
     if process_el is None:

@@ -197,6 +197,32 @@ def lock_process(db, process):
     db.refresh(process)
 
 
+PROVIDER_LABELS = {"LEGACY": "原轻量执行", "FLOWABLE": "Flowable沙箱"}
+
+
+def validate_payload(payload, xml=None):
+    from app.services import designer
+
+    if payload.execution_provider == "FLOWABLE":
+        from app.services.engine_bpmn import inspect_xml
+
+        if not xml:
+            raise HTTPException(400, "Flowable沙箱模型必须保存完整XML")
+        checked = inspect_xml(xml)
+        if {n.node_key: n.node_type.value for n in payload.nodes} != {
+            n["node_key"]: n["node_type"] for n in checked["nodes"]
+        } or {(e.source_key, e.target_key) for e in payload.edges} != {
+            (e["source_key"], e["target_key"]) for e in checked["edges"]
+        }:
+            raise HTTPException(400, "治理投影与执行XML不一致")
+    else:
+        if any(n.node_type.value == "PARALLEL" for n in payload.nodes):
+            raise HTTPException(400, "原轻量执行不支持并行网关")
+        checked = designer.validate_model(payload.nodes, payload.edges)
+        if checked["errors"]:
+            raise HTTPException(400, "；".join(checked["errors"]))
+
+
 def save_draft(
     db: Session,
     process: ProcessArch,
@@ -209,13 +235,18 @@ def save_draft(
     lock_process(db, process)
     ensure_baseline(db, process)
     latest = latest_version(db, process.id)
+    bpmn_xml = bpmn_xml or payload.bpmn_xml
+    if keep_bpmn and latest and latest.execution_provider == "FLOWABLE":
+        payload.execution_provider = "FLOWABLE"
+        bpmn_xml = bpmn_xml or latest.bpmn_xml
+    validate_payload(payload, bpmn_xml)
     if latest is not None and latest.status == IN_REVIEW:
         raise HTTPException(status_code=409, detail="当前草稿正在评审，不能修改；请先驳回")
 
     snapshot = snapshot_from_payload(payload)
     if latest is not None and latest.status == DRAFT and latest.frozen_at is None:
         # 与freeze竞争时由数据库条件裁决，旧ORM缓存不能覆盖已固定正文/XML。
-        values = {"snapshot": snapshot}
+        values = {"snapshot": snapshot, "execution_provider": payload.execution_provider}
         if note:
             values["change_note"] = note
         if bpmn_xml is not None:
@@ -252,6 +283,7 @@ def save_draft(
             process_id=process.id,
             version=base + 1,
             status=DRAFT,
+            execution_provider=payload.execution_provider,
             snapshot=snapshot,
             bpmn_xml=xml,
             change_note=note,
@@ -539,6 +571,7 @@ def rollback(
         process_id=process.id,
         version=base + 1,
         status=DRAFT,
+        execution_provider=source.execution_provider,
         snapshot=source.snapshot or {},
         bpmn_xml=source.bpmn_xml or render_bpmn(process, source.snapshot or {}),
         change_note=note or f"回滚自 v{source.version}",

@@ -63,6 +63,20 @@ const comments = createComments(ctx);
 const simulation = createSimulation(ctx);
 const compensation = createCompensation();
 const decisions = createDecisions();
+on('designer.executionProvider', async (_data, element) => {
+  const st = state.designer;
+  const modeler = st.bpmnModeler;
+  if (!modeler) return;
+  try {
+    const { xml } = await modeler.saveXML({ format: true });
+    const response = await POST('/processes/' + st.processId + '/bpmn', {
+      xml, execution_provider: element.value, expected_version: st.model.version,
+    });
+    st.model = response;
+    st.savedModel = cloneModel(response);
+    await ctx.reload();
+  } catch (error) { toast(error.message, true); element.value = st.model.execution_provider; }
+});
 
 Object.assign(ctx, {
   renderSelection: panels.renderSelection,
@@ -385,6 +399,9 @@ function paintDesigner() {
       </div>
       ${toolMountHtml(st.tools, 'design', st.processId)}
       ${stateStrip}
+      <div class="field"><label>执行目标</label><select data-act="designer.executionProvider" ${editable ? '' : 'disabled'}>
+        ${Object.entries(model.execution_provider_labels || {}).map(([key, label]) => `<option value="${esc(key)}" ${key === model.execution_provider ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select><span class="tiny">切换后保存新工作版；Flowable沙箱仅支持已验证的串行/并行人工任务。</span></div>
       <div class="designer-head-nav">
         ${tabBar}
         <div class="designer-head-actions" role="toolbar" aria-label="流程操作">

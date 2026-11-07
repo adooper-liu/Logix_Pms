@@ -1,5 +1,10 @@
 # 隔离 Flowable POC（非 PMS 执行接管）
 
+> 本页下方2026-11-05计数及镜像为已合并POC的历史证据。后续R3工作树另有默认关闭、独立token的
+> `/sandbox/v1`串行／并行人工任务接入；命令、当前门禁与未完成验收见
+> [R3沙箱说明](../../docs/r3-sandbox-execution.md)。不要混用两个Compose项目、凭据或持久卷；
+> POC支持清单不自动成为PMS沙箱支持清单。
+
 Flowable **8.0.0** / Spring Boot **4.0.2** / Java **21** / PostgreSQL **16**。
 只运行仓库固定合成流程，不读取 PMS `.env`/数据库，不调用 PMS、ERP、通知或 KPI。
 PMS Legacy 执行器、模型发布及现有 API 保持不变。

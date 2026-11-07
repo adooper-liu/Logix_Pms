@@ -31,7 +31,10 @@ class PocController {
         this.fixtures = fixtures; this.commands = commands; this.receipts = receipts; this.events = events;
     }
     @GetMapping("/fixtures") Object fixtures() { return fixtures.list(); }
-    @PostMapping("/commands") Object command(@RequestBody PocDtos.CommandRequest request) { return commands.execute(request); }
+    @PostMapping("/commands") Object command(@RequestBody PocDtos.CommandRequest request) {
+        if (request.action() != null && request.action().startsWith("SB_")) throw new PocException(403, "Sandbox command requires sandbox endpoint");
+        return commands.execute(request);
+    }
     @GetMapping("/commands/{id}") Object receipt(@PathVariable UUID id) { return receipts.find(id).orElseThrow(() -> new PocException(404, "Command not committed")); }
     @GetMapping("/events") Object events(@RequestParam(defaultValue="0") long after_id, @RequestParam(defaultValue="100") int limit) { return events.after(after_id, limit); }
     @GetMapping("/instances/{id}") Map<String,Object> instance(@PathVariable String id) {

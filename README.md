@@ -14,6 +14,13 @@
 [engine/flowable-runner/README.md](engine/flowable-runner/README.md)。
 它不连接 PMS 数据库、不接管 Legacy 实例，不代表现有执行页已支持并行、会签或消息/定时器。
 
+## R3 受控新实例沙箱
+
+本工作树新增原发布版本→受控部署→准备确认→原执行页办理的串行／并行人工任务切片，
+默认关闭，仅合成数据；Legacy 在途不迁移。运行命令、当前证据及尚未完成的验收门槛见
+[docs/r3-sandbox-execution.md](docs/r3-sandbox-execution.md)。
+独立 POC 的会签／消息／定时器结果不等于这些能力已在 PMS 沙箱开放，不用于生产接管。
+
 ## 三层体系 × 五阶段标准工作流
 
 ```text

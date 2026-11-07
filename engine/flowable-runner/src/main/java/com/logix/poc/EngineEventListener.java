@@ -47,7 +47,7 @@ class EngineEventListener implements FlowableEventListener {
             if (ctx != null) {
                 var config = org.flowable.engine.impl.util.CommandContextUtil.getProcessEngineConfiguration(ctx);
                 var root = config.getExecutionEntityManager().findById(row.get("engine_instance_id").toString());
-                if (root != null) { row.put("business_key", root.getBusinessKey()); row.put("context", root.getVariable("pocContext")); }
+                if (root != null) { row.put("business_key", root.getBusinessKey()); row.put("context", root.getVariable("sandboxContext") != null ? root.getVariable("sandboxContext") : root.getVariable("pocContext")); }
             }
         }
         events.append(row);

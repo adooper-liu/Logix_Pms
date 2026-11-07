@@ -6,6 +6,9 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
@@ -44,6 +47,8 @@ from app.schemas.execution import (
 from app.schemas.execution_readiness import ReadinessConfirm, ReadinessIn, ReadinessOut
 from app.schemas.mining import MiningOut
 from app.services import audit as audit_service
+from app.services import engine_commands
+from app.services import engine_execution as engine_service
 from app.services import escalation as escalation_service
 from app.services import execution as execution_service
 from app.services import execution_flow as flow_service
@@ -57,6 +62,83 @@ from app.services import process_mining as mining_service
 from app.services import process_model as model_service
 
 router = APIRouter(prefix="/execution", tags=["流程执行"])
+
+
+class EngineDeployRequest(BaseModel):
+    model_version_id: int
+
+
+class EngineEnableRequest(BaseModel):
+    process_id: int
+    deployment_id: int
+    enabled: bool
+
+
+def engine_result(db, command, success_status=200):
+    if command.status != "SUCCEEDED" or command.error:
+        return JSONResponse(
+            status_code=409 if command.status == "REJECTED" else 202,
+            content=engine_commands.out(command),
+        )
+    if command.task_id:
+        result = execution_service.task_out(execution_service.get_task(db, command.task_id))
+    elif command.instance_id:
+        result = execution_service.instance_out(
+            execution_service.get_instance(db, command.instance_id)
+        )
+    else:
+        return JSONResponse(content=engine_commands.out(command))
+    return JSONResponse(status_code=success_status, content=jsonable_encoder(result))
+
+
+@router.get("/engine/status")
+def engine_status(process_id: int, db: DbSession, user: CurrentUser):
+    return engine_service.deployment_status(db, user, process_id)
+
+
+@router.post("/engine/deploy")
+def engine_deploy(
+    payload: EngineDeployRequest,
+    db: DbSession,
+    user: ManagerUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    return engine_result(db, engine_service.deploy(db, user, payload.model_version_id, key))
+
+
+@router.post("/engine/enable")
+def engine_enable(payload: EngineEnableRequest, db: DbSession, user: ManagerUser):
+    return engine_service.enable(
+        db, user, payload.process_id, payload.deployment_id, payload.enabled
+    )
+
+
+@router.get("/engine/commands/{ident}")
+def engine_command_status(ident: str, db: DbSession, user: CurrentUser):
+    from app.models.engine import EngineCommand
+
+    command = db.get(EngineCommand, ident)
+    if command is None or command.user_id != user.id:
+        raise HTTPException(404, "原命令不存在")
+    return engine_commands.out(command)
+
+
+@router.post("/engine/commands/{ident}/recover")
+def engine_recover(ident: str, db: DbSession, user: WriteUser):
+    return engine_result(db, engine_service.recover(db, user, ident))
+
+
+@router.post("/engine/instances/{ident}/reconcile")
+def engine_reconcile(ident: int, db: DbSession, user: ManagerUser):
+    from app.services import engine_projection
+
+    instance = execution_service.get_instance(db, ident)
+    engine_service.instance_visible(db, user, instance)
+    if instance.provider != "FLOWABLE":
+        raise HTTPException(400, "非引擎实例")
+    engine_projection.reconcile(db, instance)
+    db.commit()
+    return execution_service.instance_detail(db, instance)
 
 
 @router.get("/readiness", response_model=ReadinessOut)
@@ -579,6 +661,11 @@ def start_instance(
     if process is None:
         raise HTTPException(status_code=404, detail="流程不存在")
     execution_service.validate_start_context(db, process, user, payload)
+    version = readiness_service.published(db, process)
+    if version and version.execution_provider == "FLOWABLE":
+        return engine_result(
+            db, engine_service.start(db, process, user, payload, idempotency_key), 201
+        )
     legacy = execution_service.legacy_start_replay(db, user, payload, idempotency_key)
     if legacy is not None:
         return legacy
@@ -621,8 +708,11 @@ def suspend_instance(
     payload: InstanceSuspendRequest,
     db: DbSession,
     user: ManagerUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     instance = execution_service.get_instance(db, instance_id)
+    if instance.provider == "FLOWABLE":
+        return engine_result(db, engine_service.control(db, instance, user, "SB_SUSPEND", key))
     execution_service.suspend_instance(db, instance, payload.reason)
     integration_service.enqueue(db, "instance.suspended", flow_service.instance_event(instance))
     notification_service.notify(
@@ -653,8 +743,15 @@ def suspend_instance(
     response_model=InstanceOut,
     summary="恢复已挂起的实例（流程管理科及以上）",
 )
-def resume_instance(instance_id: int, db: DbSession, user: ManagerUser):
+def resume_instance(
+    instance_id: int,
+    db: DbSession,
+    user: ManagerUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
     instance = execution_service.get_instance(db, instance_id)
+    if instance.provider == "FLOWABLE":
+        return engine_result(db, engine_service.control(db, instance, user, "SB_RESUME", key))
     execution_service.resume_instance(db, instance, user)
     integration_service.enqueue(db, "instance.resumed", flow_service.instance_event(instance))
     notification_service.notify(
@@ -685,8 +782,15 @@ def resume_instance(instance_id: int, db: DbSession, user: ManagerUser):
     response_model=InstanceOut,
     summary="取消运行中/已挂起的实例（流程管理科及以上）",
 )
-def cancel_instance(instance_id: int, db: DbSession, user: ManagerUser):
+def cancel_instance(
+    instance_id: int,
+    db: DbSession,
+    user: ManagerUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
     instance = execution_service.get_instance(db, instance_id)
+    if instance.provider == "FLOWABLE":
+        return engine_result(db, engine_service.control(db, instance, user, "SB_CANCEL", key))
     execution_service.cancel_instance(db, instance, user)
     integration_service.enqueue(db, "instance.cancelled", flow_service.instance_event(instance))
     notification_service.notify(
@@ -841,8 +945,15 @@ def workload_summary(
 
 
 @router.post("/tasks/{task_id}/claim", response_model=TaskOut, summary="认领任务")
-def claim_task(task_id: int, db: DbSession, user: WriteUser):
+def claim_task(
+    task_id: int,
+    db: DbSession,
+    user: WriteUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
     task = execution_service.get_task(db, task_id)
+    if task.provider == "FLOWABLE":
+        return engine_result(db, engine_service.task_command(db, task, user, "SB_CLAIM", key))
     execution_service.claim_task(db, task, user)
     integration_service.enqueue(db, "task.claimed", flow_service.task_event(task))
     audit_service.record(
@@ -861,6 +972,11 @@ def complete_task(
     user: WriteUser,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
+    task = execution_service.get_task(db, task_id)
+    if task.provider == "FLOWABLE":
+        return engine_result(
+            db, engine_service.task_command(db, task, user, "SB_COMPLETE", idempotency_key, payload)
+        )
     digest = idempotency_service.request_hash(payload)
     record = idempotency_service.begin(db, "task.complete", idempotency_key, digest)
     if record is not None and record.status == "SUCCESS":
@@ -889,8 +1005,21 @@ def complete_task(
     response_model=TaskOut,
     summary="改派任务（流程管理科及以上）",
 )
-def assign_task(task_id: int, payload: TaskAssignRequest, db: DbSession, user: ManagerUser):
+def assign_task(
+    task_id: int,
+    payload: TaskAssignRequest,
+    db: DbSession,
+    user: ManagerUser,
+    key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
     task = execution_service.get_task(db, task_id)
+    if task.provider == "FLOWABLE":
+        return engine_result(
+            db,
+            engine_service.task_command(
+                db, task, user, "SB_ASSIGN", key, assignee=payload.assignee_user_id
+            ),
+        )
     execution_service.assign_task(db, task, payload.assignee_user_id, user)
     integration_service.enqueue(db, "task.assigned", flow_service.task_event(task))
     if task.assignee_user_id is not None:

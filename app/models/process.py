@@ -283,6 +283,9 @@ class ProcessModelVersion(Base):
         index=True,
     )
     version: Mapped[int] = mapped_column(Integer)
+    execution_provider: Mapped[str] = mapped_column(
+        String(16), default="LEGACY", server_default="LEGACY"
+    )
     status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
     frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
