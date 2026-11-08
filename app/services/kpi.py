@@ -369,6 +369,17 @@ def _duration_seconds(unit: Optional[str]) -> Optional[float]:
     return _UNIT_SECONDS.get(key, _UNIT_SECONDS.get(key.lower()))
 
 
+def minutes_to_unit(value: float, unit: Optional[str]) -> Optional[float]:
+    """把「分钟」换算成 KPI 的时长单位；不是时长单位返回 None。
+
+    对照指标固定以分钟计算，写回时按 KPI 自身单位换算，避免两套口径。
+    """
+    seconds = _duration_seconds(unit)
+    if seconds is None:
+        return None
+    return round(value * 60.0 / seconds, 6)
+
+
 def _resolve_kpi(db: Session, project: Project) -> Optional[KpiDefinition]:
     if project.source_kpi_id is not None:
         return db.get(KpiDefinition, project.source_kpi_id)

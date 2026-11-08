@@ -8,6 +8,7 @@ import {
   toast, openModal, closeModal, closeAllModals, modalAlive, viewEl, on, confirmDialog, promptDialog,
 } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, go, RENDERERS, urlParams } from '../core/router.js';
 import { GET, POST, PATCH } from '../core/api.js';
 import { canWrite, canManage } from '../core/auth.js';
@@ -507,74 +508,73 @@ function paint(d) {
       </div>` : ''}
     </section>`;
 
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div><h2>方法论工具箱（${toolCount} 个工具 · ${resourceCount} 条资源）
-          <span class="module-badge">问题驱动 · 案例/模板</span></h2>
-          <div class="desc">先按问题匹配工具；案例、模板与使用证据统一放在「全部资源」。</div></div>
-        <div class="gap">
-          ${canWrite() ? '<button class="btn btn-p" data-act="toolbox.newTool">+ 新建工具</button>' : ''}
-          ${canWrite() ? '<button class="btn btn-g" data-act="knowledge.new">+ 新建案例/模板</button>' : ''}
-          ${canManage() ? '<button class="btn-sm" data-act="knowledge.manageScenarios">场景管理</button>' : ''}
-          ${canManage() ? '<button class="btn-sm" data-act="knowledge.showRecommendLogs">推荐日志</button>' : ''}
-          <a class="link-btn" data-act="knowledge.goDocuments">制度中心 →</a>
-          <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>
-        </div>
-      </div>
-      ${filterBanner}
-      ${toolMountHtml((d.groups || []).flatMap((group) => group.tools || []), 'knowledge')}
-    </div>
-
-    <div class="tb-shell">
-      <aside class="tb-nav-col">
-        <nav class="card tb-nav-card" aria-label="工具索引">
-          <div class="tb-index-label">问题</div>
-          <div class="tb-index" role="group" aria-label="问题">${scenarioButtons}</div>
-          <div class="tb-index-label">阶段</div>
-          <div class="tb-index" role="group" aria-label="阶段">${stageLinks}</div>
-          <div class="tb-index-label">目录</div>
-          <div class="tb-index" role="group" aria-label="目录">${segmentRows}</div>
-          ${statusOptions ? `<label class="tb-index-label" for="tbStatus">维护状态</label>${statusOptions}` : ''}
-        </nav>
-      </aside>
-
-      <main class="tb-main">
-        ${d.detail
-          ? `<div class="card tb-detail-card">${toolDetailHtml(d.detail)}</div>`
-          : sectionsHtml}
-      </main>
-
-      <aside class="tb-side">
-        <div class="card">
-          <h3>${d.detail ? '工具操作' : '操作'}</h3>
-          ${d.detail
-            ? `<div class="gap" style="flex-wrap:wrap">${toolDetailActions(d.detail, true)}</div>`
-            : `<div class="desc">在 ① 输入问题匹配工具，或在 ② 浏览全部资源。</div>
-               <div class="gap">
-                 <button class="btn-sm" data-act="toolbox.section"
-                   data-section="resources">${showResources ? '收起全部资源' : '浏览全部资源'}</button>
-                 <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤</a>
-               </div>`}
-        </div>
-        ${showResources ? resourceManagerCards({
-          archiveCandidates: d.archiveCandidates || [],
-          effectStats: d.effectStats || null,
-          standardCandidates: d.standardCandidates || [],
-        }) : ''}
-        <div class="card">
-          <h3>求真校验</h3>
-          <div class="desc">每个工具都应能回答：主张、证据、适用条件、反证、维护人</div>
-          <div class="tb-audit">
-            <div>✓ 主张：解决什么问题</div>
-            <div>✓ 证据：谁用过、效果如何</div>
-            <div>✓ 适用条件：什么时候有效</div>
-            <div>✓ 反证：什么时候不该用</div>
-            <div>✓ 维护人 + 最后验证日期</div>
-          </div>
-        </div>
-      </aside>
-    </div>`;
+  const shell = pageShell({
+    title: '方法论工具箱',
+    badge: `<span class="module-badge">${toolCount} 个工具 · ${resourceCount} 条资源</span>`,
+    subtitle: '先按问题匹配工具；案例、模板与使用证据统一放在「全部资源」。',
+    tip: tipHelp('工具是方法，不是资产；模板与案例走知识资源。', '工具箱说明'),
+    actions: `${canWrite() ? '<button class="btn btn-p" data-act="toolbox.newTool">+ 新建工具</button>' : ''}
+      ${canWrite() ? '<button class="btn btn-g" data-act="knowledge.new">+ 新建案例/模板</button>' : ''}
+      ${canManage() ? '<button class="btn-sm" data-act="knowledge.manageScenarios">场景管理</button>' : ''}
+      ${canManage() ? '<button class="btn-sm" data-act="knowledge.showRecommendLogs">推荐日志</button>' : ''}
+      <a class="link-btn" data-act="knowledge.goDocuments">制度中心 →</a>
+      <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤 →</a>`,
+    sections: [{
+      key: 'main',
+      html: `${filterBanner}
+        ${toolMountHtml((d.groups || []).flatMap((group) => group.tools || []), 'knowledge')}
+        <div class="tb-shell">
+          <aside class="tb-nav-col">
+            <nav class="card tb-nav-card" aria-label="工具索引">
+              <div class="tb-index-label">问题</div>
+              <div class="tb-index" role="group" aria-label="问题">${scenarioButtons}</div>
+              <div class="tb-index-label">阶段</div>
+              <div class="tb-index" role="group" aria-label="阶段">${stageLinks}</div>
+              <div class="tb-index-label">目录</div>
+              <div class="tb-index" role="group" aria-label="目录">${segmentRows}</div>
+              ${statusOptions ? `<label class="tb-index-label" for="tbStatus">维护状态</label>${statusOptions}` : ''}
+            </nav>
+          </aside>
+          <main class="tb-main">
+            ${d.detail
+              ? `<div class="card tb-detail-card">${toolDetailHtml(d.detail)}</div>`
+              : sectionsHtml}
+          </main>
+          <aside class="tb-side">
+            <div class="card">
+              <h3>${d.detail ? '工具操作' : '操作'}</h3>
+              ${d.detail
+                ? `<div class="gap" style="flex-wrap:wrap">${toolDetailActions(d.detail, true)}</div>`
+                : `<div class="desc">在 ① 输入问题匹配工具，或在 ② 浏览全部资源。</div>
+                   <div class="gap">
+                     <button class="btn-sm" data-act="toolbox.section"
+                       data-section="resources">${showResources ? '收起全部资源' : '浏览全部资源'}</button>
+                     <a class="link-btn" data-act="toolbox.goWorkflow">回到五阶段步骤</a>
+                   </div>`}
+            </div>
+            ${showResources ? resourceManagerCards({
+              archiveCandidates: d.archiveCandidates || [],
+              effectStats: d.effectStats || null,
+              standardCandidates: d.standardCandidates || [],
+            }) : ''}
+            <div class="card">
+              <h3>求真校验</h3>
+              <div class="desc">每个工具都应能回答：主张、证据、适用条件、反证、维护人</div>
+              <div class="tb-audit">
+                <div>✓ 主张：解决什么问题</div>
+                <div>✓ 证据：谁用过、效果如何</div>
+                <div>✓ 适用条件：什么时候有效</div>
+                <div>✓ 反证：什么时候不该用</div>
+                <div>✓ 维护人 + 最后验证日期</div>
+              </div>
+            </div>
+          </aside>
+        </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 }
 
 function compactToolCard(hit, meta) {

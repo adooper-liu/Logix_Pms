@@ -7,9 +7,10 @@
  * 当前试点层摘要并提供跳转，不重复实现第二套十层门禁。
  */
 
-import { esc, num, emptyRow } from '../core/format.js';
+import { esc, num, emptyRow, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { GET, POST } from '../core/api.js';
 import { canManage } from '../core/auth.js';
@@ -385,35 +386,30 @@ const renderProcessCard = () => {
           <div class="tiny muted mt">点击左侧模块查看详情；十层执行在右侧试点卡进入。</div>
         </div>`;
 
-      viewEl().innerHTML = `
-        <div class="card page-head pc-head">
-          <div class="between">
-            <div><h2>流程卡<span class="module-badge">对象 360 · 模块聚合</span></h2>
-              <div class="tiny">${chain || '—'}</div></div>
-            <div class="gap">
-              <select class="sel sel-sm" data-act="process_card.select">
-                <option value="">切换流程</option>${options}</select>
-              <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
-            </div>
-          </div>
-          <div class="between mt">
-            <div><b>${esc(c.process.code)} ${esc(c.process.name)}</b>
-              <span class="tag t-blu">${esc(c.process.process_type_label || '')}</span>
-              ${c.process.classification_is_inherited ? `<span class="tiny">来源 ${esc(c.process.classification_source_code || '')}</span>` : ''}
-              <span class="tiny muted">层级 L${c.process.level} · Owner ${esc(c.process.owner || '—')}
-                · ${esc(c.process.org_unit_name || c.process.department || '—')}</span></div>
-            <div class="gap">
-              <span class="tag t-blu">模块就绪 ${readyCount}/${readyTotal}</span>
-              <button class="btn-sm" data-act="process_card.go" data-view="data">数据治理</button>
-              <button class="btn-sm" data-act="process_card.findings">治理待办 ${c.findings.length}</button>
-            </div>
-          </div>
-        </div>
-        <div class="pc-shell">
-          <aside class="pc-side"><div class="card pc-nav">${navGroups}</div></aside>
-          <main class="pc-main">${active.html}</main>
-          <aside class="pc-related-col">${pilotHtml}${readinessHtml}</aside>
-        </div>`;
+      const shell = pageShell({
+        title: '流程卡',
+        badge: '<span class="module-badge">对象 360 · 模块聚合</span>',
+        subtitle: `${chain} · Owner ${esc(c.process.owner || '—')}
+          · ${esc(c.process.org_unit_name || c.process.department || '—')}`,
+        tip: tipHelp('点击左侧模块查看详情；十层执行在右侧试点卡进入。', '流程卡说明'),
+        actions: `<select class="sel sel-sm" data-act="process_card.select">
+            <option value="">切换流程</option>${options}</select>
+          <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
+          <span class="tag t-blu">模块就绪 ${readyCount}/${readyTotal}</span>
+          <button class="btn-sm" data-act="process_card.go" data-view="data">数据治理</button>
+          <button class="btn-sm" data-act="process_card.findings">治理待办 ${c.findings.length}</button>`,
+        sections: [{
+          key: 'main',
+          html: `<div class="pc-shell">
+            <aside class="pc-side"><div class="card pc-nav">${navGroups}</div></aside>
+            <main class="pc-main">${active.html}</main>
+            <aside class="pc-related-col">${pilotHtml}${readinessHtml}</aside>
+          </div>`,
+        }],
+        active: 'main',
+        mode: 'plain',
+      });
+      viewEl().innerHTML = shell.html;
     },
   );
 };

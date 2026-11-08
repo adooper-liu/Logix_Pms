@@ -1,15 +1,16 @@
 /* 视图：十层单页
  *
  * 一条 L3/L4 路径上的十层核对单；一次只展开一层。
- * 退出门复用开始使用的证据口径（第 4 层制度/授权按本流程范围计）；
+ * 退出门复用体系总览的证据口径（第 4 层制度/授权按本流程范围计）；
  * 待办和异常是这条路径上的人工补充。新建路径不造证据、不推动公司阶段。
  */
 
-import { esc, num } from '../core/format.js';
+import { esc, num, tipHelp } from '../core/format.js';
 import { viewEl, on, openModal, closeModal, modalAlive, confirmDialog, toast } from '../core/ui.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
 import { canManage } from '../core/auth.js';
+import { pageShell } from '../core/layout.js';
 import { state } from '../core/state.js';
 
 const LAYER_TONE = {
@@ -473,7 +474,7 @@ async function openPathModal() {
       <select id="plProcess"><option value="">请选择 L3/L4 流程</option>${options}</select></div>
     <div class="field"><label>负责人</label>
       <select id="plOwner"><option value="">当前用户</option>${userOptions(users)}</select></div>
-    <div class="note">路径名就是流程名。一条流程只建一条十层路径。退出门读已有证据，不会新建证据，也不会推动「开始使用」的公司阶段。</div>`,
+    <div class="note">路径名就是流程名。一条流程只建一条十层路径。退出门读已有证据，不会新建证据，也不会推动「体系总览」的公司阶段。</div>`,
   `<button class="btn btn-g" data-act="ui.close">取消</button>
    <button class="btn btn-p" data-act="pilot.savePath">创建</button>`);
 }
@@ -1169,7 +1170,7 @@ function paint(payload) {
     viewEl().innerHTML = `
       <div class="card page-head">
         <h2>十层核对<span class="module-badge">这条会不会跑</span></h2>
-        <div class="desc">退出门按本流程计数，与「开始使用」的公司能力门拆开。新建路径不造证据、不推公司阶段。</div>
+        <div class="desc">退出门按本流程计数，与「体系总览」的公司能力门拆开。新建路径不造证据、不推公司阶段。</div>
       </div>
       <div class="card">
         <div class="empty">还没有路径。选一条 L3/L4，按本流程建十层核对。</div>
@@ -1196,51 +1197,53 @@ function paint(payload) {
     `<option value="${path.id}"${path.id === detail.id ? ' selected' : ''}>${
       esc(pathLabel(path))} · 第${path.current_layer}层</option>`).join('');
 
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div>
-          <h2>十层核对<span class="module-badge">这条会不会跑</span></h2>
-          <div class="desc">一次只看一层。退出门按本流程（及祖先链）计数；点数字打开记录。公司能力齐不齐，看「开始使用」。</div>
+  const shell = pageShell({
+    title: '十层核对',
+    badge: '<span class="module-badge">这条会不会跑</span>',
+    subtitle: `${esc(pathLabel(detail))} · Owner ${esc(detail.owner || '—')} · 一次只看一层`,
+    tip: tipHelp(
+      '退出门按本流程（及祖先链）计数；点数字打开记录。公司能力齐不齐，看「体系总览」。',
+      '十层说明',
+    ),
+    actions: `<select class="sel sel-sm" data-act="pilot.selectPath">${options}</select>
+      <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
+      <button class="btn btn-p" data-act="pilot.newPath">+ 新建路径</button>`,
+    sections: [{
+      key: 'main',
+      html: `
+        <div class="card">
+          <div class="between">
+            <div class="gap">
+              ${statusTag('t-blu', detail.status_label)}
+              <span class="tag t-gry">当前第 ${detail.current_layer} 层 · ${esc(detail.current_layer_title || '')}</span>
+              <span class="tag ${detail.progress >= 100 ? 't-grn' : 't-yel'}">
+                可退出 ${num(detail.progress, 0)}%</span>
+              <span class="tiny muted">${esc(detail.baseline_version)} → ${esc(detail.draft_version)}</span>
+            </div>
+            <button class="btn-sm" data-act="pilot.deletePath">删除路径</button>
+          </div>
+          <div class="pipe" style="margin-top:10px">
+            <i class="fill-ok" style="width:${detail.progress}%"></i>
+          </div>
         </div>
-        <div class="gap">
-          <select class="sel sel-sm" data-act="pilot.selectPath">${options}</select>
-          <button class="btn-sm" data-act="ui.copyLink">复制链接</button>
-          <button class="btn btn-p" data-act="pilot.newPath">+ 新建路径</button>
-        </div>
-      </div>
-      <div class="between mt">
-        <div>
-          <b>${esc(pathLabel(detail))}</b>
-          <span class="tiny muted">Owner：${esc(detail.owner || '—')}</span>
-        </div>
-        <div class="gap">
-          ${statusTag('t-blu', detail.status_label)}
-          <span class="tag t-gry">当前第 ${detail.current_layer} 层 · ${esc(detail.current_layer_title || '')}</span>
-          <span class="tag ${detail.progress >= 100 ? 't-grn' : 't-yel'}">
-            可退出 ${num(detail.progress, 0)}%</span>
-          <span class="tiny muted">${esc(detail.baseline_version)} → ${esc(detail.draft_version)}</span>
-          <button class="btn-sm" data-act="pilot.deletePath">删除路径</button>
-        </div>
-      </div>
-      <div class="pipe" style="margin-top:10px">
-        <i class="fill-ok" style="width:${detail.progress}%"></i>
-      </div>
-    </div>
-
-    <div class="pilot-shell">
-      <aside class="pilot-side">
-        <div class="card pilot-nav">
-          <div class="tiny muted" style="margin-bottom:8px">十层导航</div>
-          <div class="pilot-nav-list">${layerStrip(detail, layer.layer_no)}</div>
-        </div>
-      </aside>
-      <main class="pilot-main">${workspace(detail, layer)}</main>
-      <aside class="pilot-aside">
-        ${contextList(detail, layer.layer_no)}
-        ${nextList(detail, layer.layer_no)}
-      </aside>
-    </div>`;
+        <div class="pilot-shell">
+          <aside class="pilot-side">
+            <div class="card pilot-nav">
+              <div class="tiny muted" style="margin-bottom:8px">十层导航</div>
+              <div class="pilot-nav-list">${layerStrip(detail, layer.layer_no)}</div>
+            </div>
+          </aside>
+          <main class="pilot-main">${workspace(detail, layer)}</main>
+          <aside class="pilot-aside">
+            ${contextList(detail, layer.layer_no)}
+            ${nextList(detail, layer.layer_no)}
+          </aside>
+        </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 }
 
 const renderPilot = () => {

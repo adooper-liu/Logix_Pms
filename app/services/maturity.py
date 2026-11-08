@@ -111,11 +111,14 @@ def list_assessments(
 
 def gate_out(db: Session, row: GateAttestation) -> GateAttestationOut:
     project = db.get(Project, row.project_id)
+    snapshot = row.evidence_snapshot or {}
     return GateAttestationOut(
         id=row.id,
         purpose=row.purpose,
         round_id=row.round_id,
         evidence_snapshot=row.evidence_snapshot,
+        claims_improvement=bool(snapshot.get("claims_improvement")),
+        comparison_receipt_id=snapshot.get("comparison_receipt_id"),
         project_id=row.project_id,
         project_code=project.code if project else None,
         stage_no=row.stage_no,
@@ -129,6 +132,58 @@ def gate_out(db: Session, row: GateAttestation) -> GateAttestationOut:
         signed_at=row.signed_at,
         note=row.note,
     )
+
+
+def _comparison_gate_snapshot(
+    db: Session, project: Project, receipt_id: Optional[int], claims_improvement: bool
+) -> dict:
+    """冻结阶段门引用的改善对照；只接受当前仍满足门禁的接收记录。"""
+    from fastapi import HTTPException
+
+    from app.models.log_import import LogComparisonReceipt
+    from app.services import log_import as log_import_service
+
+    if receipt_id is None:
+        raise MaturityError("声明改善时必须选择已接收的对照")
+    if project.process_id is None:
+        raise MaturityError("项目未关联流程，不能引用改善对照")
+    receipt = db.get(LogComparisonReceipt, receipt_id)
+    if receipt is None or receipt.process_id != project.process_id:
+        raise MaturityError("对照不属于本项目流程")
+    process = db.get(ProcessArch, project.process_id)
+    if process is None:
+        raise MaturityError("流程不存在")
+    try:
+        comparison = log_import_service.compare(
+            db, process, receipt.before_import_id, receipt.after_import_id
+        )
+        readiness = log_import_service.claim_readiness(
+            db, process, receipt.before_import_id, receipt.after_import_id
+        )
+    except HTTPException as exc:
+        raise MaturityError(f"对照不可核验：{exc.detail}") from exc
+    if (
+        not readiness.claim_allowed
+        or readiness.latest_receipt is None
+        or readiness.latest_receipt.id != receipt.id
+    ):
+        reasons = readiness.reasons or ["最新结论不是接收"]
+        raise MaturityError("对照未达到可核验条件：" + "；".join(reasons))
+    return {
+        "kind": "LOG_COMPARISON",
+        "claims_improvement": claims_improvement,
+        "comparison_receipt_id": receipt.id,
+        "before_import_id": receipt.before_import_id,
+        "after_import_id": receipt.after_import_id,
+        "comparable": comparison.comparable,
+        "sample_ok": receipt.sample_ok,
+        "claim_allowed": True,
+        "conclusion": comparison.conclusion,
+        "warnings": comparison.warnings,
+        "metrics": {key: value.model_dump() for key, value in comparison.metrics.items()},
+        "accepted_by_name": receipt.accepted_by_name,
+        "accepted_at": receipt.accepted_at.isoformat() if receipt.accepted_at else None,
+    }
 
 
 def create_gate(db: Session, data: dict, user: User) -> GateAttestation:
@@ -147,12 +202,20 @@ def create_gate(db: Session, data: dict, user: User) -> GateAttestation:
         raise MaturityError("只能签收项目当前阶段的门禁")
     if not (data.get("evidence_url") or "").strip():
         raise MaturityError("门禁签收必须附证据链接")
+    claims_improvement = bool(data.get("claims_improvement"))
+    receipt_id = data.get("comparison_receipt_id")
+    if receipt_id is not None:
+        claims_improvement = True
+    snapshot = None
+    if claims_improvement or receipt_id is not None:
+        snapshot = _comparison_gate_snapshot(db, project, receipt_id, claims_improvement)
     row = GateAttestation(
         project_id=project.id,
         stage_no=data["stage_no"],
         gate_code=data.get("gate_code") or "STAGE_GATE",
         exit_criteria=data.get("exit_criteria"),
         evidence_url=data["evidence_url"],
+        evidence_snapshot=snapshot,
         conclusion=data["conclusion"],
         signed_by_user_id=user.id,
         signed_at=utcnow(),
@@ -189,6 +252,41 @@ def list_gates(db: Session, project_id: int, limit: int = 100) -> List[GateAttes
     )
 
 
+def _comparison_gate_reason(db: Session, project: Project, gate: GateAttestation) -> Optional[str]:
+    """阶段门引用的对照是否仍然有效；非对照门禁返回 None。"""
+    from fastapi import HTTPException
+
+    from app.models.log_import import LogComparisonReceipt
+    from app.services import log_import as log_import_service
+
+    snapshot = gate.evidence_snapshot or {}
+    if snapshot.get("kind") != "LOG_COMPARISON":
+        return None
+    receipt_id = snapshot.get("comparison_receipt_id")
+    if not receipt_id:
+        return "引用的对照缺失"
+    receipt = db.get(LogComparisonReceipt, receipt_id)
+    if receipt is None or receipt.process_id != project.process_id:
+        return "引用的对照已删除或不属于本流程"
+    process = db.get(ProcessArch, project.process_id)
+    if process is None:
+        return "流程不存在"
+    try:
+        readiness = log_import_service.claim_readiness(
+            db, process, receipt.before_import_id, receipt.after_import_id
+        )
+    except HTTPException:
+        return "引用的对照已失效：日志导入不存在"
+    if (
+        not readiness.claim_allowed
+        or readiness.latest_receipt is None
+        or readiness.latest_receipt.id != receipt.id
+    ):
+        reasons = readiness.reasons or ["最新结论不是接收"]
+        return "引用的对照已失效：" + "；".join(reasons)
+    return None
+
+
 def ensure_advance_allowed(db: Session, project: Project, target_stage: int) -> None:
     """启用门禁时，进入下一阶段前每个经过的阶段都必须有 PASS 签收。"""
     if not project.gate_required or target_stage <= project.current_stage:
@@ -202,6 +300,10 @@ def ensure_advance_allowed(db: Session, project: Project, target_stage: int) -> 
             missing.append(
                 f"阶段{stage_no}结论为{CONCLUSION_LABELS.get(gate.conclusion, gate.conclusion)}"
             )
+        else:
+            reason = _comparison_gate_reason(db, project, gate)
+            if reason:
+                missing.append(f"阶段{stage_no}{reason}")
     if missing:
         raise MaturityError("门禁未通过，不能进入下一阶段：" + "；".join(missing))
 

@@ -1,8 +1,9 @@
 /* 视图：monitor */
-import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton } from '../core/format.js';
+import { esc, num, dtShort, _p2, SEV_COLOR, SEV_LABEL, EXC_COLOR, EXC_LABEL, KPI_DIM_ICON, bar, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, promptDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { workbenchHtml } from './shared/workbench.js';
+import { pageShell, sideCard } from '../core/layout.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage, role } from '../core/auth.js';
 import { cssVar } from '../core/theme.js';
@@ -758,12 +759,6 @@ const renderMonitor = () => {
       const exceptionList = state.cockpit.processId
         ? (d.exceptions || []).filter((row) => row.process_id === state.cockpit.processId)
         : (d.exceptions || []);
-      const excOpen = state.cockpit.processId
-        ? exceptionList.filter((row) => row.status === 'OPEN' || row.status === 'IN_PROGRESS').length
-        : s.open + s.in_progress;
-      const excOverdue = state.cockpit.processId
-        ? exceptionList.filter((row) => row.is_overdue).length
-        : s.overdue;
       const excRows = exceptionList.map((e) => {
         const canEdit = canManage()
           || (role() === 'OWNER' && AUTH.user && e.owner_user_id === AUTH.user.id);
@@ -1226,36 +1221,49 @@ const renderMonitor = () => {
           </table>
         </div>`;
 
-      const headMain = tab === 'analysis'
-        ? `<div><h2>流程分析<span class="module-badge">现状 · 瓶颈 · 根因 · 价值流 · 规则 · 基线</span></h2>
-            <div class="desc">左边点一项，中间只看这一项。右边是这条流程的实例和测算。</div></div>`
-        : tab === 'kpi'
-          ? `<div><h2>KPI<span class="module-badge">当前值 · 目标 · 红黄绿</span></h2>
-              <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b></div></div>`
-          : tab === 'exceptions'
-            ? `<div><h2>异常<span class="module-badge">未闭环 · 超期</span></h2>
-                <div class="desc">未闭环 ${excOpen} 件 · 超期 ${excOverdue} 件</div></div>`
-            : tab === 'workload'
-              ? `<div><h2>工作量<span class="module-badge">标准需求 · 可用产能 · 负荷率</span></h2>
-                  <div class="desc">按流程或岗位看标准需求。岗位可用工时是整月的，一条流程只用其中一部分。</div></div>`
-              : `<div><h2>运营驾驶舱<span class="module-badge">KPI · 异常 · 工作量 · 过程挖掘</span></h2>
-              <div class="desc">${metricHelp('overall_achievement', '综合达成率')} <b>${num(d.radar.overall_achievement, 1)}%</b>
-                · 未闭环 ${s.open + s.in_progress} 件 · 超期 ${s.overdue} 件</div></div>`;
-      viewEl().innerHTML = `
-        <div class="card page-head">
-          <div class="between">
-            ${headMain}
-            ${cockpitProcessSelect(d.flowList)}
-          </div>
-          <div class="mt">${cockpitTabBar(tab)}</div>
-          ${toolMountHtml(d.tools, monitorToolHost(tab), state.cockpit.processId)}
-        </div>
-        ${tab === 'analysis' ? workbenchHtml(d.workbench,'ANALYSIS','monitor')+analysisHtml(d)
-          : tab === 'kpi' ? `${kpiSummary}${kpiPane}`
+      const tabLabel = {
+        kpi: 'KPI', exceptions: '异常', workload: '工作量',
+        analysis: '流程分析', mining: '过程挖掘',
+      }[tab] || tab;
+      const selectedProcess = state.cockpit.processId
+        ? (d.flowList || []).find((row) => row.id === state.cockpit.processId)
+        : null;
+      const monitorContent = tab === 'analysis'
+        ? workbenchHtml(d.workbench, 'ANALYSIS', 'monitor') + analysisHtml(d)
+        : tab === 'kpi' ? `${kpiSummary}${kpiPane}`
           : tab === 'exceptions' ? excPane
             : tab === 'workload' ? workloadPane
               : tab === 'mining' ? miningPane
-                : `${kpiSummary}${kpiPane}`}`;
+                : `${kpiSummary}${kpiPane}`;
+      const aside = `
+        ${sideCard('当前范围', `
+          <div class="kv"><span>流程</span><b>${esc(selectedProcess
+    ? selectedProcess.code + ' ' + selectedProcess.name : '全部流程')}</b></div>
+          <div class="kv"><span>页签</span><b>${esc(tabLabel)}</b></div>
+          <div class="kv"><span>综合达成率</span><b>${num(d.radar.overall_achievement, 1)}%</b></div>
+          <div class="kv"><span>未闭环异常</span><b>${s.open + s.in_progress}</b></div>
+          <div class="kv"><span>超期异常</span><b>${s.overdue}</b></div>`)}
+        ${sideCard('口径', '<div class="tiny muted">KPI、异常、工作量、过程挖掘各自独立；红黄绿只统计有正式来源的指标。</div>')}`;
+      const shell = pageShell({
+        title: '度量',
+        badge: '<span class="module-badge">KPI · 异常 · 工作量 · 过程挖掘</span>',
+        subtitle: '按流程看指标、异常、工作量与过程挖掘；页签切换不改变流程范围。',
+        tip: tipHelp(
+          'KPI/异常/工作量/过程挖掘各自独立口径；红黄绿只统计有正式来源的指标。',
+          '度量说明',
+        ),
+        actions: cockpitProcessSelect(d.flowList),
+        sections: [{
+          key: 'main',
+          html: `${cockpitTabBar(tab)}${toolMountHtml(
+            d.tools, monitorToolHost(tab), state.cockpit.processId,
+          )}${monitorContent}`,
+        }],
+        active: 'main',
+        mode: 'plain',
+        aside,
+      });
+      viewEl().innerHTML = shell.html;
 
       if (tab === 'kpi' || !['exceptions', 'workload', 'mining', 'analysis'].includes(tab)) {
         drawOverallTrend(trend, periods);
@@ -1837,9 +1845,13 @@ function newKpiModal(kpi = null) {
     </div>
     <div class="row2">
       <div class="field"><label>归属流程（L2–L4）</label>
-        <select id="nkProcess"><option value="">不关联</option></select></div>
+        <select id="nkProcess"><option value="">不关联</option>${
+          kpi?.process_id ? `<option value="${kpi.process_id}" selected>当前流程</option>` : ''
+        }</select></div>
       <div class="field"><label>绑定 L4 活动</label>
-        <select id="nkActivity"><option value="">不绑定</option></select></div>
+        <select id="nkActivity"><option value="">不绑定</option>${
+          kpi?.activity_id ? `<option value="${kpi.activity_id}" selected>当前活动</option>` : ''
+        }</select></div>
     </div>
     <div class="field"><label>责任人</label>
       <select id="nkOwner"><option value="">未指派</option></select>
@@ -1864,6 +1876,7 @@ function newKpiModal(kpi = null) {
       if(kpiForm!==context || !modalAlive(gen) || state.view!=='monitor' || state.cockpit.processId!==context.processId)return;
       const procSel = document.getElementById('nkProcess');
       if (procSel) {
+        procSel.querySelectorAll('option[value]:not([value=""])').forEach((o) => o.remove());
         rows.filter((r) => r.level >= 2).forEach((r) => {
           const o = document.createElement('option');
           o.value = String(r.id);
@@ -1874,6 +1887,7 @@ function newKpiModal(kpi = null) {
       }
       const actSel = document.getElementById('nkActivity');
       if (actSel) {
+        actSel.querySelectorAll('option[value]:not([value=""])').forEach((o) => o.remove());
         rows.filter((r) => r.level === 4).forEach((r) => {
           const o = document.createElement('option');
           o.value = String(r.id);

@@ -5,6 +5,7 @@
 import { esc, dtShort, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { role } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
@@ -61,7 +62,7 @@ const renderOrgs = () => {
     viewEl().innerHTML = `
       <div class="card page-head">
         <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span></h2>
-        <div class="desc">组织树、岗位、账号与治理角色供「开始使用」核对谁能改流程地图，
+        <div class="desc">组织树、岗位、账号与治理角色供「体系总览」核对谁能改流程地图，
           也是标准文件继承范围的来源。</div>
         <div class="note mt">仅系统管理员可维护。需要建组织或任命角色时，请管理员处理。</div>
       </div>`;
@@ -97,36 +98,37 @@ function paintShell() {
   const userCount = (state.adminUsers || []).length;
   const positionCount = (state.adminPositions || []).length;
   const roleCount = (state.adminRoles || []).length;
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div>
-          <h2>组织与人员<span class="module-badge">建体系底座 · 主数据</span>${tipHelp(
-            '开始使用数启用且有成员的治理角色，用来回答谁有权改流程地图。'
-            + '组织编码决定标准文件/模板的继承范围。'
-            + '系统角色管能不能改系统；治理角色管对流程/事项承担什么责任——两套不要混。'
-            + '先建试点相关组织与岗位，不用一次建全集团。')}</h2>
-          <div class="desc">给流程地图和标准文件继承一个可信来源；编码与启停先对，再谈账号。</div>
-        </div>
-        <div class="gap">
-          <span class="tag t-blu">治理角色 ${roleCount}</span>
-          <span class="tag t-blu">岗位 ${positionCount}</span>
-          <span class="tag t-gry">组织 ${orgCount}</span>
-          <span class="tag t-gry">人员 ${userCount}</span>
-        </div>
-      </div>
-      <div class="tabs" style="margin-bottom:0">
-        <button class="${a.tab === 'org' ? 'on' : ''}" data-act="orgs.tab" data-tab="org">
-          组织架构（${orgCount}）</button>
-        <button class="${a.tab === 'user' ? 'on' : ''}" data-act="orgs.tab" data-tab="user">
-          人员与角色（${userCount}）</button>
-        <button class="${a.tab === 'position' ? 'on' : ''}" data-act="orgs.tab" data-tab="position">
-          岗位（${positionCount}）</button>
-        <button class="${a.tab === 'governance' ? 'on' : ''}" data-act="orgs.tab"
-          data-tab="governance">治理角色（${roleCount}）</button>
-      </div>
-    </div>
-    <div id="adminBody"></div>`;
+  const tabs = `
+    <div class="tabs" style="margin-bottom:14px">
+      <button class="${a.tab === 'org' ? 'on' : ''}" data-act="orgs.tab" data-tab="org">
+        组织架构（${orgCount}）</button>
+      <button class="${a.tab === 'user' ? 'on' : ''}" data-act="orgs.tab" data-tab="user">
+        人员与角色（${userCount}）</button>
+      <button class="${a.tab === 'position' ? 'on' : ''}" data-act="orgs.tab" data-tab="position">
+        岗位（${positionCount}）</button>
+      <button class="${a.tab === 'governance' ? 'on' : ''}" data-act="orgs.tab"
+        data-tab="governance">治理角色（${roleCount}）</button>
+    </div>`;
+  const shell = pageShell({
+    title: '组织与人员',
+    badge: '<span class="module-badge">建体系底座 · 主数据</span>',
+    subtitle: '给流程地图和标准文件继承一个可信来源；编码与启停先对，再谈账号。',
+    tip: tipHelp(
+      '体系总览数启用且有成员的治理角色，用来回答谁有权改流程地图。'
+      + '组织编码决定标准文件/模板的继承范围。'
+      + '系统角色管能不能改系统；治理角色管对流程/事项承担什么责任——两套不要混。'
+      + '先建试点相关组织与岗位，不用一次建全集团。',
+      '组织说明',
+    ),
+    actions: `<span class="tag t-blu">治理角色 ${roleCount}</span>
+      <span class="tag t-blu">岗位 ${positionCount}</span>
+      <span class="tag t-gry">组织 ${orgCount}</span>
+      <span class="tag t-gry">人员 ${userCount}</span>`,
+    sections: [{ key: 'main', html: `${tabs}<div id="adminBody"></div>` }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
   if (a.tab === 'org') paintOrgTab();
   else if (a.tab === 'position') paintPositionTab();
   else if (a.tab === 'governance') paintGovernanceTab();

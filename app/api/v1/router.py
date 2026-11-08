@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_user
 from app.api.v1 import (
+    alignment,
+    asset_graph,
     auth,
     authorization,
     baselines,
@@ -63,6 +65,9 @@ protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(dashboard.router)
 protected.include_router(process_map.router)
 protected.include_router(process_card.router)
+protected.include_router(asset_graph.router)
+protected.include_router(asset_graph.package_router)
+protected.include_router(asset_graph.trace_router)
 protected.include_router(governance_evidence.router)
 protected.include_router(process_documents.router)
 protected.include_router(process_tasks.router)
@@ -90,6 +95,7 @@ protected.include_router(positions.router)
 protected.include_router(workload.router)
 protected.include_router(workforce.router)
 protected.include_router(strategy.router)
+protected.include_router(alignment.router)
 protected.include_router(raci.router)
 protected.include_router(replication.router)
 protected.include_router(authorization.router)

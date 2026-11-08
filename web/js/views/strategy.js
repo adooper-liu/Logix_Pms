@@ -5,9 +5,10 @@
  * 挂在上层的目标，下层流程卡按祖先继承能看见，不另建一条目标。
  */
 
-import { esc, num } from '../core/format.js';
+import { esc, num, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
@@ -180,31 +181,41 @@ const renderStrategy = () => {
       const treeHtml = renderObjectiveTree(
         d.objectives, d.processes, state.strategy.selectedId);
 
-      viewEl().innerHTML = `
-        <div class="card page-head">
-          <div class="between">
-            <div><h2>战略目标<span class="module-badge">目标 → 流程 → KPI</span></h2>
-              <div class="desc">左边先点目标，流程层级收在这条目标下面，默认只露出 L1。
-                挂到流程或 KPI 的链接不进入总览优先级，三个分数在地图节点上改。</div></div>
-            <div class="gap">
-              <button class="btn btn-g" data-act="strategy.goMap">去地图改优先级</button>
-              <select class="sel sel-sm" data-act="strategy.year">${yearOptions}</select>
-              ${canManage() ? '<button class="btn btn-p" data-act="strategy.new">+ 新建目标</button>' : ''}
+      const shell = pageShell({
+        title: '战略目标',
+        badge: '<span class="module-badge">目标 → 流程 → KPI</span>',
+        subtitle: '选一条目标，看它的指标、承接流程和下一步行动。',
+        tip: tipHelp(
+          '左边先点目标，流程层级收在这条目标下面，默认只露出 L1。'
+          + '挂到流程或 KPI 的链接不进入总览优先级，三个分数在地图节点上改。',
+          '本页说明',
+        ),
+        actions: `<button class="btn btn-g" data-act="strategy.goMap">去地图改优先级</button>
+          <select class="sel sel-sm" data-act="strategy.year">${yearOptions}</select>
+          ${canManage() ? '<button class="btn btn-p" data-act="strategy.new">+ 新建目标</button>' : ''}`,
+        sections: [{
+          key: 'main',
+          html: `<div class="so-shell">
+            <div class="so-side">
+              <div class="card">
+                <div class="so-count">${year} 年 · ${s.objective_count} 条目标 · 进行中 ${s.active_count}
+                  · 未承接 ${s.unlinked_count}</div>
+                <div class="so-tree">${treeHtml}</div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div class="so-shell">
-          <div class="so-side">
-            <div class="card">
-              <div class="so-count">${year} 年 · ${s.objective_count} 条目标 · 进行中 ${s.active_count}
-                · 未承接 ${s.unlinked_count}</div>
-              <div class="so-tree">${treeHtml}</div>
+            <div class="so-main-col">
+              ${urlParams().lifecycle
+                ? '<div class="tiny muted">当前目标列表已按流程及祖先承接筛选；以下年度汇总仍为全公司范围。</div>'
+                : ''}
+              ${detailHtml(selected)}
             </div>
-          </div>
-          <div class="tiny muted">${urlParams().lifecycle ? '当前目标列表已按流程及祖先承接筛选；以下年度汇总仍为全公司范围。' : ''}</div>
-          ${detailHtml(selected)}
-          ${asideHtml(selected, d.tools, d.processes)}
-        </div>`;
+            ${asideHtml(selected, d.tools, d.processes)}
+          </div>`,
+        }],
+        active: 'main',
+        mode: 'plain',
+      });
+      viewEl().innerHTML = shell.html;
     },
   );
 };

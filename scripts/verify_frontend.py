@@ -36,8 +36,12 @@ if hasattr(sys.stdout, "reconfigure"):
 
 VIEWS = [
     ("dashboard", "运营驾驶舱"),
-    ("start", "开始使用"),
+    ("workbench", "工作台"),
+    ("alignment", "目标与承接"),
+    ("processes", "流程"),
+    ("start", "体系总览"),
     ("strategy", "战略目标"),
+    ("traceability", "追溯矩阵"),
     ("map", "企业流程地图"),
     ("process_card", "流程卡"),
     ("authorization", "授权矩阵"),
@@ -46,6 +50,7 @@ VIEWS = [
     ("projects", "流程项目组合"),
     ("toolbox", "方法论工具箱"),
     ("designer", "流程设计器"),
+    ("asset", "流程资产"),
     ("monitor", "运营驾驶舱"),
     ("data", "数据治理"),
     ("execution", "流程执行"),
@@ -117,19 +122,24 @@ def main() -> int:
 
         skipped_keys: list[str] = []
 
-        # 侧栏按两件事分组，入口都露在外面。流程卡、五阶段、工具箱、交付物从页面里进入。
+        # 生产入口：工作台 → 流程框架 / 流程 / 项目
         def default_entry_and_nav() -> None:
-            assert page.inner_text("#pageTitle") == "开始使用", (
-                f"默认落地页应固定为「开始使用」，实际「{page.inner_text('#pageTitle')}」"
+            assert page.inner_text("#pageTitle") == "工作台", (
+                f"默认落地页应固定为「工作台」，实际「{page.inner_text('#pageTitle')}」"
             )
             groups = [text.strip() for text in page.locator(".nav .grp").all_inner_texts()]
-            assert groups == ["把公司流程体系立起来", "把一条流程建好", "系统学习"], groups
+            assert groups == ["生产主线", "运营与治理", "更多"], groups
             assert page.locator("#expertToggle").count() == 0
             assert page.locator('.nav a[data-view="map"]').is_visible()
+            assert page.locator('.nav a[data-view="alignment"]').is_visible()
+            assert page.locator('.nav a[data-view="processes"]').is_visible()
+            assert page.locator('.nav a[data-view="projects"]').is_visible()
+            assert page.locator('.nav a[data-view="monitor"]').is_visible()
             assert page.locator('.nav a[data-view="execution"]').is_visible()
-            assert page.locator('.nav a[data-view="bpmn"]').is_visible()
-            assert page.locator('.nav a[data-view="pcf"]').is_visible()
-            assert page.locator('.nav a[data-view="cbok"]').is_visible()
+            assert page.locator('.nav a[data-view="authorization"]').is_visible()
+            assert page.locator('.nav a[data-view="bpmn"]').count() == 0
+            assert page.locator('.nav a[data-view="pcf"]').count() == 0
+            assert page.locator('.nav a[data-view="cbok"]').count() == 0
             assert page.locator('.nav a[data-view="workflow"]').count() == 0
 
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
@@ -2468,7 +2478,7 @@ def main() -> int:
         def direct_view_url() -> None:
             page.goto(base + "/start", wait_until="networkidle")
             page.wait_for_timeout(1200)
-            assert page.inner_text("#pageTitle") == "开始使用", (
+            assert page.inner_text("#pageTitle") == "体系总览", (
                 f"直接打开 /start 未进入启动页：{page.inner_text('#pageTitle')}"
             )
             page.goto(base + "/orgs", wait_until="networkidle")
@@ -2509,7 +2519,7 @@ def main() -> int:
             assert page.locator(".side").bounding_box()["width"] < 80
             assert not page.locator(".nav .grp").first.is_visible()
             assert not page.locator(".nav a .lbl").first.is_visible()
-            assert page.get_attribute('.nav a[data-view="map"]', "title") == "企业流程地图", (
+            assert page.get_attribute('.nav a[data-view="map"]', "title") == "流程框架", (
                 "折叠后缺少导航提示"
             )
 
@@ -2600,25 +2610,27 @@ def main() -> int:
             goto("start")
             page.wait_for_timeout(900)
             view = page.inner_text("#view")
-            assert "开始使用" in view and "唯一主入口" in view, "启动向导未渲染"
-            assert page.locator("#view .tl-step").count() == 0, "开始页不应再铺阶段时间轴"
-            assert page.locator("#view .start-nav-item").count() == 0, "开始页不应再有阶段导航"
-            assert "流程框架边界" in view, "开始页应回答框架边界"
+            assert "体系总览" in view and "企业管理体系" in view, "体系总览未渲染"
+            assert page.locator("#view .fw-layer").count() == 5, "体系总览应有五层框架"
+            assert "客户价值 → 下一轮改善" in view
+            assert "治理与支持贯穿始终" in view
+            assert page.locator("#view .fw-layer .fw-actions button").count() >= 10, (
+                "体系总览每层缺少入口按钮"
+            )
+            assert page.locator('#view button[data-view="map"]').count() >= 1
+            assert page.locator('#view button[data-view="asset"]').count() >= 1
+            assert page.locator('#view button[data-view="execution"]').count() >= 1
+            assert page.locator("#view .tl-step").count() == 0, "体系总览不应再铺阶段时间轴"
+            assert page.locator("#view .start-nav-item").count() == 0, "体系总览不应再有阶段导航"
+            assert "按任务导航" in view, "八阶段应作为折叠的辅助入口"
             assert "九个阶段" not in view and "前 8 个阶段" not in view
             assert "Q1 要什么" not in view and "地图层" not in view
             assert "确认首次上线" not in view
-            tip = page.locator("#view .page-head .metric-help.has-tip")
-            assert tip.count() == 1, "开始页没有把计数口径收进说明"
-            tip_text = tip.first.get_attribute("data-tip") or ""
-            assert "流程地图" in tip_text and "L1、L2" in tip_text and "治理角色" in tip_text, (
-                tip_text
-            )
-            assert page.locator("#view .start-current").count() == 1, "开始页应展开框架边界"
+            assert page.locator("#view .start-current").count() == 1, "体系总览应展开当前证据"
             assert "这一步要留下什么" in view
             jumps = page.locator("#view .start-current button.ev-jump")
             assert jumps.count() >= 1, "证据计数不能打开记录"
             assert jumps.first.get_attribute("data-view"), "证据计数没有落点页面"
-            assert page.locator('#view button:has-text("1+3+10 建架构")').count() == 1
 
         def process_card_view() -> None:
             goto("process_card")
@@ -2694,7 +2706,7 @@ def main() -> int:
 
             page.click('#originBar button[data-act="shell.mainline"]')
             page.wait_for_timeout(1200)
-            assert page.inner_text("#pageTitle") == "开始使用", "主线按钮没有回到唯一主入口"
+            assert page.inner_text("#pageTitle") == "工作台", "主线按钮没有回到工作台"
             assert not page.is_visible("#originBack")
 
         def select_click_stable() -> None:
@@ -3167,7 +3179,7 @@ def main() -> int:
         check("主导航折叠", main_nav_collapse)
         check("驾驶舱入口", dashboard_entries)
         check("战略目标承接", strategy_view)
-        check("开始使用框架边界", start_view)
+        check("体系总览框架边界", start_view)
         check("流程卡聚合视图", process_card_view)
         check("返回来源与固定主线", navigation_origin_and_mainline)
         check("下拉选择稳定", select_click_stable)

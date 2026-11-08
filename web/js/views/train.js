@@ -4,8 +4,9 @@
  * 实证里的下一步来自 /train/coach，只读已有记录，不接外部语言模型。
  */
 
-import { esc } from '../core/format.js';
+import { esc, tipHelp } from '../core/format.js';
 import { viewEl, on, toast } from '../core/ui.js';
+import { pageShell } from '../core/layout.js';
 import { go, renderAsync, urlParams } from '../core/router.js';
 import { state } from '../core/state.js';
 import { GET } from '../core/api.js';
@@ -15,7 +16,7 @@ const DONE_KEY = 'psm_train_done';
 
 const EVIDENCE = {
   bpm: {
-    lead: '十层核对用来写清一条流程从哪开始、到哪结束。公司地图谁能改，在开始使用。',
+    lead: '十层核对用来写清一条流程从哪开始、到哪结束。公司地图谁能改，在体系总览。',
     view: 'pilot',
     button: '打开十层核对',
     gap: '讲义把生命周期写成八段。本系统在监控和变革之后还有治理：谁能改图、谁审批。地图层级是 L1 到 L4，活动在 L4。',
@@ -89,7 +90,7 @@ const EVIDENCE = {
     },
   },
   org: {
-    lead: '治理角色在组织与人员。谁能改公司地图，在开始使用。单条流程谁审批，在授权矩阵。',
+    lead: '治理角色在组织与人员。谁能改公司地图，在体系总览。单条流程谁审批，在授权矩阵。',
     view: 'orgs',
     button: '打开组织与人员',
     extra: { view: 'authorization', button: '打开授权矩阵' },
@@ -236,11 +237,14 @@ function paint(coach) {
   state.train.module = current.id;
   const done = readDone();
   const practice = current.practice || { steps: [] };
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <h2>BPM 实训<span class="module-badge">九讲讲义</span></h2>
-      <div class="desc">《BPM 业务流程管理专业实战教程》。参考 ABPMP BPM CBOK 4.0。正文按讲义展开，本系统的页面只在每讲末尾作实证。</div>
-    </div>
+  const shell = pageShell({
+    title: 'BPM 实训',
+    badge: '<span class="module-badge">九讲讲义</span>',
+    subtitle: '《BPM 业务流程管理专业实战教程》，参考 ABPMP BPM CBOK 4.0；系统页面只在每讲末尾作实证。',
+    tip: tipHelp('正文按讲义展开；本页不接外部语言模型。', '实训说明'),
+    sections: [{
+      key: 'main',
+      html: `
     <div class="study-layout">
       <div class="card study-list">${lessonButtons(done)}</div>
       <div class="card lecture-body">
@@ -279,7 +283,12 @@ function paint(coach) {
         </div>
         ${evidenceHtml(current, coach)}
       </div>
-    </div>`;
+    </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 }
 
 const renderTrain = () => {

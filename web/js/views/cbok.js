@@ -5,7 +5,8 @@
  * 流程架构对 APQC。不转载手册正文，也不写未核对的考试题量。
  */
 
-import { esc } from '../core/format.js';
+import { esc, tipHelp } from '../core/format.js';
+import { pageShell } from '../core/layout.js';
 import { viewEl, on } from '../core/ui.js';
 import { renderAsync, go, urlParams } from '../core/router.js';
 import { GET } from '../core/api.js';
@@ -19,7 +20,7 @@ const AREAS = [
     lane: 'process',
     title: '业务流程管理',
     body: '先说清这条流程是什么、从哪到哪、属于核心、支持还是管理。生命周期是公司体系的顺序，这一项把顺序用在一条流程上。',
-    here: '十层核对写这一条的起止和范围。公司地图和谁能改图，在开始使用。',
+    here: '十层核对写这一条的起止和范围。公司地图和谁能改图，在体系总览。',
     view: 'pilot',
     button: '打开十层核对',
   },
@@ -188,17 +189,24 @@ function paint(data, processes) {
     <button type="button" class="study-lesson${item.id === state.cbok.area ? ' on' : ''}"
       data-act="cbok.area" data-id="${item.id}">${esc(item.label)}${
         item.lane ? `<span class="tiny"> ${esc(LANE[item.lane])}</span>` : ''}</button>`).join('');
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <h2>CBOK 知识域<span class="module-badge">ABPMP 4.0 · 九项落在哪一页</span></h2>
-      <p class="desc">生命周期是长期流程的管理导航，不是阶段推进器。知识域 1 到 7 在「把一条流程建好」，8 和 9 留在公司体系。流程架构对 APQC。手册正文不转载。</p>
-      ${lifecycleHtml(data, processes)}
-      ${rail('cbok')}
-    </div>
-    <div class="study-layout">
-      <div class="card study-list">${list}</div>
-      <div class="card">${area ? areaPane(area) : readPane()}</div>
-    </div>`;
+  const shell = pageShell({
+    title: 'CBOK 知识域',
+    badge: '<span class="module-badge">ABPMP 4.0 · 九项落在哪一页</span>',
+    subtitle: '生命周期是长期流程的管理导航，不是阶段推进器；知识域 1–7 在「建好一条流程」，8–9 留在公司体系。',
+    tip: tipHelp('手册正文不转载；流程架构对 APQC。', 'CBOK 说明'),
+    sections: [{
+      key: 'main',
+      html: `${lifecycleHtml(data, processes)}
+        ${rail('cbok')}
+        <div class="study-layout">
+          <div class="card study-list">${list}</div>
+          <div class="card">${area ? areaPane(area) : readPane()}</div>
+        </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 }
 
 const renderCbok = () => renderAsync('cbok', () => Promise.all([loadLifecycle(urlParams()), GET('/process-map/flat')]), ([data, processes]) => paint(data, processes));

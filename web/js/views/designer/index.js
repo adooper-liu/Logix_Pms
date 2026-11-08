@@ -8,6 +8,7 @@
 import { esc, num, dur, tipHelp } from '../../core/format.js';
 import { toast, closeModal, openModal, viewEl, on } from '../../core/ui.js';
 import { state } from '../../core/state.js';
+import { pageShell } from '../../core/layout.js';
 import { renderAsync, go, RENDERERS, urlParams, setUrlState } from '../../core/router.js';
 import { AUTH, canWrite, canManage } from '../../core/auth.js';
 import { metricHelp } from '../../core/metrics.js';
@@ -267,8 +268,6 @@ function paintDesigner() {
           </div>
         </div>
       </div>
-      <div class="note" style="margin-top:8px">执行引擎只支持串行流程：调色板与「更改元素」菜单已隐藏
-        并行网关、子流程和边界事件。从外部导入包含这些构造的 BPMN 文件时，保存仍会被拒绝并给出提示。</div>
       ${versions.validationHtml(st.model)}
     </div>`;
 
@@ -384,53 +383,63 @@ function paintDesigner() {
       </div>
     </div>`;
 
-  viewEl().innerHTML = `
-    <div class="card page-head designer-head">
-      <div class="designer-head-row">
-        <div class="designer-head-left">
-          <h2>流程设计器<span class="module-badge">建模与测算</span>
-            · ${esc(model.process_name || '')}</h2>
-        </div>
-        <div class="designer-head-right">
-          <select class="sel sel-sm" data-act="designer.process"
-            title="切换当前流程">${opts}</select>
-          <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
-        </div>
-      </div>
-      ${toolMountHtml(st.tools, 'design', st.processId)}
-      ${stateStrip}
-      <div class="field"><label>执行目标</label><select data-act="designer.executionProvider" ${editable ? '' : 'disabled'}>
-        ${Object.entries(model.execution_provider_labels || {}).map(([key, label]) => `<option value="${esc(key)}" ${key === model.execution_provider ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-      </select><span class="tiny">切换后保存新工作版；Flowable沙箱仅支持已验证的串行/并行人工任务。</span></div>
-      <div class="designer-head-nav">
-        ${tabBar}
-        <div class="designer-head-actions" role="toolbar" aria-label="流程操作">
-          ${lifecycleHtml
-            ? `<div class="designer-act-group" data-group="lifecycle">${lifecycleHtml}</div>`
-            : ''}
-          <div class="designer-act-group" data-group="governance">
-            <button class="btn-sm btn-g" data-act="designer.versions">版本历史</button>
-            ${gateBlocksPublish
-              ? `<button class="btn-sm btn-g" data-act="designer.tab" data-tab="change"
-                  title="发布前须有已批准变更单">去批准变更</button>`
-              : ''}
-          </div>
-          <div class="designer-act-group" data-group="io">
-            <button class="btn-sm btn-g" data-act="designer.export">导出 BPMN</button>
-            ${editable
-              ? '<button class="btn-sm btn-g" data-act="designer.import">导入 BPMN</button>'
-              : ''}
-            ${tab === 'analysis'
-              ? '<button class="btn-sm btn-g" data-act="designer.reanalyze">重新测算</button>'
-              : ''}
-          </div>
-        </div>
-      </div>
-    </div>
-    ${workbenchHtml(st.workbench,urlParams().lifecycle==='design'?'DESIGN':(urlParams().lifecycle==='modeling'?'MODELING':(st.workKind || 'MODELING')),'designer')}
+  const content = `
+    ${workbenchHtml(st.workbench, urlParams().lifecycle === 'design' ? 'DESIGN'
+    : (urlParams().lifecycle === 'modeling' ? 'MODELING' : (st.workKind || 'MODELING')), 'designer')}
     ${tab === 'analysis' ? analysisPane
-      : tab === 'change' ? changePane
-        : tab === 'raci' ? raciPane : modelPane}`;
+    : tab === 'change' ? changePane
+      : tab === 'raci' ? raciPane : modelPane}`;
+  const shell = pageShell({
+    title: '流程设计器',
+    badge: '<span class="module-badge">建模与测算</span>',
+    subtitle: esc(model.process_name || ''),
+    tip: tipHelp(
+      '执行引擎只支持串行流程：调色板与「更改元素」菜单已隐藏并行网关、子流程和边界事件；'
+      + '外部导入包含这些构造的 BPMN 会被拒绝并提示。属性/校验在画布右侧抽屉，版本历史在弹窗。',
+      '设计器说明',
+    ),
+    actions: `<div class="gap" style="flex-wrap:wrap;justify-content:flex-end">
+      <select class="sel sel-sm" data-act="designer.process"
+        title="切换当前流程">${opts}</select>
+      <a class="link-btn link-btn-sm" data-act="designer.goExecution">去流程执行 →</a>
+      <button class="btn-sm btn-g" data-act="designer.versions">版本历史</button>
+      ${gateBlocksPublish
+        ? `<button class="btn-sm btn-g" data-act="designer.tab" data-tab="change"
+            title="发布前须有已批准变更单">去批准变更</button>` : ''}
+    </div>`,
+    sections: [{
+      key: 'main',
+      html: `
+        ${toolMountHtml(st.tools, 'design', st.processId)}
+        ${stateStrip}
+        <div class="field"><label>执行目标</label>
+          <select data-act="designer.executionProvider" ${editable ? '' : 'disabled'}>
+            ${Object.entries(model.execution_provider_labels || {}).map(([key, label]) => `<option value="${esc(key)}" ${key === model.execution_provider ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+          </select>
+          <span class="tiny">切换后保存新工作版；Flowable 沙箱仅支持已验证的串行/并行人工任务。</span></div>
+        <div class="designer-head-nav">
+          ${tabBar}
+          <div class="designer-head-actions" role="toolbar" aria-label="流程操作">
+            ${lifecycleHtml
+              ? `<div class="designer-act-group" data-group="lifecycle">${lifecycleHtml}</div>`
+              : ''}
+            <div class="designer-act-group" data-group="io">
+              <button class="btn-sm btn-g" data-act="designer.export">导出 BPMN</button>
+              ${editable
+                ? '<button class="btn-sm btn-g" data-act="designer.import">导入 BPMN</button>'
+                : ''}
+              ${tab === 'analysis'
+                ? '<button class="btn-sm btn-g" data-act="designer.reanalyze">重新测算</button>'
+                : ''}
+            </div>
+          </div>
+        </div>
+        ${content}`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
   if (tab !== 'analysis' && tab !== 'change' && tab !== 'raci') canvas.mount();
 }
 

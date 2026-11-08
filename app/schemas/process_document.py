@@ -24,6 +24,7 @@ class ProcessDocumentVersionOut(ORMModel):
     version_display: str
     status: str
     status_label: Optional[str] = None
+    source_kind: str = Field(default="UPLOAD", description="UPLOAD=人工上传；COMPILED=资产包生成")
     note: Optional[str] = None
     file_name: Optional[str] = None
     mime_type: Optional[str] = None

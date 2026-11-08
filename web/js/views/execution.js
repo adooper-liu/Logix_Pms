@@ -2,6 +2,7 @@
 import { esc, dtShort, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, promptDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell, sideCard } from '../core/layout.js';
 import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/router.js';
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
@@ -699,27 +700,31 @@ const renderExecution = () => {
 
     const startableCount = (d.processes || []).filter((p) => p.can_start).length;
     const startReady = startableCount > 0;
-    viewEl().innerHTML = `
-      <div class="card page-head exec-head">
-        <div class="exec-head-row">
-          <div class="exec-head-left">
-            <h2>流程执行<span class="module-badge">运行时</span>${
-              tipHelp(PATH_TIPS.page, '流程执行说明')}</h2>
-            ${tabs}
-          </div>
-          <div class="exec-head-right">
-            <button class="btn ${startReady ? 'btn-p' : 'btn-g'}" id="execStartBtn"
-              data-act="execution.startModal"${canWrite() ? '' : ' disabled'}
-              title="${startReady
-                ? '启动已发布流程的新实例'
-                : '没有可启动流程：请先在设计器发布到运行时'}">+ 启动流程</button>
-            <span class="tiny muted">${startReady
-              ? `${startableCount} 条可启动`
-              : '暂无可启动'}</span>
-          </div>
-        </div>
-      </div>
-      ${ex.tab === 'instances' ? instancePane : ex.tab === 'config' ? configPane : ex.tab === 'integrations' ? integrationsPane : taskPane}`;
+    const pane = ex.tab === 'instances' ? instancePane
+      : ex.tab === 'config' ? configPane
+        : ex.tab === 'integrations' ? integrationsPane
+          : taskPane;
+    const shell = pageShell({
+      title: '流程执行',
+      badge: '<span class="module-badge">运行时</span>',
+      subtitle: '待办、实例与运行配置；启动前确认流程已发布到运行时。',
+      tip: tipHelp(PATH_TIPS.page, '流程执行说明'),
+      actions: `<button class="btn ${startReady ? 'btn-p' : 'btn-g'}" id="execStartBtn"
+        data-act="execution.startModal"${canWrite() ? '' : ' disabled'}
+        title="${startReady
+    ? '启动已发布流程的新实例'
+    : '没有可启动流程：请先在设计器发布到运行时'}">+ 启动流程</button>
+        <span class="tiny muted">${startReady
+    ? `${startableCount} 条可启动` : '暂无可启动'}</span>`,
+      sections: [{ key: 'main', html: `${tabs}${pane}` }],
+      active: 'main',
+      mode: 'plain',
+      aside: sideCard('运行概览', `
+        <div class="kv"><span>待办任务</span><b>${mine.length}</b></div>
+        <div class="kv"><span>运行中实例</span><b>${running.length}</b></div>
+        <div class="kv"><span>可启动流程</span><b>${startableCount}</b></div>`),
+    });
+    viewEl().innerHTML = shell.html;
 
     if (params.focus === 'forms' && ex.tab === 'config') {
       const evidence = document.getElementById('execution-evidence');

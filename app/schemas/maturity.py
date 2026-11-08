@@ -57,6 +57,9 @@ class GateAttestationCreate(BaseModel):
     exit_criteria: Optional[str] = None
     evidence_url: str = Field(min_length=1, max_length=500)
     conclusion: GateConclusion
+    # 声明本次门禁依据改善对照时，必须引用已接收且达到样本/可比条件的对照。
+    claims_improvement: bool = False
+    comparison_receipt_id: Optional[int] = Field(default=None, ge=1)
     note: Optional[str] = None
 
 
@@ -64,6 +67,8 @@ class GateAttestationOut(ORMModel):
     purpose: str = "STAGE_GATE"
     round_id: Optional[int] = None
     evidence_snapshot: Optional[dict] = None
+    claims_improvement: bool = False
+    comparison_receipt_id: Optional[int] = None
     id: int
     project_id: int
     project_code: Optional[str] = None

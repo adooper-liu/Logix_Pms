@@ -10,13 +10,13 @@ export const state = {
   meta: { methodology: {}, status: {}, stage: {}, setupStage: {} },
   map: {
     code: null, name: null, path: [], improvementOnly: false,
-    pendingJump: null, navCollapsed: false,
+    pendingJump: null, navCollapsed: false, tab: 'architecture',
     frameworks: null, benchmarkFramework: '', benchmark: null, openCode: null,
     openGuidedPcf: false, guidedPcfExternal: '', guidedPcfFramework: '',
     guidedPcfActivities: true,
   },
   projects: { filter: { methodology: '', status: '', stage: '', projectType: '' },
-    keyword: '', openId: null, newProcess: null, newName: '', newObjective: null },
+    keyword: '', openId: null, tab: 'list', newProcess: null, newName: '', newObjective: null },
   workflow: { tab: 'workbench', projectId: null, stage: null, stepStage: 1 },
   /** 从步骤页进入工具箱时只显示该步骤的推荐工具；null 表示显示全部 */
   toolboxFilter: null,
@@ -49,6 +49,7 @@ export const state = {
     workloadProcess: '', workloadPosition: '', analysisTopic: 'path' },
   strategy: { year: new Date().getFullYear(), selectedId: null },
   dataGov: null,
+  dataGovTab: 'domains',
   processCard: { processId: null, activeModule: 'strategy' },
   /** 跨页面跳转来源栈：供「返回来源」按钮使用，侧栏切换时清空 */
   navTrail: [],
@@ -58,6 +59,7 @@ export const state = {
     eventOpen: false, runOpen: false, caseOpen: false, techOpen: false,
     runOptions: null, techKinds: null },
   execution: { tab: 'tasks', filter: 'mine', configStep: 'process' },
+  asset: { processId: null, package: null, preview: null },
   deliverables: {
     tab: 'project', projectId: null, templateTool: '', templateFormat: '',
     documentProcessId: null, documentCategory: '', documentOrgUnitId: null,
@@ -67,16 +69,21 @@ export const state = {
 };
 
 export const TITLES = {
-  map: '企业流程地图',
+  workbench: '工作台',
+  alignment: '目标与承接',
+  processes: '流程',
+  map: '流程框架',
   workflow: '五阶段标准工作流',
   projects: '流程项目组合',
   execution: '流程执行',
+  asset: '流程资产',
   toolbox: '方法论工具箱',
   designer: '流程设计器',
-  monitor: '运营驾驶舱',
+  monitor: '度量',
   strategy: '战略目标',
+  traceability: '追溯矩阵',
   data: '数据治理',
-  start: '开始使用',
+  start: '体系总览',
   pilot: '十层核对',
   process_card: '流程卡',
   authorization: '授权矩阵',

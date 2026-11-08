@@ -1,4 +1,4 @@
-/* 视图：开始使用
+/* 视图：体系总览
  *
  * 只回答公司流程地图的框架边界：哪些工作进这张图，上下级怎么挂，谁有权改图。
  * 某一条流程从哪开始、到哪结束，去十层核对。
@@ -17,6 +17,94 @@ const STATUS_TONE = {
   NOT_STARTED: 't-gry',
   SKIPPED: 't-pur',
 };
+
+/* 企业管理体系：流程是让目标可控的一种实践。
+ * 前五层是主链，治理与支持横切；首页图谱和侧栏都从这里派生。 */
+const FRAMEWORK_LAYERS = [
+  {
+    no: '01',
+    label: '价值与目标',
+    flow: '客户 / 市场价值 → 战略 → 目标 / KPI',
+    question: '客户要什么？公司要赢什么？目标由哪条流程承接？',
+    out: '产物：战略目标、KPI、目标—流程承接',
+    views: [['dashboard', '运营驾驶舱'], ['strategy', '战略目标'], ['orgs', '组织与人员']],
+  },
+  {
+    no: '02',
+    label: '流程架构',
+    flow: 'L1 价值链 → L2 类别 → L3 流程 → L4 活动',
+    question: '公司有哪些流程？边界、Owner、分类和层级是什么？',
+    out: '产物：流程地图、L1–L4、Owner、边界',
+    views: [['map', '企业流程地图'], ['pcf', '流程架构 / PCF'], ['sketches', '架构草图']],
+  },
+  {
+    no: '03',
+    label: '流程资产',
+    flow: '模型 → 资产包（编译）/ SOP / 表单 / 规则 / RACI / 控制点',
+    question: '这条流程的资产齐不齐？谁负责、依据什么、留下什么记录？',
+    out: '产物：模型版本、资产包、受控 SOP、表单与规则',
+    views: [
+      ['asset', '流程资产'], ['designer', '流程设计器'],
+      ['deliverables', '交付物与模板库'], ['pilot', '十层核对'],
+    ],
+  },
+  {
+    no: '04',
+    label: '作业与执行',
+    flow: 'L4–L5 活动 → 工作流 / 审批流 / 作业资源 → ERP / OA',
+    question: '资产能不能变成可执行的待办、审批与系统动作？',
+    out: '产物：运行配置、任务实例、系统集成',
+    views: [['execution', '流程执行']],
+  },
+  {
+    no: '05',
+    label: '度量与反馈',
+    flow: '周期 / 等待 / 质量 / 成本 / 体验 + 证据观测 → 下一轮改善',
+    question: '跑得怎么样？偏差在哪里？改善了多少？',
+    out: '产物：KPI、日志实测、前后对照、改善项目',
+    views: [['monitor', '流程分析'], ['projects', '流程项目组合'], ['workflow', '五阶段工作流']],
+  },
+];
+
+function frameworkMapHtml() {
+  const layers = FRAMEWORK_LAYERS.map((layer, index) => `
+    <div class="fw-layer">
+      <div class="fw-no">${layer.no}</div>
+      <div class="fw-main">
+        <div class="fw-hd"><b>${esc(layer.label)}</b>
+          <span class="fw-flow">${esc(layer.flow)}</span></div>
+        <div class="fw-q">${esc(layer.question)}</div>
+        <div class="fw-actions">${layer.views.map(([view, label]) => (
+          `<button class="btn btn-sm" data-act="start.go" data-view="${view}">${esc(label)}</button>`
+        )).join('')}</div>
+      </div>
+      <div class="fw-out">${esc(layer.out)}</div>
+    </div>
+    ${index < FRAMEWORK_LAYERS.length - 1 ? '<div class="fw-arrow">↓</div>' : ''}`).join('');
+  return `<div class="card fw-wrap">
+    <div class="fw-head">
+      <div>
+        <h3>企业管理体系</h3>
+        <p class="desc">流程不是目的，是让目标可控的一种实践。治理、证据和产物贯穿全过程。</p>
+      </div>
+      <span class="tag t-blu">客户价值 → 下一轮改善</span>
+    </div>
+    ${layers}
+    <div class="fw-loop">↺ 度量回到目标与资产
+      <button class="btn-sm" data-act="start.go" data-view="monitor">看流程分析</button>
+      <button class="btn-sm" data-act="start.go" data-view="projects">开改善项目</button>
+      <button class="btn-sm" data-act="start.go" data-view="asset">回流程资产</button>
+    </div>
+    <div class="fw-cross"><b>治理与支持贯穿始终</b>
+      <button class="btn-sm" data-act="start.go" data-view="authorization">授权矩阵</button>
+      <button class="btn-sm" data-act="start.go" data-view="toolbox">方法论工具箱</button>
+      <button class="btn-sm" data-act="start.go" data-view="data">数据治理</button>
+      <button class="btn-sm" data-act="start.go" data-view="cbok">CBOK</button>
+      <button class="btn-sm" data-act="start.go" data-view="train">BPM 实训</button>
+      <button class="btn-sm" data-act="start.go" data-view="bpmn">BPMN 符号</button>
+    </div>
+  </div>`;
+}
 
 /* -------------------------------------------------- 展示片段 */
 
@@ -154,16 +242,24 @@ function paint(data, lifecycle, processes) {
     <div class="card page-head">
       <div class="between">
         <div>
-          <h2>开始使用<span class="module-badge">唯一主入口 · 公司流程地图</span>${tipHelp(
-            '数的是全公司这张流程地图：至少一条 L3 同时有 L1、L2 上级并对上 PCF，'
-            + '并且至少一个治理角色启用且有成员。')}</h2>
+          <h2>体系总览<span class="module-badge">企业管理体系 · 从价值到反馈</span>${tipHelp(
+            '流程不是目的，是让目标可控的一种实践。先选你所在的一层：'
+            + '目标、架构、资产、执行、度量，或治理支持。')}</h2>
+          <p class="desc">首页图谱与侧栏按同一框架组织；每层都能进入对应页面办理。</p>
         </div>
         <span class="tag ${ready ? 't-grn' : 't-yel'}">${ready ? '最低框架条件已满足' : '最低框架条件待补充'}</span>
       </div>
     </div>
-    ${lifecycleHtml(lifecycle, processes)}
-    ${step ? currentCard(step) : ''}
-    ${pathRollupCard(data)}`;
+    ${frameworkMapHtml()}
+    <div class="grid mt2" style="grid-template-columns:1.4fr .8fr;gap:14px;align-items:start">
+      ${step ? currentCard(step) : ''}
+      ${pathRollupCard(data)}
+    </div>
+    <details class="start-fold mt2">
+      <summary><b>按任务导航 · BPM 八阶段</b>
+        <span class="tiny muted">辅助入口，不是状态机；主线仍是上面的企业管理体系</span></summary>
+      ${lifecycleHtml(lifecycle, processes)}
+    </details>`;
 }
 
 /* -------------------------------------------------- 交互 */

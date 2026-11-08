@@ -4,13 +4,19 @@
  * 保留期与跨法人可见性）。缺口由一致性扫描标记。
  */
 
-import { esc, emptyRow } from '../core/format.js';
+import { esc, emptyRow, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell, sideCard } from '../core/layout.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 
+on('data.tab', ({ tab }) => {
+  if (!tab) return;
+  state.dataGovTab = tab;
+  RENDERERS.data();
+});
 on('data.domainNew', () => domainModal());
 on('data.domainEdit', ({ id }) => domainModal(Number(id)));
 on('data.submitDomain', ({ id }) => submitDomain(id ? Number(id) : null));
@@ -71,43 +77,50 @@ const renderData = () => {
           </div>` : ''}</td>
         </tr>`).join('') || emptyRow(7, '还没有数据流');
 
-      viewEl().innerHTML = `
-        <div class="card page-head">
-          <div class="between">
-            <div><h2>数据治理<span class="module-badge">数据域 · 数据流</span></h2>
-              <div class="desc">最小口径：谁负责、从哪来、主键是什么、质量规则与保留期；
-                缺口由一致性扫描标记</div></div>
-            ${canManage() ? `<div class="gap">
-              <button class="btn btn-g" data-act="data.domainNew">+ 新建数据域</button>
-              <button class="btn btn-p" data-act="data.flowNew">+ 新建数据流</button>
-            </div>` : ''}
-          </div>
-        </div>
-        <div class="grid g4 stat-row">
-          <div class="kpi stat"><div class="num">${s.domains}</div><div class="lab">数据域</div></div>
-          <div class="kpi stat"><div class="num">${s.flows}</div><div class="lab">数据流</div></div>
-          <div class="kpi stat"><div class="num">${s.domains_without_owner}</div>
-            <div class="lab">无所有者数据域</div></div>
-          <div class="kpi stat"><div class="num">${s.flows_without_quality_rule}</div>
-            <div class="lab">缺质量规则数据流</div></div>
-        </div>
-        <div class="card">
-          <div class="between mb"><h3>数据域（${d.domains.length}）</h3></div>
-          <table class="tbl">
-            <thead><tr><th>数据域</th><th>类型</th><th>所有者 / 管家</th><th>数据流</th>
-              <th>状态</th><th></th></tr></thead>
-            <tbody>${domainRows}</tbody>
-          </table>
-        </div>
-        <div class="card">
-          <div class="between mb"><h3>数据流（${d.flows.length}）</h3>
-            <div class="tiny muted">来源 → 目标 · 频率 · 主键 · 质量规则</div></div>
-          <table class="tbl">
-            <thead><tr><th>数据流</th><th>数据域</th><th>来源 / 频率</th><th>主键</th>
-              <th>质量规则</th><th>关联流程</th><th></th></tr></thead>
-            <tbody>${flowRows}</tbody>
-          </table>
-        </div>`;
+      const shell = pageShell({
+        title: '数据治理',
+        badge: '<span class="module-badge">数据域 · 数据流</span>',
+        subtitle: '谁负责、从哪来、主键是什么、质量规则与保留期；缺口由一致性扫描标记。',
+        tip: tipHelp('最小口径：数据域先定所有者与管家，数据流再定来源、主键、频率与质量规则。', '数据治理说明'),
+        actions: canManage() ? `<button class="btn btn-g" data-act="data.domainNew">+ 新建数据域</button>
+          <button class="btn btn-p" data-act="data.flowNew">+ 新建数据流</button>` : '',
+        sections: [
+          {
+            key: 'domains',
+            label: '数据域',
+            count: d.domains.length,
+            html: `<div class="card">
+              <table class="tbl">
+                <thead><tr><th>数据域</th><th>类型</th><th>所有者 / 管家</th><th>数据流</th>
+                  <th>状态</th><th></th></tr></thead>
+                <tbody>${domainRows}</tbody>
+              </table>
+            </div>`,
+          },
+          {
+            key: 'flows',
+            label: '数据流',
+            count: d.flows.length,
+            html: `<div class="card">
+              <table class="tbl">
+                <thead><tr><th>数据流</th><th>数据域</th><th>来源 / 频率</th><th>主键</th>
+                  <th>质量规则</th><th>关联流程</th><th></th></tr></thead>
+                <tbody>${flowRows}</tbody>
+              </table>
+            </div>`,
+          },
+        ],
+        active: state.dataGovTab || 'domains',
+        tabAct: 'data.tab',
+        mode: 'tabs',
+        aside: sideCard('治理概览', `
+          <div class="kv"><span>数据域</span><b>${s.domains}</b></div>
+          <div class="kv"><span>数据流</span><b>${s.flows}</b></div>
+          <div class="kv"><span>无所有者数据域</span><b>${s.domains_without_owner}</b></div>
+          <div class="kv"><span>缺质量规则数据流</span><b>${s.flows_without_quality_rule}</b></div>`),
+      });
+      state.dataGovTab = shell.active;
+      viewEl().innerHTML = shell.html;
     },
   );
 };

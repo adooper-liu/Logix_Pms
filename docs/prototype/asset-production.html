@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流程资产生产系统 · UI 原型</title>
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f4f6fb; --panel:#ffffff; --panel-2:#fafbfe; --panel-3:#f5f7fc;
+  --line:#e8ecf4; --line-soft:#f1f4f9; --line-strong:#cbd5e1;
+  --text:#0f172a; --text-strong:#0b1220; --sub:#475569; --sub-2:#94a3b8;
+  --brand:#3b6ff6; --brand-strong:#2f5fe0; --brand-soft:#eaf0ff; --brand-softer:#f5f8ff;
+  --ok:#16a97c; --ok-soft:#e7f7f1; --warn:#f5a524; --warn-strong:#b47405; --warn-soft:#fef5e3;
+  --bad:#ef4d5a; --bad-soft:#fdedef; --purple:#8b5cf6; --purple-soft:#f1ebfe;
+  --nav-bg:#101a2e; --nav-text:#cbd5e1; --nav-sub:#64748b;
+  --radius:14px; --radius-sm:9px; --radius-pill:999px;
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 6px 20px rgba(15,23,42,.05);
+  --shadow-hover:0 10px 34px rgba(15,23,42,.12);
+  --font-sans:"PingFang SC","Microsoft YaHei","WenQuanYi Micro Hei",sans-serif;
+  --font-mono:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit}
+button{cursor:pointer}
+a{color:inherit;text-decoration:none}
+
+.app{display:flex;min-height:100vh}
+
+/* ---------- 侧栏 ---------- */
+.side{width:238px;flex:0 0 238px;background:linear-gradient(180deg,var(--nav-bg),#0d1524);
+  color:var(--nav-text);padding:16px 12px 18px;position:sticky;top:0;height:100vh;overflow:auto}
+.logo{display:flex;align-items:center;gap:10px;padding:6px 8px 18px;border-bottom:1px solid rgba(148,163,184,.12);margin-bottom:12px}
+.mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--brand),var(--purple));color:#fff;flex:0 0 34px}
+.mark svg{width:19px;height:19px}
+.brand b{display:block;font-size:13px;color:#f8fafc;letter-spacing:.2px}
+.brand span{display:block;font-size:9px;color:var(--nav-sub);letter-spacing:1.1px;margin-top:2px}
+.nav-grp{font-size:10px;letter-spacing:1.2px;color:var(--nav-sub);padding:14px 10px 6px}
+.nav a{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;
+  color:var(--nav-text);font-size:13px;margin-bottom:2px}
+.nav a:hover{background:rgba(148,163,184,.10)}
+.nav a.active{background:linear-gradient(90deg,rgba(59,111,246,.22),rgba(59,111,246,.04));
+  color:#fff;box-shadow:inset 3px 0 0 var(--brand)}
+.nav .ic{width:17px;text-align:center;color:#93a4bf;font-size:13px}
+.nav a.active .ic{color:#bfd0ff}
+.side-foot{position:sticky;bottom:0;margin-top:22px;padding:12px 10px 0;border-top:1px solid rgba(148,163,184,.12);
+  font-size:10px;line-height:1.6;color:var(--nav-sub)}
+
+/* ---------- 主区 ---------- */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{height:62px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 26px;position:sticky;top:0;z-index:20}
+.crumb{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--sub-2);min-width:0}
+.crumb b{color:var(--text);font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumb .sep{color:#cbd5e1}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--brand-soft);color:var(--brand-strong);
+  display:grid;place-items:center;font-size:11px;font-weight:700}
+.user{font-size:12px;color:var(--sub)}
+.view{padding:22px 28px 64px;max-width:1340px;width:100%;margin:0 auto}
+
+/* ---------- 通用 ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow)}
+.card-pad{padding:18px 20px}
+.card-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.card-hd h3{font-size:14px;font-weight:650;letter-spacing:.1px}
+.card-hd .sub{font-size:12px;color:var(--sub-2)}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:var(--radius-pill);
+  font-size:11.5px;white-space:nowrap;border:1px solid transparent}
+.t-ok{background:var(--ok-soft);color:#0e7a5a;border-color:#c9efe1}
+.t-warn{background:var(--warn-soft);color:var(--warn-strong);border-color:#fbe3b5}
+.t-bad{background:var(--bad-soft);color:#b42332;border-color:#f8cdd2}
+.t-info{background:var(--brand-soft);color:var(--brand-strong);border-color:#d6e2ff}
+.t-mute{background:var(--panel-3);color:var(--sub);border-color:var(--line)}
+.t-purple{background:var(--purple-soft);color:#6d3fd1;border-color:#e3d6ff}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line-strong);
+  background:#fff;color:var(--text);border-radius:9px;padding:8px 13px;font-size:13px;transition:.15s}
+.btn:hover{border-color:var(--brand);color:var(--brand-strong);box-shadow:var(--shadow)}
+.btn-p{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn-p:hover{background:var(--brand-strong);border-color:var(--brand-strong);color:#fff}
+.btn-warn{background:var(--warn);border-color:var(--warn);color:#3b2a06}
+.btn-warn:hover{background:#e99a1b;border-color:#e99a1b;color:#3b2a06}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:7px}
+.btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.btn:disabled:hover{border-color:var(--line-strong);color:var(--text)}
+.muted{color:var(--sub-2)}
+.tiny{font-size:11.5px}
+.mono{font-family:var(--font-mono);font-size:12px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mt{margin-top:12px}
+.mt2{margin-top:18px}
+.hr{height:1px;background:var(--line);margin:14px 0}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:1100px){.grid-3,.grid-4{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.grid-3,.grid-4{grid-template-columns:1fr}.side{display:none}.view{padding:16px}}
+
+/* ---------- 页头 ---------- */
+.page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px}
+.page-head h1{font-size:22px;font-weight:680;letter-spacing:.2px}
+.page-head .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
+.page-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.proto-banner{display:flex;align-items:center;gap:9px;background:var(--brand-softer);
+  border:1px solid var(--brand-line,#c7d2fe);border-radius:10px;padding:9px 12px;font-size:12px;color:var(--brand-strong);margin-bottom:14px}
+.proto-banner b{font-weight:650}
+
+/* ---------- 三问 ---------- */
+.three{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:1100px){.three{grid-template-columns:1fr}}
+.q-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.q-card .k{font-size:11px;letter-spacing:.8px;color:var(--sub-2);text-transform:uppercase}
+.q-card .v{font-size:15px;font-weight:650;margin-top:6px;line-height:1.45}
+.q-card .d{font-size:12px;color:var(--sub);margin-top:6px}
+.q-card.accent{border-color:#d6e2ff;background:linear-gradient(180deg,#f8fbff,#fff)}
+.q-card.warn{border-color:#fbe3b5;background:linear-gradient(180deg,#fffdf7,#fff)}
+
+/* ---------- 就绪度 ---------- */
+.ready{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:var(--panel-2)}
+.ready .k{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--sub)}
+.ready .v{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:-.3px}
+.ready .v small{font-size:12px;font-weight:500;color:var(--sub-2)}
+.ready.ok{border-color:#c9efe1;background:#f7fdfa}
+.ready.warn{border-color:#fbe3b5;background:#fffdf7}
+.ready.bad{border-color:#f8cdd2;background:#fff8f8}
+
+/* ---------- 资产清单 ---------- */
+.asset-list{display:flex;flex-direction:column;gap:0}
+.asset-line{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.asset-line:last-child{border-bottom:0}
+.dot{width:20px;height:20px;border-radius:50%;flex:0 0 20px;display:grid;place-items:center;font-size:11px;margin-top:1px}
+.dot.ok{background:var(--ok-soft);color:#0e7a5a}
+.dot.warn{background:var(--warn-soft);color:var(--warn-strong)}
+.dot.bad{background:var(--bad-soft);color:#b42332}
+.asset-line .name{font-size:13px;font-weight:600}
+.asset-line .desc{font-size:12px;color:var(--sub);margin-top:2px}
+.asset-line .right{margin-left:auto;text-align:right;flex:0 0 auto}
+.prov{display:inline-flex;align-items:center;gap:4px;border:1px dashed var(--line-strong);border-radius:6px;
+  padding:1px 6px;font-size:10.5px;color:var(--sub-2);background:#fff;white-space:nowrap}
+
+/* ---------- 阻断 ---------- */
+.blocker{display:flex;gap:11px;align-items:flex-start;background:#fff8f8;border:1px solid #f8cdd2;
+  border-radius:11px;padding:11px 13px}
+.blocker .ic{width:22px;height:22px;border-radius:50%;background:var(--bad-soft);color:#b42332;
+  display:grid;place-items:center;flex:0 0 22px;font-weight:700;font-size:12px}
+.blocker b{font-size:13px}
+.blocker .d{font-size:12px;color:var(--sub);margin-top:2px}
+
+/* ---------- Tabs ---------- */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:20px 0 16px;overflow:auto}
+.tab{padding:10px 14px;border:0;background:transparent;color:var(--sub);border-bottom:2px solid transparent;
+  font-size:13px;white-space:nowrap;border-radius:8px 8px 0 0}
+.tab:hover{background:var(--panel-3)}
+.tab.active{color:var(--brand-strong);border-bottom-color:var(--brand);font-weight:650}
+.tab .count{font-size:10.5px;color:var(--sub-2);margin-left:4px}
+.panel{display:none}
+.panel.active{display:block}
+
+/* ---------- SOP ---------- */
+.sop{font-size:13px;line-height:1.75}
+.sop h2{font-size:16px;margin:0 0 4px}
+.sop h3{font-size:13.5px;margin:18px 0 7px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+.sop p{margin:6px 0;color:var(--sub)}
+.sop table{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:12px}
+.sop th,.sop td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+.sop th{background:var(--panel-3);font-weight:600;color:var(--sub)}
+.sop .sec{position:relative;padding-top:2px}
+.sop .sec .prov{position:absolute;right:0;top:0}
+.sub-h{font-size:12px;letter-spacing:.4px;color:var(--sub);margin:18px 0 7px;font-weight:650;border-left:3px solid var(--brand);padding-left:8px}
+.doc-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--sub-2);
+  border-bottom:1px dashed var(--line);padding-bottom:10px;margin-bottom:12px}
+
+/* ---------- 表格 ---------- */
+.table{width:100%;border-collapse:collapse;font-size:12.5px}
+.table th,.table td{border-bottom:1px solid var(--line-soft);padding:9px 10px;text-align:left;vertical-align:top}
+.table th{font-size:11px;letter-spacing:.4px;color:var(--sub-2);font-weight:600;background:var(--panel-2)}
+.table tr:hover td{background:var(--panel-2)}
+.table .act{font-weight:600}
+.table .sub{font-size:11px;color:var(--sub-2);margin-top:2px}
+
+/* ---------- 证据 ---------- */
+.ev-card{border:1px solid var(--line);border-radius:11px;padding:12px 13px;background:var(--panel-2)}
+.ev-card .hd{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.ev-card .nm{font-size:13px;font-weight:600}
+.ev-card .meta{font-size:11.5px;color:var(--sub-2);margin-top:5px;line-height:1.6}
+.conflict{border:1px solid #fbe3b5;background:#fffdf7;border-radius:11px;padding:12px 13px}
+.conflict b{font-size:13px}
+.conflict .sides{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.side-box{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
+.side-box .k{font-size:10.5px;color:var(--sub-2)}
+
+/* ---------- 治理 ---------- */
+.timeline{display:flex;align-items:center;gap:0;margin:6px 0 16px}
+.tl{display:flex;align-items:center;gap:8px;flex:1}
+.tl .node{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:11px;flex:0 0 24px;
+  background:var(--panel-3);color:var(--sub-2);border:1px solid var(--line-strong)}
+.tl.done .node{background:var(--ok-soft);color:#0e7a5a;border-color:#c9efe1}
+.tl.now .node{background:var(--brand);color:#fff;border-color:var(--brand)}
+.tl .lbl{font-size:12px}
+.tl .lbl small{display:block;color:var(--sub-2);font-size:10.5px}
+.tl .bar{height:2px;background:var(--line);flex:1;margin:0 10px}
+
+/* ---------- 模态 ---------- */
+.mask{position:fixed;inset:0;background:rgba(15,23,42,.46);display:none;align-items:center;justify-content:center;
+  padding:20px;z-index:80}
+.mask.on{display:flex}
+.modal{background:#fff;border-radius:16px;width:min(760px,100%);max-height:90vh;overflow:auto;
+  box-shadow:0 24px 70px rgba(0,0,0,.35);animation:pop .16s ease-out}
+@keyframes pop{from{transform:translateY(8px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.modal-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line)}
+.modal-hd b{font-size:15px}
+.modal-x{border:0;background:transparent;font-size:18px;color:var(--sub-2);padding:2px 6px;border-radius:6px}
+.modal-x:hover{background:var(--panel-3);color:var(--text)}
+.modal-bd{padding:18px 20px}
+.modal-ft{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--line);background:var(--panel-2);border-radius:0 0 16px 16px}
+.option{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:11px;padding:13px 14px;margin-bottom:9px;cursor:pointer;transition:.15s}
+.option:hover{border-color:var(--brand);background:var(--brand-softer)}
+.option.sel{border-color:var(--brand);background:var(--brand-softer);box-shadow:var(--focus-ring,0 0 0 3px rgba(59,111,246,.10))}
+.option .num{width:24px;height:24px;border-radius:50%;background:var(--panel-3);color:var(--sub);display:grid;place-items:center;font-size:11px;flex:0 0 24px}
+.option b{font-size:13px}
+.option .d{font-size:12px;color:var(--sub);margin-top:3px}
+.field{margin:11px 0}
+.field label{display:block;font-size:12px;color:var(--sub);margin-bottom:5px}
+.field select,.field input{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font-size:13px;background:#fff}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,10px);background:#0f172a;color:#fff;
+  padding:10px 16px;border-radius:10px;font-size:12.5px;box-shadow:0 12px 40px rgba(0,0,0,.3);
+  opacity:0;pointer-events:none;transition:.2s;z-index:100}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:7px 12px;font-size:12.5px}
+.kv dt{color:var(--sub-2)}
+.kv dd{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 侧栏 -->
+  <aside class="side">
+    <div class="logo">
+      <span class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+      </span>
+      <div class="brand"><b>流程资产 PMS</b><span>PROCESS ASSET SYSTEM</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-grp">生产</div>
+      <a class="active"><span class="ic">◧</span><span>资产工作台</span></a>
+      <a><span class="ic">▤</span><span>资产包</span></a>
+      <a><span class="ic">⌗</span><span>架构关系</span><span class="tag t-warn" style="margin-left:auto;font-size:10px">专家</span></a>
+      <a><span class="ic">◉</span><span>证据账本</span><span class="tag t-warn" style="margin-left:auto;font-size:10px">专家</span></a>
+      <div class="nav-grp">治理</div>
+      <a><span class="ic">⚖</span><span>版本与审批</span></a>
+      <a><span class="ic">↻</span><span>变更影响</span></a>
+      <div class="nav-grp">入口</div>
+      <a onclick="openEntry()"><span class="ic">＋</span><span>新建流程</span></a>
+    </nav>
+    <div class="side-foot">UI 原型 · 演示数据<br>默认只回答三个问题：能产出什么、缺什么、下一步。</div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb">
+        <span>流程资产</span><span class="sep">/</span>
+        <span>L3-032</span><span class="sep">/</span>
+        <b>订单评审与交付</b>
+      </div>
+      <div class="top-right">
+        <span class="tag t-purple">原型 · 演示数据</span>
+        <span class="user">周经理</span>
+        <div class="avatar">周</div>
+      </div>
+    </div>
+
+    <div class="view">
+      <div class="proto-banner">
+        <b>这不是最终界面。</b> 本原型验证一件事：默认首屏能否只回答「能产出什么 / 缺什么 / 下一步」，并把证据与溯源收进专家页签。
+      </div>
+
+      <!-- 页头 -->
+      <div class="page-head">
+        <div>
+          <h1>订单评审与交付</h1>
+          <div class="meta">
+            <span class="tag t-info">L3</span>
+            <span class="tag t-mute">销售运营</span>
+            <span class="tag t-mute">Owner 周经理</span>
+            <span class="tag t-ok">To-Be v3 · 已发布</span>
+            <span class="tag t-warn">证据覆盖 62%</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="switchTab('activity')">查看架构关系</button>
+          <button class="btn btn-p" id="newBtn" onclick="openEntry()">＋ 新建流程</button>
+        </div>
+      </div>
+
+      <!-- 三问 -->
+      <div class="three">
+        <div class="q-card accent">
+          <div class="k">能产出什么</div>
+          <div class="v">活动级资产包 R0</div>
+          <div class="d">SOP 5 章 · 8 个活动 · RACI 8 行 · 控制点 5 个 · 表单引用 7 个</div>
+        </div>
+        <div class="q-card warn">
+          <div class="k">还缺什么</div>
+          <div class="v" id="missingTitle">1 项待补</div>
+          <div class="d" id="missingDesc">A-07 异常订单审批缺少表单载体；有 1 个证据冲突未裁决。</div>
+        </div>
+        <div class="q-card">
+          <div class="k">下一步做什么</div>
+          <div class="v" id="nextTitle">补上 A-07 的表单载体</div>
+          <div class="d" id="nextDesc">补完后生成 R0 草稿；草稿可评审，但冲突未裁决前不可生效。</div>
+        </div>
+      </div>
+
+      <!-- 就绪度 -->
+      <div class="card card-pad" style="margin-bottom:14px">
+        <div class="card-hd">
+          <h3>生成就绪度</h3>
+          <span class="sub">只显示影响生成的 4 项；其余检查在生成时逐条跑</span>
+        </div>
+        <div class="grid-4">
+          <div class="ready ok"><div class="k"><span>架构关系</span><span class="tag t-ok">齐</span></div><div class="v">8<small>/8</small></div></div>
+          <div class="ready ok"><div class="k"><span>责任角色</span><span class="tag t-ok">齐</span></div><div class="v">8<small>/8</small></div></div>
+          <div class="ready warn" id="readyForm"><div class="k"><span>表单 / 记录载体</span><span class="tag t-warn" id="formTag">缺 1</span></div><div class="v" id="formCount">7<small>/8</small></div></div>
+          <div class="ready ok"><div class="k"><span>控制点</span><span class="tag t-ok">齐</span></div><div class="v">5<small>/5</small></div></div>
+        </div>
+      </div>
+
+      <!-- 主内容 -->
+      <div class="grid-3" style="align-items:start">
+        <div class="card card-pad" style="grid-column:span 2">
+          <div class="card-hd">
+            <h3>将生成的资产</h3>
+            <span class="sub">每一项都带来源；不是模型的打印版</span>
+          </div>
+          <div class="asset-list">
+            <div class="asset-line">
+              <span class="dot ok">✓</span>
+              <div><div class="name">SOP 正文 · 5 章</div><div class="desc">范围、活动与责任、控制点、表单与记录、异常与升级</div></div>
+              <div class="right"><span class="prov">模型 v3 · 8 节点</span></div>
+            </div>
+            <div class="asset-line">
+              <span class="dot ok">✓</span>
+              <div><div class="name">活动责任表（RACI）</div><div class="desc">8 个活动 × 责任角色；引用既有分派，不复制</div></div>
+              <div class="right"><span class="prov">RACI 4 行 · 分派 8 条</span></div>
+            </div>
+            <div class="asset-line">
+              <span class="dot ok">✓</span>
+              <div><div class="name">控制点清单</div><div class="desc">5 个控制点：信用、价格、交期、异常、放行</div></div>
+              <div class="right"><span class="prov">规则 v2 · 5 条</span></div>
+            </div>
+            <div class="asset-line" id="formAssetLine">
+              <span class="dot warn" id="formAssetDot">!</span>
+              <div><div class="name">表单与记录引用</div><div class="desc" id="formAssetDesc">7 个活动已有载体；A-07 异常订单审批缺表单</div></div>
+              <div class="right"><span class="tag t-warn" id="formAssetBadge">待补 1</span></div>
+            </div>
+            <div class="asset-line">
+              <span class="dot ok">✓</span>
+              <div><div class="name">KPI 挂点</div><div class="desc">订单交付周期、一次通过率；只挂口径，不在此算结果</div></div>
+              <div class="right"><span class="prov">KPI 2 项</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-hd"><h3>阻断与裁决</h3><span class="tag t-warn" id="blockerTag">1 项</span></div>
+          <div class="blocker" id="blockerCard">
+            <span class="ic" id="blockerIc">!</span>
+            <div style="flex:1" id="blockerBody">
+              <b>A-07 异常订单审批缺少表单载体</b>
+              <div class="d">草稿可生成；提交评审前必须补上。</div>
+              <button class="btn btn-sm mt" onclick="openFix()">补上表单载体</button>
+            </div>
+          </div>
+          <div class="hr"></div>
+          <div class="tiny muted">证据冲突（审批层级：制度 2 / 观测 1.4）不阻断草稿，但阻断「生效」。<button class="btn-sm btn" style="margin-left:6px" onclick="switchTab('evidence')">去裁决</button></div>
+        </div>
+      </div>
+
+      <!-- 主按钮 -->
+      <div class="card card-pad mt2" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:650" id="ctaTitle">生成 R0 草稿（1 项待补）</div>
+          <div class="tiny muted" id="ctaDesc">生成后可预览、导出 HTML；提交评审前系统会重新跑全部阻断规则。</div>
+        </div>
+        <button class="btn btn-warn" id="generateBtn" onclick="generate()">生成 R0 草稿</button>
+        <button class="btn" onclick="openPreview()">查看预览</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="workbench" onclick="switchTab('workbench')">工作台</button>
+        <button class="tab" data-tab="package" onclick="switchTab('package')">资产包 <span class="count">R0</span></button>
+        <button class="tab" data-tab="activity" onclick="switchTab('activity')">架构关系 <span class="count">15</span></button>
+        <button class="tab" data-tab="evidence" onclick="switchTab('evidence')">证据 <span class="count">4</span></button>
+        <button class="tab" data-tab="governance" onclick="switchTab('governance')">治理</button>
+      </div>
+
+      <!-- 工作台 -->
+      <div class="panel active" id="panel-workbench">
+        <div class="card card-pad">
+          <div class="card-hd"><h3>这条流程的资产状态</h3><span class="sub">演示：L3-032 / To-Be v3</span></div>
+          <table class="table">
+            <thead><tr><th>对象</th><th>当前状态</th><th>说明</th><th>下一步</th></tr></thead>
+            <tbody>
+              <tr><td class="act">流程架构</td><td><span class="tag t-ok">已纳入</span></td><td>L3-032 挂在 L2-005 下，Owner 已设</td><td class="muted">无</td></tr>
+              <tr><td class="act">To-Be 模型</td><td><span class="tag t-ok">v3 已发布</span></td><td>8 个活动节点，2 个网关</td><td class="muted">无</td></tr>
+              <tr><td class="act">架构关系</td><td><span class="tag t-ok">8/8</span></td><td>节点↔活动、层级、交接已完成；1 个未建模活动已登记</td><td><button class="btn btn-sm" onclick="switchTab('activity')">查看</button></td></tr>
+              <tr><td class="act">责任与载体</td><td><span class="tag t-warn">7/8</span></td><td>A-07 缺表单载体</td><td><button class="btn btn-sm" onclick="openFix()">补上</button></td></tr>
+              <tr><td class="act">证据</td><td><span class="tag t-warn">62%</span></td><td>1 个冲突未裁决；日志未接入</td><td><button class="btn btn-sm" onclick="switchTab('evidence')">查看</button></td></tr>
+              <tr><td class="act">资产包</td><td><span class="tag t-mute">未生成</span></td><td>生成后进入 R0 草稿</td><td><button class="btn btn-sm" onclick="generate()">生成</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 资产包 -->
+      <div class="panel" id="panel-package">
+        <div class="card card-pad">
+          <div class="card-hd">
+            <h3>资产包 R0 · 草稿</h3>
+            <div class="row">
+              <span class="tag t-warn" id="pkgStatus">1 项待补 · 不可提交评审</span>
+              <button class="btn btn-sm" onclick="openPreview()">导出预览</button>
+            </div>
+          </div>
+          <div class="sop">
+            <div class="doc-meta">
+              <span>文件：SOP-L3-032-订单评审与交付</span>
+              <span>来源模型：To-Be v3（PUBLISHED）</span>
+              <span>生成规则：asset-compile v1</span>
+              <span>内容 hash：8f3a…c21d</span>
+            </div>
+            <h2>订单评审与交付 · 作业标准</h2>
+            <p>本文件由已发布流程模型确定性生成；责任、载体、控制点均引用原对象，不复制第二套口径。</p>
+
+            <div class="sec"><span class="prov">来源：模型 v3 · n1–n2</span>
+              <h3>1. 范围与边界</h3>
+              <p>从客户订单接收开始，到订单关闭结束。覆盖信用检查、技术评审、价格审批、交期确认与异常处理。</p>
+            </div>
+
+            <div class="sec"><span class="prov">来源：L4-201…205 · 节点 n1–n6</span>
+              <h3>2. 活动与责任</h3>
+              <table>
+                <thead><tr><th>活动</th><th>责任角色</th><th>作业 / 等待</th><th>表单 / 记录</th></tr></thead>
+                <tbody>
+                  <tr><td>A-01 接收订单</td><td>销售运营</td><td>20 / 30 分钟</td><td>F-ORD-01 v2</td></tr>
+                  <tr><td>A-02 信用检查</td><td>信用管理</td><td>15 / 120 分钟</td><td>F-CRD-02 v1</td></tr>
+                  <tr><td>A-03 技术评审</td><td>工艺技术</td><td>45 / 240 分钟</td><td>F-TEC-03 v3</td></tr>
+                  <tr><td>A-04 价格审批</td><td>销售总监</td><td>10 / 180 分钟</td><td>F-PRC-04 v2</td></tr>
+                  <tr><td>A-05 交期确认</td><td>计划员</td><td>30 / 360 分钟</td><td>F-PLN-05 v1</td></tr>
+                  <tr><td>A-06 计划回退与修改</td><td>计划员</td><td>25 / 90 分钟</td><td>F-PLN-06 v1</td></tr>
+                  <tr style="background:#fffdf7"><td>A-07 异常订单审批</td><td>销售运营</td><td>20 / 60 分钟</td><td id="a07CarrierCell"><span class="tag t-warn">待补</span></td></tr>
+                  <tr><td>A-08 订单关闭</td><td>销售运营</td><td>5 / 0 分钟</td><td>F-ORD-08 v1</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="sec"><span class="prov">来源：规则 v2 · 5 条</span>
+              <h3>3. 控制点</h3>
+              <table>
+                <thead><tr><th>控制点</th><th>触发</th><th>控制方式</th><th>证据</th></tr></thead>
+                <tbody>
+                  <tr><td>信用额度</td><td>A-02</td><td>超限拦截，转人工</td><td>信用系统回执</td></tr>
+                  <tr><td>价格底线</td><td>A-04</td><td>低于底价升级</td><td>审批记录</td></tr>
+                  <tr><td>交期能力</td><td>A-05</td><td>超出产能预警</td><td>排程快照</td></tr>
+                  <tr><td>异常放行</td><td>A-07</td><td>双人复核</td><td>异常单</td></tr>
+                  <tr><td>订单关闭</td><td>A-08</td><td>交付确认后关闭</td><td>客户签收</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="sec"><span class="prov">来源：FormDefinition · NodeAssignment</span>
+              <h3>4. 表单与记录</h3>
+              <p>每个活动至少一个载体；A-07 当前缺失，已在阻断清单中列出，不以空白代替。</p>
+            </div>
+
+            <div class="sec"><span class="prov">来源：模型异常路径 · 证据账本</span>
+              <h3>5. 异常与升级</h3>
+              <p>信用超限、价格越权、交期不可满足进入异常路径；A-07 由销售运营发起，销售总监与信用管理双人复核。证据冲突未裁决前，本章保留两种口径，不合并。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 架构关系 -->
+      <div class="panel" id="panel-activity">
+        <div class="card card-pad">
+          <div class="card-hd"><h3>架构关系 · ArchiMate-lite</h3><span class="sub">只实现 8 种关系；新增关系走变更评审</span></div>
+          <div class="grid-4" style="margin-bottom:6px">
+            <div class="ready ok"><div class="k"><span>节点 ↔ 活动</span><span class="tag t-ok">齐</span></div><div class="v">8<small>/8</small></div></div>
+            <div class="ready ok"><div class="k"><span>活动层级</span><span class="tag t-ok">齐</span></div><div class="v">8<small>/8</small></div></div>
+            <div class="ready ok"><div class="k"><span>连线交接</span><span class="tag t-ok">齐</span></div><div class="v">3<small>/3</small></div></div>
+            <div class="ready warn"><div class="k"><span>未建模活动</span><span class="tag t-warn">待确认</span></div><div class="v">1<small> 条</small></div></div>
+          </div>
+
+          <div class="sub-h">1. 节点 ↔ 活动 · REALIZES / PART_OF / CONTROLS</div>
+          <table class="table">
+            <thead><tr><th>活动</th><th>节点</th><th>关系</th><th>路径</th><th>覆盖</th><th>模型</th><th>确认人</th></tr></thead>
+            <tbody>
+              <tr><td class="act">L4-201 接收订单</td><td class="mono">n1</td><td><span class="tag t-info">REALIZES</span></td><td>标准</td><td>100%</td><td>v3</td><td>周经理</td></tr>
+              <tr><td class="act">L4-202 信用检查</td><td class="mono">n2</td><td><span class="tag t-info">REALIZES</span></td><td>标准</td><td>100%</td><td>v3</td><td>周经理</td></tr>
+              <tr><td class="act">L4-202 信用检查</td><td class="mono">g1</td><td><span class="tag t-purple">CONTROLS</span></td><td>标准</td><td>100%</td><td>v3</td><td>信用管理</td></tr>
+              <tr><td class="act">L4-203 技术评审</td><td class="mono">n3a</td><td><span class="tag t-info">PART_OF</span></td><td>标准</td><td>100%</td><td>v3</td><td>工艺技术</td></tr>
+              <tr><td class="act">L4-203 技术评审</td><td class="mono">n3b</td><td><span class="tag t-info">PART_OF</span></td><td>标准</td><td>100%</td><td>v3</td><td>工艺技术</td></tr>
+              <tr><td class="act">L4-204 价格审批</td><td class="mono">n4</td><td><span class="tag t-info">REALIZES</span></td><td>标准</td><td>100%</td><td>v3</td><td>销售总监</td></tr>
+              <tr><td class="act">L4-205 交期确认</td><td class="mono">n5</td><td><span class="tag t-info">REALIZES</span></td><td>标准</td><td>100%</td><td>v3</td><td>计划员</td></tr>
+              <tr><td class="act">A-06 计划回退与修改</td><td class="mono">n6</td><td><span class="tag t-info">REALIZES</span></td><td><span class="tag t-warn">异常</span></td><td>100%</td><td>v3</td><td>计划员</td></tr>
+              <tr style="background:#fffdf7"><td class="act">A-07 异常订单审批</td><td class="mono">n7</td><td><span class="tag t-info">REALIZES</span></td><td><span class="tag t-warn">异常</span></td><td>100%</td><td>v3</td><td>销售运营</td></tr>
+              <tr><td class="act">A-08 订单关闭</td><td class="mono">n8</td><td><span class="tag t-info">REALIZES</span></td><td>标准</td><td>100%</td><td>v3</td><td>销售运营</td></tr>
+            </tbody>
+          </table>
+
+          <div class="sub-h">2. 活动层级 · DECOMPOSES / PART_OF</div>
+          <table class="table">
+            <thead><tr><th>父活动</th><th>子活动</th><th>关系</th><th>模型</th><th>确认人</th></tr></thead>
+            <tbody>
+              <tr><td class="act">L3-032 订单评审与交付</td><td>L4-201…L4-205</td><td><span class="tag t-purple">DECOMPOSES</span></td><td>v3</td><td>周经理</td></tr>
+              <tr><td class="act">L3-032 订单评审与交付</td><td>A-06…A-08</td><td><span class="tag t-purple">DECOMPOSES</span></td><td>v3</td><td>周经理</td></tr>
+              <tr><td class="act">L4-203 技术评审</td><td>A-03.1 工艺会签 / A-03.2 系统校验</td><td><span class="tag t-purple">DECOMPOSES</span></td><td>v3</td><td>工艺技术</td></tr>
+            </tbody>
+          </table>
+
+          <div class="sub-h">3. 连线与交接 · HANDOFF（NO_HANDOFF 是显式否定登记，不是新关系类型）</div>
+          <table class="table">
+            <thead><tr><th>连线</th><th>从</th><th>到</th><th>关系</th><th>依据</th><th>确认人</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">n1 → n2</td><td>销售运营</td><td>信用管理</td><td><span class="tag t-purple">HANDOFF</span></td><td>制度 v2</td><td>周经理</td></tr>
+              <tr><td class="mono">n2 → n3a</td><td>信用管理</td><td>工艺技术</td><td><span class="tag t-purple">HANDOFF</span></td><td>制度 v2 + 访谈</td><td>周经理</td></tr>
+              <tr><td class="mono">n3a → n3b</td><td>工艺技术</td><td>工艺技术</td><td><span class="tag t-mute">NO_HANDOFF</span></td><td>同泳道</td><td>工艺技术</td></tr>
+              <tr><td class="mono">n4 → n5</td><td>销售总监</td><td>计划员</td><td><span class="tag t-purple">HANDOFF</span></td><td>制度 v2</td><td>周经理</td></tr>
+              <tr><td class="mono">n6 → n2</td><td>计划员</td><td>信用管理</td><td><span class="tag t-purple">HANDOFF</span></td><td>访谈（异常）</td><td>计划员</td></tr>
+            </tbody>
+          </table>
+
+          <div class="sub-h">4. 未建模活动 · UNMODELED</div>
+          <div class="blocker" style="background:#fffdf7;border-color:#fbe3b5">
+            <span class="ic" style="background:var(--warn-soft);color:var(--warn-strong)">!</span>
+            <div style="flex:1">
+              <b>A-09 客户电话确认</b>
+              <div class="d">线下电话，模型无对应节点；访谈提到每周约 3 单。登记为未建模，不静默消失。</div>
+              <div class="row mt"><button class="btn btn-sm" onclick="toast('原型：已登记 A-09 为未建模活动')">登记未建模</button>
+                <span class="tiny muted">需要 Owner 确认；确认后进入 SOP 的「线下活动」章节。</span></div>
+            </div>
+          </div>
+
+          <p class="tiny muted" style="margin-top:14px">ArchiMate-lite 的边界：只实现 8 种关系，不实现完整 ArchiMate 元素/视图；<span class="mono">SERVES</span> 只用于明确支撑，禁止当垃圾桶；新增关系类型走变更评审。</p>
+          <div class="row mt">
+            <button class="btn" onclick="toast('原型：打开关系编辑器')">建立 / 合并关系</button>
+            <button class="btn" onclick="toast('原型：导出关系表')">导出关系表</button>
+            <span class="tiny muted">关系是治理断言，不是自动推断；合并需要 Owner 确认。</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 证据 -->
+      <div class="panel" id="panel-evidence">
+        <div class="grid-3" style="align-items:start">
+          <div class="card card-pad" style="grid-column:span 2">
+            <div class="card-hd"><h3>证据账本</h3><span class="sub">主张级 + 范围继承；未知显式标出</span></div>
+            <table class="table" style="margin-bottom:14px">
+              <thead><tr><th>主张</th><th>范围</th><th>方法 / 样本</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr><td class="act">C-01 信用检查是必经控制</td><td>A-02 · 标准路径</td><td>DOCUMENTED + STATED</td><td><span class="tag t-ok">已支持</span></td></tr>
+                <tr style="background:#fffdf7"><td class="act">C-02 A-04 审批层级</td><td>A-04 · 标准路径</td><td>DOCUMENTED 2 级 / OBSERVED 1.4 级（12 单）</td><td><span class="tag t-warn">冲突</span></td></tr>
+                <tr><td class="act">C-03 A-04 平均等待 180 分钟</td><td>A-04.wait · 标准路径</td><td>OBSERVED · 12 单 · 10/20–10/24</td><td><span class="tag t-ok">已支持</span></td></tr>
+                <tr><td class="act">C-04 计划回退只发生在异常路径</td><td>A-06.path · 异常路径</td><td>STATED · 未验证</td><td><span class="tag t-warn">待验证</span></td></tr>
+                <tr><td class="act">C-05 订单交付周期基线</td><td>KPI-ORD-01</td><td>UNKNOWN · 无来源</td><td><span class="tag t-mute">未知</span></td></tr>
+              </tbody>
+            </table>
+            <div class="sub-h">来源</div>
+            <div class="grid-3">
+              <div class="ev-card">
+                <div class="hd"><span class="nm">订单评审管理办法</span><span class="tag t-info">DOCUMENTED</span></div>
+                <div class="tiny muted">v2 · 覆盖 A-01…A-05</div>
+                <div class="meta">来源：ProcessDocumentVersion #118<br>质量：制度文本，不代表实际执行</div>
+              </div>
+              <div class="ev-card">
+                <div class="hd"><span class="nm">现场观测</span><span class="tag t-ok">OBSERVED</span></div>
+                <div class="tiny muted">2026-10-28 · 12 单 · 覆盖 A-02 / A-04 时间</div>
+                <div class="meta">来源：ToolSheet #2041<br>样本：12；窗口：5 个工作日</div>
+              </div>
+              <div class="ev-card">
+                <div class="hd"><span class="nm">访谈 · 周经理</span><span class="tag t-warn">STATED</span></div>
+                <div class="tiny muted">覆盖 A-06 例外路径</div>
+                <div class="meta">来源：ToolSheet #2052<br>未验证，不能单独作为定量依据</div>
+              </div>
+              <div class="ev-card" style="border-style:dashed">
+                <div class="hd"><span class="nm">系统日志</span><span class="tag t-mute">未接入</span></div>
+                <div class="tiny muted">可支撑：实际路径、等待、返工</div>
+                <div class="meta">接入后「定量诊断」才可用；现在只到「范围 / 设计」。</div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="card-hd"><h3>冲突</h3><span class="tag t-warn">1 组未裁决</span></div>
+            <div class="conflict">
+              <b>C-02 审批层级：制度 2 级 / 观测均值 1.4 级</b>
+              <div class="tiny muted" style="margin-top:4px">冲突组 CG-03；影响 A-04 价格审批。草稿保留两种口径，生效前必须裁决。</div>
+              <div class="sides">
+                <div class="side-box"><div class="k">制度</div>2 级审批；覆盖全部订单</div>
+                <div class="side-box"><div class="k">观测</div>12 单均值 1.4；9 单仅 1 级</div>
+              </div>
+              <div class="row mt">
+                <button class="btn btn-sm" onclick="resolveConflict('制度')">以制度为准</button>
+                <button class="btn btn-sm" onclick="resolveConflict('观测')">以观测为准</button>
+                <button class="btn btn-sm" onclick="resolveConflict('保留')">保留冲突</button>
+              </div>
+              <div class="tiny muted mt" id="conflictResult"></div>
+            </div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-hd"><h3>用途就绪度</h3><span class="sub">证据约束用途</span></div>
+            <div class="asset-list">
+              <div class="asset-line"><span class="dot ok">✓</span><div><div class="name">范围 / 边界 / 设计</div><div class="desc">模型 + 架构关系即可</div></div></div>
+              <div class="asset-line"><span class="dot ok">✓</span><div><div class="name">活动级资产包</div><div class="desc">模型 + 责任 + 载体 + 控制点</div></div></div>
+              <div class="asset-line"><span class="dot warn">!</span><div><div class="name">定量诊断（PCE / 瓶颈）</div><div class="desc">需观测或日志达到最低样本</div></div></div>
+              <div class="asset-line"><span class="dot bad">×</span><div><div class="name">执行 / 自动化</div><div class="desc">需已发布模型 + 确认表单/规则 + 分派</div></div></div>
+            </div>
+            <div class="hr"></div>
+            <p class="tiny muted">名字可以叫「制度模型」；系统真正拦住的是「拿它做定量结论」。不 policing 名字，约束用途。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 治理 -->
+      <div class="panel" id="panel-governance">
+        <div class="grid-3" style="align-items:start">
+          <div class="card card-pad" style="grid-column:span 2">
+            <div class="card-hd"><h3>版本与审批</h3><span class="sub">复用交付物状态机，不新建审批引擎</span></div>
+            <div class="timeline">
+              <div class="tl now"><span class="node">R0</span><span class="lbl">草稿<small>周经理 · 今天</small></span></div>
+              <span class="bar"></span>
+              <div class="tl"><span class="node">R1</span><span class="lbl">评审<small>流程管理科</small></span></div>
+              <span class="bar"></span>
+              <div class="tl"><span class="node">R2</span><span class="lbl">生效<small>流程 Owner</small></span></div>
+            </div>
+            <dl class="kv">
+              <dt>生产者</dt><dd>周经理（销售运营）</dd>
+              <dt>评审人</dt><dd>流程管理科</dd>
+              <dt>批准人</dt><dd>销售运营部负责人</dd>
+              <dt>生效条件</dt><dd>阻断清零 + 冲突裁决 + 评审通过</dd>
+            </dl>
+            <div class="row mt2">
+              <button class="btn btn-p" id="submitBtn" disabled onclick="submitReview()">提交评审</button>
+              <span class="tiny muted" id="submitHint">A-07 表单载体未补，暂不可提交。</span>
+            </div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-hd"><h3>变更影响</h3><span class="sub">生效后自动列出</span></div>
+            <div class="asset-list">
+              <div class="asset-line"><span class="dot ok">◧</span><div><div class="name">表单</div><div class="desc">F-ORD-01 v2 → v3</div></div></div>
+              <div class="asset-line"><span class="dot ok">◧</span><div><div class="name">角色</div><div class="desc">销售运营 / 信用管理 / 计划员</div></div></div>
+              <div class="asset-line"><span class="dot ok">◧</span><div><div class="name">培训</div><div class="desc">2 个岗位需更新作业指导</div></div></div>
+              <div class="asset-line"><span class="dot ok">◧</span><div><div class="name">KPI</div><div class="desc">订单交付周期口径不变</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 生成阻断模态 -->
+<div class="mask" id="maskBlockers">
+  <div class="modal">
+    <div class="modal-hd"><b>生成前检查</b><button class="modal-x" onclick="closeModal('maskBlockers')">✕</button></div>
+    <div class="modal-bd">
+      <div class="blocker" style="margin-bottom:10px">
+        <span class="ic">!</span>
+        <div><b>1 项软阻断：A-07 异常订单审批缺少表单载体</b>
+          <div class="d">允许生成 R0 草稿；提交评审前必须补上。系统不会用空白表单代替。</div></div>
+      </div>
+      <div class="note tiny muted" style="background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:10px 12px">
+        硬阻断（模型未发布、活动未映射、数字无来源）会直接拒绝生成；本次没有硬阻断。
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn" onclick="closeModal('maskBlockers')">返回</button>
+      <button class="btn btn-warn" onclick="commitDraft()">仍然生成草稿</button>
+    </div>
+  </div>
+</div>
+
+<!-- 补表单模态 -->
+<div class="mask" id="maskFix">
+  <div class="modal" style="width:min(560px,100%)">
+    <div class="modal-hd"><b>补上 A-07 的表单载体</b><button class="modal-x" onclick="closeModal('maskFix')">✕</button></div>
+    <div class="modal-bd">
+      <p class="tiny muted" style="margin-bottom:10px">只允许引用已生效表单；新建表单请走表单库，不在这里临时拼。</p>
+      <div class="field">
+        <label>选择已生效表单</label>
+        <select id="formSelect">
+          <option value="">请选择</option>
+          <option>F-ORD-07 异常订单审批单 v1</option>
+          <option>F-ORD-09 订单变更单 v2</option>
+          <option>F-CRD-03 信用例外审批单 v1</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>挂到活动</label>
+        <input value="A-07 异常订单审批" disabled>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn" onclick="closeModal('maskFix')">取消</button>
+      <button class="btn btn-p" onclick="fixForm()">保存并重跑检查</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预览模态 -->
+<div class="mask" id="maskPreview">
+  <div class="modal" style="width:min(860px,100%)">
+    <div class="modal-hd"><b>资产包预览 · R0</b><button class="modal-x" onclick="closeModal('maskPreview')">✕</button></div>
+    <div class="modal-bd">
+      <div class="doc-meta">
+        <span>SOP-L3-032</span><span>模型 v3</span><span>asset-compile v1</span><span>hash 8f3a…c21d</span>
+      </div>
+      <div class="sop">
+        <h2>订单评审与交付 · 作业标准</h2>
+        <p>范围：订单接收 → 订单关闭。生成内容以模型与已登记证据为准，缺项不填 0。</p>
+        <h3>1. 范围与边界</h3>
+        <p>覆盖信用检查、技术评审、价格审批、交期确认与异常处理。</p>
+        <h3>2. 活动与责任</h3>
+        <p>8 个活动；A-07 表单载体待补，已在阻断清单中列出。</p>
+        <h3>3. 控制点</h3>
+        <p>5 个控制点；信用、价格、交期、异常、放行。</p>
+        <h3>4. 表单与记录</h3>
+        <p>7 个活动已有载体，1 个待补。</p>
+        <h3>5. 异常与升级</h3>
+        <p>证据冲突保留两种口径，未裁决前不合并。</p>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn" onclick="closeModal('maskPreview')">关闭</button>
+      <button class="btn btn-p" onclick="commitDraft()">生成 R0 草稿</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建入口模态 -->
+<div class="mask" id="maskEntry">
+  <div class="modal" style="width:min(620px,100%)">
+    <div class="modal-hd"><b>从哪里开始？</b><button class="modal-x" onclick="closeModal('maskEntry')">✕</button></div>
+    <div class="modal-bd">
+      <p class="tiny muted" style="margin-bottom:12px">不让你先选「场景」。只问：你手上现在有什么。</p>
+      <div class="option" onclick="chooseEntry(this,'从公司架构开始')">
+        <span class="num">1</span>
+        <div><b>从公司架构开始</b><div class="d">先建 L1–L4、边界与 Owner；再对每条 L3 选择 As-Is 的起点。</div></div>
+      </div>
+      <div class="option" onclick="chooseEntry(this,'从一条流程开始')">
+        <span class="num">2</span>
+        <div><b>从一条流程开始</b><div class="d">选一条已有的 L3，直接用你手上的制度、访谈或日志建模。</div></div>
+      </div>
+      <div class="option" onclick="chooseEntry(this,'从一个问题开始')">
+        <span class="num">3</span>
+        <div><b>从一个问题开始</b><div class="d">给一个 KPI 差距或项目目标，系统反查受影响的 L3 / L4。</div></div>
+      </div>
+      <div class="note tiny muted" style="margin-top:8px">重组变革不单独做成第四入口；它是架构变更 + 批量迁移，走治理页签。</div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn" onclick="closeModal('maskEntry')">取消</button>
+      <button class="btn btn-p" onclick="confirmEntry()">继续</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">已保存</div>
+
+<script>
+const state = {
+  blockers: 1,
+  conflictResolved: false,
+  packageGenerated: false,
+  formName: '',
+  entry: '',
+};
+
+function $(id){ return document.getElementById(id); }
+
+function toast(msg){
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => el.classList.remove('on'), 2200);
+}
+
+function openModal(id){ $(id).classList.add('on'); }
+function closeModal(id){ $(id).classList.remove('on'); }
+
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderReadiness(){
+  const count = 8 - state.blockers;
+  $('formCount').innerHTML = count + '<small>/8</small>';
+  $('formTag').textContent = state.blockers ? '缺 ' + state.blockers : '齐';
+  $('formTag').className = 'tag ' + (state.blockers ? 't-warn' : 't-ok');
+  $('readyForm').className = 'ready ' + (state.blockers ? 'warn' : 'ok');
+
+  $('missingTitle').textContent = state.blockers ? '1 项待补' : '无软阻断';
+  $('missingDesc').textContent = state.blockers
+    ? 'A-07 异常订单审批缺少表单载体；有 1 个证据冲突未裁决。'
+    : (state.conflictResolved ? '冲突已裁决；无待补项。' : '有 1 个证据冲突未裁决。');
+  $('nextTitle').textContent = state.blockers ? '补上 A-07 的表单载体' : (state.conflictResolved ? '生成 R0 草稿' : '裁决证据冲突');
+  $('nextDesc').textContent = state.blockers
+    ? '补完后生成 R0 草稿；草稿可评审，但冲突未裁决前不可生效。'
+    : (state.conflictResolved ? '所有阻断已清零，可生成并提交评审。' : '冲突不影响草稿，但影响生效。');
+
+  // 阻断卡与资产行跟随状态
+  const blocked = !!state.blockers;
+  $('blockerTag').textContent = blocked ? '1 项' : '已清零';
+  $('blockerTag').className = 'tag ' + (blocked ? 't-warn' : 't-ok');
+  $('blockerCard').style.background = blocked ? '#fff8f8' : '#f7fdfa';
+  $('blockerCard').style.borderColor = blocked ? '#f8cdd2' : '#c9efe1';
+  $('blockerIc').textContent = blocked ? '!' : '✓';
+  $('blockerIc').style.background = blocked ? 'var(--bad-soft)' : 'var(--ok-soft)';
+  $('blockerIc').style.color = blocked ? '#b42332' : '#0e7a5a';
+  $('blockerBody').innerHTML = blocked
+    ? '<b>A-07 异常订单审批缺少表单载体</b><div class="d">草稿可生成；提交评审前必须补上。</div><button class="btn btn-sm mt" onclick="openFix()">补上表单载体</button>'
+    : '<b>阻断已清零</b><div class="d">A-07 已挂上 ' + (state.formName || '表单载体') + '，可生成并提交评审。</div>';
+  const formDot = $('formAssetDot');
+  formDot.className = 'dot ' + (blocked ? 'warn' : 'ok');
+  formDot.textContent = blocked ? '!' : '✓';
+  $('formAssetDesc').textContent = blocked
+    ? '7 个活动已有载体；A-07 异常订单审批缺表单'
+    : '8 个活动均有载体；A-07 已挂 ' + (state.formName || '表单载体');
+  const formBadge = $('formAssetBadge');
+  formBadge.className = 'tag ' + (blocked ? 't-warn' : 't-ok');
+  formBadge.textContent = blocked ? '待补 1' : '齐';
+  const a07Cell = $('a07CarrierCell');
+  if (a07Cell) a07Cell.innerHTML = blocked
+    ? '<span class="tag t-warn">待补</span>'
+    : '<span class="tag t-ok">' + (state.formName || '已补') + '</span>';
+  const a07Act = $('a07ActivityCarrier');
+  if (a07Act) a07Act.innerHTML = blocked
+    ? '<span class="tag t-warn">待补</span>'
+    : '<span class="tag t-ok">' + (state.formName || '已补') + '</span>';
+
+  const btn = $('generateBtn');
+  if (state.blockers){
+    btn.className = 'btn btn-warn';
+    btn.textContent = '生成 R0 草稿（1 项待补）';
+  } else {
+    btn.className = 'btn btn-p';
+    btn.textContent = state.packageGenerated ? '重新生成 R0 草稿' : '生成 R0 草稿';
+  }
+  $('ctaTitle').textContent = state.blockers ? '生成 R0 草稿（1 项待补）' : '生成 R0 草稿';
+  $('ctaDesc').textContent = state.blockers
+    ? '生成后可预览；提交评审前系统会重新跑全部阻断规则。'
+    : '阻断已清零；生成后可提交评审。';
+
+  const submit = $('submitBtn');
+  const readyToSubmit = state.packageGenerated && !state.blockers && state.conflictResolved;
+  submit.disabled = !readyToSubmit;
+  $('submitHint').textContent = !state.packageGenerated
+    ? '尚未生成资产包。'
+    : state.blockers
+      ? 'A-07 表单载体未补，暂不可提交。'
+      : !state.conflictResolved
+        ? '证据冲突未裁决，暂不可提交。'
+        : '阻断清零、冲突已裁决，可提交评审。';
+  $('pkgStatus').textContent = state.blockers || !state.conflictResolved
+    ? (state.blockers ? '1 项待补 · 不可提交评审' : '1 个冲突未裁决 · 不可生效')
+    : '可提交评审';
+  $('pkgStatus').className = 'tag ' + (state.blockers || !state.conflictResolved ? 't-warn' : 't-ok');
+}
+
+function openFix(){ openModal('maskFix'); }
+function openPreview(){ openModal('maskPreview'); }
+function openEntry(){ openModal('maskEntry'); }
+
+function fixForm(){
+  const select = $('formSelect');
+  if (!select.value){ toast('请选择一个已生效表单'); return; }
+  state.blockers = 0;
+  state.formName = select.value;
+  closeModal('maskFix');
+  renderReadiness();
+  toast('已补上表单载体，阻断清零');
+}
+
+function generate(){
+  if (state.blockers){ openModal('maskBlockers'); return; }
+  openModal('maskPreview');
+}
+
+function commitDraft(){
+  state.packageGenerated = true;
+  closeModal('maskBlockers');
+  closeModal('maskPreview');
+  renderReadiness();
+  switchTab('package');
+  toast('R0 草稿已生成；提交评审前会重新检查');
+}
+
+function resolveConflict(choice){
+  state.conflictResolved = true;
+  $('conflictResult').textContent = '已裁决：以' + (choice === '保留' ? '「保留冲突」处理，草稿保留两种口径，生效前复核' : '「' + choice + '」为准') + '。';
+  renderReadiness();
+  toast('冲突已记录：' + choice);
+}
+
+function submitReview(){
+  if ($('submitBtn').disabled) return;
+  toast('已提交评审（原型）：流程管理科接收');
+}
+
+function chooseEntry(el, name){
+  document.querySelectorAll('#maskEntry .option').forEach(o => o.classList.remove('sel'));
+  el.classList.add('sel');
+  state.entry = name;
+}
+
+function confirmEntry(){
+  if (!state.entry){ toast('请选择一个开始方式'); return; }
+  closeModal('maskEntry');
+  toast('原型：进入「' + state.entry + '」');
+}
+
+renderReadiness();
+</script>
+</body>
+</html>
