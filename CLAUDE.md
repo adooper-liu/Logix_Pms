@@ -35,7 +35,7 @@ app/models    ORM
 app/schemas   Pydantic 契约
 app/services  业务逻辑（方法论匹配、测算、审计…）
 app/api/v1    路由
-web/js/core   前端基础设施（api/auth/format/router/state/ui）
+web/js/core   前端基础设施（api/auth/format/layout/router/state/ui）
 web/js/views  业务视图模块
 ```
 
@@ -55,6 +55,14 @@ web/js/views  业务视图模块
 5. **提交前跑 `python scripts/check.py`。** 它跑不过就不要提交。
 6. **`alembic.ini` 必须保持纯 ASCII。** Windows 下 configparser 按系统 locale（中文机器是 GBK）
    读这个文件，写中文注释会直接抛 `UnicodeDecodeError`。
+7. **页面布局只走 `pageShell`**（`web/js/core/layout.js`）。页面只提供数据、
+   `sections[].html` 与 `aside`，不手写标题、目录/Tab、三栏、吸顶结构。
+   `workspaceHtml` / `sectionNav` / `sectionTabs` 是底层组件，视图不得直接 import。
+   规范见 `docs/ui-layout-system.md`，静态守卫在 `tests/test_frontend_structure.py`。
+8. **一次只渲染一个主题 section。** 默认首屏只放结论、阻断、下一步；明细与专家内容
+   放第二个目录项/Tab。帮助/免责一律用 `tipHelp`，次级区块用 `foldCard`。
+   新页面或迁移页面必须在 `tests/test_frontend_structure.py` 的 `MIGRATED_PAGE_SHELL`
+   里登记。
 
 ## AI 协作纪律
 
@@ -84,6 +92,8 @@ web/js/views  业务视图模块
 ## 不要做的事
 
 - 不要在前端硬编码枚举中文，也不要引入构建工具（保持零构建）
+- 不要在 `views/*` 手写三栏布局、复制页面壳，或直接 import `workspaceHtml` / `sectionNav`
+- 不要在页面首屏平铺全部明细；专家内容必须收进后面的目录项/Tab
 - 不要在 `views/*` 之间互相 import 造成循环
 - 不要把 `Depends()` 从默认参数里挪走（FastAPI 依赖注入就是这么用的，B008 已忽略）
 - 不要为了让 lint 通过而把 `Optional[X]` 批量改成 `X | None` —— 这属于独立的一轮重构，

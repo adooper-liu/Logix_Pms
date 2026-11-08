@@ -1613,6 +1613,9 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
     _seed_knowledge(db, project_ids, user_ids)
     _seed_tool_usage(db, project_ids, user_ids)
     _seed_design_models(db, code_to_id, position_ids)
+    from app.seed.asset_relations import backfill_node_activity_links
+
+    backfill_node_activity_links(db)
     _seed_changes(db, code_to_id, user_ids)
     _seed_forms_rules(db, code_to_id)
     _seed_execution(db, code_to_id, project_ids, user_ids)

@@ -1,7 +1,8 @@
 /* 视图：架构草图 —— 独立的 draw.io 白板，不参与 BPMN 建模与流程执行。 */
-import { esc, dtShort, emptyRow } from '../core/format.js';
+import { esc, dtShort, emptyRow, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, RENDERERS } from '../core/router.js';
 import { canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
@@ -85,24 +86,25 @@ const renderSketches = () => {
           </td>
         </tr>`).join('') || emptyRow(5, '还没有架构草图');
 
-      viewEl().innerHTML = `
-        <div class="card page-head">
-          <div class="between">
-            <div>
-              <h2>架构草图<span class="module-badge">draw.io 白板</span></h2>
-              <div class="desc">自由画布 · 用于架构草图/汇报示意，独立于 BPMN 设计器与流程执行；
-                不作为可执行流程模型</div>
-            </div>
-            ${canWrite()
-              ? '<button class="btn btn-p" data-act="sketch.create">+ 新建草图</button>' : ''}
-          </div>
-        </div>
-        <div class="card">
-          <table class="tbl">
-            <thead><tr><th>标题</th><th>关联</th><th>创建人</th><th>更新时间</th><th></th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>`;
+      const shell = pageShell({
+        title: '架构草图',
+        badge: '<span class="module-badge">draw.io 白板</span>',
+        subtitle: '自由画布，用于架构草图/汇报示意；独立于 BPMN 设计器与流程执行。',
+        tip: tipHelp('草图不作为可执行流程模型。', '草图说明'),
+        actions: canWrite() ? '<button class="btn btn-p" data-act="sketch.create">+ 新建草图</button>' : '',
+        sections: [{
+          key: 'main',
+          html: `<div class="card">
+            <table class="tbl">
+              <thead><tr><th>标题</th><th>关联</th><th>创建人</th><th>更新时间</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`,
+        }],
+        active: 'main',
+        mode: 'plain',
+      });
+      viewEl().innerHTML = shell.html;
     });
 };
 

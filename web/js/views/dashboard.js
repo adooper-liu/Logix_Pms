@@ -1,12 +1,13 @@
 /* 视图：dashboard
  *
  * 总览只回答今天处理哪一件：越线的指标、过期的异常、接着推进的项目。
- * 下一条该改的流程用地图上的优先级。框架边界留在开始使用。
+ * 下一条该改的流程用地图上的优先级。框架边界留在体系总览。
  */
-import { esc, num, HEAT_CLASS, HEAT_LABEL } from '../core/format.js';
+import { esc, num, HEAT_CLASS, HEAT_LABEL, tipHelp } from '../core/format.js';
 import { metricHelp } from '../core/metrics.js';
 import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, go, urlParams } from '../core/router.js';
 import { GET } from '../core/api.js';
 import { cockpitTabBar, cockpitProcessSelect, loadCockpitProcesses } from '../core/cockpit.js';
@@ -81,39 +82,46 @@ const renderDashboard = () => {
       </button>`).join('') || `<div class="empty">${
         selected ? '这条流程不在前 5。' : '暂无待改善流程'}</div>`;
 
-    viewEl().innerHTML = `
-      <div class="card page-head">
-        <div class="between">
-          <div><h2>运营驾驶舱<span class="module-badge">总览</span></h2>
-            <div class="desc">${urlParams().lifecycle ? '当前流程已保留；本页总览指标、项目推进和告警仍为全公司范围，流程选择只筛选改善优先级。进入指标/分析页核所选流程数据。' : '左边选下一条流程，中间接着推进，右边看今天越线的指标和异常'}</div></div>
-          ${cockpitProcessSelect(payload.flowList)}
-        </div>
-        <div class="mt">${cockpitTabBar('overview')}</div>
-      </div>
-      <div class="db-shell">
-        <aside class="card db-side">
-          <div class="between mb">
-            <h3 style="margin:0">改善优先级</h3>
-            <a class="link-btn" data-act="dashboard.goImprovementMap">地图</a>
-          </div>
-          <div class="tiny muted mb">战略 × 痛点 × 改善空间，前 5</div>
-          <div class="db-pri-list">${priorityList}</div>
-        </aside>
-        <main class="db-main">${nextActionsHtml}</main>
-        <aside class="card db-aside">
-          <h3 style="margin:0 0 8px">今天</h3>
-          <button type="button" class="db-alert" data-act="dashboard.kpi" data-key="kpi_alert">
-            <b>${num(home.kpi_red_yellow, 0)}<small>/${num(home.kpi_total, 0)}</small></b>
-            <span>${metricHelp('kpi_red_yellow', '红/黄 KPI')}</span>
-            <span class="tiny">最新点落在红线或黄线</span>
-          </button>
-          <button type="button" class="db-alert" data-act="dashboard.kpi" data-key="open_exceptions">
-            <b>${num(openCount, 0)}<small>件</small></b>
-            <span>${metricHelp('open_exceptions', '未闭环异常')}</span>
-            <span class="tiny">超期 ${num(es.overdue, 0)} 件</span>
-          </button>
-        </aside>
-      </div>`;
+    const shell = pageShell({
+      title: '运营驾驶舱',
+      badge: '<span class="module-badge">总览</span>',
+      subtitle: urlParams().lifecycle
+        ? '当前流程已保留；总览指标、项目推进和告警仍为全公司范围。'
+        : '左边选下一条流程，中间接着推进，右边看今天越线的指标和异常。',
+      tip: tipHelp('流程选择只筛选改善优先级；进入指标/分析页核所选流程数据。', '驾驶舱说明'),
+      actions: cockpitProcessSelect(payload.flowList),
+      sections: [{
+        key: 'main',
+        html: `${cockpitTabBar('overview')}
+          <div class="db-shell">
+            <aside class="card db-side">
+              <div class="between mb">
+                <h3 style="margin:0">改善优先级</h3>
+                <a class="link-btn" data-act="dashboard.goImprovementMap">地图</a>
+              </div>
+              <div class="tiny muted mb">战略 × 痛点 × 改善空间，前 5</div>
+              <div class="db-pri-list">${priorityList}</div>
+            </aside>
+            <main class="db-main">${nextActionsHtml}</main>
+            <aside class="card db-aside">
+              <h3 style="margin:0 0 8px">今天</h3>
+              <button type="button" class="db-alert" data-act="dashboard.kpi" data-key="kpi_alert">
+                <b>${num(home.kpi_red_yellow, 0)}<small>/${num(home.kpi_total, 0)}</small></b>
+                <span>${metricHelp('kpi_red_yellow', '红/黄 KPI')}</span>
+                <span class="tiny">最新点落在红线或黄线</span>
+              </button>
+              <button type="button" class="db-alert" data-act="dashboard.kpi" data-key="open_exceptions">
+                <b>${num(openCount, 0)}<small>件</small></b>
+                <span>${metricHelp('open_exceptions', '未闭环异常')}</span>
+                <span class="tiny">超期 ${num(es.overdue, 0)} 件</span>
+              </button>
+            </aside>
+          </div>`,
+      }],
+      active: 'main',
+      mode: 'plain',
+    });
+    viewEl().innerHTML = shell.html;
   });
 };
 

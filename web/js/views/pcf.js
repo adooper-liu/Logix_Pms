@@ -1,7 +1,8 @@
 /* 视图：APQC PCF 分类框架（学习 / 识别 / 指标） */
-import { esc } from '../core/format.js';
+import { esc, tipHelp } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, RENDERERS, go, urlParams } from '../core/router.js';
 import { GET } from '../core/api.js';
 
@@ -108,31 +109,34 @@ function paintPcf() {
     `<option value="${f.code}"${f.code === state.pcf.framework ? ' selected' : ''}>${
       esc(f.name)}${f.version ? ' ' + esc(f.version) : ''}</option>`).join('');
 
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between mb">
-        <div><h2>流程架构<span class="module-badge">APQC PCF · 分类不是先后</span></h2>
-          <div class="desc">公司体系里的流程架构用这套分类对齐。L1–L5 是类名，不是生命周期的顺序。</div></div>
-        <div class="gap">
-          <select class="sel" data-act="pcf.framework">${frameworkOptions}</select>
-          <a class="link-btn" data-act="pcf.goMap">去流程地图 →</a>
-        </div>
-      </div>
-      <div class="pcf-counts">${levelLine}</div>
-    </div>
-    <div class="pcf-layout">
-      <div class="card pcf-tree-card">
-        <div class="between mb">
-          <h3 style="margin:0">分类树</h3>
-          <span class="tiny" id="pcfVisibleCount"></span>
-        </div>
-        <input id="pcfQ" class="sel" placeholder="搜索编码、中文名或英文名"
-          value="${esc(state.pcf.keyword)}" data-act="pcf.search">
-        <div class="pcf-rows" id="pcfRows"></div>
-      </div>
-      <div class="card pcf-detail" id="pcfDetail"></div>
-      <div class="card pcf-guide" id="pcfGuide"></div>
-    </div>`;
+  const shell = pageShell({
+    title: '流程架构',
+    badge: '<span class="module-badge">APQC PCF · 分类不是先后</span>',
+    subtitle: '公司体系里的流程架构用这套分类对齐；L1–L5 是类名，不是生命周期的顺序。',
+    tip: tipHelp('切换框架只换分类视图，不改公司流程目录。', 'PCF 说明'),
+    actions: `<select class="sel" data-act="pcf.framework">${frameworkOptions}</select>
+      <a class="link-btn" data-act="pcf.goMap">去流程地图 →</a>`,
+    sections: [{
+      key: 'main',
+      html: `<div class="pcf-counts">${levelLine}</div>
+        <div class="pcf-layout">
+          <div class="card pcf-tree-card">
+            <div class="between mb">
+              <h3 style="margin:0">分类树</h3>
+              <span class="tiny" id="pcfVisibleCount"></span>
+            </div>
+            <input id="pcfQ" class="sel" placeholder="搜索编码、中文名或英文名"
+              value="${esc(state.pcf.keyword)}" data-act="pcf.search">
+            <div class="pcf-rows" id="pcfRows"></div>
+          </div>
+          <div class="card pcf-detail" id="pcfDetail"></div>
+          <div class="card pcf-guide" id="pcfGuide"></div>
+        </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 
   paintPcfRows();
   const selected = state.pcf.selectedId && state.pcf.byId.get(state.pcf.selectedId);

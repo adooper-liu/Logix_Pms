@@ -2,7 +2,7 @@
 
 > **现行口径（以代码为准）**  
 > 侧栏只分两件事：把公司流程体系立起来 / 把一条流程改好。  
-> 开始使用只按九阶段全公司计数展开；证据数字可点开对应记录。  
+> 体系总览只按九阶段全公司计数展开；证据数字可点开对应记录。  
 > 没有专家模式，也没有单独的能力地图页。  
 > 现行证据实例见 [startup-evidence-example.md](startup-evidence-example.md)；  
 > 简历主张与过硬演示路径见 [resume-capability-map.md](resume-capability-map.md)。  

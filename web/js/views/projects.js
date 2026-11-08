@@ -1,5 +1,6 @@
 /* 视图：projects */
-import { esc, num, pct, methodTag, statusTag, bar, emptyRow, skeleton } from '../core/format.js';
+import { esc, num, pct, methodTag, statusTag, bar, emptyRow, skeleton, tipHelp } from '../core/format.js';
+import { pageShell } from '../core/layout.js';
 import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, tab, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
@@ -13,6 +14,18 @@ import { toolMountHtml } from './shared/tool_mount.js';
 /* ============================================================ 4. 流程项目组合 */
 
 on('projects.open', ({ id }) => openProject(Number(id)));
+on('projects.select', ({ id }) => {
+  state.projects.openId = Number(id);
+  state.projects.tab = 'detail';
+  syncProjectUrl({ push: true });
+  RENDERERS.projects();
+});
+on('projects.section', ({ tab }) => {
+  if (!tab) return;
+  state.projects.tab = tab;
+  syncProjectUrl();
+  RENDERERS.projects();
+});
 on('projects.new', () => newProjectWizard());
 on('projects.goWorkflow', () => go('workflow'));
 on('projects.goExecution', () => go('execution'));
@@ -74,6 +87,10 @@ on('projects.openExecution', ({ process }) => {
 });
 on('projects.saveEdit', ({ id }) => saveProjectEdit(Number(id)));
 on('projects.gate', ({ id }) => openGateModal(Number(id)));
+on('projects.claimsImprovement', (_, el) => {
+  const select = document.getElementById('gtComparison');
+  if (select) select.classList.toggle('hide', !el.checked);
+});
 on('projects.submitGate', ({ id }) => submitGate(Number(id)));
 on('projects.replication', ({ id }) => openReplicationModal(Number(id)));
 on('projects.submitReplication', ({ id }) => submitReplication(Number(id)));
@@ -198,6 +215,7 @@ function applyProjectParams() {
   if ('stage' in params) state.projects.filter.stage = params.stage;
   if ('type' in params) state.projects.filter.projectType = params.type;
   if ('keyword' in params) state.projects.keyword = params.keyword;
+  if (params.tab === 'list' || params.tab === 'detail') state.projects.tab = params.tab;
 }
 
 function projectUrlParams(extra = {}) {
@@ -208,6 +226,7 @@ function projectUrlParams(extra = {}) {
     stage: f.stage,
     type: f.projectType,
     project: state.projects.openId || '',
+    tab: state.projects.tab,
     new_process: state.projects.newProcess || '',
     new_name: state.projects.newName || '',
     new_objective: state.projects.newObjective || '',
@@ -217,6 +236,64 @@ function projectUrlParams(extra = {}) {
 
 function syncProjectUrl({ push = false } = {}) {
   setUrlState('projects', projectUrlParams(), { push });
+}
+
+function projectSummaryHtml(d) {
+  if (!d || !d.project) {
+    return `<div class="card"><div class="empty">从「项目列表」选择一个项目，或新建项目。</div></div>`;
+  }
+  const p = d.project;
+  const steps = d.steps || [];
+  const next = steps.find((step) => step.step_no && step.status !== 'DONE'
+    && step.stage_no === p.current_stage)
+    || steps.find((step) => step.step_no && step.status !== 'DONE');
+  const kpi = p.metric_name ? `
+    <table class="tbl">
+      <thead><tr><th>指标</th><th>基线</th><th>当前</th><th>目标</th><th>单位</th><th>改善</th></tr></thead>
+      <tbody><tr><td><b>${esc(p.metric_name)}</b></td>
+        <td>${num(p.baseline_value, 1)}</td><td><b>${num(p.current_value, 1)}</b></td>
+        <td>${num(p.target_value, 1)}</td><td class="muted">${esc(p.metric_unit || '')}</td>
+        <td>${p.improvement_pct === null ? '—' : num(p.improvement_pct, 1) + '%'}</td></tr></tbody>
+    </table>` : '<div class="tiny muted">尚未设定量化指标。</div>';
+  return `<div class="card">
+    <div class="between">
+      <div>
+        <h3 style="margin:0">${esc(p.name)}</h3>
+        <div class="tiny muted">${esc(p.code)} · ${esc(p.methodology_label || p.methodology)}
+          · 阶段${p.current_stage} ${esc(p.stage_name || '')}</div>
+      </div>
+      <div class="gap">
+        ${statusTag(p.status, p.status_label)}
+        <button class="btn btn-p" data-act="projects.open" data-id="${p.id}">打开完整工作台</button>
+      </div>
+    </div>
+    <div class="grid g4 stat-row mt">
+      <div class="kpi stat"><div class="num">${num(p.progress, 0)}<small>%</small></div><div class="lab">整体进度</div></div>
+      <div class="kpi stat"><div class="num">${num(p.budget, 1)}</div><div class="lab">预算(万)</div></div>
+      <div class="kpi stat"><div class="num">${num(p.actual_cost, 1)}</div><div class="lab">已投入(万)</div></div>
+      <div class="kpi stat"><div class="num">${p.roi_estimate === null ? '—' : num(p.roi_estimate, 1)}</div><div class="lab">预计 ROI</div></div>
+    </div>
+    <div class="row2 mt">
+      <div class="field"><label>改善目标</label><textarea readonly>${esc(p.objective || '—')}</textarea></div>
+      <div class="field"><label>范围边界</label><textarea readonly>${esc(p.scope || '—')}</textarea></div>
+    </div>
+    <div class="row2 mt">
+      <div><div class="tiny muted">Owner / Sponsor</div>
+        <b>${esc(p.owner || '—')}</b> · ${esc(p.sponsor || '—')} · ${esc(p.department || '—')}</div>
+      <div><div class="tiny muted">关联流程</div>
+        <b>${esc(p.process_name || '未关联')}</b></div>
+    </div>
+    <div class="mt"><h3>指标</h3>${kpi}</div>
+    <div class="note mt">下一步：${next
+      ? `阶段${next.stage_no} · ${esc(next.step_no)} ${esc(next.name)}`
+      : '所有步骤已完成'}</div>
+    <div class="gap mt">
+      ${p.process_id ? `<button class="btn btn-g" data-act="projects.openExecution"
+        data-process="${p.process_id}">去流程执行</button>
+      <button class="btn btn-g" data-act="projects.closeOpenDesigner"
+        data-process="${p.process_id}">查看流程模型</button>` : ''}
+    </div>
+  </div>`;
 }
 
 const renderProjects = () => {
@@ -244,10 +321,13 @@ const renderProjects = () => {
       const objective = newObjectiveId
         ? await GET('/strategy/objectives/' + newObjectiveId).catch(() => null)
         : null;
+      const openId = Number(params.project) || state.projects.openId || null;
+      const detail = openId ? await GET('/projects/' + openId).catch(() => null) : null;
       return {
         page,
         meta,
-        openId: Number(params.project) || null,
+        openId,
+        detail,
         newProcess: Number(params.new_process) || null,
         newName: params.new_name || '',
         newObjective: objective,
@@ -259,7 +339,7 @@ const renderProjects = () => {
       state.projectMeta = d.meta;
       const rows = page.items.map((p) => `
         <tr class="clk">
-          <td><button class="project-open" type="button" data-act="projects.open"
+          <td><button class="project-open" type="button" data-act="projects.select"
               data-id="${p.id}"><b>${esc(p.name)}</b></button>
             <div class="tiny">${esc(p.code)}${p.process_name ? ' · ' + esc(p.process_name) : ''}
               ${p.project_type === 'GOVERNANCE_SETUP'
@@ -304,18 +384,8 @@ const renderProjects = () => {
       const avgProgress = page.items.length
         ? Math.round(page.items.reduce((a, p) => a + p.progress, 0) / page.items.length) : 0;
 
-      viewEl().innerHTML = `
-        <div class="card page-head">
-          <div class="between">
-            <div><h2>流程项目组合<span class="module-badge">改善项目 · 推进循环</span></h2>
-              <div class="desc">共 ${page.total} 个项目 · 改善项目走 24 步、体系落地项目走 9 阶段；点击行查看详情与下一步动作</div></div>
-            <div class="gap">
-              <a class="link-btn" data-act="projects.goWorkflow">查看方法手册</a>
-              <a class="link-btn" data-act="projects.goExecution">流程执行 →</a>
-              <button class="btn btn-g" data-act="projects.newSetup">+ 体系落地项目</button>
-              <button class="btn btn-p" data-act="projects.new">+ 新建流程项目</button>
-            </div>
-          </div>
+      const listHtml = `
+        <div class="card">
           ${toolMountHtml(d.tools, 'change')}
           <div class="grid g4 stat-row">
             <div class="kpi stat"><div class="num">${page.total}</div><div class="lab">${metricHelp('project_total', '项目总数')}</div></div>
@@ -349,7 +419,6 @@ const renderProjects = () => {
               ? '<button class="btn-sm" style="align-self:center" data-act="projects.clearFilter">清空筛选</button>' : ''}
           </div>
         </div>
-
         <div class="card">
           <table class="tbl">
             <thead><tr><th>项目</th><th>方法</th><th>阶段</th><th>Owner</th>
@@ -357,13 +426,35 @@ const renderProjects = () => {
             <tbody>${rows}</tbody>
           </table>
         </div>`;
-      if (d.openId && state.projects.openId !== d.openId) {
+
+      if (d.openId) {
         state.projects.openId = d.openId;
-        openProject(d.openId, { fromUrl: true });
-      } else if (!d.openId && state.projects.openId) {
+        if (!urlParams().tab) state.projects.tab = 'detail';
+      } else if (!d.newProcess) {
         state.projects.openId = null;
-        closeModal();
       }
+      const shell = pageShell({
+        title: '项目',
+        badge: '<span class="module-badge">改善项目 · 推进循环</span>',
+        subtitle: `共 ${page.total} 个项目 · 改善项目 24 步、体系落地 9 阶段；列表与详情分开。`,
+        tip: tipHelp(
+          '点击列表行进入项目详情；概览、KPI、工作流、甘特和下一步在「打开完整工作台」里。',
+          '本页说明',
+        ),
+        actions: `<a class="link-btn" data-act="projects.goWorkflow">查看方法手册</a>
+          <a class="link-btn" data-act="projects.goExecution">流程执行 →</a>
+          <button class="btn btn-g" data-act="projects.newSetup">+ 体系落地项目</button>
+          <button class="btn btn-p" data-act="projects.new">+ 新建流程项目</button>`,
+        sections: [
+          { key: 'list', label: '项目列表', count: page.total, html: listHtml },
+          { key: 'detail', label: '项目详情', html: projectSummaryHtml(d.detail) },
+        ],
+        active: state.projects.tab,
+        tabAct: 'projects.section',
+        mode: 'tabs',
+      });
+      state.projects.tab = shell.active;
+      viewEl().innerHTML = shell.html;
       if (d.newProcess
         && (state.projects.newProcess !== d.newProcess
           || (d.newObjective && state.projects.newObjective !== d.newObjective.id))) {
@@ -388,8 +479,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pms:modal-closed', () => {
     if (state.view !== 'projects') return;
     if (document.getElementById('mask').classList.contains('show')) return;
-    if (!state.projects.openId && !state.projects.newProcess) return;
-    state.projects.openId = null;
+    if (!state.projects.newProcess) return;
     state.projects.newProcess = null;
     state.projects.newName = '';
     state.projects.newObjective = null;
@@ -414,6 +504,7 @@ function clearPFilter() {
 
 async function openProject(id, options = {}) {
   state.projects.openId = id;
+  state.projects.tab = 'detail';
   state.projects.newProcess = null;
   state.projects.newName = '';
   state.projects.newObjective = null;
@@ -863,15 +954,42 @@ async function openGateModal(projectId) {
     return toast(e.message, true);
   }
   const p = detail.project;
+  let comparisons = [];
+  if (p.process_id) {
+    try {
+      comparisons = await GET(
+        `/processes/${p.process_id}/log-imports/compare/accepted`,
+      );
+    } catch (_) {
+      comparisons = [];
+    }
+  }
   const rows = (gates || []).map((row) => `
     <tr><td>阶段${row.stage_no}</td>
       <td><span class="tag ${row.conclusion === 'PASS' ? 't-grn' : 't-yel'}">${
         esc(row.conclusion_label || row.conclusion)}</span></td>
       <td class="tiny">${esc(row.exit_criteria || '—')}</td>
-      <td class="tiny">${esc(row.evidence_url)}</td>
+      <td class="tiny">${esc(row.evidence_url)}${
+        row.claims_improvement ? ' <span class="tag t-pur">改善对照</span>' : ''}</td>
       <td>${esc(row.signed_by || '—')}</td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">还没有门禁记录</td></tr>';
   const conclusions = (meta && meta.conclusion_labels) || {};
+  const comparisonOptions = (comparisons || []).map((row) => {
+    const delta = row.delta_pct === null || row.delta_pct === undefined
+      ? '—' : `${(row.delta_pct * 100).toFixed(1)}%`;
+    return `<option value="${row.receipt_id}">
+      ${esc(row.before_file_name)} → ${esc(row.after_file_name)} ·
+      ${num(row.mean_before)} → ${num(row.mean_after)} · ${delta}</option>`;
+  }).join('');
+  const comparisonBlock = comparisons.length ? `
+    <div class="field"><label class="tiny">
+      <input type="checkbox" id="gtClaimsImprovement"
+        data-act="projects.claimsImprovement"> 本次门禁依据改善对照</label>
+      <div class="tiny muted">勾选后只能引用：可比、两次样本 ≥5、已接收的对照；
+        后续退回或对照失效会阻止阶段推进。</div>
+      <select class="sel hide" id="gtComparison">${comparisonOptions}</select>
+    </div>` : `
+    <div class="note tiny">本流程还没有可引用的已接收对照；普通门禁不受影响。</div>`;
   openModal('阶段门禁 · ' + p.code, `
     <div class="note mb">启用门禁后，进入下一阶段必须有 PASS 签收；
       PATCH/NARROW/STOP 不视为通过。</div>
@@ -893,7 +1011,8 @@ async function openGateModal(projectId) {
     </div>
     <div class="field"><label>退出条件</label>
       <input id="gtCriteria" placeholder="本阶段离开前必须满足什么"></div>
-    <div class="field"><label>说明</label><input id="gtNote"></div>`,
+    <div class="field"><label>说明</label><input id="gtNote"></div>
+    ${comparisonBlock}`,
   `<button class="btn btn-g" data-act="projects.close">取消</button>
    <button class="btn btn-p" data-act="projects.submitGate" data-id="${projectId}">签收</button>`);
 }
@@ -904,6 +1023,11 @@ async function submitGate(projectId) {
     return el ? el.value.trim() : '';
   };
   if (!val('gtEvidence')) return toast('门禁签收必须填写证据链接', true);
+  const claimsImprovement = !!document.getElementById('gtClaimsImprovement')?.checked;
+  const comparisonReceiptId = claimsImprovement ? Number(val('gtComparison')) : null;
+  if (claimsImprovement && !comparisonReceiptId) {
+    return toast('请选择已接收的改善对照', true);
+  }
   try {
     await POST('/maturity/gates', {
       project_id: projectId,
@@ -912,6 +1036,8 @@ async function submitGate(projectId) {
       evidence_url: val('gtEvidence'),
       exit_criteria: val('gtCriteria') || null,
       note: val('gtNote') || null,
+      claims_improvement: claimsImprovement,
+      comparison_receipt_id: comparisonReceiptId,
     });
     toast('门禁已签收');
     closeModal();

@@ -9,10 +9,11 @@
  * 这里只维护颜色映射。
  */
 import {
-  esc, num, dtShort, dateShort, skeleton, emptyRow, DLV_TONE,
+  esc, num, dtShort, dateShort, skeleton, emptyRow, DLV_TONE, tipHelp,
 } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
+import { pageShell } from '../core/layout.js';
 import { renderAsync, go, urlParams, setUrlState } from '../core/router.js';
 import { canManage, canWrite } from '../core/auth.js';
 import { GET, PATCH, POST, POST_FORM, download, fetchBlob } from '../core/api.js';
@@ -202,21 +203,27 @@ function pageHeadLink(tab) {
 
 function paintShell() {
   const tab = state.deliverables.tab || 'project';
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <div class="between">
-        <div><h2>交付物与模板库</h2>
-          <div class="desc">项目实例 · 流程标准 · 工具模板；版本只追加，晋升才进标准</div></div>
-        ${pageHeadLink(tab)}
-      </div>
-      <div class="tabs" style="margin-bottom:0">
-        <button class="${tab === 'project' ? 'on' : ''}" data-act="dlv.tab" data-tab="project">项目交付物</button>
-        <button class="${tab === 'document' ? 'on' : ''}" data-act="dlv.tab" data-tab="document">流程标准文件</button>
-        <button class="${tab === 'template' ? 'on' : ''}" data-act="dlv.tab" data-tab="template">工具模板库</button>
-        <button class="${tab === 'baseline' ? 'on' : ''}" data-act="dlv.tab" data-tab="baseline">基线与审计</button>
-      </div>
-    </div>
-    <div id="dlvBody">${skeleton(4)}</div>`;
+  const tabs = `
+    <div class="tabs" style="margin-bottom:14px">
+      <button class="${tab === 'project' ? 'on' : ''}" data-act="dlv.tab" data-tab="project">项目交付物</button>
+      <button class="${tab === 'document' ? 'on' : ''}" data-act="dlv.tab" data-tab="document">流程标准文件</button>
+      <button class="${tab === 'template' ? 'on' : ''}" data-act="dlv.tab" data-tab="template">工具模板库</button>
+      <button class="${tab === 'baseline' ? 'on' : ''}" data-act="dlv.tab" data-tab="baseline">基线与审计</button>
+    </div>`;
+  const shell = pageShell({
+    title: '交付物与模板库',
+    badge: '<span class="module-badge">版本化内容</span>',
+    subtitle: '项目实例 · 流程标准 · 工具模板；版本只追加，晋升才进标准。',
+    tip: tipHelp('版本只追加；晋升才进标准。标准文件是唯一源，项目产出不直接改标准。', '交付物说明'),
+    actions: pageHeadLink(tab),
+    sections: [{
+      key: 'main',
+      html: `${tabs}<div id="dlvBody">${skeleton(4)}</div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
   if (tab === 'project') paintProjectTab();
   else if (tab === 'document') paintDocumentTab();
   else if (tab === 'template') paintTemplateTab();

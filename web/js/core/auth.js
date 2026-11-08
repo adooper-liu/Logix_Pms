@@ -145,7 +145,7 @@ export async function loadMeta() {
 
 /**
  * 登录/启动后的落地页：显式 hash/路径优先；
- * 否则只有“已确认首次上线且 8 个阶段仍就绪”才进驾驶舱，其余进「开始使用」。
+ * 没有点名时进生产工作台，由用户选流程框架 / 流程 / 项目。
  */
 export async function enterDefaultView() {
   const explicit = explicitView();
@@ -153,8 +153,7 @@ export async function enterDefaultView() {
     go(explicit, { push: false, skipHash: true, skipOrigin: true });
     return;
   }
-  // 固定唯一主入口：0→1 启动路径。驾驶舱/流程卡等是模块视图，不再抢默认落地。
-  go('start', { push: false, skipOrigin: true });
+  go('workbench', { push: false, skipOrigin: true });
 }
 
 // 令牌失效由 api 层回调到这里：清身份 + 弹登录页

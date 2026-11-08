@@ -848,6 +848,7 @@ def version_out(db: Session, version: ProcessDocumentVersion) -> ProcessDocument
         version_display=f"v{version.version_label}",
         status=version.status,
         status_label=deliverable_service.STATUS_LABELS.get(version.status, version.status),
+        source_kind=version.source_kind or "UPLOAD",
         note=version.note,
         file_name=version.file_name,
         mime_type=version.mime_type,

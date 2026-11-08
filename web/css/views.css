@@ -231,6 +231,7 @@ button.bpmn-lint-item:last-child{border-bottom:none}
 .tool-mount .desc{margin:0 0 8px}
 .tool-mount-row{flex-wrap:wrap}
 .so-side,.so-aside{position:sticky;top:0;display:flex;flex-direction:column;gap:12px}
+.so-main-col{min-width:0;display:flex;flex-direction:column;gap:12px}
 .so-side .card,.so-aside .card,.so-main{margin-bottom:0}
 .so-tree{max-height:calc(100vh - 210px);overflow:auto;padding:4px 8px 10px}
 .so-obj + .so-obj{margin-top:6px}
@@ -1318,3 +1319,143 @@ ul.wb-fold-body{margin:0;padding:8px 14px 12px 30px}
   .help-toc{position:static;max-height:none}
   .help-gloss-row{grid-template-columns:1fr}
 }
+
+/* 企业管理体系图谱（首页） */
+.fw-wrap{padding:18px 20px}
+.fw-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}
+.fw-head h3{font-size:16px;margin:0 0 4px}
+.fw-head .desc{margin:0;font-size:12.5px;color:var(--sub)}
+.fw-layer{display:grid;grid-template-columns:46px minmax(0,1fr) 250px;gap:14px;
+  align-items:stretch;border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;background:var(--panel-2)}
+.fw-no{width:36px;height:36px;border-radius:10px;background:var(--brand-soft);
+  color:var(--brand-strong);display:grid;place-items:center;font-weight:700;font-size:12.5px}
+.fw-main{min-width:0}
+.fw-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.fw-hd b{font-size:14px}
+.fw-flow{font-size:12px;color:var(--sub)}
+.fw-q{font-size:12.5px;color:var(--sub);margin:5px 0 9px;line-height:1.55}
+.fw-actions{display:flex;flex-wrap:wrap;gap:6px}
+.fw-out{border-left:1px dashed var(--line-strong);padding-left:12px;font-size:11.5px;
+  color:var(--sub-2);line-height:1.6;display:flex;align-items:center}
+.fw-arrow{padding:3px 0 3px 36px;color:var(--sub-2);font-size:14px;line-height:1}
+.fw-loop{margin-top:14px;border:1px dashed var(--brand-line);background:var(--brand-softer);
+  border-radius:10px;padding:9px 12px;font-size:12px;color:var(--brand-strong);
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fw-cross{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+  font-size:11.5px;color:var(--sub);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fw-cross b{color:var(--text);font-size:12px}
+@media(max-width:900px){
+  .fw-layer{grid-template-columns:40px minmax(0,1fr)}
+  .fw-out{grid-column:1/-1;border-left:0;border-top:1px dashed var(--line-strong);padding:8px 0 0}
+}
+
+/* 生产工作台 */
+.wb-head{margin-bottom:14px}
+.wb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.wb-card{padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-height:210px}
+.wb-card-no{width:30px;height:30px;border-radius:9px;background:var(--brand-soft);
+  color:var(--brand-strong);display:grid;place-items:center;font-weight:700;font-size:12px}
+.wb-card h3{margin:0;font-size:16px}
+.wb-card .tiny{margin:0}
+.wb-metrics{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+  padding:9px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.wb-metrics b{font-size:20px;line-height:1}
+.wb-metrics span{font-size:11.5px;color:var(--sub);margin-right:6px}
+.wb-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:auto}
+.wb-actions .sel{min-width:180px;flex:1 1 180px}
+.wb-todo ul,.wb-recent ul{list-style:none;margin:10px 0 0;padding:0;display:flex;
+  flex-direction:column;gap:8px}
+.wb-todo li,.wb-recent li{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;font-size:12.5px;border-top:1px dashed var(--line);padding-top:8px}
+.wb-todo li:first-child,.wb-recent li:first-child{border-top:0;padding-top:0}
+.wb-recent .link{background:none;border:0;padding:0;color:var(--brand-strong);
+  font-size:12.5px;cursor:pointer;text-align:left}
+.wb-recent .link:hover{text-decoration:underline}
+@media(max-width:1100px){.wb-grid{grid-template-columns:1fr}}
+
+/* 目标与承接 */
+.al-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
+.al-obj-list{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.al-obj{text-align:left;border:1px solid var(--line);background:var(--panel-2);
+  border-radius:10px;padding:9px 11px;display:flex;flex-direction:column;gap:2px;cursor:pointer}
+.al-obj:hover{border-color:var(--brand-line)}
+.al-obj.on{border-color:var(--brand);background:var(--brand-softer)}
+.al-obj b{font-size:12px}
+.al-obj span{font-size:12px;color:var(--text)}
+.al-obj em{font-style:normal;font-size:11px;color:var(--sub)}
+.al-obj em.is-ok{color:var(--good)}
+.al-obj em.is-gap{color:var(--warn)}
+.al-objective{margin-bottom:12px}
+.al-links{display:flex;flex-direction:column;gap:6px;margin-top:10px;font-size:12px}
+.al-links>div{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.al-enablers{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.al-enabler{padding:14px 16px;display:flex;flex-direction:column;gap:8px;
+  border-left:3px solid var(--warn)}
+.al-enabler.is-ok{border-left-color:var(--good)}
+.al-enabler h3{margin:0;font-size:14px}
+.al-metrics{display:flex;flex-wrap:wrap;gap:10px}
+.al-metrics span{font-size:11.5px;color:var(--sub)}
+.al-metrics b{font-size:14px;color:var(--text);margin-right:3px}
+.al-gaps{margin:0;padding-left:16px;font-size:11.5px;color:var(--sub);line-height:1.6}
+.chip{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;
+  padding:2px 9px;font-size:11.5px;cursor:pointer;color:var(--brand-strong)}
+.chip:hover{border-color:var(--brand-line)}
+@media(max-width:1100px){
+  .al-layout{grid-template-columns:1fr}
+  .al-enablers{grid-template-columns:1fr}
+}
+
+/* 生产页面外壳：左目录 / 中内容 / 右上下文 */
+.ws-head{margin-bottom:14px}
+.ws-head h2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ws-layout{display:grid;grid-template-columns:200px minmax(0,1fr) 270px;gap:14px;align-items:start}
+.ws-layout.no-aside{grid-template-columns:200px minmax(0,1fr)}
+.ws-layout.no-nav{grid-template-columns:minmax(0,1fr) 270px}
+.ws-layout.no-nav.no-aside{grid-template-columns:minmax(0,1fr)}
+.ws-layout.two-col{grid-template-columns:200px minmax(0,1fr)}
+.ws-nav{padding:7px;display:flex;flex-direction:column;gap:2px;position:sticky;top:12px}
+.ws-nav-item{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  border:0;background:none;text-align:left;padding:8px 10px;border-radius:8px;
+  font-size:12.5px;color:var(--sub);cursor:pointer}
+.ws-nav-item:hover{background:var(--panel-2);color:var(--text)}
+.ws-nav-item.on{background:var(--brand-soft);color:var(--brand-strong);font-weight:650}
+.ws-nav-item em{font-style:normal;font-size:11px;color:var(--sub-2)}
+.ws-nav-item.on em{color:var(--brand-strong)}
+.ws-main{min-width:0}
+.ws-aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
+.ws-side-card{padding:14px 16px}
+.ws-side-card h3{font-size:13px;margin:0}
+.ws-side-card .kv{display:flex;justify-content:space-between;gap:10px;
+  font-size:12px;padding:5px 0;border-top:1px dashed var(--line)}
+.ws-side-card .kv:first-of-type{border-top:0}
+.ws-side-card .kv span{color:var(--sub)}
+.fold-card{border:1px solid var(--line);border-radius:12px;background:var(--panel);
+  margin-bottom:14px;overflow:hidden}
+.fold-card summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;
+  align-items:center;gap:8px;font-weight:650;font-size:13px}
+.fold-card summary::-webkit-details-marker{display:none}
+.fold-card summary::before{content:'›';color:var(--sub-2);font-size:15px;
+  transform:rotate(90deg);transition:transform .15s}
+.fold-card:not([open]) summary::before{transform:rotate(0)}
+.fold-body{padding:0 16px 16px}
+@media(max-width:1200px){
+  .ws-layout{grid-template-columns:180px minmax(0,1fr)}
+  .ws-layout.no-nav{grid-template-columns:minmax(0,1fr)}
+  .ws-aside{grid-column:1/-1;position:static;display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:860px){
+  .ws-layout,.ws-layout.two-col,.ws-layout.no-nav,.ws-layout.no-aside{grid-template-columns:1fr}
+  .ws-nav{position:static;flex-direction:row;overflow:auto}
+  .ws-nav-item{white-space:nowrap}
+  .ws-aside{grid-template-columns:1fr}
+}
+
+/* 顶部 Tab 模式（不占左栏） */
+.ws-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto}
+.ws-tab{border:0;background:none;padding:9px 12px;font-size:12.5px;color:var(--sub);
+  cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.ws-tab:hover{color:var(--text)}
+.ws-tab.on{color:var(--brand-strong);border-bottom-color:var(--brand);font-weight:650}
+.ws-tab em{font-style:normal;font-size:11px;color:var(--sub-2)}

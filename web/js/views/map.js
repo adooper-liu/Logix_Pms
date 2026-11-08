@@ -1,5 +1,6 @@
 /* 视图：map */
 import { esc, num, bar, tipHelp, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
+import { pageShell } from '../core/layout.js';
 import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
@@ -32,6 +33,11 @@ on('map.coverage', ({ index }) => openCoverageCategory(Number(index)));
 on('map.categoryMetrics', ({ index }) => openCategoryMetrics(Number(index)));
 on('map.goProjects', () => go('projects'));
 on('map.goSketches', () => go('sketches'));
+on('map.tab', ({ tab }) => {
+  if (!tab || !state.map.repaint) return;
+  state.map.tab = tab;
+  state.map.repaint();
+});
 on('map.benchmarkFramework', (_data, el) => setBenchmarkFramework(el.value));
 on('map.pcfWizard', () => openPcfDraftWizard());
 on('map.promoteAll', () => promoteAllDrafts());
@@ -298,31 +304,20 @@ const renderMap = () => {
                 esc(selectedFramework.attribution)}</div></details>` : ''}
       </div>` : '';
 
-    viewEl().innerHTML = `
-      <div class="card map-head">
-        <div class="between map-head-top">
-          <div>
-            <h2 style="margin:0">企业流程地图<span class="module-badge">流程资产 · 定位与优先级</span></h2>
-            <div class="desc" style="margin:4px 0 0">
-              从 L1 价值链逐级下钻到 L4 活动 · 先定位结构，再决定改善对象</div>
-          </div>
-          <div class="gap">
-            <a class="link-btn" data-act="map.goSketches">架构草图</a>
-            <a class="link-btn" data-act="map.goProjects">去立项 →</a>
-            <select class="sel" data-act="map.benchmarkFramework" title="切换对标框架">
-              <option value="">不对标</option>
-              ${frameworkOptions}
-            </select>
-            ${canManage()
-              ? '<button class="btn-sm" data-act="map.pcfWizard">+ 从 PCF 生成</button>'
-                + (draftCount
-                  ? `<button class="btn-sm" data-act="map.promoteAll">确认全部草稿（${
-                    draftCount}）</button>`
-                  : '')
-                + '<button class="btn-sm" data-act="map.newProcess" title="跨层新建，需自选层级与上级">跨层新建</button>'
-              : '<span class="tiny">当前角色只读</span>'}
-          </div>
-        </div>
+    const headerActions = `
+      <a class="link-btn" data-act="map.goSketches">架构草图</a>
+      <a class="link-btn" data-act="map.goProjects">去立项 →</a>
+      ${canManage()
+        ? '<button class="btn-sm" data-act="map.pcfWizard">+ 从 PCF 生成</button>'
+          + (draftCount
+            ? `<button class="btn-sm" data-act="map.promoteAll">确认全部草稿（${
+              draftCount}）</button>`
+            : '')
+          + '<button class="btn-sm" data-act="map.newProcess" title="跨层新建，需自选层级与上级">跨层新建</button>'
+        : '<span class="tiny">当前角色只读</span>'}`;
+
+    const architectureHtml = `
+      <div class="card" style="padding:10px 14px;margin-bottom:14px">
         <div class="map-stats">
           <span class="map-stat"><b>${flat.length}</b> ${metricHelp('process_total', '流程资产')}</span>
           <button class="map-stat${improvementOnly ? ' on' : ''}" data-act="map.toggleImprovement">
@@ -334,7 +329,6 @@ const renderMap = () => {
           <span class="map-stat">${metricHelp('level_counts', 'L4')} <b>${levelCounts[4]}</b></span>
         </div>
       </div>
-
       <div class="map-layout${state.map.navCollapsed ? ' nav-collapsed' : ''}">
         <aside class="map-side card">
           <div class="map-side-hd">
@@ -346,9 +340,7 @@ const renderMap = () => {
             </button>
           </div>
           <div class="map-tree">${treeHtml}</div>
-          <div class="map-side-foot tiny">每行左侧标注 L1–L5 层级；点击层级展开；数字为本分支 L4 活动数；更深层活动在右侧列表查看。</div>
         </aside>
-
         <div class="map-main">
           <div class="card map-list">
             <div class="map-list-hd">
@@ -391,10 +383,84 @@ const renderMap = () => {
               <tbody>${rows}</tbody>
             </table>
           </div>
-          ${benchCard}
         </div>
       </div>`;
+
+    const benchmarkHtml = `
+      <div class="card">
+        <div class="between mb">
+          <div>
+            <h3 style="margin:0">对标框架
+              ${tipHelp('切换只换对标视图，不改流程目录；覆盖率按后代聚合。', '对标说明')}</h3>
+            <div class="tiny muted">选一个行业框架，看当前 L3 的覆盖与缺口。</div>
+          </div>
+          <select class="sel" data-act="map.benchmarkFramework" title="切换对标框架">
+            <option value="">不对标</option>
+            ${frameworkOptions}
+          </select>
+        </div>
+      </div>
+      ${benchCard || '<div class="card"><div class="empty">选择对标框架后查看覆盖与缺口。</div></div>'}`;
+
+    const priorityRows = flat
+      .filter((n) => n.level === 3 && !n.is_draft)
+      .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))
+      .slice(0, 50)
+      .map((n, index) => {
+        const heat = n.heat_level || 'LOW';
+        const heatClass = HEAT_CLASS[heat] || HEAT_CLASS.LOW;
+        return `<tr>
+          <td class="num">${index + 1}</td>
+          <td><button class="map-open" type="button" data-act="map.row"
+            data-code="${esc(n.code)}"><b>${esc(n.code)} ${esc(n.name)}</b></button></td>
+          <td>${esc(n.owner || '—')}</td>
+          <td class="num">${n.health_score ?? '—'}</td>
+          <td class="num">${num(n.pain_score, 1)} / ${num(n.improvement_space, 1)}</td>
+          <td><span class="tag ${heatClass}">${HEAT_LABEL[heat] || heat}
+            ${num(n.priority_score, 0)}</span></td>
+          <td>${canWrite() ? `<button class="btn-sm" data-act="map.startProject"
+            data-id="${n.id}">去立项</button>` : '—'}</td>
+        </tr>`;
+      }).join('');
+    const priorityHtml = `
+      <div class="card">
+        <div class="between mb">
+          <h3>优先级排序 ${tipHelp(
+            '按战略重要性 × 痛点 × 改善空间排序；只列 L3，最多 50 条。',
+            '优先级说明',
+          )}</h3>
+          <span class="tiny muted">${flat.filter((n) => n.level === 3 && !n.is_draft).length} 条 L3</span>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>#</th><th>流程</th><th>Owner</th><th>健康度</th>
+            <th>痛点 / 改善空间</th><th>优先级</th><th>操作</th></tr></thead>
+          <tbody>${priorityRows || emptyRow(7, '还没有 L3 流程')}</tbody>
+        </table>
+      </div>`;
+
+    const shell = pageShell({
+      title: '流程框架',
+      badge: '<span class="module-badge">流程资产 · 定位与优先级</span>',
+      subtitle: '从 L1 价值链逐级下钻到 L4 活动；换对标或看优先级不改变目录。',
+      tip: tipHelp(
+        '每行左侧标注层级；点击层级展开；数字为本分支 L4 活动数；更深层活动在右侧列表查看。',
+        '流程框架说明',
+      ),
+      actions: headerActions,
+      sections: [
+        { key: 'architecture', label: '架构', count: flat.length, html: architectureHtml },
+        { key: 'benchmark', label: '对标', html: benchmarkHtml },
+        { key: 'priority', label: '优先级', html: priorityHtml },
+      ],
+      active: state.map.tab,
+      tabAct: 'map.tab',
+      mode: 'tabs',
+    });
+    state.map.tab = shell.active;
+    viewEl().innerHTML = shell.html;
   };
+  state.map.repaint = paint;
+
 
   const start = async () => {
     const params = urlParams();

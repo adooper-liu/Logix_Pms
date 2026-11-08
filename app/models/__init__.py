@@ -15,6 +15,15 @@ from app.models.adoption import (
     SiblingBoundaryLine,
     SiblingBoundaryReview,
 )
+from app.models.asset_graph import (
+    ActivityRelation,
+    EdgeHandoffLink,
+    EvidenceAdjudication,
+    EvidenceClaim,
+    EvidenceClaimTarget,
+    NodeActivityLink,
+    UnmodeledActivity,
+)
 from app.models.authorization import AuthorizationException, AuthorizationRule
 from app.models.baseline import AssetBaseline
 from app.models.benchmark import (
@@ -34,6 +43,7 @@ from app.models.deliverable import (
     DeliverableVersion,
     StepContract,
 )
+from app.models.document_candidate import DocumentCandidateActivity
 from app.models.engine import EngineCommand, EngineCursor, EngineDeployment, EngineInbox
 from app.models.enums import (
     AssetVariationPolicy,
@@ -115,17 +125,23 @@ from app.models.knowledge import (
     KnowledgeUsage,
     KnowledgeWorkflowLink,
 )
+from app.models.log_import import LogComparisonReceipt, ProcessLogEvent, ProcessLogImport
 from app.models.maturity import GateAttestation, MaturityAssessment
 from app.models.monitor import ExceptionEvent, KpiDefinition, KpiRecord
 from app.models.notification import Notification
 from app.models.org import OrgUnit, Position
 from app.models.pilot import PilotIssue, PilotLayer, PilotPath, PilotTask
 from app.models.process import NodeTool, ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
-from app.models.process_document import ProcessDocument, ProcessDocumentVersion
+from app.models.process_document import (
+    CompiledAssetComponent,
+    ProcessDocument,
+    ProcessDocumentVersion,
+)
 from app.models.process_task import ProcessTaskDefinition
 from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.replication import ReplicationPack
+from app.models.requirement import MarketRequirement, RequirementObjectiveLink
 from app.models.sketch import Sketch
 from app.models.startup import ProcessCharter, StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
@@ -141,6 +157,13 @@ from app.models.workload import (
 
 __all__ = [
     # 模型
+    "NodeActivityLink",
+    "ActivityRelation",
+    "EdgeHandoffLink",
+    "UnmodeledActivity",
+    "EvidenceClaim",
+    "EvidenceClaimTarget",
+    "EvidenceAdjudication",
     "EngineCommand",
     "EngineCursor",
     "EngineDeployment",
@@ -154,6 +177,11 @@ __all__ = [
     "NodeTool",
     "ProcessDocument",
     "ProcessDocumentVersion",
+    "CompiledAssetComponent",
+    "DocumentCandidateActivity",
+    "ProcessLogImport",
+    "ProcessLogEvent",
+    "LogComparisonReceipt",
     "Project",
     "ProjectStep",
     "ProjectGateCondition",
@@ -233,6 +261,8 @@ __all__ = [
     "CapacityCalendar",
     "StrategyObjective",
     "ObjectiveProcessLink",
+    "MarketRequirement",
+    "RequirementObjectiveLink",
     "ProcessChangeRequest",
     "ProcessComment",
     "CompensationAction",

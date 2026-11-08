@@ -12,6 +12,7 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -122,6 +123,13 @@ class ProcessDocumentVersion(Base):
     storage_backend: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     storage_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # 来源：UPLOAD=人工上传；COMPILED=由已发布模型+架构关系+证据主张生成。
+    source_kind: Mapped[str] = mapped_column(
+        String(16), default="UPLOAD", server_default="UPLOAD", index=True
+    )
+    # 生成清单：规则版本、模型版本、输入快照、阻断、内容 hash。人工上传版本为空。
+    compile_manifest: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     base_version_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("process_document_version.id", ondelete="SET NULL"), nullable=True
     )
@@ -152,4 +160,41 @@ class ProcessDocumentVersion(Base):
 
     __table_args__ = (
         UniqueConstraint("document_id", "version_label", name="uq_process_document_version_label"),
+    )
+
+
+class CompiledAssetComponent(Base):
+    """资产包版本引用了哪些原对象；支持反向查询「哪些资产用了这个表单/规则」。
+
+    只存引用与来源 hash，不复制表单、规则、RACI 的正文。
+    """
+
+    __tablename__ = "compiled_asset_component"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_version_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "process_document_version.id",
+            ondelete="CASCADE",
+            name="fk_compiled_component_version",
+        ),
+        index=True,
+    )
+    # SOP_SECTION / RACI / CONTROL / FORM_REF / RULE_REF / KPI_REF
+    component_type: Mapped[str] = mapped_column(String(24), index=True)
+    component_ref_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    activity_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="SET NULL", name="fk_compiled_component_activity"),
+        nullable=True,
+        index=True,
+    )
+    source_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index(
+            "ix_compiled_component_version_type",
+            "document_version_id",
+            "component_type",
+        ),
     )

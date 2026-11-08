@@ -9,7 +9,8 @@ line-length = 100
 target-version = "py312"
 
 # 生成的迁移脚本不参与格式化和检查
-extend-exclude = ["alembic/versions"]
+# cbpp-prep-main 是外部准备资料目录，不属于本仓库代码
+extend-exclude = ["alembic/versions", "cbpp-prep-main"]
 
 [tool.ruff.lint]
 # 只选抓真问题的规则，不做风格现代化。

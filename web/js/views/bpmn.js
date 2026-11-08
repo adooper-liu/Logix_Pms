@@ -3,9 +3,10 @@
  * 只讲本系统画布能画、保存时会拒绝的符号。不转载 OMG 规范正文。
  */
 
-import { esc } from '../core/format.js';
+import { esc, tipHelp } from '../core/format.js';
 import { viewEl, on } from '../core/ui.js';
 import { go } from '../core/router.js';
+import { pageShell } from '../core/layout.js';
 import { state } from '../core/state.js';
 
 const LESSONS = [
@@ -106,24 +107,31 @@ function paint() {
     <button type="button" class="study-lesson${item.id === current.id ? ' on' : ''}"
       data-act="bpmn.lesson" data-id="${item.id}">${esc(item.title)}</button>`).join('');
   const points = current.points.map((line) => `<li>${esc(line)}</li>`).join('');
-  viewEl().innerHTML = `
-    <div class="card page-head">
-      <h2>BPMN 符号<span class="module-badge">OMG · 一条流程怎么走</span></h2>
-      <p class="desc">按本系统画布实际能画的符号来学。规范全文在 OMG，本页不转载。</p>
-      ${rail('bpmn')}
-    </div>
-    <div class="study-layout">
-      <div class="card study-list">${list}</div>
-      <div class="card">
-        <h3>${esc(current.title)}</h3>
-        <p>${esc(current.body)}</p>
-        <ul class="study-points">${points}</ul>
-        <div class="gap mt">
-          <button type="button" class="btn btn-p" data-act="bpmn.jump" data-view="designer">去流程设计器画</button>
-          <button type="button" class="btn btn-g" data-act="bpmn.jump" data-view="pcf">去看流程架构</button>
-        </div>
-      </div>
-    </div>`;
+  const shell = pageShell({
+    title: 'BPMN 符号',
+    badge: '<span class="module-badge">OMG · 一条流程怎么走</span>',
+    subtitle: '按本系统画布实际能画的符号来学；规范全文在 OMG，本页不转载。',
+    tip: tipHelp('只讲本系统画布能画、保存时会拒绝的符号。', 'BPMN 说明'),
+    sections: [{
+      key: 'main',
+      html: `${rail('bpmn')}
+        <div class="study-layout">
+          <div class="card study-list">${list}</div>
+          <div class="card">
+            <h3>${esc(current.title)}</h3>
+            <p>${esc(current.body)}</p>
+            <ul class="study-points">${points}</ul>
+            <div class="gap mt">
+              <button type="button" class="btn btn-p" data-act="bpmn.jump" data-view="designer">去流程设计器画</button>
+              <button type="button" class="btn btn-g" data-act="bpmn.jump" data-view="pcf">去看流程架构</button>
+            </div>
+          </div>
+        </div>`,
+    }],
+    active: 'main',
+    mode: 'plain',
+  });
+  viewEl().innerHTML = shell.html;
 }
 
 const renderBpmn = () => paint();

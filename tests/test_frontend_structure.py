@@ -27,6 +27,7 @@ def test_frontend_has_modules():
         "api.js",
         "auth.js",
         "format.js",
+        "layout.js",
         "metrics.js",
         "router.js",
         "state.js",
@@ -37,8 +38,12 @@ def test_frontend_has_modules():
     # 各业务视图
     assert {
         "dashboard.js",
+        "workbench.js",
+        "alignment.js",
+        "processes.js",
         "start.js",
         "strategy.js",
+        "traceability.js",
         "map.js",
         "process_card.js",
         "authorization.js",
@@ -55,6 +60,7 @@ def test_frontend_has_modules():
         "data.js",
         "knowledge.js",
         "execution.js",
+        "asset.js",
         "deliverables.js",
         "orgs.js",
         "sketches.js",
@@ -144,8 +150,12 @@ def test_view_modules_are_registered():
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     for view in (
         "dashboard",
+        "workbench",
+        "alignment",
+        "processes",
         "start",
         "strategy",
+        "traceability",
         "map",
         "process_card",
         "authorization",
@@ -162,6 +172,7 @@ def test_view_modules_are_registered():
         "data",
         "knowledge",
         "execution",
+        "asset",
         "deliverables",
         "orgs",
         "sketches",
@@ -174,7 +185,7 @@ def test_spa_views_cover_all_registered_views():
     """/start 这类深链要求服务端 SPA_VIEWS 与前端注册表一致，否则直接 404。"""
     main_src = (JS_ROOT / "main.js").read_text(encoding="utf-8")
     registered = set(re.findall(r"register\('([a-z_]+)'", main_src))
-    assert {"start", "process_card"} <= registered
+    assert {"workbench", "alignment", "processes", "start", "process_card"} <= registered
 
     backend_src = (PROJECT_ROOT / "app" / "main.py").read_text(encoding="utf-8")
     block = re.search(r"SPA_VIEWS = \{(.*?)\}", backend_src, re.S)
@@ -183,14 +194,238 @@ def test_spa_views_cover_all_registered_views():
     assert registered <= declared, f"SPA_VIEWS 缺少视图：{sorted(registered - declared)}"
 
 
-def test_default_view_is_start():
-    """未指定 hash/路径时固定进「开始使用」；它是唯一主入口，不再按试点进度切驾驶舱。"""
+def test_kpi_edit_seeds_process_before_async_options():
+    """编辑 KPI 时不能等异步下拉加载完才保留流程，否则早提交会把 process_id 清空。"""
+    src = (JS_ROOT / "views" / "monitor.js").read_text(encoding="utf-8")
+    assert "当前流程" in src
+    assert 'option[value]:not([value=""])' in src
+    assert "当前活动" in src
+
+
+def test_asset_page_uses_workspace_shell():
+    """高密度页面必须用左目录 + 中内容 + 右上下文，不能整页铺开。"""
+    src = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "workspaceHtml" not in src, "页面不应再手写三栏外壳"
+    assert "sectionList" in src
+    assert "foldCard" in src
+    assert "tipHelp(" in src
+    assert "ASSET().tab" in src
+
+
+MIGRATED_PAGE_SHELL = {
+    # 迁移到 pageShell 的页面；新增/迁移页面必须在这里登记
+    "asset.js",
+    "alignment.js",
+    "map.js",
+    "projects.js",
+    "monitor.js",
+    "execution.js",
+    "strategy.js",
+    "deliverables.js",
+    "orgs.js",
+    "data.js",
+    "designer/index.js",
+    "bpmn.js",
+    "cbok.js",
+    "train.js",
+    "sketches.js",
+    "pcf.js",
+    "process_card.js",
+    "pilot.js",
+    "toolbox.js",
+    "dashboard.js",
+}
+
+
+def test_migrated_pages_use_page_shell():
+    for filename in sorted(MIGRATED_PAGE_SHELL):
+        src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")
+        assert "pageShell(" in src, f"{filename} 没有使用 pageShell"
+        assert "workspaceHtml" not in src, f"{filename} 仍在手写三栏外壳"
+        assert 'class="ws-layout' not in src, f"{filename} 仍在手写三栏 DOM"
+
+
+def test_views_do_not_import_low_level_layout():
+    """页面只能依赖 pageShell 和内容组件，不能绕过外壳直接拼布局。"""
+    bad = []
+    for module in sorted((JS_ROOT / "views").rglob("*.js")):
+        src = module.read_text(encoding="utf-8")
+        for name in ("workspaceHtml", "sectionNav", "sectionTabs"):
+            if re.search(rf"import\s*\{{[^}}]*\b{name}\b", src):
+                bad.append(f"{module.name} 直接 import {name}")
+        if 'class="ws-layout' in src:
+            bad.append(f"{module.name} 手写 ws-layout")
+        if re.search(r"export\s+function\s+pageShell", src):
+            bad.append(f"{module.name} 复制了 pageShell")
+    assert not bad, "页面布局纪律被绕过：\n" + "\n".join(bad)
+
+
+def test_page_shell_tabs_mode_has_no_left_nav():
+    """tabs 模式只把 Tab 放内容顶部，不能同时再渲染左目录。"""
+    src = (JS_ROOT / "core" / "layout.js").read_text(encoding="utf-8")
+    assert "nav: mode === 'nav' ? navHtml : ''" in src
+    assert "main: `${mode === 'tabs' ? navHtml : ''}" in src
+
+
+def test_remaining_pages_use_page_shell():
+    """BPMN/CBOK/实训/草图/PCF/流程卡/十层/工具箱/驾驶舱：统一头部，内容各自保留。"""
+    for filename in (
+        "bpmn.js",
+        "cbok.js",
+        "train.js",
+        "sketches.js",
+        "pcf.js",
+        "process_card.js",
+        "pilot.js",
+        "toolbox.js",
+        "dashboard.js",
+    ):
+        src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")
+        assert "pageShell" in src, f"{filename} 没有使用 pageShell"
+        assert "mode: 'plain'" in src, f"{filename} 没有使用 plain 模式"
+
+
+def test_knowledge_view_is_a_redirect():
+    """知识库已并入工具箱，不维护第二套渲染。"""
+    src = (JS_ROOT / "views" / "knowledge.js").read_text(encoding="utf-8")
+    assert "go('toolbox'" in src
+    assert "viewEl().innerHTML" not in src
+
+
+def test_designer_keeps_canvas_full_width_with_plain_shell():
+    """设计器：统一头部，画布全宽；属性/校验在右侧抽屉，版本在弹窗。"""
+    src = (JS_ROOT / "views" / "designer" / "index.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "mode: 'plain'" in src
+    assert 'id="bpmnCanvas"' in src
+    assert 'id="bpmnSidebar"' in src
+    assert 'class="bpmn-drawer-rail"' in src
+    assert "designer.versions" in src
+
+
+def test_next_batch_pages_use_page_shell():
+    """战略/交付物/组织/数据：统一头部；各自保留既有页签或专用三栏。"""
+    checks = {
+        "strategy.js": ("pageShell", "mode: 'plain'", "so-main-col"),
+        "deliverables.js": ("pageShell", "mode: 'plain'", "dlv.tab", "dlvBody"),
+        "orgs.js": ("pageShell", "mode: 'plain'", "orgs.tab", "adminBody"),
+        "data.js": ("pageShell", "mode: 'tabs'", "data.tab", "dataGovTab"),
+    }
+    for filename, markers in checks.items():
+        src = (JS_ROOT / "views" / filename).read_text(encoding="utf-8")
+        for marker in markers:
+            assert marker in src, f"{filename} 缺少 {marker}"
+
+
+def test_execution_uses_plain_page_shell_with_aside():
+    """执行保留待办/实例/配置/集成页签，头部与右栏由 pageShell 接管。"""
+    src = (JS_ROOT / "views" / "execution.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "mode: 'plain'" in src
+    assert 'data-act="execution.tab"' in src
+    assert "sideCard('运行概览'" in src
+
+
+def test_monitor_uses_plain_page_shell_with_aside():
+    """度量保留既有页签，但头部与右栏统一由 pageShell 接管。"""
+    src = (JS_ROOT / "views" / "monitor.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "mode: 'plain'" in src
+    assert "cockpitTabBar(tab)" in src
+    assert "sideCard('当前范围'" in src
+
+
+def test_projects_split_list_and_detail():
+    """项目：列表行进入详情主题，完整工作台仍是显式按钮。"""
+    src = (JS_ROOT / "views" / "projects.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "mode: 'tabs'" in src
+    assert "key: 'list'" in src and "key: 'detail'" in src
+    assert 'data-act="projects.select"' in src
+    assert "打开完整工作台" in src
+    assert "projectSummaryHtml" in src
+    assert 'data-act="projects.open"' in src
+
+
+def test_map_uses_page_shell_with_three_tabs():
+    """流程框架：树留在内容区，外壳用顶部 Tab 分架构/对标/优先级。"""
+    src = (JS_ROOT / "views" / "map.js").read_text(encoding="utf-8")
+    assert "pageShell" in src
+    assert "mode: 'tabs'" in src
+    assert 'data-act="map.tab"' not in src  # 由外壳生成
+    for key, label in (("architecture", "架构"), ("benchmark", "对标"), ("priority", "优先级")):
+        assert f"key: '{key}'" in src
+        assert f"label: '{label}'" in src
+
+
+def test_strategy_three_columns_keep_detail_in_middle():
+    """战略目标是左树/中详情/右行动；详情必须在中间列，不能掉到第三列。"""
+    src = (JS_ROOT / "views" / "strategy.js").read_text(encoding="utf-8")
+    assert '<div class="so-side">' in src
+    assert '<div class="so-main-col">' in src
+    assert "detailHtml(selected)" in src
+    assert "asideHtml(selected" in src
+    assert src.index("so-main-col") < src.index("detailHtml(selected)")
+    assert src.index("detailHtml(selected)") < src.index("asideHtml(selected")
+
+
+def test_layout_shell_is_a_leaf_module():
+    src = (JS_ROOT / "core" / "layout.js").read_text(encoding="utf-8")
+    assert "export function pageShell" in src
+    assert "export function workspaceHtml" in src
+    assert "export function sectionNav" in src
+    assert "export function sectionTabs" in src
+    assert "export function foldCard" in src
+    assert not re.search(r"from\s+['\"]\.\./views/", src)
+
+
+def test_alignment_workbench_wires_requirements_and_enablers():
+    """目标与承接：上游要求可登记，四路使能按后端下发状态渲染。"""
+    src = (JS_ROOT / "views" / "alignment.js").read_text(encoding="utf-8")
+    assert "客户 / 市场要求" in src
+    assert 'data-act="alignment.newRequirement"' in src
+    assert 'data-act="alignment.submitRequirement"' in src
+    assert "enablerCard" in src
+    assert "metric_labels" in src, "四路指标标签必须用后端下发"
+    assert "四路就绪" in src
+    assert "pageShell" in src, "目标与承接必须走统一页面外壳"
+
+
+def test_workbench_exposes_three_production_entries():
+    """工作台只回答从哪开始：流程框架 / 一条流程 / 一个项目。"""
+    src = (JS_ROOT / "views" / "workbench.js").read_text(encoding="utf-8")
+    for label in ("流程框架", "一条流程", "一个项目", "待我处理", "最近打开"):
+        assert label in src, f"工作台缺少「{label}」"
+    assert 'data-act="workbench.newNode"' in src
+    assert 'data-act="workbench.newProcess"' in src
+    assert 'data-act="workbench.newActivity"' in src
+    assert 'data-act="workbench.openProcess"' in src
+    assert 'data-act="workbench.newProject"' in src
+    assert "L4 活动" in src, "工作台没有 L4 活动新建入口"
+    assert "frameworkMapHtml" not in src, "工作台不应再铺体系图"
+
+
+def test_process_list_is_production_table():
+    """流程清单只列 L3，提供搜索、缺 Owner 过滤和三个去向。"""
+    src = (JS_ROOT / "views" / "processes.js").read_text(encoding="utf-8")
+    assert "已纳入目录的 L3 流程" in src
+    assert 'data-act="processes.search"' in src
+    assert 'data-act="processes.only"' in src
+    assert 'data-act="processes.open"' in src
+    assert 'data-act="processes.design"' in src
+    assert 'data-act="processes.newActivity"' in src
+    assert 'data-act="processes.project"' in src
+
+
+def test_default_view_is_workbench():
+    """未指定 hash/路径时固定进生产工作台；体系图/驾驶舱不再抢默认落地。"""
     router_src = (JS_ROOT / "core" / "router.js").read_text(encoding="utf-8")
     assert "export function explicitView()" in router_src
 
     auth_src = (JS_ROOT / "core" / "auth.js").read_text(encoding="utf-8")
     assert "const explicit = explicitView()" in auth_src
-    assert "go('start'" in auth_src
+    assert "go('workbench'" in auth_src
     assert "skipOrigin: true" in auth_src
     assert "pilot_ready_count" not in auth_src
 
@@ -226,16 +461,21 @@ def test_help_center_and_page_help_button():
     assert "PAGE_TOPIC" in catalog
     assert "glossary" in catalog
     for key in (
+        "workbench",
+        "alignment",
+        "processes",
         "start",
         "orgs",
         "map",
         "authorization",
         "strategy",
+        "traceability",
         "projects",
         "workflow",
         "pilot",
         "designer",
         "execution",
+        "asset",
         "dashboard",
         "monitor",
         "toolbox",
@@ -275,6 +515,7 @@ def test_start_page_counts_framework_boundary_only():
     assert "Q1 要什么" not in src
     assert "地图层" not in src
     assert "activeQ" not in src
+    assert 'data-view="asset"' in src, "开始使用页缺少流程资产工作台入口"
 
 
 def test_process_analysis_keeps_six_records():
@@ -314,28 +555,47 @@ def test_nav_follows_what_each_page_writes():
     assert "expert-only" not in html
     views = re.findall(r'<a[^>]*data-view="([^"]+)"', html)
     assert views == [
-        "start",
-        "strategy",
-        "pcf",
+        "workbench",
+        "alignment",
         "map",
-        "orgs",
-        "authorization",
-        "pilot",
-        "designer",
+        "processes",
         "projects",
+        "monitor",
         "execution",
-        "dashboard",
-        "cbok",
-        "train",
-        "bpmn",
+        "authorization",
+        "orgs",
+        "strategy",
+        "traceability",
+        "deliverables",
+        "asset",
+        "designer",
+        "data",
+        "help",
     ]
-    assert "把公司流程体系立起来" in html
-    assert "把一条流程建好" in html
-    assert "十层核对" in html
-    build = html.split("把一条流程建好")[0]
-    assert 'data-view="pilot"' not in build
+    for group in ("生产主线", "运营与治理", "更多"):
+        assert group in html, f"侧栏缺少生产分组 {group}"
+    assert "把公司流程体系立起来" not in html
+    assert "把一条流程建好" not in html
     assert "能力地图" not in html
     assert "capability" not in views
+
+
+def test_start_page_has_enterprise_framework_map():
+    """首页必须是企业管理体系图谱，不是并列功能入口。"""
+    src = (JS_ROOT / "views" / "start.js").read_text(encoding="utf-8")
+    for layer in (
+        "价值与目标",
+        "流程架构",
+        "流程资产",
+        "作业与执行",
+        "度量与反馈",
+        "治理与支持",
+    ):
+        assert layer in src, f"首页体系图缺少 {layer}"
+    assert "frameworkMapHtml" in src
+    assert 'data-act="start.go"' in src
+    assert "度量回到目标与资产" in src
+    assert "客户 / 市场价值" in src
 
 
 def test_workload_page_consumes_boundary_note():
@@ -634,6 +894,9 @@ def test_view_exports_do_not_collide():
 def test_every_view_module_exports_a_renderer():
     renderers = {
         "dashboard.js": "renderDashboard",
+        "workbench.js": "renderWorkbench",
+        "alignment.js": "renderAlignment",
+        "processes.js": "renderProcesses",
         "start.js": "renderStart",
         "strategy.js": "renderStrategy",
         "map.js": "renderMap",

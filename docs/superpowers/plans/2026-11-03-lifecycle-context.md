@@ -2,7 +2,7 @@
 
 > 用户已明确要求合并前一单元后执行M2；原生执行，不启动文档评审循环。前一单元已通过PR#15合并为432451c；M2代码位于feat/lifecycle-task-handoffs，未自动发布。
 
-**Goal:** 同一后端目录定义八阶段任务/方法/原产物/核验/下一步，开始使用和CBOK共享，进入原模块仍看同一流程上下文。
+**Goal:** 同一后端目录定义八阶段任务/方法/原产物/核验/下一步，体系总览和CBOK共享，进入原模块仍看同一流程上下文。
 **Architecture:** 新只读/lifecycle返回8阶段和贯穿治理、经验证的流程/可选项目身份；core/lifecycle仅依赖api/state/format，router负责导航与renderAsync前后承接。阶段不保存状态，不新增表。
 **Tech Stack:** FastAPI/Pydantic/SQLAlchemy，原生ES模块、pytest、Playwright。
 **Spec:** 总规格R0-01与第2节，主任务brief M2。原主去向strategy/pcf/designer/monitor analysis/designer/execution/dashboard/projects不变，治理authorization独列。
@@ -35,7 +35,7 @@ Create app/services/lifecycle.py、schemas/lifecycle.py、api/v1/lifecycle.py、
 
 Create web/js/core/lifecycle.js；Modify router.js、views/start.js、cbok.js。
 - [x] 共享loadLifecycle(params)只从/lifecycle读；渲染流程/可选项目摘要、阶段nav、选中阶段task/方法/原产物/核验/下一步、治理入口。下拉只列L3/L4；换流程清项目。
-- [x] 开始使用和CBOK移除各自硬编码生命周期数组，使用同一目录；公司框架证据仍保留，但不说八阶段顺序推进或最低证据=全公司完成。
+- [x] 体系总览和CBOK移除各自硬编码生命周期数组，使用同一目录；公司框架证据仍保留，但不说八阶段顺序推进或最低证据=全公司完成。
 - [x] router注册导航动作，目标params只构建process/project/lifecycle+该阶段tab；不携带不适用旧筛选。执行明确tab=tasks，设计器明确tab=model。
 - [x] renderAsync遇lifecycle参数先验证目录/身份，错误或所需流程缺失时仅显示上下文指引，不执行业务loader；paint后插入共享任务契约。请求序号防旧响应覆盖同view新上下文。
 - [x] setUrlState在当前同view规范化时保留合法lifecycle身份，换流程清project；普通非lifecycle链接行为不变。

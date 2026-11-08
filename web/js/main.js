@@ -18,9 +18,13 @@ import { actions, registerActions } from './core/actions.js';
 import { openNotifications, refreshNotifications } from './core/notifications.js';
 
 import * as dashboard from './views/dashboard.js';
+import * as workbenchView from './views/workbench.js';
+import * as alignmentView from './views/alignment.js';
+import * as processesView from './views/processes.js';
 import * as startView from './views/start.js';
 import * as pilotView from './views/pilot.js';
 import * as strategyView from './views/strategy.js';
+import * as traceabilityView from './views/traceability.js';
 import * as mapView from './views/map.js';
 import * as processCardView from './views/process_card.js';
 import * as authorizationView from './views/authorization.js';
@@ -31,6 +35,7 @@ import * as trainView from './views/train.js';
 import * as workflowView from './views/workflow.js';
 import * as projectsView from './views/projects.js';
 import * as executionView from './views/execution.js';
+import * as assetView from './views/asset.js';
 import * as toolboxView from './views/toolbox.js';
 import * as designerView from './views/designer.js';
 import * as monitorView from './views/monitor.js';
@@ -43,9 +48,13 @@ import * as helpView from './views/help.js';
 import { openPageHelp } from './core/help.js';
 
 register('dashboard', dashboard.renderDashboard);
+register('workbench', workbenchView.renderWorkbench);
+register('alignment', alignmentView.renderAlignment);
+register('processes', processesView.renderProcesses);
 register('start', startView.renderStart);
 register('pilot', pilotView.renderPilot);
 register('strategy', strategyView.renderStrategy);
+register('traceability', traceabilityView.renderTraceability);
 register('map', mapView.renderMap);
 register('process_card', processCardView.renderProcessCard);
 register('authorization', authorizationView.renderAuthorization);
@@ -56,6 +65,7 @@ register('train', trainView.renderTrain);
 register('workflow', workflowView.renderWorkflow);
 register('projects', projectsView.renderProjects);
 register('execution', executionView.renderExecution);
+register('asset', assetView.renderAsset);
 register('toolbox', toolboxView.renderToolbox);
 register('designer', designerView.renderDesigner);
 register('monitor', monitorView.renderMonitor);
@@ -97,7 +107,7 @@ on('shell.retry', ({ view }) => go(view, { push: false, skipHash: true, skipOrig
 on('shell.backToOrigin', () => goBackToOrigin());
 on('shell.mainline', () => {
   // 主线是唯一固定入口；从任何模块回来都清空来源栈。
-  go('start', { push: true, skipOrigin: true });
+  go('workbench', { push: true, skipOrigin: true });
 });
 on('shell.pageHelp', () => openPageHelp());
 

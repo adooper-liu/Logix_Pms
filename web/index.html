@@ -34,23 +34,25 @@
       <div class="brand"><b>流程管理系统 PMS</b><span>PROCESS MANAGEMENT SYSTEM</span></div>
     </div>
     <nav class="nav">
-      <div class="grp">把公司流程体系立起来</div>
-      <a class="active" data-view="start"><span class="ic">➜</span><span class="lbl">开始使用</span></a>
-      <a data-view="strategy"><span class="ic">◎</span><span class="lbl">战略目标</span></a>
-      <a data-view="pcf"><span class="ic">◈</span><span class="lbl">流程架构</span></a>
-      <a data-view="map"><span class="ic">◈</span><span class="lbl">企业流程地图</span></a>
+      <a class="active" data-view="workbench"><span class="ic">◉</span><span class="lbl">工作台</span></a>
+      <div class="grp">生产主线</div>
+      <a data-view="alignment"><span class="ic">◎</span><span class="lbl">目标与承接</span></a>
+      <a data-view="map"><span class="ic">◈</span><span class="lbl">流程框架</span></a>
+      <a data-view="processes"><span class="ic">≡</span><span class="lbl">流程</span></a>
+      <a data-view="projects"><span class="ic">▤</span><span class="lbl">项目</span></a>
+      <div class="grp">运营与治理</div>
+      <a data-view="monitor"><span class="ic">◔</span><span class="lbl">度量</span></a>
+      <a data-view="execution"><span class="ic">▶</span><span class="lbl">执行</span></a>
+      <a data-view="authorization"><span class="ic">⚖</span><span class="lbl">治理</span></a>
+      <div class="grp">更多</div>
       <a data-view="orgs"><span class="ic">⚙</span><span class="lbl">组织与人员</span></a>
-      <a data-view="authorization"><span class="ic">⚖</span><span class="lbl">授权矩阵</span></a>
-      <div class="grp">把一条流程建好</div>
-      <a data-view="pilot"><span class="ic">▥</span><span class="lbl">十层核对</span></a>
+      <a data-view="strategy"><span class="ic">◎</span><span class="lbl">目标</span></a>
+      <a data-view="traceability"><span class="ic">⇄</span><span class="lbl">追溯</span></a>
+      <a data-view="deliverables"><span class="ic">▤</span><span class="lbl">交付物</span></a>
+      <a data-view="asset"><span class="ic">◧</span><span class="lbl">流程资产</span></a>
       <a data-view="designer"><span class="ic">⌗</span><span class="lbl">流程设计器</span></a>
-      <a data-view="projects"><span class="ic">▤</span><span class="lbl">流程项目组合</span></a>
-      <a data-view="execution"><span class="ic">▶</span><span class="lbl">流程执行</span></a>
-      <a data-view="dashboard"><span class="ic">▦</span><span class="lbl">运营驾驶舱</span></a>
-      <div class="grp">系统学习</div>
-      <a data-view="cbok"><span class="ic">▤</span><span class="lbl">CBOK 知识域</span></a>
-      <a data-view="train"><span class="ic">✎</span><span class="lbl">BPM 实训</span></a>
-      <a data-view="bpmn"><span class="ic">⌗</span><span class="lbl">BPMN 符号</span></a>
+      <a data-view="data"><span class="ic">◫</span><span class="lbl">数据治理</span></a>
+      <a data-view="help"><span class="ic">?</span><span class="lbl">帮助与方法</span></a>
     </nav>
     <div class="foot">v1.0 · BPR / 优化 / 精益 一体化<br>
       <span id="backendState">连接后端中…</span></div>
@@ -60,7 +62,7 @@
   <div class="main">
     <div class="topbar">
       <div class="topbar-title">
-        <h1 id="pageTitle">开始使用</h1>
+        <h1 id="pageTitle">工作台</h1>
         <button type="button" class="page-help-btn" id="pageHelpBtn"
           data-act="shell.pageHelp" title="本页帮助" aria-label="打开本页帮助">?</button>
       </div>
@@ -78,7 +80,7 @@
     </div>
     <div class="origin-bar" id="originBar">
       <button class="btn-sm mainline-btn" type="button" data-act="shell.mainline"
-        title="回到唯一主路径：0→1 启动">⌂ 主线：0→1</button>
+        title="回到工作台">⌂ 工作台</button>
       <button class="btn-sm hide" id="originBack" type="button"
         data-act="shell.backToOrigin">← 返回来源</button>
       <span class="tiny muted" id="originContext"></span>
