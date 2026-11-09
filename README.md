@@ -64,7 +64,8 @@
 
 启动证据文档保留了旧九阶段的历史口径，不能当作当前八阶段导航或项目推进规范；历史实例见
 [docs/startup-evidence-example.md](docs/startup-evidence-example.md)；
-简历正文见 [docs/resume.md](docs/resume.md)；
+简历正文见 [docs/resume/resume.md](docs/resume/resume.md)，各岗位自我推介见
+[docs/resume/README.md](docs/resume/README.md)；
 过硬演示包（简历主张 → 能点开的证据）见
 [docs/resume-capability-map.md](docs/resume-capability-map.md)；
 页面依赖的历史结构说明见
@@ -510,7 +511,7 @@ docs/           使用指南、行业对标、信息架构、指标口径、BPMN
                 「APQC＋十要素」治理体系的能力差距与优先级见 docs/apqc-ten-elements-gap-analysis.md
                 APQC 中文参考译文的约定见 docs/pcf-chinese-translation.md
                 九阶段启动证据的实际口径与实例见 docs/startup-evidence-example.md
-                简历正文见 docs/resume.md
+                简历正文与各岗位自我推介见 docs/resume/README.md
                 过硬演示包见 docs/resume-capability-map.md
                 页面依赖的历史结构说明见 docs/three-layers-and-page-dependencies.md
 alembic/        数据库迁移脚本（env.py + versions/）
