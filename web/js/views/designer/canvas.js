@@ -143,6 +143,7 @@ export function createCanvas(ctx) {
       st.model = response;
       st.savedModel = ctx.cloneModel(response);
       st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
+      await ctx.refreshBinding();
       setSaveState('已保存 · v' + (response.draft_version || response.version));
       ctx.renderSelection(st.bpmnSelection || []);
       ctx.runLint();
@@ -243,6 +244,7 @@ export function createCanvas(ctx) {
     try {
       const xml = await fetchXml();
       await modeler.importXML(xml);
+      ctx.applyBindingMarkers();
       const paletteToggle = container.querySelector('.djs-palette-toggle');
       if (paletteToggle) paletteToggle.title = '展开/收起工具';
       fit();

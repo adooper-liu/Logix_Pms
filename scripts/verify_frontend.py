@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_binding_readiness import verify_binding_readiness
 from verify_execution_readiness import verify_execution_readiness
 from verify_improvement_round import verify_improvement_round
 from verify_lifecycle import (
@@ -142,6 +143,8 @@ def main() -> int:
             assert page.locator('.nav a[data-view="cbok"]').count() == 0
             assert page.locator('.nav a[data-view="workflow"]').count() == 0
 
+        check("默认入口与两侧栏分组", default_entry_and_nav)
+        check("P0经营绑定只读核对", lambda: verify_binding_readiness(page, base))
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))
@@ -154,7 +157,6 @@ def main() -> int:
         check("M4本人核验弹窗守卫", lambda: verify_work_review_guards(page, base))
         check("M3战略边界与交接", lambda: verify_process_context(page, base))
         check("三类型分类维护与原流程消费", lambda: verify_process_classification(page, base))
-        check("默认入口与两侧栏分组", default_entry_and_nav)
 
         # ---------------------------------------------------- 第一段：视图渲染
         print("── 视图渲染 ──")
@@ -223,6 +225,16 @@ def main() -> int:
             except Exception:
                 pass
             page.wait_for_timeout(600)
+
+        def open_project_workbench() -> None:
+            """列表选项目 -> 页面摘要 -> 完整工作台；保留两段入口的真实断言。"""
+            page.locator('[data-act="projects.section"][data-tab="list"]').click()
+            page.wait_for_selector("#view .project-open")
+            page.locator("#view .project-open").first.click()
+            page.wait_for_selector('#view [data-act="projects.open"]')
+            assert "project=" in page.url
+            page.locator('#view [data-act="projects.open"]').click()
+            page.wait_for_selector("#mBody .tabs")
 
         def goto_workflow_tab(label: str) -> None:
             """workflow 默认落在项目工作台，方法手册相关检查要先切页签。"""
@@ -397,7 +409,7 @@ def main() -> int:
             page.click('#view button:has-text("1+3+10 建架构")')
             page.wait_for_selector("#mask.show", timeout=8000)
             page.wait_for_selector('#pcfGuided input[data-act="map.guidedL1"]', timeout=12000)
-            assert page.inner_text("#pageTitle") == "企业流程地图"
+            assert page.inner_text("#pageTitle") == "流程框架"
             page.locator('#pcfGuided input[data-act="map.guidedL1"]').first.check()
             page.wait_for_timeout(400)
             page.click('#pcfGuided button:has-text("套用推荐")')
@@ -483,6 +495,8 @@ def main() -> int:
 
         def benchmark_switch() -> None:
             goto("map")
+            page.locator('[data-act="map.tab"][data-tab="benchmark"]').click()
+            page.wait_for_selector('[data-act="map.benchmarkFramework"]')
             options = page.eval_on_selector_all(
                 "#view select[title='切换对标框架'] option", "els => els.map(e => e.value)"
             )
@@ -671,7 +685,7 @@ def main() -> int:
         # 项目详情：四个页签 + 步骤状态可改
         def project_detail_tabs() -> None:
             goto("projects")
-            page.click("#view .project-open >> nth=0")
+            open_project_workbench()
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(900)
             assert "概览" in page.inner_text("#mBody"), "详情弹窗未渲染"
@@ -700,7 +714,7 @@ def main() -> int:
         # 工作流推进：从步骤直达工作现场、记录进度、按步骤看交付物
         def project_step_actions() -> None:
             goto("projects")
-            page.click("#view .project-open >> nth=0")
+            open_project_workbench()
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(900)
             page.click('#mBody .tabs button:has-text("工作流推进")')
@@ -758,6 +772,8 @@ def main() -> int:
             page.click("#mFoot .btn-p")
             page.wait_for_timeout(2200)
             assert not page.is_visible("#mask.show"), "提交后弹窗未关闭，可能是接口报错"
+            page.locator('[data-act="projects.section"][data-tab="list"]').click()
+            page.wait_for_selector("#view .project-open")
             listing = page.inner_text("#view")
             assert "自检用临时项目" in listing, "新建的项目没有出现在列表里"
 
@@ -2423,7 +2439,7 @@ def main() -> int:
 
         def project_gantt() -> None:
             goto("projects")
-            page.click("#view .project-open >> nth=0")
+            open_project_workbench()
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(1000)
             page.click('#mBody .tabs button:has-text("甘特图")')
@@ -2470,7 +2486,9 @@ def main() -> int:
             page.wait_for_timeout(1800)
             assert page.inner_text("#pageTitle") == "流程项目组合", "异常转改善没有进入项目组合"
             assert "project=" in page.url, f"URL 没有记录改善项目：{page.url}"
-            page.wait_for_selector("#mask.show", timeout=8000)
+            page.wait_for_selector('#view [data-act="projects.open"]', timeout=8000)
+            page.locator('#view [data-act="projects.open"]').click()
+            page.wait_for_selector("#mBody .tabs", timeout=8000)
             assert "改善项目卡" in page.inner_text("#mBody"), "改善项目详情缺少改善项目卡"
             close_modal()
 
@@ -2542,7 +2560,10 @@ def main() -> int:
             continue_btn = page.locator('#view button[data-act="dashboard.openProject"]')
             if continue_btn.count():
                 continue_btn.first.click()
-                page.wait_for_selector("#mask.show")
+                page.wait_for_selector('#view [data-act="projects.open"]')
+                assert "project=" in page.url
+                page.locator('#view [data-act="projects.open"]').click()
+                page.wait_for_selector("#mBody .tabs")
                 page.wait_for_timeout(1400)
                 assert "概览" in page.inner_text("#mBody"), "继续推进未打开项目详情"
                 close_modal()
@@ -2554,7 +2575,7 @@ def main() -> int:
             goto("dashboard")
             page.click('[data-act="dashboard.openProcess"] >> nth=0')
             page.wait_for_timeout(1200)
-            assert page.inner_text("#pageTitle") == "企业流程地图"
+            assert page.inner_text("#pageTitle") == "流程框架"
             page.wait_for_selector("#mask.show")
             assert "综合优先级得分" in page.inner_text("#mask")
             close_modal()
@@ -2566,7 +2587,7 @@ def main() -> int:
                 goto("dashboard")
                 page.click(f'[data-act="dashboard.kpi"][data-key="{key}"]')
                 page.wait_for_timeout(900)
-                assert page.inner_text("#pageTitle") == "运营驾驶舱"
+                assert page.inner_text("#pageTitle") == "度量"
                 assert f"tab={tab}" in page.url
                 assert marker in page.inner_text("#view")
 
@@ -3128,7 +3149,7 @@ def main() -> int:
                 assert page.inner_text("#pageTitle") == "流程卡"
                 assert "战略承接" in page.inner_text("#view"), "流程卡没有渲染战略承接区块"
             else:
-                assert page.inner_text("#pageTitle") == "企业流程地图"
+                assert page.inner_text("#pageTitle") == "流程框架"
                 page.wait_for_selector("#mask.show", timeout=8000)
                 assert "流程" in page.inner_text("#mask"), "没有按目标承接的流程打开详情"
                 close_modal()
@@ -3145,12 +3166,14 @@ def main() -> int:
 
         def project_to_execution() -> None:
             goto("projects")
-            page.click("#view .project-open >> nth=0")
+            open_project_workbench()
             page.wait_for_selector("#mask.show")
             page.wait_for_timeout(1100)
             assert "project=" in page.url, f"URL 没有记录项目：{page.url}"
             page.reload(wait_until="networkidle")
-            page.wait_for_selector("#mask.show", timeout=8000)
+            page.wait_for_selector('#view [data-act="projects.open"]', timeout=8000)
+            assert "project=" in page.url, "刷新后丢失所选项目"
+            page.locator('#view [data-act="projects.open"]').click()
             page.wait_for_selector("#mBody .tabs", timeout=8000)
             page.wait_for_timeout(600)
             assert "概览" in page.inner_text("#mBody"), "刷新没有恢复项目详情"

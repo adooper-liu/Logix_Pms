@@ -1,8 +1,4 @@
-/* BPMN 属性侧栏：节点 / 连线 / 泳道 / 流程 四类元素的面板与就地编辑。
- *
- * 画布实例通过 index.js 注入的 ctx 访问；本文件不 import 其他有状态的
- * designer 子模块（assignment 的渲染同样走 ctx）。
- */
+/* BPMN 属性侧栏：节点、连线、泳道、流程；跨模块能力经 ctx 注入。 */
 
 import { esc, NODE_LABEL, tipHelp } from '../../core/format.js';
 import { toast, promptDialog, confirmDialog } from '../../core/ui.js';
@@ -93,6 +89,7 @@ export function createPanels(ctx) {
     { id: 'metrics', label: '测算' },
     { id: 'docs', label: '文件' },
     { id: 'exec', label: '执行' },
+    { id: 'binding', label: '绑定' },
   ];
   const NODE_PROP_SECTION_ALIAS = { runtime: 'exec', tools: 'exec' };
 
@@ -238,6 +235,8 @@ export function createPanels(ctx) {
           方法论工具（SIPOC/FMEA 等）请在五阶段步骤或工具箱挂接。</div>
         <div id="bpDocsSlot" class="bpmn-node-extra first"><div class="tiny muted">正在加载标准文件…</div></div>`
         : noPms;
+    } else if (section === 'binding') {
+      body = ctx.renderNodeBinding(bo.id);
     } else if (section === 'exec') {
       body = node ? `
         <div class="hint mb">与「流程执行 → 运行配置」同口径：本页可就地改
@@ -488,6 +487,7 @@ export function createPanels(ctx) {
       st.model = response;
       st.savedModel = ctx.cloneModel(response);
       st.analysis = await POST('/processes/' + st.processId + '/design/analyze', {});
+      await ctx.refreshBinding();
       ctx.setSaveState('属性已保存 · v' + (response.draft_version || response.version));
       ctx.renderSelection(st.bpmnSelection || []);
       toast(okMessage);

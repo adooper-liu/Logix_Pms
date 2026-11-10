@@ -93,6 +93,8 @@ def verify_outcome_governance(page, base):
     finally:
         ctx.close()
     page.evaluate("id=>go('projects',{params:{project:String(id)},skipOrigin:true})", project["id"])
+    page.locator('#view [data-act="projects.open"]').click()
+    expect(page.locator("#mBody .tabs")).to_be_visible()
     page.locator(f'[data-act="projects.replication"][data-id="{project["id"]}"]').click()
     expect(page.locator("#rpRound")).to_be_visible()
     expect(page.locator("#rpReceiver")).to_be_visible()

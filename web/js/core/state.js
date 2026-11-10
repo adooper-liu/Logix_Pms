@@ -33,6 +33,7 @@ export const state = {
   designer: {
     processId: null, processCode: null, model: null, analysis: null, tab: 'model',
     changes: null, changeMeta: null, raci: null, raciMeta: null, governanceRoles: null,
+    binding: null, bindingError: null, bindingLocate: null,
   },
   knowledge: {
     type: '', sort: 'recent', page: 1, status: '', tool: '', tag: '', step: '',
