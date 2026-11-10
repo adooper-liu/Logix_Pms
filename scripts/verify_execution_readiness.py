@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 
+from binding_gate_fixture import add_bindings, api_for
 from frontend_test_app import isolated_app
 from playwright.sync_api import expect, sync_playwright
 
@@ -24,12 +25,32 @@ def verify_execution_readiness(page, base):
             "owner_user_id": me["id"],
         },
     ).json()["id"]
+    api, _headers = api_for(page, base)
+    suffix = uuid4().hex[:8]
+    activity = api(
+        "POST",
+        "/process-map",
+        {"code": "M6A-" + suffix, "name": "上线合成活动", "level": 4, "parent_id": pid},
+    )
+    position = api("POST", "/positions", {"code": "M6P-" + suffix, "name": "上线合成岗位"})
     try:
         page.request.put(
             base + f"/api/v1/processes/{pid}/design",
             headers=headers,
-            data={"nodes": [{"node_key": "a", "name": "办理", "node_type": "TASK"}], "edges": []},
+            data={
+                "nodes": [
+                    {
+                        "node_key": "a",
+                        "name": "办理",
+                        "node_type": "TASK",
+                        "process_arch_id": activity["id"],
+                        "owner_position_id": position["id"],
+                    }
+                ],
+                "edges": [],
+            },
         )
+        add_bindings(page, base, pid, activity["id"], position["id"], "a", performance=False)
         page.request.post(
             base + f"/api/v1/processes/{pid}/design/submit-review",
             headers=headers,

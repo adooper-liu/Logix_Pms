@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.timeutil import utcnow
-from app.models.enums import DeliverableStatus
 from app.models.execution import FormDefinition, ProcessRule
 from app.models.process import ProcessArch, ProcessNode
 from app.models.process_document import (
@@ -41,7 +40,7 @@ from app.schemas.asset_graph import (
     NodeActivityLinkOut,
 )
 from app.services import asset_graph as asset_service
-from app.services import audit
+from app.services import audit, binding_readiness
 from app.services import deliverable as deliverable_service
 from app.services import preview as preview_service
 from app.services import process_document as document_service
@@ -214,6 +213,9 @@ def _collect(db: Session, process: ProcessArch) -> dict:
         "blockers": [row.model_dump() for row in readiness.blockers],
         "warnings": list(dict.fromkeys(readiness.warnings + mapping.warnings)),
         "content_hash": content_hash,
+        "binding_fingerprint": binding_readiness.binding_gate(
+            db, process.id, profile="PERFORMANCE", model_version_id=readiness.model_version_id
+        ).fingerprint,
     }
     return {
         "html": html,
@@ -716,20 +718,6 @@ def transition(
     if document is None or document.process_id != process.id:
         raise HTTPException(404, "资产包不属于该流程。")
 
-    if target != DeliverableStatus.RETIRED.value:
-        readiness = asset_service.readiness(db, process)
-        if readiness.blockers:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": "阻断未清零，不能提交评审或生效。",
-                    "blockers": [row.model_dump() for row in readiness.blockers],
-                },
-            )
-        manifest = version.compile_manifest or {}
-        if manifest.get("model_version_id") != readiness.model_version_id:
-            raise HTTPException(409, "模型版本已变化，请重新生成资产包。")
-
     try:
         version = document_service.transition_version(db, document, version, target, user)
     except document_service.ProcessDocumentError as exc:
@@ -1020,3 +1008,37 @@ def build_print_pack(
   </section>
   {"".join(sections)}
 </body></html>"""
+
+
+def validate_for_transition(db, document, version, target, user):
+    """两种文档入口共用；诊断只走原诊断守卫，不套正式资产完整度。"""
+    if target not in {"IN_REVIEW", "APPROVED", "EFFECTIVE"}:
+        return
+    manifest = version.compile_manifest or {}
+    if version.source_kind != "COMPILED":
+        raise HTTPException(409, "生成产物的人工替代版本不能正式流转，请回原入口重新编译。")
+    if manifest.get("kind") in {"DIAGNOSIS", "DIAGNOSIS_R1"}:
+        from app.services import diagnosis
+
+        diagnosis.r1_transition_guard(db, user, version.id)
+        return
+    process = asset_service.require_process(db, user, document.process_id)
+    readiness = asset_service.readiness(db, process, user)
+    if readiness.blockers:
+        raise HTTPException(
+            409,
+            {
+                "message": "阻断未清零，不能提交评审或生效。",
+                "blockers": [b.model_dump() for b in readiness.blockers],
+            },
+        )
+    from app.services.binding_readiness import binding_gate
+
+    current = binding_gate(
+        db, process.id, profile="PERFORMANCE", model_version_id=readiness.model_version_id
+    )
+    if (
+        manifest.get("model_version_id") != readiness.model_version_id
+        or manifest.get("binding_fingerprint") != current.fingerprint
+    ):
+        raise HTTPException(409, "模型或绑定依据已变化（或缺少固定指纹），请重新生成资产包。")

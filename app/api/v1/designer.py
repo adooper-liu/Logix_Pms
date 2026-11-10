@@ -607,7 +607,19 @@ def publish_model(
         + (f"，变更单 {change_row.code}" if change_row else ""),
     )
     db.commit()
-    return _load_model(db, process_id)
+    from app.services.binding_readiness import binding_gate
+
+    gate = binding_gate(
+        db,
+        process_id,
+        user,
+        profile="PERFORMANCE",
+        model_version_id=row.id,
+        require_confirmed=False,
+    )
+    result = _load_model(db, process_id)
+    result.binding_warnings = ["绑定告警：" + b.message for b in gate.blockers]
+    return result
 
 
 @router.post(

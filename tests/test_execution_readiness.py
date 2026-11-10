@@ -20,12 +20,73 @@ def ready_process(client):
         },
     ).json()
     pid = proc["id"]
+    activity = client.post(
+        API + "/process-map",
+        json={
+            "code": "READY-A-" + uuid4().hex[:8],
+            "name": "上线活动",
+            "level": 4,
+            "parent_id": pid,
+        },
+    ).json()
+    from binding_test_helpers import position_role, remove_position_roles
+    from sqlalchemy import select
+
+    from app.core.database import SessionLocal
+    from app.models.org import Position
+    from app.models.process_document import ProcessDocument, ProcessDocumentVersion
+    from app.models.raci import RaciAssignment
+    from app.models.workload import WorkMeasurementStandard
+
+    with SessionLocal() as db:
+        position = Position(code="READY-P-" + uuid4().hex[:8], name="上线岗位")
+        db.add(position)
+        db.flush()
+        posid = position.id
+        role, _member = position_role(db, posid)
+        db.add(
+            RaciAssignment(
+                process_id=pid,
+                activity_id=activity["id"],
+                role_id=role.id,
+                matter="上线负责",
+                raci="A",
+            )
+        )
+        db.add(
+            WorkMeasurementStandard(
+                code="READY-S-" + uuid4().hex[:8],
+                name="已验证工时",
+                activity_id=activity["id"],
+                position_id=posid,
+                status="VERIFIED",
+                standard_minutes=5,
+            )
+        )
+        carrier = ProcessDocument(
+            process_id=activity["id"],
+            code="READY-C-" + uuid4().hex[:8],
+            title="上线记录",
+            category="FORM",
+        )
+        db.add(carrier)
+        db.flush()
+        db.add(
+            ProcessDocumentVersion(document_id=carrier.id, version_label="1.0", status="EFFECTIVE")
+        )
+        db.commit()
     saved = client.put(
         f"{API}/processes/{pid}/design",
         json={
             "nodes": [
                 {"node_key": "s", "name": "开始", "node_type": "START"},
-                {"node_key": "a", "name": "办理", "node_type": "TASK"},
+                {
+                    "node_key": "a",
+                    "name": "办理",
+                    "node_type": "TASK",
+                    "process_arch_id": activity["id"],
+                    "owner_position_id": posid,
+                },
                 {"node_key": "e", "name": "结束", "node_type": "END"},
             ],
             "edges": [
@@ -45,7 +106,7 @@ def ready_process(client):
         pid,
         published.json()["id"] if "id" in published.json() else published.json()["version_id"],
     )
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
     from app.core.database import SessionLocal
     from app.models.execution import (
@@ -74,8 +135,27 @@ def ready_process(client):
         db.execute(delete(ProcessExecutionConfig).where(ProcessExecutionConfig.process_id == pid))
         db.execute(delete(NodeAssignment).where(NodeAssignment.process_id == pid))
         db.commit()
+    with SessionLocal() as db:
+        document_ids = select(ProcessDocument.id).where(
+            ProcessDocument.process_id == activity["id"]
+        )
+        db.execute(
+            delete(ProcessDocumentVersion).where(
+                ProcessDocumentVersion.document_id.in_(document_ids)
+            )
+        )
+        db.execute(delete(ProcessDocument).where(ProcessDocument.process_id == activity["id"]))
+        db.execute(delete(RaciAssignment).where(RaciAssignment.process_id == pid))
+        db.execute(
+            delete(WorkMeasurementStandard).where(WorkMeasurementStandard.position_id == posid)
+        )
+        db.commit()
     deleted = client.delete(f"{API}/process-map/{pid}")
     assert deleted.status_code == 200, deleted.text
+    with SessionLocal() as db:
+        remove_position_roles(db, [posid])
+        db.delete(db.get(Position, posid))
+        db.commit()
 
 
 def ready_payload(client, revision):

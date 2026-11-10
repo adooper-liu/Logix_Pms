@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 
+from binding_gate_fixture import add_bindings
 from frontend_test_app import isolated_app
 from playwright.sync_api import expect, sync_playwright
 
@@ -57,6 +58,7 @@ def verify_binding_p2(page, base):
                 "edges": [],
             },
         )
+        add_bindings(page, base, process["id"], activity["id"], pos["id"], "job")
         api(
             "POST",
             f"/processes/{process['id']}/design/publish",

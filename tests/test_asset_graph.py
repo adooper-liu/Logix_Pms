@@ -101,6 +101,7 @@ def _create_process() -> dict:
                 process_id=process.id,
                 node_key="n3",
                 name="是否超授权",
+                process_arch_id=a2.id,
                 node_type="DECISION",
                 lane="销售运营",
                 owner_role="销售员",
@@ -266,6 +267,10 @@ def _create_process() -> dict:
                 ),
             ]
         )
+        from app.services.process_model import snapshot_from_live
+
+        db.flush()
+        version.snapshot = snapshot_from_live(db, process.id)
         db.commit()
         return {
             "process_id": process.id,
@@ -357,7 +362,28 @@ def _cleanup_process(pid: int) -> None:
         db.execute(delete(ToolSheet).where(ToolSheet.process_id == pid))
         db.execute(delete(ProcessRule).where(ProcessRule.process_id == pid))
         db.execute(delete(FormDefinition).where(FormDefinition.process_id == pid))
+        from app.models.org import Position
+        from app.models.raci import RaciAssignment
+        from app.models.workload import WorkMeasurementStandard
+
+        aids = select(ProcessArch.id).where(ProcessArch.parent_id == pid)
+        posids = list(
+            db.scalars(
+                select(WorkMeasurementStandard.position_id).where(
+                    WorkMeasurementStandard.activity_id.in_(aids)
+                )
+            )
+        )
+        db.execute(
+            delete(WorkMeasurementStandard).where(WorkMeasurementStandard.activity_id.in_(aids))
+        )
+        db.execute(delete(KpiDefinition).where(KpiDefinition.activity_id.in_(aids)))
+        db.execute(delete(RaciAssignment).where(RaciAssignment.process_id == pid))
         db.execute(delete(ProcessNode).where(ProcessNode.process_id == pid))
+        from binding_test_helpers import remove_position_roles
+
+        remove_position_roles(db, posids)
+        db.execute(delete(Position).where(Position.id.in_(posids), Position.code.like("APOS-%")))
         db.execute(delete(ProcessModelVersion).where(ProcessModelVersion.process_id == pid))
         db.execute(delete(ProcessArch).where(ProcessArch.parent_id == pid))
         db.execute(delete(ProcessArch).where(ProcessArch.id == pid))
@@ -391,6 +417,9 @@ def blank_process():
         db.execute(
             update(ProcessNode).where(ProcessNode.process_id == pid).values(process_arch_id=None)
         )
+        from app.services.process_model import snapshot_from_live
+
+        db.get(ProcessModelVersion, ids["version_id"]).snapshot = snapshot_from_live(db, pid)
         db.commit()
     yield ids
     _cleanup_process(pid)
@@ -416,8 +445,8 @@ def test_architecture_map_and_readiness(client, asset_process):
     result = readiness.json()
     assert result["metrics"]["activity_nodes"] == 2
     assert result["metrics"]["mapped_activities"] == 2
-    assert result["metrics"]["owner_ready"] == 2
-    assert result["metrics"]["carrier_ready"] == 2
+    assert result["metrics"]["owner_ready"] == 0  # 角色文本不冒充岗位和唯一 A
+    assert result["metrics"]["carrier_ready"] == 0  # 有表单但无验证工时
     assert result["metrics"]["decision_nodes"] == 1
     assert result["metrics"]["rule_ready"] == 1
     assert result["metrics"]["control_links"] == 1
@@ -435,6 +464,89 @@ def test_architecture_map_and_readiness(client, asset_process):
     assert payload["labels"]["status"]["CONFLICTED"] == "冲突"
 
 
+def _complete_asset_bindings(ids):
+    from binding_test_helpers import position_role
+
+    from app.models.org import Position
+    from app.models.raci import RaciAssignment
+    from app.models.workload import WorkMeasurementStandard
+    from app.services import binding_snapshot, process_model
+
+    pid = ids["process_id"]
+    with SessionLocal() as db:
+        pos = Position(code="APOS-" + uuid4().hex[:8], name="资产岗位")
+        db.add(pos)
+        db.flush()
+        role, _member = position_role(db, pos.id)
+        # 显式把原未建模活动纳入模型；缺口补齐后重新固定，不追认旧快照。
+        db.add(
+            ProcessNode(
+                process_id=pid,
+                node_key="n4",
+                name="电话确认",
+                node_type="TASK",
+                process_arch_id=ids["a3_id"],
+                owner_position_id=pos.id,
+            )
+        )
+        db.add(FormDefinition(process_id=pid, node_key="n4", name="电话记录", fields=[]))
+        db.add(FormDefinition(process_id=pid, node_key="n3", name="判断记录", fields=[]))
+        db.flush()
+        for node in db.scalars(select(ProcessNode).where(ProcessNode.process_id == pid)):
+            if node.node_type in {"TASK", "APPROVAL", "DECISION"}:
+                node.owner_position_id = pos.id
+        for aid in [ids["a1_id"], ids["a2_id"], ids["a3_id"]]:
+            db.add(
+                RaciAssignment(
+                    process_id=pid, activity_id=aid, role_id=role.id, raci="A", matter="资产负责"
+                )
+            )
+            db.add(
+                WorkMeasurementStandard(
+                    code="AS-" + uuid4().hex[:8],
+                    name="活动标准工时",
+                    activity_id=aid,
+                    position_id=pos.id,
+                    standard_minutes=5,
+                    status="VERIFIED",
+                )
+            )
+            db.add(
+                KpiDefinition(
+                    code="AK-" + uuid4().hex[:8],
+                    name="活动指标",
+                    dimension="EFFICIENCY",
+                    process_id=pid,
+                    activity_id=aid,
+                    target_value=5,
+                    measurement={"formula": "分钟"},
+                )
+            )
+            doc = ProcessDocument(
+                process_id=pid,
+                node_key={ids["a1_id"]: "n1", ids["a2_id"]: "n2", ids["a3_id"]: "n4"}[aid],
+                code="AD-" + uuid4().hex[:8],
+                title="活动标准",
+                category="SOP",
+                control_points="复核记录",
+            )
+            db.add(doc)
+            db.flush()
+            ver = ProcessDocumentVersion(
+                document_id=doc.id, version_label="1.0", status="EFFECTIVE"
+            )
+            db.add(ver)
+            db.flush()
+            for claim in db.scalars(select(EvidenceClaim).where(EvidenceClaim.process_id == pid)):
+                claim.source_type = "DOCUMENT_VERSION"
+                claim.source_id = ver.id
+        db.flush()
+        model = db.get(ProcessModelVersion, ids["version_id"])
+        model.snapshot = process_model.snapshot_from_live(db, pid)
+        model.binding_snapshot = binding_snapshot.capture(db, db.get(ProcessArch, pid), model)
+        db.commit()
+
+
 def test_adjudication_unblocks_submission(client, asset_process):
     ids = asset_process
     pid = ids["process_id"]
@@ -449,6 +561,7 @@ def test_adjudication_unblocks_submission(client, asset_process):
         )
         db.commit()
 
+    _complete_asset_bindings(ids)
     readiness = client.get(f"{API}/processes/{pid}/asset-readiness").json()
     assert readiness["can_submit_review"] is True
     assert readiness["metrics"]["claims_conflicted"] == 1
@@ -732,6 +845,10 @@ def test_asset_package_preview_commit_and_transition(client, asset_process, view
     )
     assert adjudicated.status_code == 200, adjudicated.text
 
+    _complete_asset_bindings(ids)
+    replacement = client.post(f"{API}/processes/{pid}/asset-packages")
+    assert replacement.status_code == 200, replacement.text
+    version_id = replacement.json()["version_id"]
     moved = client.post(
         f"{API}/asset-packages/{version_id}/transition",
         json={"status": "IN_REVIEW"},

@@ -259,6 +259,7 @@ class ProcessModelIn(BaseModel):
 
 
 class ProcessModelOut(BaseModel):
+    binding_warnings: List[str] = Field(default_factory=list)
     execution_provider_labels: Dict[str, str] = {}
     execution_provider: str = "LEGACY"
     execution_provider_label: str = "原轻量执行"

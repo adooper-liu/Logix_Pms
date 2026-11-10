@@ -22,7 +22,7 @@ from app.models.asset_graph import (
     NodeActivityLink,
     UnmodeledActivity,
 )
-from app.models.execution import FormDefinition, ProcessRule
+from app.models.execution import ProcessRule
 from app.models.monitor import KpiDefinition
 from app.models.process import ProcessArch, ProcessEdge, ProcessModelVersion, ProcessNode
 from app.models.user import User
@@ -525,7 +525,7 @@ def _unknown_targets(db: Session, process: ProcessArch, claims: List[EvidenceCla
     return result
 
 
-def readiness(db: Session, process: ProcessArch) -> AssetReadinessOut:
+def readiness(db: Session, process: ProcessArch, user: Optional[User] = None) -> AssetReadinessOut:
     version_id, version_no, status, versioned, warnings = _version_info(db, process)
     nodes = list(
         db.scalars(
@@ -547,15 +547,37 @@ def readiness(db: Session, process: ProcessArch) -> AssetReadinessOut:
     activity_nodes = [node for node in nodes if node.node_type in ACTIVITY_NODE_TYPES]
     decision_nodes = [node for node in nodes if node.node_type == "DECISION"]
 
+    from app.services import binding_readiness
+
+    binding = binding_readiness.activity_bindings(db, process.id, user, model_version_id=version_id)
+    gate = binding_readiness.binding_gate(
+        db, process.id, user, profile="PERFORMANCE", model_version_id=version_id
+    )
+    by_key = {n.node_key: n for n in binding.nodes}
+
+    def ready_facet(node, key):
+        bound = by_key.get(node.node_key)
+        return bool(
+            bound
+            and not bound.blockers
+            and any(f.key == key and f.status == "READY" for f in bound.facets)
+        )
+
     mapped = [
         node
         for node in activity_nodes
-        if node.process_arch_id
-        or any(
-            link.relation in {"REALIZES", "PART_OF"}
-            for link in links_by_node.get(node.node_key, [])
-        )
+        if node.node_key in by_key and not by_key[node.node_key].blockers
     ]
+    owner_ready = [node for node in activity_nodes if ready_facet(node, "TEAM")]
+    carrier_ready = [node for node in activity_nodes if ready_facet(node, "RESOURCE")]
+    rule_keys = set(
+        db.scalars(
+            select(ProcessRule.node_key).where(
+                ProcessRule.process_id == process.id, ProcessRule.is_active.is_(True)
+            )
+        )
+    )
+    rule_ready = [node for node in decision_nodes if node.node_key in rule_keys]
     legacy_nodes = [
         node
         for node in activity_nodes
@@ -565,32 +587,6 @@ def readiness(db: Session, process: ProcessArch) -> AssetReadinessOut:
             for link in links_by_node.get(node.node_key, [])
         )
     ]
-    owner_ready = [node for node in activity_nodes if (node.owner_role or "").strip()]
-
-    forms = list(
-        db.scalars(
-            select(FormDefinition).where(
-                FormDefinition.process_id == process.id,
-                FormDefinition.is_active.is_(True),
-            )
-        ).all()
-    )
-    specific_forms = {row.node_key for row in forms if row.node_key}
-    has_default_form = any(not row.node_key for row in forms)
-    carrier_ready = [
-        node for node in activity_nodes if node.node_key in specific_forms or has_default_form
-    ]
-
-    rules = list(
-        db.scalars(
-            select(ProcessRule).where(
-                ProcessRule.process_id == process.id,
-                ProcessRule.is_active.is_(True),
-            )
-        ).all()
-    )
-    rule_keys = {row.node_key for row in rules}
-    rule_ready = [node for node in decision_nodes if node.node_key in rule_keys]
 
     claims = list(
         db.scalars(
@@ -631,42 +627,7 @@ def readiness(db: Session, process: ProcessArch) -> AssetReadinessOut:
                 message="没有已发布的模型版本；请先在流程设计器发布。",
             )
         )
-    unmapped = [node for node in activity_nodes if node not in mapped]
-    if unmapped:
-        blockers.append(
-            ReadinessBlockerOut(
-                code="NODE_ACTIVITY_UNMAPPED",
-                message=f"{len(unmapped)} 个活动节点未映射到 L4 活动。",
-                targets=[f"{node.node_key} {node.name}" for node in unmapped],
-            )
-        )
-    no_owner = [node for node in activity_nodes if node not in owner_ready]
-    if no_owner:
-        blockers.append(
-            ReadinessBlockerOut(
-                code="ACTIVITY_OWNER_MISSING",
-                message=f"{len(no_owner)} 个活动没有责任角色。",
-                targets=[f"{node.node_key} {node.name}" for node in no_owner],
-            )
-        )
-    no_carrier = [node for node in activity_nodes if node not in carrier_ready]
-    if no_carrier:
-        blockers.append(
-            ReadinessBlockerOut(
-                code="ACTIVITY_CARRIER_MISSING",
-                message=f"{len(no_carrier)} 个活动没有表单或记录载体。",
-                targets=[f"{node.node_key} {node.name}" for node in no_carrier],
-            )
-        )
-    missing_rules = [node for node in decision_nodes if node not in rule_ready]
-    if missing_rules:
-        blockers.append(
-            ReadinessBlockerOut(
-                code="DECISION_RULE_MISSING",
-                message=f"{len(missing_rules)} 个判断节点没有规则。",
-                targets=[f"{node.node_key} {node.name}" for node in missing_rules],
-            )
-        )
+    blockers.extend(gate.blockers)
     unresolved_claims = [
         claim
         for claim in conflicted
@@ -693,22 +654,7 @@ def readiness(db: Session, process: ProcessArch) -> AssetReadinessOut:
     can_generate_draft = versioned and not any(item.code in hard_codes for item in blockers)
     can_submit_review = not blockers
 
-    if not versioned:
-        next_action = "先在流程设计器发布 To-Be 模型。"
-    elif unmapped:
-        next_action = "在「架构关系」里把未映射节点挂到 L4 活动。"
-    elif no_owner:
-        next_action = "补上活动的责任角色。"
-    elif no_carrier:
-        next_action = "补上活动的表单或记录载体。"
-    elif missing_rules:
-        next_action = "补上判断节点的规则。"
-    elif unresolved_groups or unresolved_claims:
-        next_action = "裁决证据冲突后再提交评审。"
-    elif expired:
-        next_action = "续证或重新采集过期证据。"
-    else:
-        next_action = "可以生成资产包草稿并提交评审。"
+    next_action = blockers[0].message if blockers else "可以生成资产包草稿并提交评审。"
 
     if not versioned:
         warnings.append("模型未版本化：当前就绪度基于运行中的节点，不能作为正式生成依据。")

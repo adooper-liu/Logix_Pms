@@ -44,7 +44,7 @@ def require_process(db, pid):
     return process
 
 
-def require_activity(db, process, aid, node_key=None):
+def require_activity(db, process, aid, node_key=None, *, model_version=None):
     activity = db.get(ProcessArch, aid)
     if not activity or activity.level != 4 or activity.parent_id != process.id or activity.is_draft:
         raise HTTPException(400, "活动不属于当前流程或仍为草稿")
@@ -53,9 +53,11 @@ def require_activity(db, process, aid, node_key=None):
 
         from app.models.asset_graph import NodeActivityLink
 
-        snapshot = process_model.current_snapshot(db, process.id)
-        node = next((n for n in snapshot.get("nodes", []) if n["node_key"] == node_key), None)
-        version = process_model.latest_version(db, process.id)
+        version = model_version or process_model.latest_version(db, process.id)
+        snapshot = version.snapshot if version else process_model.current_snapshot(db, process.id)
+        node = next(
+            (n for n in (snapshot or {}).get("nodes", []) if n["node_key"] == node_key), None
+        )
         ids = list(
             db.scalars(
                 select(NodeActivityLink.activity_id).where(
@@ -74,7 +76,7 @@ def require_activity(db, process, aid, node_key=None):
     return activity
 
 
-def source(db, process, activity, kind, ref_id, node_key=None, user=None):
+def source(db, process, activity, kind, ref_id, node_key=None, user=None, *, model_version=None):
     """valid,label,note；不可见来源不给名称。删除/停用原对象后保留失效引用。"""
     if kind not in MODELS:
         return True, LABELS.get(kind, kind), "仅外部引用登记，未核验实物或适用性"
@@ -97,7 +99,9 @@ def source(db, process, activity, kind, ref_id, node_key=None, user=None):
             return False, "原来源不适用", "表单/规则不属于当前流程或节点"
         if row.node_key:
             try:
-                require_activity(db, process, activity.id, row.node_key)
+                require_activity(
+                    db, process, activity.id, row.node_key, model_version=model_version
+                )
             except HTTPException:
                 return False, "原来源不适用", "原节点专属资源未实现所选活动"
     elif kind in {"TECH", "RPA"}:
@@ -112,7 +116,9 @@ def source(db, process, activity, kind, ref_id, node_key=None, user=None):
             return False, "原来源不适用", "活动子模型节点文件不等于父流程节点文件"
         if row.node_key:
             try:
-                require_activity(db, process, activity.id, row.node_key)
+                require_activity(
+                    db, process, activity.id, row.node_key, model_version=model_version
+                )
             except HTTPException:
                 return False, "原来源不适用", "原节点专属文件未实现所选活动"
         if user:
@@ -136,16 +142,26 @@ def source(db, process, activity, kind, ref_id, node_key=None, user=None):
     return True, label, "引用原对象；不代替业务核验"
 
 
-def out(db, process, row, user=None):
+def out(db, process, row, user=None, *, model_version=None):
     activity = db.get(ProcessArch, row.activity_id)
     valid, label, note = source(
-        db, process, activity, row.resource_type, row.ref_id, row.node_key, user
+        db,
+        process,
+        activity,
+        row.resource_type,
+        row.ref_id,
+        row.node_key,
+        user,
+        model_version=model_version,
     )
     document = db.get(ProcessDocument, row.ref_id) if row.resource_type == "DOCUMENT" else None
+    form = db.get(FormDefinition, row.ref_id) if row.resource_type == "FORM" else None
     record_carrier = valid and (
-        row.resource_type == "FORM"
+        form is not None
+        and bool(form.node_key)
         or document is not None
         and document.category in {"FORM", "CHECKLIST"}
+        and (bool(document.node_key) or document.process_id == activity.id)
     )
     return ResourceLinkOut(
         is_record_carrier=bool(record_carrier),
@@ -167,14 +183,14 @@ def out(db, process, row, user=None):
     )
 
 
-def list_links(db, process, user=None):
+def list_links(db, process, user=None, *, model_version=None):
     rows = db.scalars(
         select(ActivityResourceLink)
         .join(ProcessArch, ProcessArch.id == ActivityResourceLink.activity_id)
         .where(ProcessArch.parent_id == process.id, ActivityResourceLink.is_active.is_(True))
         .order_by(ActivityResourceLink.id)
     ).all()
-    return [out(db, process, row, user) for row in rows]
+    return [out(db, process, row, user, model_version=model_version) for row in rows]
 
 
 def upsert(db, process, payload, user):

@@ -264,6 +264,29 @@ def test_generic_transition_cannot_bypass_job_description_source_check(client, c
 
 
 def test_three_positions_complete_existing_document_lifecycle(client, coverage_case):
+    from test_position_coverage import _raci
+    from test_publish_gate_bindings import complete_performance
+
+    from app.models.execution import FormDefinition
+    from app.models.workload import WorkMeasurementStandard
+
+    p, a, ids = coverage_case
+    _raci(client, coverage_case, activity_id=a["id"], raci="A")
+    with SessionLocal() as db:
+        db.add(
+            WorkMeasurementStandard(
+                code="JDS-" + str(a["id"]),
+                name="验证工时",
+                activity_id=a["id"],
+                position_id=ids["position"],
+                status="VERIFIED",
+                standard_minutes=5,
+            )
+        )
+        for key in ["n1", "n2"]:
+            db.add(FormDefinition(process_id=p["id"], node_key=key, name=key + "记录", fields=[]))
+        db.commit()
+    complete_performance({"pid": p["id"], "aid": a["id"]})
     _fixed_model(coverage_case)
     try:
         created = _compile(client, coverage_case, preview(client, coverage_case)["input_hash"])
@@ -283,6 +306,14 @@ def test_three_positions_complete_existing_document_lifecycle(client, coverage_c
         assert detail["status"] == "EFFECTIVE"
     finally:
         _remove_generated(coverage_case)
+        from test_publish_gate_bindings import clean_documents
+
+        clean_documents({"pid": p["id"], "aid": a["id"], "position": ids["position"]})
+        with SessionLocal() as db:
+            from sqlalchemy import delete
+
+            db.execute(delete(FormDefinition).where(FormDefinition.process_id == p["id"]))
+            db.commit()
 
 
 def test_storage_or_transaction_failure_leaves_no_partial_version(

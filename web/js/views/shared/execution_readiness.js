@@ -3,7 +3,7 @@ import { PUT, POST } from '../../core/api.js';
 import { esc, dtShort } from '../../core/format.js';
 import { on, openModal, closeModal, modalAlive, toast } from '../../core/ui.js';
 import { state } from '../../core/state.js';
-import { RENDERERS } from '../../core/router.js';
+import { go, RENDERERS } from '../../core/router.js';
 import { AUTH, canManage, canWrite } from '../../core/auth.js';
 
 let current = null;
@@ -24,6 +24,9 @@ export function executionReadinessHtml(data) {
     ${canManage() ? '<button class="btn-sm" data-act="ready.edit">维护准备约定</button>' : ''}
     ${canWrite() && saved?.reviewer_user_id === AUTH.user?.id && saved?.edited_by_id !== AUTH.user?.id ? '<button class="btn-sm" data-act="ready.confirm">记录本人决定</button>' : ''}</div></div>
     <p><b>${esc(data.state_label)}</b> · 原发布模型 #${data.published_model_version_id || '未发布'} · 修订 ${data.revision}</p>
+    ${data.binding_gate ? `<div data-execution-binding-gate><p><b>${esc(data.binding_gate.profile_label)}</b> · ${esc(data.binding_gate.consistency_label)}</p>
+      ${data.binding_gate.blockers.map(b => `<p class="tiny">${esc(b.message)}</p>`).join('')}
+      ${data.nodes.map(n => `<button class="btn-sm btn-g" data-act="ready.bindingNode" data-node="${esc(n.node_key)}">回原节点 ${esc(n.name)}</button>`).join(' ')}</div>` : ''}
     <table class="tbl"><thead><tr><th>条件</th><th>当前事实</th><th>约定</th><th>依据</th></tr></thead><tbody>${rows}</tbody></table>
     <details><summary>逐任务适用性与配置</summary>${data.nodes.map(n => `<p class="tiny"><b>${esc(n.name)} · ${esc(n.node_key)}</b>：${Object.entries(data.requirement_labels).map(([key,label]) => { const req=saved?.node_requirements?.[n.node_key]?.[key] || saved?.requirements[key]; return esc(label)+' '+(req?esc(data.mode_labels[req.mode]):'待约定')+' · '+(n.facts[key]?'已配置':'未配置')+(req?.reason?'（'+esc(req.reason)+'）':''); }).join('；')}</p>`).join('')}</details>
     ${data.missing.length ? `<p class="warnbox">待补：${data.missing.map(esc).join('；')}</p>` : ''}
@@ -76,3 +79,9 @@ async function submit(confirm) {
 }
 on('ready.save', () => submit(false));
 on('ready.submitConfirm', () => submit(true));
+
+on('ready.bindingNode', ({ node }) => {
+  const c = current;
+  if (!alive(c)) return;
+  go('designer', { params: { process: c.processId, node, basis: c.data.published_model_version_id, tab: 'model' }, push: true });
+});
