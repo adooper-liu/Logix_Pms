@@ -14,6 +14,7 @@ from typing import List, Optional
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -35,8 +36,19 @@ class ProcessDocument(Base):
     __tablename__ = "process_document"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    process_id: Mapped[int] = mapped_column(
-        ForeignKey("process_arch.id", ondelete="CASCADE"), index=True
+    scope: Mapped[str] = mapped_column(String(16), default="PROCESS", server_default="PROCESS")
+    position_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("position.id", ondelete="RESTRICT", name="fk_document_position"),
+        nullable=True,
+        index=True,
+    )
+    governance_role_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("governance_role.id", ondelete="RESTRICT", name="fk_document_role"),
+        nullable=True,
+        index=True,
+    )
+    process_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE"), nullable=True, index=True
     )
     code: Mapped[str] = mapped_column(String(48), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(200))
@@ -88,7 +100,7 @@ class ProcessDocument(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
-    process: Mapped["ProcessArch"] = relationship("ProcessArch")  # noqa: F821
+    process: Mapped[Optional["ProcessArch"]] = relationship("ProcessArch")  # noqa: F821
     org_unit: Mapped[Optional["OrgUnit"]] = relationship("OrgUnit")  # noqa: F821
     versions: Mapped[List["ProcessDocumentVersion"]] = relationship(
         "ProcessDocumentVersion",
@@ -98,6 +110,12 @@ class ProcessDocument(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "(scope='PROCESS' AND process_id IS NOT NULL AND position_id IS NULL AND governance_role_id IS NULL) OR "
+            "(scope='POSITION' AND process_id IS NULL AND position_id IS NOT NULL AND governance_role_id IS NULL AND node_key IS NULL) OR "
+            "(scope='ROLE' AND process_id IS NULL AND position_id IS NULL AND governance_role_id IS NOT NULL AND node_key IS NULL)",
+            name="ck_document_subject",
+        ),
         Index("ix_process_document_process_category", "process_id", "category"),
         Index("ix_process_document_process_node", "process_id", "node_key"),
     )

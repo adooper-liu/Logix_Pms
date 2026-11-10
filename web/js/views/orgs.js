@@ -6,11 +6,12 @@ import { esc, dtShort, emptyRow, skeleton, tipHelp } from '../core/format.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
 import { pageShell } from '../core/layout.js';
-import { renderAsync, RENDERERS, urlParams, setUrlState } from '../core/router.js';
+import { go, renderAsync, RENDERERS, urlParams, setUrlState } from '../core/router.js';
 import { role } from '../core/auth.js';
 import { GET, POST, PATCH, DEL } from '../core/api.js';
 
 on('orgs.tab', ({ tab }) => setAdminTab(tab));
+on('orgs.positionResponsibilities', ({ id }) => go('responsibility', { params: { position: id }, push: true }));
 on('orgs.createOrg', () => openOrgCreate());
 on('orgs.editOrg', ({ id }) => openOrgEdit(Number(id)));
 on('orgs.toggleOrg', ({ id, active }) => toggleOrgActive(Number(id), active === '1'));
@@ -313,7 +314,8 @@ function paintPositionTab() {
       <td>${esc(row.org_unit_name || '集团通用')}</td>
       <td>${row.is_active
         ? '<span class="tag t-grn">启用</span>' : '<span class="tag t-gry">停用</span>'}</td>
-      <td><button class="btn-sm" data-act="orgs.editPosition" data-id="${row.id}">编辑</button>
+      <td><button class="btn-sm" data-act="orgs.positionResponsibilities" data-id="${row.id}">查看职责</button>
+        <button class="btn-sm" data-act="orgs.editPosition" data-id="${row.id}">编辑</button>
         <button class="btn-sm" data-act="orgs.deletePosition" data-id="${row.id}">删除</button></td>
     </tr>`).join('') || emptyRow(5, '还没有岗位，先建一个岗位再绑定人员和流程节点');
 

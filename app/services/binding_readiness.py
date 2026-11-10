@@ -140,7 +140,11 @@ def _team_facet(related, activity_id, racis, positions):
 
 
 def activity_bindings(
-    db: Session, process_id: int, user: Optional[User] = None
+    db: Session,
+    process_id: int,
+    user: Optional[User] = None,
+    *,
+    model_version_id: Optional[int] = None,
 ) -> ActivityBindingsOut:
     process = db.get(ProcessArch, process_id)
     if process is None:
@@ -151,6 +155,12 @@ def activity_bindings(
     day = utcnow().date()
     # latest_version/current_snapshot 均纯读；禁止 ensure_baseline/get_design 的隐式写入。
     version = process_model.latest_version(db, process_id)
+    if model_version_id is not None:
+        from app.models.process import ProcessModelVersion
+
+        version = db.get(ProcessModelVersion, model_version_id)
+        if version is None or version.process_id != process_id:
+            raise HTTPException(404, "模型版本不属于当前流程")
     snapshot = version.snapshot if version else process_model.current_snapshot(db, process_id)
     nodes, _edges = process_model.rows_from_snapshot(process_id, snapshot or {})
     nodes = [

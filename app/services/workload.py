@@ -13,15 +13,16 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.timeutil import utcnow
 from app.models.enums import WorkMeasurementSource, WorkMeasurementStatus
-from app.models.execution import ProcessTask, TaskWorklog
+from app.models.execution import ProcessInstance, ProcessTask, TaskWorklog
 from app.models.org import OrgUnit, Position
 from app.models.process import ProcessArch
 from app.models.process_task import ProcessTaskDefinition
+from app.models.project import Project
 from app.models.user import User
 from app.models.workload import (
     CapacityCalendar,
@@ -38,6 +39,7 @@ from app.schemas.workload import (
     WorkMeasurementObservationOut,
     WorkMeasurementStandardOut,
 )
+from app.services import org_access
 
 BOUNDARY_NOTE = (
     "标准工时只作为能力基线，用于产能、周期、成本与改善收益；"
@@ -545,10 +547,17 @@ def _effective_org(row: WorkMeasurementStandard, position: Optional[Position]) -
     return row.org_unit_id or (position.org_unit_id if position else None)
 
 
-def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
+def summary(
+    db: Session, period: Optional[date] = None, *, user: Optional[User] = None
+) -> WorkloadSummaryOut:
     start, end = month_bounds(period)
+    scoped = user is not None and not org_access.unrestricted(user)
+    orgs = org_access.subtree_ids(db, user.org_unit_id) if scoped else set()
 
-    standards = db.scalars(
+    def visible(column):
+        return or_(column.is_(None), column.in_(orgs))
+
+    standards_stmt = (
         select(WorkMeasurementStandard)
         .options(
             joinedload(WorkMeasurementStandard.activity),
@@ -562,7 +571,24 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
             (WorkMeasurementStandard.valid_to.is_(None))
             | (WorkMeasurementStandard.valid_to >= start),
         )
-    ).all()
+    )
+    if scoped:
+        standards_stmt = (
+            standards_stmt.join(Position, Position.id == WorkMeasurementStandard.position_id)
+            .join(ProcessArch, ProcessArch.id == WorkMeasurementStandard.activity_id)
+            .where(
+                visible(WorkMeasurementStandard.org_unit_id),
+                visible(Position.org_unit_id),
+                visible(ProcessArch.org_unit_id),
+                or_(
+                    ProcessArch.parent_id.is_(None),
+                    ProcessArch.parent_id.in_(
+                        select(ProcessArch.id).where(visible(ProcessArch.org_unit_id))
+                    ),
+                ),
+            )
+        )
+    standards = db.scalars(standards_stmt).all()
     observation_counts = dict(
         db.execute(
             select(
@@ -628,7 +654,7 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
 
     start_dt = datetime.combine(start, time.min)
     end_dt = datetime.combine(end, time.min)
-    actual_rows_raw = db.execute(
+    actual_stmt = (
         select(
             ProcessTask.activity_id,
             User.position_id,
@@ -639,7 +665,28 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
         .outerjoin(User, User.id == TaskWorklog.user_id)
         .where(TaskWorklog.created_at >= start_dt, TaskWorklog.created_at < end_dt)
         .group_by(ProcessTask.activity_id, User.position_id)
-    ).all()
+    )
+    if scoped:
+        visible_processes = select(ProcessArch.id).where(visible(ProcessArch.org_unit_id))
+        visible_projects = select(Project.id).where(visible(Project.org_unit_id))
+        actual_stmt = (
+            actual_stmt.join(ProcessInstance, ProcessInstance.id == ProcessTask.instance_id)
+            .outerjoin(Position, Position.id == User.position_id)
+            .where(
+                visible(User.org_unit_id),
+                visible(Position.org_unit_id),
+                ProcessInstance.process_id.in_(visible_processes),
+                or_(
+                    ProcessInstance.project_id.is_(None),
+                    ProcessInstance.project_id.in_(visible_projects),
+                ),
+                or_(
+                    ProcessTask.activity_id.is_(None),
+                    ProcessTask.activity_id.in_(visible_processes),
+                ),
+            )
+        )
+    actual_rows_raw = db.execute(actual_stmt).all()
     activity_ids = {row[0] for row in actual_rows_raw if row[0] is not None}
     position_ids = {row[1] for row in actual_rows_raw if row[1] is not None}
     activities = (
@@ -691,9 +738,12 @@ def summary(db: Session, period: Optional[date] = None) -> WorkloadSummaryOut:
         for activity_id, position_id, task_count, effort in actual_rows_raw
     ]
 
-    capacity_rows_raw = db.scalars(
-        select(CapacityCalendar).where(CapacityCalendar.period == start)
-    ).all()
+    capacity_stmt = select(CapacityCalendar).where(CapacityCalendar.period == start)
+    if scoped:
+        capacity_stmt = capacity_stmt.join(Position).where(
+            visible(CapacityCalendar.org_unit_id), visible(Position.org_unit_id)
+        )
+    capacity_rows_raw = db.scalars(capacity_stmt).all()
     capacity_rows: List[WorkloadCapacityRow] = []
     for capacity in capacity_rows_raw:
         demand = 0.0

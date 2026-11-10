@@ -96,6 +96,7 @@ export const TITLES = {
   train: 'BPM 实训',
   deliverables: '交付物与模板库',
   orgs: '组织与人员',
+  responsibility: '岗位职责',
   sketches: '架构草图',
   help: '帮助中心',
 };

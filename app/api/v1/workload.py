@@ -369,4 +369,15 @@ def workload_summary(
     user: CurrentUser,
     period: Optional[date] = Query(default=None, description="所看月份内任意日期，归一到 1 号"),
 ):
-    return workload_service.summary(db, period=period)
+    return workload_service.summary(db, period=period, user=user)
+
+
+from app.schemas.position_coverage import PositionCoverageOut  # noqa: E402
+from app.services import position_coverage  # noqa: E402
+
+
+@router.get("/position-coverage", response_model=PositionCoverageOut)
+def position_coverage_view(
+    db: DbSession, user: CurrentUser, position_id: int, period: Optional[date] = None
+):
+    return position_coverage.coverage(db, position_id, user, period)

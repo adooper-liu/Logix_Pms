@@ -54,7 +54,11 @@ class ProcessDocumentVersionOut(ORMModel):
 
 class ProcessDocumentOut(ORMModel):
     id: int
-    process_id: int
+    process_id: Optional[int] = None
+    document_scope: str = "PROCESS"
+    document_scope_label: str = "流程"
+    position_id: Optional[int] = None
+    governance_role_id: Optional[int] = None
     process_code: Optional[str] = None
     process_name: Optional[str] = None
     node_key: Optional[str] = Field(default=None, description="关联的 BPMN 节点；NULL=流程级")

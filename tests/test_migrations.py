@@ -243,6 +243,56 @@ def test_p1_downgrade_refuses_data_before_ddl(tmp_path):
         engine.dispose()
 
 
+def test_p2_document_scope_backfill_and_protected_downgrade(tmp_path):
+    url = _sqlite_url(tmp_path)
+    cfg = _config(url)
+    command.upgrade(cfg, "g9b0c1d2e3f4")
+    engine = create_engine(url)
+    try:
+        table = Table("process_document", MetaData(), autoload_with=engine)
+        with engine.begin() as conn:
+            conn.execute(
+                table.insert().values(
+                    process_id=123,
+                    code="OLD-DOC",
+                    title="旧流程文档",
+                    category="SOP",
+                    level="PROCESS",
+                    language="zh-CN",
+                    variation_policy="LOCKED",
+                    is_active=True,
+                    created_at=datetime(2026, 11, 10),
+                    updated_at=datetime(2026, 11, 10),
+                )
+            )
+        command.upgrade(cfg, "head")
+        table = Table("process_document", MetaData(), autoload_with=engine)
+        with engine.begin() as conn:
+            old = conn.execute(select(table)).mappings().one()
+            assert old["scope"] == "PROCESS" and old["process_id"] == 123
+            conn.execute(
+                table.insert().values(
+                    scope="POSITION",
+                    position_id=456,
+                    code="NEW-JD",
+                    title="岗位责任书",
+                    category="JOB_DESCRIPTION",
+                    level="PROCESS",
+                    language="zh-CN",
+                    variation_policy="LOCKED",
+                    is_active=True,
+                    created_at=datetime(2026, 11, 10),
+                    updated_at=datetime(2026, 11, 10),
+                )
+            )
+        with pytest.raises(RuntimeError, match="P2 subject documents exist"):
+            command.downgrade(cfg, "g9b0c1d2e3f4")
+        with engine.connect() as conn:
+            assert conn.scalar(select(table.c.code).where(table.c.scope == "POSITION")) == "NEW-JD"
+    finally:
+        engine.dispose()
+
+
 def test_current_revision_helper(tmp_path):
     from app.core.migrations import current_revision
 

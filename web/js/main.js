@@ -43,6 +43,7 @@ import * as dataView from './views/data.js';
 import * as knowledgeView from './views/knowledge.js';
 import * as deliverableView from './views/deliverables.js';
 import * as orgsView from './views/orgs.js';
+import * as responsibilityView from './views/responsibility.js';
 import * as sketchesView from './views/sketches.js';
 import * as helpView from './views/help.js';
 import { openPageHelp } from './core/help.js';
@@ -73,6 +74,7 @@ register('data', dataView.renderData);
 register('knowledge', knowledgeView.renderKnowledge);
 register('deliverables', deliverableView.renderDeliverables);
 register('orgs', orgsView.renderOrgs);
+register('responsibility', responsibilityView.renderResponsibility);
 register('sketches', sketchesView.renderSketches);
 register('help', helpView.renderHelp);
 

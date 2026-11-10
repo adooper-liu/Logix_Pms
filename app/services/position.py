@@ -94,8 +94,18 @@ def delete_position(db: Session, row: Position) -> None:
         )
         or 0
     )
-    if users or nodes:
+    from app.models.process_document import ProcessDocument
+
+    documents = (
+        db.scalar(
+            select(func.count())
+            .select_from(ProcessDocument)
+            .where(ProcessDocument.position_id == row.id)
+        )
+        or 0
+    )
+    if users or nodes or documents:
         raise PositionError(
-            f"岗位仍被 {users} 个用户、{nodes} 个流程节点引用，请停用（is_active=false）而不是删除"
+            f"岗位仍被 {users} 个用户、{nodes} 个流程节点、{documents} 份岗位文档引用，请停用（is_active=false）而不是删除"
         )
     db.delete(row)

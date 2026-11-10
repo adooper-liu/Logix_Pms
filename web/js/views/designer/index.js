@@ -136,7 +136,7 @@ export function renderDesigner() {
     }
     if (state.designer.processId) {
       const id = state.designer.processId;
-      const url = { process: id };
+      const url = params.node ? { process: id, node: params.node, basis: params.basis } : { process: id };
       if (state.designer.tab && state.designer.tab !== 'model') url.tab = state.designer.tab;
       setUrlState('designer', url, { push: false });
       const [model, analysis, positions, tools, toolMeta, docMeta, changes, changeMeta,
@@ -157,7 +157,7 @@ export function renderDesigner() {
       const workbench = await GET('/processes/'+id+'/workbench');
       const bindingData = await binding.load(id);
       if (!current() || state.designer.processId !== id) return;
-      binding.accept(bindingData, model);
+      binding.accept(bindingData, model); binding.acceptLocation(params, bindingData, model);
       state.designer.workbench=workbench;
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
