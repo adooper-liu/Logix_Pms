@@ -42,7 +42,7 @@ export function createRaci(ctx) {
         </span>`).join(' ') || '<span class="muted">还没有角色</span>';
       return `
         <tr>
-          <td><b>${esc(matter.matter)}</b>
+          <td><b>${esc(matter.matter)}</b><div class="tiny muted">${esc(matter.scope_label)} · ${esc(matter.scope_key)}</div>
             ${matter.has_accountable
               ? '<span class="tag t-grn">A 已明确</span>'
               : '<span class="tag t-red">缺少 A</span>'}</td>

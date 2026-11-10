@@ -183,6 +183,66 @@ def test_m3_upgrade_preserves_legacy_charter_and_sheet(tmp_path):
         engine.dispose()
 
 
+def test_p1_backfills_matter_scope_without_guessing(tmp_path):
+    url = _sqlite_url(tmp_path)
+    cfg = _config(url)
+    command.upgrade(cfg, "f8a9b0c1d2e3")
+    engine = create_engine(url)
+    try:
+        table = Table("raci_assignment", MetaData(), autoload_with=engine)
+        with engine.begin() as conn:
+            conn.execute(
+                table.insert().values(
+                    process_id=123,
+                    matter="同名活动",
+                    role_id=456,
+                    raci="A",
+                    created_at=datetime(2026, 11, 10),
+                    updated_at=datetime(2026, 11, 10),
+                )
+            )
+        command.upgrade(cfg, "head")
+        table = Table("raci_assignment", MetaData(), autoload_with=engine)
+        with engine.connect() as conn:
+            row = conn.execute(select(table)).mappings().one()
+            assert row["scope_key"] == "MATTER:同名活动"
+            assert row["activity_id"] is None and row["node_key"] is None
+        command.downgrade(cfg, "f8a9b0c1d2e3")
+        table = Table("raci_assignment", MetaData(), autoload_with=engine)
+        with engine.connect() as conn:
+            assert conn.execute(select(table.c.matter)).scalar_one() == "同名活动"
+    finally:
+        engine.dispose()
+
+
+def test_p1_downgrade_refuses_data_before_ddl(tmp_path):
+    url = _sqlite_url(tmp_path)
+    cfg = _config(url)
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    try:
+        table = Table("activity_resource_link", MetaData(), autoload_with=engine)
+        with engine.begin() as conn:
+            conn.execute(
+                table.insert().values(
+                    activity_id=123,
+                    resource_type="EQUIPMENT",
+                    ref_key="EQUIP:TEST",
+                    org_scope="GLOBAL",
+                    is_active=True,
+                    created_at=datetime(2026, 11, 10),
+                )
+            )
+        with pytest.raises(RuntimeError, match="preserve g9b0c1d2e3f4"):
+            command.downgrade(cfg, "f8a9b0c1d2e3")
+        with engine.connect() as conn:
+            assert conn.scalar(select(table.c.ref_key)) == "EQUIP:TEST"
+            version = Table("alembic_version", MetaData(), autoload_with=conn)
+            assert conn.scalar(select(version.c.version_num)) == "g9b0c1d2e3f4"
+    finally:
+        engine.dispose()
+
+
 def test_current_revision_helper(tmp_path):
     from app.core.migrations import current_revision
 

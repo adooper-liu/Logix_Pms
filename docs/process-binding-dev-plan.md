@@ -120,6 +120,16 @@ python scripts/check.py
 
 **目标**：修断点 1/3/4——把 RACI 与资源绑到活动，并让绑定进入版本冻结。
 
+### 2026-11-10 实施与验收记录
+
+- 基线 `df508db`；独立分支 `worktree-binding-p1`，详见 [P1 细化计划](superpowers/plans/2026-11-10-binding-p1.md)。实施阶段保持隔离，未迁移正在使用的业务库；收尾按用户授权提交并本地合入 main，不推送远端，身份以 Git 记录为准。
+- 原RACI增加活动/节点作用域；历史事项仍为 `MATTER:`，不按名称猜活动。原事项API兼容，按scope分组返回；MANAGER+写权限不放宽，流程锁与数据库部分唯一索引共同保护同scope唯一A。
+- 活动原资源引用支持原表单/规则/标准文件/集成/技术/RPA及设备量具引用key，不复制源主数据；停用引用不删除原资源。跨流程、错误节点、失效或受限来源明确拒绝/待核，不把SOP当记录表单。
+- 原发布/固定模型捕获绑定内容hash；后续原来源改变显示待确认，删除/失效显示STALE。已固定快照不被重复固定或发布覆盖；冻结依据变化须先建新工作版。此为保护原不可变依据，不是执行版/绩效版的完整性硬门禁。
+- 设计器绑定页与节点属性增加原责任/资源维护，顶层权责同步scope；只读账号不获编辑；原冻结状态与来源一致性分开，不代表有权组织裁决或运行效果。
+- 首轮完整 `check.py`：`774 passed, 1 skipped, 4 warnings in 227.82s`、格式/lint/测试通过、退出0；独立PostgreSQL全量同为 `774 passed, 1 skipped, 4 warnings in 298.88s`。首轮全站脚本退出0，P1及既有专项通过。独立SQLite、专用PostgreSQL迁移均 `No new upgrade operations detected.`；专用PG空库回退再升级通过；全量测试后的PG库重复scope/多A查询均0行，scope空值0。最终当前代码全站已退出0、P1及全部场景通过；日志保留Playwright路由取消回调 `CancelledError`（非页面JS异常）、条件调色板跳过及外部draw.io403限制，不称零错误。一次独立复核已完成：发现的发布快照被freeze覆盖、L4查询、NODE作用域责任串用、证据原来源漏指纹、受限备注泄露、意外失效硬门禁均补RED→GREEN；维护后背景未刷新经真实浏览器复现升级为重要项并修复。当前定向/结构97项及新增浏览器通过，修复后完整工程检查 `779 passed, 1 skipped, 4 warnings in 241.29s`、格式/lint/测试均通过；PG全量 `779 passed, 1 skipped, 4 warnings in 300.19s`，重复scope/多A均0行、空scope0；最终全站 `全部检查通过。`、退出0，P1及所有既有场景通过；最终服务无500、无页面JS异常，仍保留预期负例请求、受保护实例清理409和调色板条件跳过；draw.io只测协议，不证明外站成功。不冒称独立二次复核。
+- **P1 软件切片与本轮自动化验收完成。** 用户授权提交后本地合入 main，不推送远端；提交前重新执行 `check.py`：`779 passed, 1 skipped, 4 warnings in 224.94s`，格式/lint/测试通过、退出0。单迁移 `g9b0c1d2e3f4` 尚未应用实际业务库；存在P1数据时降级明确拒绝，不能用删记录回退。专用测试服务/PG容器已停止，证据在隔离工作树 `.superpowers/sdd/2026-11-10-binding-p1/`（`check-reviewed.log`、`postgres-reviewed.log`、`frontend-reviewed.log`）。生产并发压力、组织授权充分性、资源真实到位和业务收益均未验收。
+
 ### 迁移（一条 Alembic）
 
 ```bash

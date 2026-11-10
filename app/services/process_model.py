@@ -469,6 +469,9 @@ def publish(
     bypass_policy: bool = False,
     bypass_author_check: bool = False,
 ) -> ProcessModelVersion:
+    from app.services import binding_snapshot
+
+    lock_process(db, process)
     version = (
         db.get(ProcessModelVersion, version_id)
         if version_id is not None
@@ -511,6 +514,12 @@ def publish(
             )
         note_text = f"{note_text}｜自评自发豁免：{reason}"
 
+    captured_bindings = binding_snapshot.capture(db, process, version)
+    if version.binding_snapshot is not None:
+        if captured_bindings["activities"] != version.binding_snapshot.get("activities", {}):
+            raise HTTPException(409, "冻结绑定依据已变化，请创建新工作版后重新固定/发布")
+    else:
+        version.binding_snapshot = captured_bindings
     _apply_snapshot(db, process.id, version.snapshot or {})
     db.expire(process, ["nodes", "edges"])
     for row in db.scalars(

@@ -453,6 +453,10 @@ def freeze_model(process_id: int, payload: FreezeModelRequest, db: DbSession, us
     if not payload.note.strip():
         raise HTTPException(400, "请写明固定用途")
     if row.frozen_at is None:
+        from app.services import binding_snapshot
+
+        if row.binding_snapshot is None and row.status not in {"PUBLISHED", "SUPERSEDED"}:
+            row.binding_snapshot = binding_snapshot.capture(db, process, row)
         row.frozen_at = utcnow()
         audit_service.record(
             db,

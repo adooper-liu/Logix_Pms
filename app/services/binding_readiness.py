@@ -11,14 +11,12 @@ from app.core.timeutil import utcnow
 from app.models.adoption import ProcessTrainingRecord
 from app.models.asset_graph import EvidenceClaim, NodeActivityLink
 from app.models.execution import FormDefinition, ProcessRule
-from app.models.log_import import ProcessLogImport
 from app.models.monitor import KpiDefinition
 from app.models.org import Position
 from app.models.process import NodeTool, ProcessArch, ProcessNode
 from app.models.process_document import ProcessDocument
 from app.models.raci import GovernanceRole, RaciAssignment
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
-from app.models.tool_sheet import ToolSheet
 from app.models.user import User
 from app.models.workload import WorkMeasurementStandard
 from app.schemas.binding_readiness import (
@@ -29,7 +27,7 @@ from app.schemas.binding_readiness import (
     NodeBindingOut,
     ProcessBindingSummaryOut,
 )
-from app.services import handoff, org_access, process_model
+from app.services import org_access, process_model
 from app.services.process_document import effective_version_on, visible_conditions
 
 FACETS = {"GOAL": "定目标", "TEAM": "搭班子", "RESOURCE": "配资源", "METHOD": "智慧与绩效"}
@@ -86,6 +84,58 @@ def _overall(facets):
 def _in_date(row, day):
     return (row.valid_from is None or row.valid_from <= day) and (
         row.valid_to is None or row.valid_to >= day
+    )
+
+
+def _team_facet(related, activity_id, racis, positions):
+    keys = {node.node_key for node in related}
+    relevant = [
+        row
+        for row in racis
+        if row.activity_id == activity_id or row.activity_id is None and row.node_key in keys
+    ]
+    inherited = [row for row in racis if row.activity_id is None and not row.node_key]
+    refs = [
+        _ref("POSITION", positions[node.owner_position_id])
+        for node in related
+        if node.owner_position_id in positions
+    ]
+    refs += [
+        BindingRefOut(
+            kind="ROLE_TEXT",
+            label=node.owner_role,
+            source="DIRECT",
+            source_label=SOURCES["DIRECT"],
+            detail="文本角色，尚未归位到岗位",
+        )
+        for node in related
+        if node.owner_role and not node.owner_position_id
+    ]
+    refs += [_ref("RACI", row, "DIRECT", f"{row.raci} · {row.scope_key}") for row in relevant]
+    refs += [
+        _ref("RACI", row, "PROCESS", f"{row.raci} · 流程事项，非活动责任") for row in inherited
+    ]
+    by_scope = defaultdict(list)
+    for row in relevant:
+        if row.raci == "A":
+            by_scope[row.scope_key].append(row)
+    conflict = any(len(rows) > 1 for rows in by_scope.values())
+    activity_a = by_scope.get(f"ACTIVITY:{activity_id}", [])
+    ready = (
+        bool(related)
+        and not conflict
+        and all(
+            node.owner_position_id in positions
+            and (len(by_scope.get("NODE:" + node.node_key, [])) == 1 or len(activity_a) == 1)
+            for node in related
+        )
+    )
+    return _facet(
+        "TEAM",
+        refs,
+        ready,
+        [] if ready else ["缺活动/节点唯一 RACI-A 或有效负责人岗位；流程事项不能代替"],
+        conflict=conflict,
     )
 
 
@@ -227,33 +277,17 @@ def activity_bindings(
         row.id: row.node_key
         for row in db.scalars(select(ProcessNode).where(ProcessNode.process_id == process_id)).all()
     }
-    visible_doc_ids = {ver.id for _, ver in documents}
+    from app.services import evidence_source
+
     for claim in claims:
         if not _in_date(claim, day) or claim.status == "EXPIRED":
             continue
-        source_ok = False
-        if claim.source_type == "DOCUMENT_VERSION":
-            source_ok = claim.source_id in visible_doc_ids
-        elif claim.source_type == "TOOL_SHEET":
-            sheet = db.get(ToolSheet, claim.source_id)
-            if sheet and sheet.process_id == process_id:
-                try:
-                    if user:
-                        handoff.require_sheet(db, user, sheet.tool_code, sheet.id)
-                    source_ok = True
-                except HTTPException:
-                    pass
-        elif claim.source_type == "LOG_IMPORT":
-            log = db.get(ProcessLogImport, claim.source_id)
-            source_ok = bool(log and log.process_id == process_id and log.status == "COMMITTED")
-            if source_ok and user:
-                try:
-                    org_access.ensure_visible(db, user, process.org_unit_id)
-                except HTTPException:
-                    source_ok = False
-        if source_ok:
+        if evidence_source.resolve(db, process, claim, user) is not None:
             visible_claims.append(claim)
     tools = rows(NodeTool, NodeTool.process_id == process_id)
+    from app.services import resource_link
+
+    linked_resources = resource_link.list_links(db, process, user) if process.level == 3 else []
     training = rows(ProcessTrainingRecord, ProcessTrainingRecord.process_id == process_id)
     # 目标的祖先承接沿原主数据，不按名称匹配。
     ancestors = {process_id}
@@ -305,26 +339,7 @@ def activity_bindings(
             [] if goal_ready else ["缺活动级完整 KPI（目标值、口径与方向）"],
         )
 
-        refs = [
-            _ref("POSITION", positions[node.owner_position_id])
-            for node in related
-            if node.owner_position_id in positions
-        ]
-        refs += [
-            BindingRefOut(
-                kind="ROLE_TEXT",
-                label=node.owner_role,
-                source="DIRECT",
-                source_label=SOURCES["DIRECT"],
-                detail="文本角色，尚未归位到岗位",
-            )
-            for node in related
-            if node.owner_role and not node.owner_position_id
-        ]
-        refs += [
-            _ref("RACI", row, "PROCESS", f"{row.raci} · 流程事项，非活动责任") for row in racis
-        ]
-        team = _facet("TEAM", refs, gaps=["活动级 RACI-A 尚未建立；流程事项不代替活动唯一 A"])
+        team = _team_facet(related, activity.id, racis, positions)
 
         applicable_standards = [
             row
@@ -373,9 +388,32 @@ def activity_bindings(
         ]
         node_rules = [row for row in rules if row.node_key in keys]
         refs += [_ref("RULE", row) for row in node_rules]
-        covered = {row.node_key for row in specific_forms} | {doc.node_key for doc, _ in carriers}
+        activity_resources = [row for row in linked_resources if row.activity_id == activity.id]
+        valid_resources = [row for row in activity_resources if row.source_valid]
+        refs += [
+            BindingRefOut(
+                kind="RESOURCE_LINK",
+                id=row.id,
+                label=row.source_label,
+                source="DIRECT",
+                source_label=SOURCES["DIRECT"],
+                detail=f"{row.resource_type_label} · {row.ref_key} · {row.source_note}",
+            )
+            for row in valid_resources
+        ]
+        linked_forms = {
+            row.node_key for row in valid_resources if row.resource_type == "FORM" and row.node_key
+        }
+        linked_carrier = any(row.is_record_carrier and not row.node_key for row in valid_resources)
+        covered = (
+            {row.node_key for row in specific_forms}
+            | {doc.node_key for doc, _ in carriers}
+            | linked_forms
+        )
         has_carrier = bool(related) and (
-            keys <= covered or any(doc.process_id == activity.id for doc, _ in carriers)
+            keys <= covered
+            or linked_carrier
+            or any(doc.process_id == activity.id for doc, _ in carriers)
         )
         has_rules = all(
             node.node_type != "DECISION" or any(row.node_key == node.node_key for row in node_rules)
@@ -394,7 +432,10 @@ def activity_bindings(
             gaps.append("缺节点专属表单或活动记录载体；默认表单仅继承")
         if not has_rules:
             gaps.append("判断节点缺启用规则")
-        resource = _facet("RESOURCE", refs, resource_ready, gaps)
+        stale_resources = [row for row in activity_resources if not row.source_valid]
+        if stale_resources:
+            gaps.append(f"{len(stale_resources)} 条原资源引用已失效，须回原来源核对")
+        resource = _facet("RESOURCE", refs, resource_ready and not stale_resources, gaps)
 
         direct_docs = [
             (doc, ver)
@@ -502,7 +543,11 @@ def activity_bindings(
         ids = node_ids[node.node_key]
         facets = []
         for key in FACETS:
-            parts = [next(f for f in by_activity[ident].facets if f.key == key) for ident in ids]
+            parts = (
+                [_team_facet([node], ident, racis, positions) for ident in ids]
+                if key == "TEAM"
+                else [next(f for f in by_activity[ident].facets if f.key == key) for ident in ids]
+            )
             refs = [ref for part in parts for ref in part.refs]
             gaps = list(dict.fromkeys(gap for part in parts for gap in part.gaps))
             facet = _facet(
@@ -573,7 +618,44 @@ def activity_bindings(
             "unmodeled_activities": sum(not row.node_keys for row in activity_out),
         },
     )
+    from app.models.process import ProcessModelVersion
+    from app.services import binding_snapshot
+
+    current_bindings = binding_snapshot.capture(db, process, version)
+    basis = (
+        version
+        if version and version.binding_snapshot is not None
+        else db.scalar(
+            select(ProcessModelVersion)
+            .where(
+                ProcessModelVersion.process_id == process_id,
+                ProcessModelVersion.status == "PUBLISHED",
+            )
+            .order_by(ProcessModelVersion.version.desc())
+        )
+    )
+    basis_snapshot = basis.binding_snapshot if basis else None
+    consistency = binding_snapshot.compare(current_bindings, basis_snapshot)
+    for item in activity_out:
+        aid = str(item.activity_id)
+        current_activity = {
+            "model_version_id": current_bindings["model_version_id"],
+            "activities": {aid: current_bindings["activities"][aid]},
+        }
+        original_activity = (
+            {
+                "model_version_id": basis_snapshot["model_version_id"],
+                "activities": {aid: basis_snapshot["activities"][aid]},
+            }
+            if basis_snapshot and aid in basis_snapshot.get("activities", {})
+            else None
+        )
+        item.consistency = binding_snapshot.compare(current_activity, original_activity)
+        item.consistency_label = binding_snapshot.LABELS[item.consistency]
     return ActivityBindingsOut(
+        consistency=consistency,
+        consistency_label=binding_snapshot.LABELS[consistency],
+        basis_model_version_id=basis.id if basis else None,
         process_id=process_id,
         model_version_id=version.id if version else None,
         model_version=version.version if version else int(process.model_version or 0),
@@ -582,9 +664,9 @@ def activity_bindings(
         nodes=node_out,
         limitations=[
             "只读结构核对，不代表授权充分、资源到位或业务绩效达标。",
-            "当前 RACI 仅流程事项；活动级唯一 A 与绑定冻结由 P1 承接。",
+            "活动级唯一 A 只核绑定结构；不替代组织有权政策与职责分离核验。",
             "按当前已保存设计模型核对；未保存修改不纳入。设计估计不等于已验证工时。",
-            "P0 不修改模型发布、执行上线或资产评审门禁。",
+            "绑定齐全不直接改变执行上线或资产评审门禁；冻结依据变更需新工作版。",
         ],
     )
 

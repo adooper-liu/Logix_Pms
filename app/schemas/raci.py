@@ -61,6 +61,8 @@ class GovernanceRoleOut(ORMModel):
 class RaciCreate(BaseModel):
     process_id: int
     matter: str = Field(max_length=120)
+    activity_id: Optional[int] = Field(default=None, ge=1)
+    node_key: Optional[str] = Field(default=None, min_length=1, max_length=64)
     role_id: int
     raci: RaciType
     note: Optional[str] = Field(default=None, max_length=200)
@@ -70,6 +72,10 @@ class RaciOut(BaseModel):
     id: int
     process_id: int
     matter: str
+    activity_id: Optional[int] = None
+    node_key: Optional[str] = None
+    scope_key: str
+    scope_label: str
     role_id: int
     role_name: Optional[str] = None
     role_type_label: Optional[str] = None
@@ -80,6 +86,10 @@ class RaciOut(BaseModel):
 
 class RaciMatterOut(BaseModel):
     matter: str
+    activity_id: Optional[int] = None
+    node_key: Optional[str] = None
+    scope_key: str
+    scope_label: str
     entries: List[RaciOut] = []
     has_accountable: bool = False
 

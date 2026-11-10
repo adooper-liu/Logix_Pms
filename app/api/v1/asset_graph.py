@@ -65,16 +65,19 @@ from app.schemas.log_import import (
     LogImportOut,
 )
 from app.schemas.model_source import ModelSourceProfileOut
+from app.schemas.resource_link import ResourceLinkIn, ResourceLinkOut, ResourceOptionsOut
 from app.schemas.traceability import TraceabilityOut
 from app.services import asset_graph as asset_service
 from app.services import asset_graph_write as write_service
 from app.services import asset_package as package_service
+from app.services import audit as audit_service
 from app.services import binding_readiness as binding_service
 from app.services import diagnosis as diagnosis_service
 from app.services import document_extract as document_extract_service
 from app.services import log_import as log_import_service
 from app.services import model_source as model_source_service
 from app.services import preview as preview_service
+from app.services import resource_link as resource_service
 from app.services import traceability as traceability_service
 
 router = APIRouter(prefix="/processes", tags=["流程资产"])
@@ -117,6 +120,44 @@ def get_traceability(
 )
 def get_binding_readiness(process_id: int, db: DbSession, user: CurrentUser):
     return binding_service.activity_bindings(db, process_id, user)
+
+
+@router.get("/{process_id}/resource-links", response_model=list[ResourceLinkOut])
+def get_resource_links(process_id: int, db: DbSession, user: CurrentUser):
+    process = resource_service.require_process(db, process_id)
+    return resource_service.list_links(db, process, user)
+
+
+@router.get("/{process_id}/resource-link-options", response_model=ResourceOptionsOut)
+def get_resource_options(
+    process_id: int,
+    activity_id: int,
+    db: DbSession,
+    user: CurrentUser,
+    node_key: Optional[str] = None,
+):
+    process = resource_service.require_process(db, process_id)
+    return resource_service.options(db, process, activity_id, node_key, user)
+
+
+@router.post("/{process_id}/resource-links", response_model=ResourceLinkOut, status_code=201)
+def save_resource_link(process_id: int, payload: ResourceLinkIn, db: DbSession, user: ManagerUser):
+    process = resource_service.require_process(db, process_id)
+    row = resource_service.upsert(db, process, payload, user)
+    audit_service.record(db, user, "UPDATE", "process", process_id, f"活动原资源引用 {row.ref_key}")
+    db.commit()
+    return resource_service.out(db, process, row, user)
+
+
+@router.delete("/{process_id}/resource-links/{link_id}", response_model=DeleteResult)
+def remove_resource_link(process_id: int, link_id: int, db: DbSession, user: ManagerUser):
+    process = resource_service.require_process(db, process_id)
+    row = resource_service.deactivate(db, process, link_id)
+    audit_service.record(
+        db, user, "UPDATE", "process", process_id, f"停用活动原资源引用 {row.ref_key}"
+    )
+    db.commit()
+    return DeleteResult(deleted=1)
 
 
 @router.get(

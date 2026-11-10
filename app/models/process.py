@@ -288,6 +288,7 @@ class ProcessModelVersion(Base):
     )
     status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
     frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    binding_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     # 发布时引用的变更申请；重大变更/门禁流程由它提供影响分析证据
     change_request_id: Mapped[Optional[int]] = mapped_column(
