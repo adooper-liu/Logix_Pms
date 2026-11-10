@@ -922,16 +922,16 @@ def test_asset_print_pack(client, asset_process, monkeypatch):
     text = html.text
     assert "流程资产打印包" in text
     assert "资产关系测试流程" in text
-    assert first["version_label"] in text
-    assert second["version_label"] in text
+    assert f"{first['document_code']} · v{first['version_label']}</h1>" in text
+    assert f"{second['document_code']} · v{second['version_label']}</h1>" in text
 
     filtered = client.get(
         f"{API}/processes/{pid}/asset-packages/print-pack"
         f"?format=html&version_ids={second['version_id']}"
     )
     assert filtered.status_code == 200, filtered.text
-    assert second["version_label"] in filtered.text
-    assert first["version_label"] not in filtered.text
+    assert f"{second['document_code']} · v{second['version_label']}</h1>" in filtered.text
+    assert f"{first['document_code']} · v{first['version_label']}</h1>" not in filtered.text
 
     monkeypatch.setattr(preview_service, "converter_available", lambda: False)
     assert (

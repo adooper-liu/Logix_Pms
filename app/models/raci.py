@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -77,6 +78,15 @@ class GovernanceRoleMember(Base):
     __table_args__ = (UniqueConstraint("role_id", "user_id", name="uq_role_member_role_user"),)
 
 
+def _scope_default(context):
+    data = context.get_current_parameters()
+    if data.get("activity_id") is not None:
+        return f"ACTIVITY:{data['activity_id']}"
+    if data.get("node_key"):
+        return "NODE:" + data["node_key"]
+    return "MATTER:" + data["matter"]
+
+
 class RaciAssignment(Base):
     """事项 × 治理角色 × A/R/C/I；同一事项只允许一个 A。"""
 
@@ -88,6 +98,15 @@ class RaciAssignment(Base):
         index=True,
     )
     matter: Mapped[str] = mapped_column(String(120), index=True)
+    activity_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_arch.id", ondelete="CASCADE", name="fk_raci_activity"),
+        nullable=True,
+        index=True,
+    )
+    node_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    scope_key: Mapped[str] = mapped_column(
+        String(160), nullable=False, default=_scope_default, index=True
+    )
     role_id: Mapped[int] = mapped_column(
         ForeignKey("governance_role.id", ondelete="CASCADE", name="fk_raci_role"),
         index=True,
@@ -97,10 +116,18 @@ class RaciAssignment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
-    process: Mapped["ProcessArch"] = relationship("ProcessArch")  # noqa: F821
+    process: Mapped["ProcessArch"] = relationship("ProcessArch", foreign_keys=[process_id])  # noqa: F821
     role: Mapped["GovernanceRole"] = relationship("GovernanceRole")
 
     __table_args__ = (
-        UniqueConstraint("process_id", "matter", "role_id", name="uq_raci_process_matter_role"),
+        UniqueConstraint("process_id", "scope_key", "role_id", name="uq_raci_process_scope_role"),
+        Index(
+            "uq_raci_scope_accountable",
+            "process_id",
+            "scope_key",
+            unique=True,
+            sqlite_where=text("raci = 'A'"),
+            postgresql_where=text("raci = 'A'"),
+        ),
         Index("ix_raci_process_matter", "process_id", "matter"),
     )

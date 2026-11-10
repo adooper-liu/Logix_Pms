@@ -182,12 +182,24 @@ def remove_member(db: Session, role: GovernanceRole, member_id: int) -> None:
     db.flush()
 
 
+def scope_label(row):
+    if row.activity_id is not None:
+        return f"活动 #{row.activity_id}"
+    if row.node_key:
+        return f"节点 {row.node_key}"
+    return "流程事项"
+
+
 def raci_out(db: Session, row: RaciAssignment) -> RaciOut:
     role = db.get(GovernanceRole, row.role_id)
     return RaciOut(
         id=row.id,
         process_id=row.process_id,
         matter=row.matter,
+        activity_id=row.activity_id,
+        node_key=row.node_key,
+        scope_key=row.scope_key,
+        scope_label=scope_label(row),
         role_id=row.role_id,
         role_name=role.name if role else None,
         role_type_label=(ROLE_TYPE_LABELS.get(role.role_type, role.role_type) if role else None),
@@ -206,10 +218,11 @@ def process_raci(db: Session, process_id: int) -> RaciProcessOut:
     ).all()
     grouped: Dict[str, List[RaciOut]] = {}
     for row in rows:
-        grouped.setdefault(row.matter, []).append(raci_out(db, row))
+        grouped.setdefault(row.scope_key, []).append(raci_out(db, row))
     matters: List[RaciMatterOut] = []
     errors: List[str] = []
-    for matter, entries in grouped.items():
+    for scope_key, entries in grouped.items():
+        matter = entries[0].matter
         accountable = [entry for entry in entries if entry.raci == RaciType.A.value]
         if not accountable:
             errors.append(f"「{matter}」没有 A（唯一负责）")
@@ -218,6 +231,10 @@ def process_raci(db: Session, process_id: int) -> RaciProcessOut:
         matters.append(
             RaciMatterOut(
                 matter=matter,
+                scope_key=scope_key,
+                scope_label=entries[0].scope_label,
+                activity_id=entries[0].activity_id,
+                node_key=entries[0].node_key,
                 entries=entries,
                 has_accountable=len(accountable) == 1,
             )
@@ -234,7 +251,48 @@ def process_raci(db: Session, process_id: int) -> RaciProcessOut:
 
 def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
     process = require_process(db, data["process_id"])
+    from sqlalchemy import or_
+
+    from app.models.asset_graph import NodeActivityLink
+    from app.services import process_model
+
+    process_model.lock_process(db, process)
     role = require_role(db, data["role_id"])
+    if not role.is_active:
+        raise RaciError("治理角色已停用")
+    activity_id = data.get("activity_id")
+    node_key = (data.get("node_key") or "").strip() or None
+    if activity_id is not None:
+        activity = db.get(ProcessArch, activity_id)
+        if (
+            activity is None
+            or activity.level != 4
+            or activity.is_draft
+            or activity.parent_id != process.id
+        ):
+            raise RaciError("活动不属于当前流程或仍为草稿")
+    if node_key:
+        snapshot = process_model.current_snapshot(db, process.id)
+        node = next((n for n in snapshot.get("nodes", []) if n["node_key"] == node_key), None)
+        if node is None or node["node_type"] not in {"TASK", "APPROVAL", "HANDOFF", "DECISION"}:
+            raise RaciError("节点不存在于当前设计模型或不支持责任绑定")
+        if activity_id is not None:
+            version = process_model.latest_version(db, process.id)
+            links = list(
+                db.scalars(
+                    select(NodeActivityLink.activity_id).where(
+                        NodeActivityLink.process_id == process.id,
+                        NodeActivityLink.node_key == node_key,
+                        NodeActivityLink.relation.in_({"REALIZES", "PART_OF"}),
+                        or_(
+                            NodeActivityLink.model_version_id == version.id if version else False,
+                            NodeActivityLink.model_version_id.is_(None),
+                        ),
+                    )
+                ).all()
+            )
+            if activity_id not in (links or [node.get("process_arch_id")]):
+                raise RaciError("节点未实现所选活动")
     matter = (data.get("matter") or "").strip()
     if not matter:
         raise RaciError("事项不能为空")
@@ -242,11 +300,16 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
     if raci not in {item.value for item in RaciType}:
         raise RaciError("RACI 只能是 A/R/C/I")
 
+    scope_key = (
+        f"ACTIVITY:{activity_id}"
+        if activity_id is not None
+        else ("NODE:" + node_key if node_key else "MATTER:" + matter)
+    )
     if raci == RaciType.A.value:
         existing_a = db.scalar(
             select(RaciAssignment).where(
                 RaciAssignment.process_id == process.id,
-                RaciAssignment.matter == matter,
+                RaciAssignment.scope_key == scope_key,
                 RaciAssignment.raci == RaciType.A.value,
                 RaciAssignment.role_id != role.id,
             )
@@ -261,7 +324,7 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
     row = db.scalar(
         select(RaciAssignment).where(
             RaciAssignment.process_id == process.id,
-            RaciAssignment.matter == matter,
+            RaciAssignment.scope_key == scope_key,
             RaciAssignment.role_id == role.id,
         )
     )
@@ -269,12 +332,17 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
         row = RaciAssignment(
             process_id=process.id,
             matter=matter,
+            activity_id=activity_id,
+            node_key=node_key,
+            scope_key=scope_key,
             role_id=role.id,
             raci=raci,
             note=data.get("note"),
         )
         db.add(row)
     else:
+        row.matter = matter
+        row.node_key = node_key
         row.raci = raci
         row.note = data.get("note")
     db.flush()
@@ -282,6 +350,9 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
 
 
 def remove_raci(db: Session, row: RaciAssignment) -> None:
+    from app.services import process_model
+
+    process_model.lock_process(db, require_process(db, row.process_id))
     db.delete(row)
     db.flush()
 

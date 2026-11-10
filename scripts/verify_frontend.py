@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_binding_p1 import verify_binding_p1
 from verify_binding_readiness import verify_binding_readiness
 from verify_execution_readiness import verify_execution_readiness
 from verify_improvement_round import verify_improvement_round
@@ -145,6 +146,7 @@ def main() -> int:
 
         check("默认入口与两侧栏分组", default_entry_and_nav)
         check("P0经营绑定只读核对", lambda: verify_binding_readiness(page, base))
+        check("P1活动责任资源与绑定快照", lambda: verify_binding_p1(page, base))
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))

@@ -4,6 +4,7 @@ import { foldCard } from '../../core/layout.js';
 import { GET } from '../../core/api.js';
 import { state } from '../../core/state.js';
 import { on } from '../../core/ui.js';
+import { canManage } from '../../core/auth.js';
 
 const TONE = { READY: 't-grn', PARTIAL: 't-yel', MISSING: 't-gry', CONFLICT: 't-red' };
 const MARKERS = ['pms-bind-red', 'pms-bind-yellow', 'pms-bind-green'];
@@ -33,7 +34,9 @@ export function createBinding(ctx) {
       <div class="between"><h3>绑定核对 · 只读</h3><span class="tag ${TONE[summary.overall]}">${esc(summary.overall_label)}</span></div>
       <p>当前已保存模型 v${esc(data.model_version)} · ${summary.counts.activities} 个活动 · ${summary.counts.unmapped_nodes} 个节点未映射</p>
       <div class="binding-summary-facets">${summary.facets.map(facet => `<span class="tag ${TONE[facet.status]}">${esc(facet.label)} · ${esc(facet.status_label)}</span>`).join('')}</div>
-      <p class="tiny">下一步：先核对缺口与原来源；本页不新增绑定，不改变发布或评审门禁。
+      <p data-binding-consistency class="tiny">${esc(data.consistency_label)}</p>
+      ${canManage() ? data.activities.map(activity => `<button class="btn-sm" data-act="designer.bindingEdit" data-activity="${activity.activity_id}">维护 ${esc(activity.activity_code)} 绑定</button>`).join(' ') : ''}
+      <p class="tiny">下一步：先核对缺口与原来源；维护仅改原责任与资源引用，不自动确认冻结依据。
         ${tipHelp(data.limitations.join(' '), '核对范围与限制')}</p>
       ${summary.conflicts.length ? `<div class="warnbox">${summary.conflicts.map(esc).join('；')}</div>` : ''}
     </div>
@@ -50,6 +53,7 @@ export function createBinding(ctx) {
     if (!node) return '<div data-node-binding class="hint">当前节点尚无可核对的绑定结果；保存后重新读取。开始/结束等非活动节点不参与四面核对。</div>';
     return `<div data-node-binding><p class="tiny">只读 · 当前已保存模型 v${esc(data.model_version)}。${tipHelp(data.limitations.join(' '), '绑定核对说明')}</p>
       ${node.blockers.map(item => `<p class="tiny">${esc(item)}</p>`).join('')}
+      ${canManage() ? node.activity_ids.map(activity => `<button class="btn-sm" data-act="designer.bindingEdit" data-activity="${activity}" data-node="${esc(key)}">维护活动绑定</button>`).join('') : ''}
       ${facetsHtml(node.facets)}</div>`;
   }
   function clearMarkers(modeler) {
@@ -100,6 +104,8 @@ export function createBinding(ctx) {
       state.designer.bindingError = error.message;
     }
     applyMarkers();
+    const pane = document.getElementById('designerBindingPane');
+    if (pane && state.designer.tab === 'binding') pane.innerHTML = paneHtml();
     ctx.renderSelection(state.designer.bpmnSelection || []);
   }
   function locate(key) {

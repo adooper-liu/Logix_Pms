@@ -142,6 +142,7 @@ from app.models.project import Project, ProjectGateCondition, ProjectStep, Workf
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.replication import ReplicationPack
 from app.models.requirement import MarketRequirement, RequirementObjectiveLink
+from app.models.resource_link import ActivityResourceLink
 from app.models.sketch import Sketch
 from app.models.startup import ProcessCharter, StartupPilotConfirm, StartupStepSkip
 from app.models.strategy import ObjectiveProcessLink, StrategyObjective
@@ -270,6 +271,7 @@ __all__ = [
     "GovernanceRole",
     "GovernanceRoleMember",
     "RaciAssignment",
+    "ActivityResourceLink",
     "ReplicationPack",
     "DataDomain",
     "DataFlow",

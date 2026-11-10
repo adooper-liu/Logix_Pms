@@ -26,6 +26,8 @@ class BindingFacetOut(BaseModel):
 
 
 class ActivityBindingOut(BaseModel):
+    consistency: str = "PENDING_CONFIRM"
+    consistency_label: str = "绑定待确认"
     activity_id: int
     activity_code: str
     activity_name: str
@@ -56,6 +58,9 @@ class ProcessBindingSummaryOut(BaseModel):
 
 
 class ActivityBindingsOut(BaseModel):
+    consistency: str = "PENDING_CONFIRM"
+    consistency_label: str = "绑定待确认"
+    basis_model_version_id: Optional[int] = None
     process_id: int
     model_version_id: Optional[int] = None
     model_version: int

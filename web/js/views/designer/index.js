@@ -20,6 +20,7 @@ import { createTransfer } from './transfer.js';
 import { createChanges } from './changes.js';
 import { createRaci } from './raci.js';
 import { createBinding } from './binding.js';
+import { createBindingEdit } from './binding-edit.js';
 import { createComments } from './comments.js';
 import { createSimulation } from './simulation.js';
 import { toolMountHtml } from '../shared/tool_mount.js';
@@ -59,6 +60,7 @@ const transfer = createTransfer(ctx);
 const changes = createChanges(ctx);
 const raci = createRaci(ctx);
 const binding = createBinding(ctx);
+createBindingEdit(ctx);
 const comments = createComments(ctx);
 const simulation = createSimulation(ctx);
 const compensation = createCompensation();
@@ -395,7 +397,7 @@ function paintDesigner() {
     : (urlParams().lifecycle === 'modeling' ? 'MODELING' : (st.workKind || 'MODELING')), 'designer')}
     ${tab === 'analysis' ? analysisPane
     : tab === 'change' ? changePane
-      : tab === 'binding' ? binding.paneHtml()
+      : tab === 'binding' ? '<div id="designerBindingPane">' + binding.paneHtml() + '</div>'
       : tab === 'raci' ? raciPane : modelPane}`;
   const shell = pageShell({
     title: '流程设计器',
