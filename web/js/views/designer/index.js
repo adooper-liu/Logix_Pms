@@ -1,8 +1,5 @@
-/* 流程设计器编排层。
- *
- * `designer.js` 只是薄壳；这里负责：加载数据 → 创建 ctx → 组装子模块 →
- * 渲染页面 → 注册 data-act 处理器。子模块之间不互相 import，
- * 统一通过 ctx 访问画布与彼此的服务。
+/* 设计器编排：加载数据、注入 ctx、组装子模块及注册动作。
+ * 子模块不互相 import；共享能力只通过 ctx。
  */
 
 import { esc, num, dur, tipHelp } from '../../core/format.js';
@@ -22,6 +19,7 @@ import { createVersions } from './versions.js';
 import { createTransfer } from './transfer.js';
 import { createChanges } from './changes.js';
 import { createRaci } from './raci.js';
+import { createBinding } from './binding.js';
 import { createComments } from './comments.js';
 import { createSimulation } from './simulation.js';
 import { toolMountHtml } from '../shared/tool_mount.js';
@@ -60,6 +58,7 @@ const versions = createVersions(ctx);
 const transfer = createTransfer(ctx);
 const changes = createChanges(ctx);
 const raci = createRaci(ctx);
+const binding = createBinding(ctx);
 const comments = createComments(ctx);
 const simulation = createSimulation(ctx);
 const compensation = createCompensation();
@@ -81,6 +80,10 @@ on('designer.executionProvider', async (_data, element) => {
 
 Object.assign(ctx, {
   renderSelection: panels.renderSelection,
+  renderNodeBinding: binding.nodeHtml,
+  refreshBinding: binding.refresh,
+  applyBindingMarkers: binding.mounted,
+  showModel: () => setDesignerTab('model'),
   renderBpmnAssignment: assignment.renderBpmnAssignment,
   hydrateBpmnNodeExtras: assignment.hydrateBpmnNodeExtras,
   runLint: lint.run,
@@ -110,7 +113,7 @@ export function renderDesigner() {
   const load = async () => {
     const params = urlParams();
     if (params.process) state.designer.processId = Number(params.process);
-    if (['model', 'analysis', 'change', 'raci'].includes(params.tab)) {
+    if (['model', 'analysis', 'change', 'raci', 'binding'].includes(params.tab)) {
       state.designer.tab = params.tab;
     }
     // 每次进入都拉清单：seed --reset 后 id 会变，缓存会指向已删除流程
@@ -150,7 +153,9 @@ export function renderDesigner() {
           GET('/governance/meta'),
         ]);
       const workbench = await GET('/processes/'+id+'/workbench');
+      const bindingData = await binding.load(id);
       if (!current() || state.designer.processId !== id) return;
+      binding.accept(bindingData, model);
       state.designer.workbench=workbench;
       state.designer.model = model;
       state.designer.savedModel = cloneModel(model);   // 回滚基准
@@ -201,6 +206,8 @@ function paintDesigner() {
       <button type="button" class="${tab === 'raci' ? 'on' : ''}"
         data-act="designer.tab" data-tab="raci">权责${
           st.raci && st.raci.matters ? ' · ' + st.raci.matters.length : ''}</button>
+      <button type="button" class="${tab === 'binding' ? 'on' : ''}"
+        data-act="designer.tab" data-tab="binding">绑定</button>
       <button type="button" class="${tab === 'change' ? 'on' : ''}"
         data-act="designer.tab" data-tab="change">变更${
           (st.changes || []).length ? ' · ' + st.changes.length : ''}</button>
@@ -388,6 +395,7 @@ function paintDesigner() {
     : (urlParams().lifecycle === 'modeling' ? 'MODELING' : (st.workKind || 'MODELING')), 'designer')}
     ${tab === 'analysis' ? analysisPane
     : tab === 'change' ? changePane
+      : tab === 'binding' ? binding.paneHtml()
       : tab === 'raci' ? raciPane : modelPane}`;
   const shell = pageShell({
     title: '流程设计器',
@@ -440,7 +448,7 @@ function paintDesigner() {
     mode: 'plain',
   });
   viewEl().innerHTML = shell.html;
-  if (tab !== 'analysis' && tab !== 'change' && tab !== 'raci') canvas.mount();
+  if (tab === 'model') canvas.mount();
 }
 
 function paintMetrics(a) {
@@ -555,22 +563,22 @@ async function reanalyze() {
   }
 }
 
-/** 把当前内存中的模型整份提交给后端（后端是覆盖式保存）
- *
- *  节点编辑是「先改内存模型，再提交」的乐观更新。一旦后端拒绝（比如唯一键冲突、
- *  连线悬空），必须把模型回滚到最后一个服务端确认过的版本并重绘，
- *  否则内存里的模型和界面显示就分叉了，下次重绘会冒出从未保存成功的节点。
- */
+/** 原节点编辑保存失败时，重载服务端已确认模型及绑定。 */
 async function reloadDesign() {
   const st = state.designer;
+  const pid = st.processId;
+  const revision = ++designerLoadRevision;
   try {
     const [model, analysis] = await Promise.all([
-      GET('/processes/' + st.processId + '/design'),
-      POST('/processes/' + st.processId + '/design/analyze', {}),
+      GET('/processes/' + pid + '/design'),
+      POST('/processes/' + pid + '/design/analyze', {}),
     ]);
+    if (revision !== designerLoadRevision || state.view !== 'designer' || st.processId !== pid) return;
     st.model = model;
     st.savedModel = cloneModel(model);
     st.analysis = analysis;
+    await binding.refresh();
+    if (revision !== designerLoadRevision || state.view !== 'designer' || st.processId !== pid) return;
     // 冲突重载可能带回别人的结构改动，分派配置也跟着重新拉取
     st.assignmentCtx = null;
     st.assignmentPending = null;
@@ -581,7 +589,7 @@ async function reloadDesign() {
 }
 
 function setDesignerTab(tab) {
-  const next = ['model', 'analysis', 'change', 'raci'].includes(tab) ? tab : 'model';
+  const next = ['model', 'analysis', 'change', 'raci', 'binding'].includes(tab) ? tab : 'model';
   state.designer.tab = next;
   const params = {};
   if (state.designer.processId) params.process = state.designer.processId;

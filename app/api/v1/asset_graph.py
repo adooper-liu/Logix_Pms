@@ -39,6 +39,7 @@ from app.schemas.asset_graph import (
     UnmodeledActivityIn,
     UnmodeledActivityOut,
 )
+from app.schemas.binding_readiness import ActivityBindingsOut
 from app.schemas.common import DeleteResult
 from app.schemas.diagnosis import (
     DiagnosisPreviewOut,
@@ -68,6 +69,7 @@ from app.schemas.traceability import TraceabilityOut
 from app.services import asset_graph as asset_service
 from app.services import asset_graph_write as write_service
 from app.services import asset_package as package_service
+from app.services import binding_readiness as binding_service
 from app.services import diagnosis as diagnosis_service
 from app.services import document_extract as document_extract_service
 from app.services import log_import as log_import_service
@@ -106,6 +108,15 @@ def get_traceability(
 
 
 # ------------------------------------------------------------------ 查询
+
+
+@router.get(
+    "/{process_id}/binding-readiness",
+    response_model=ActivityBindingsOut,
+    summary="活动四绑定只读核对：来源、缺口与当前设计模型",
+)
+def get_binding_readiness(process_id: int, db: DbSession, user: CurrentUser):
+    return binding_service.activity_bindings(db, process_id, user)
 
 
 @router.get(

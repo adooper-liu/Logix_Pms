@@ -105,8 +105,8 @@ def verify_process_classification(page, base):
         page.evaluate(
             "id => go('process_card', {params:{process:String(id)}, skipOrigin:true})", child["id"]
         )
-        expect(page.locator("#view .pc-head")).to_contain_text("核心流程")
-        expect(page.locator("#view .pc-head")).to_contain_text(root["code"])
+        expect(page.locator("#view .page-head")).to_contain_text("核心流程")
+        expect(page.locator("#view .page-head")).to_contain_text(root["code"])
         print("OK   M1a：分类维护、继承/例外/阻断、筛选刷新与流程卡")
     finally:
         page.evaluate("() => closeModal()")

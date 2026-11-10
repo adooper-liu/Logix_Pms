@@ -389,7 +389,9 @@ const renderProcessCard = () => {
       const shell = pageShell({
         title: '流程卡',
         badge: '<span class="module-badge">对象 360 · 模块聚合</span>',
-        subtitle: `${chain} · Owner ${esc(c.process.owner || '—')}
+        subtitle: `${chain} · ${esc(c.process.process_type_label)}${c.process.classification_is_inherited
+          ? ' · 继承自 ' + esc(c.process.classification_source_code || '上级流程') : ''}
+          · Owner ${esc(c.process.owner || '—')}
           · ${esc(c.process.org_unit_name || c.process.department || '—')}`,
         tip: tipHelp('点击左侧模块查看详情；十层执行在右侧试点卡进入。', '流程卡说明'),
         actions: `<select class="sel sel-sm" data-act="process_card.select">

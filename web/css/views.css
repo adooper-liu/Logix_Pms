@@ -1,6 +1,21 @@
 /* 各视图专属样式。只被某一个页面使用的类放这里。
    跨页面复用的（.card / .step / .tool / .tag / 模态框…）在 components.css。 */
 
+/* ===== 经营绑定：沿用设计器令牌，角标不进入 lint/模型命令栈 ===== */
+.binding-summary-facets{display:flex;flex-wrap:wrap;gap:8px}
+.binding-facets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.binding-facet{border:1px solid var(--line);border-radius:var(--radius-sm,8px);padding:12px;min-width:0}
+.binding-facet p{margin:6px 0}
+.binding-refs{padding-left:18px;margin:0;overflow-wrap:anywhere}
+.binding-refs li+li{margin-top:8px}
+[data-node-binding] .binding-facet{margin-bottom:10px}
+.binding-marker{border:1px solid var(--line);border-radius:50%;width:26px;height:26px;font-size:11px;cursor:pointer;font-family:inherit;box-shadow:var(--shadow-hover)}
+.binding-marker-red{background:var(--bad-soft);color:var(--bad-strong)}
+.binding-marker-yellow{background:var(--warn-soft);color:var(--warn-strong)}
+.binding-marker-green{background:var(--ok-soft);color:var(--ok)}
+.binding-marker:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+@media(max-width:760px){.binding-facets{grid-template-columns:1fr}}
+
 /* ===== 管理驾驶舱：五阶段进度条 ===== */
 .stagebar{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .stagebar .nm{width:74px;font-size:13px;color:var(--sub)}

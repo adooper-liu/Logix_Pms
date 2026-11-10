@@ -6,6 +6,15 @@ from frontend_test_app import isolated_app
 from playwright.sync_api import expect, sync_playwright
 
 
+def open_lifecycle_navigation(page):
+    """按当前用户路径展开辅助导航，不以隐藏节点冒充可操作入口。"""
+    summary = page.locator("details.start-fold > summary")
+    if summary.count():
+        details = page.locator("details.start-fold")
+        if not details.evaluate("(element) => element.open"):
+            summary.click()
+
+
 def verify_lifecycle(page, base):
     for module in ["core/router.js", "core/lifecycle.js", "views/start.js", "views/cbok.js"]:
         response = page.request.get(base + "/static/js/" + module)
@@ -15,6 +24,8 @@ def verify_lifecycle(page, base):
             == (Path(__file__).resolve().parents[1] / "web/js" / module).read_bytes()
         ), "验证对象不是当前代码：" + module
     page.evaluate("() => go('start', {skipOrigin:true})")
+    page.wait_for_selector("details.start-fold > summary")
+    open_lifecycle_navigation(page)
     expect(page.locator('[data-act="lifecycle.process"]')).to_be_visible()
     assert page.locator('[data-act="lifecycle.open"][data-key]').count() == 9
     token = page.evaluate("localStorage.getItem('psm_token')")
@@ -43,6 +54,8 @@ def verify_lifecycle(page, base):
     for key, view in expected:
         requests.clear()
         page.evaluate("pid => go('start', {params:{process:String(pid)}, skipOrigin:true})", pid)
+        page.wait_for_selector("details.start-fold > summary")
+        open_lifecycle_navigation(page)
         page.locator(f'[data-act="lifecycle.open"][data-key="{key}"]').click()
         expect(page.locator("#lifecycleTask")).to_contain_text("原产物")
         assert page.evaluate("state.view") == view
@@ -119,6 +132,8 @@ def verify_lifecycle_handoffs(page, base):
             "args => go('start', {params:{process:String(args[0]),project:String(args[1])},skipOrigin:true})",
             [pid, project],
         )
+        page.wait_for_selector("details.start-fold > summary")
+        open_lifecycle_navigation(page)
         page.locator('[data-act="lifecycle.open"][data-key="strategy"]').click()
         expect(page.locator("#lifecycleTask")).to_contain_text("战略对齐")
         page.evaluate("() => { state.toolbox.step = '2.1'; }")
