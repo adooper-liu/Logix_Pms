@@ -27,6 +27,7 @@ from app.api.v1 import (
     governance_evidence,
     improvement_round,
     integrations,
+    job_description,
     knowledge,
     lifecycle,
     maturity,
@@ -92,6 +93,7 @@ protected.include_router(monitor.router)
 protected.include_router(notifications.router)
 protected.include_router(orgs.router)
 protected.include_router(positions.router)
+protected.include_router(job_description.router)
 protected.include_router(workload.router)
 protected.include_router(workforce.router)
 protected.include_router(strategy.router)

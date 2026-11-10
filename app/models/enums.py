@@ -388,6 +388,7 @@ class ProcessDocumentCategory(str, Enum):
     CHECKLIST = "CHECKLIST"
     TEMPLATE = "TEMPLATE"
     POLICY = "POLICY"
+    JOB_DESCRIPTION = "JOB_DESCRIPTION"
     OTHER = "OTHER"
 
 

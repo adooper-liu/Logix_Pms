@@ -655,7 +655,11 @@ def commit(db: Session, process: ProcessArch, user: User) -> AssetPackageOut:
 
 def get_package(db: Session, user: User, version_id: int) -> AssetPackageOut:
     version = db.get(ProcessDocumentVersion, version_id)
-    if version is None or version.source_kind != "COMPILED":
+    if (
+        version is None
+        or version.source_kind != "COMPILED"
+        or (version.compile_manifest or {}).get("kind") == "JOB_DESCRIPTION"
+    ):
         raise HTTPException(404, "资产包版本不存在。")
     document = db.get(ProcessDocument, version.document_id)
     if document is None:
@@ -680,7 +684,11 @@ def transition_by_id(
     note: Optional[str],
 ) -> AssetPackageOut:
     version = db.get(ProcessDocumentVersion, version_id)
-    if version is None or version.source_kind != "COMPILED":
+    if (
+        version is None
+        or version.source_kind != "COMPILED"
+        or (version.compile_manifest or {}).get("kind") == "JOB_DESCRIPTION"
+    ):
         raise HTTPException(404, "资产包版本不存在。")
     document = db.get(ProcessDocument, version.document_id)
     if document is None:
@@ -698,7 +706,11 @@ def transition(
     user: User,
 ) -> AssetPackageOut:
     version = db.get(ProcessDocumentVersion, version_id)
-    if version is None or version.source_kind != "COMPILED":
+    if (
+        version is None
+        or version.source_kind != "COMPILED"
+        or (version.compile_manifest or {}).get("kind") == "JOB_DESCRIPTION"
+    ):
         raise HTTPException(404, "资产包版本不存在。")
     document = db.get(ProcessDocument, version.document_id)
     if document is None or document.process_id != process.id:

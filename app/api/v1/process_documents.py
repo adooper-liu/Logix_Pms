@@ -112,6 +112,7 @@ def list_documents(
 ):
     stmt = (
         select(ProcessDocument)
+        .where(ProcessDocument.scope == "PROCESS")
         .options(
             joinedload(ProcessDocument.process),
             joinedload(ProcessDocument.org_unit),
@@ -190,8 +191,10 @@ def effective_documents(
 
 
 @router.get("/{document_id}", response_model=ProcessDocumentDetail, summary="文档详情与版本历史")
-def get_document(document_id: int, db: DbSession):
-    return document_service.document_detail(db, _get(db, document_id))
+def get_document(document_id: int, db: DbSession, user: CurrentUser):
+    document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
+    return document_service.document_detail(db, document)
 
 
 @router.post(
@@ -201,6 +204,8 @@ def get_document(document_id: int, db: DbSession):
     summary="新建标准文件（MANAGER+）",
 )
 def create_document(payload: ProcessDocumentCreate, db: DbSession, user: ManagerUser):
+    if payload.category == ProcessDocumentCategory.JOB_DESCRIPTION:
+        raise HTTPException(400, "岗位责任书须从岗位职责编译，不支持人工创建")
     try:
         process = document_service.require_process(db, payload.process_id)
     except document_service.ProcessDocumentError as exc:
@@ -256,6 +261,8 @@ def update_document(
     document_id: int, payload: ProcessDocumentUpdate, db: DbSession, user: ManagerUser
 ):
     document = _get(db, document_id)
+    if document.scope != "PROCESS" or payload.category == ProcessDocumentCategory.JOB_DESCRIPTION:
+        raise HTTPException(400, "岗位产物元数据来自原岗位及编译输入，不支持在文档页改写")
     data = as_columns(payload.model_dump(exclude_unset=True))
     if "node_key" in data:
         try:
@@ -398,8 +405,9 @@ def rebase_variant(
     response_model=List[ProcessDocumentVersionOut],
     summary="版本历史",
 )
-def list_versions(document_id: int, db: DbSession):
+def list_versions(document_id: int, db: DbSession, user: CurrentUser):
     document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
     return [document_service.version_out(db, v) for v in document.versions]
 
 
@@ -420,6 +428,8 @@ def upload_version(
     base_version_id: Optional[int] = Form(default=None),
 ):
     document = _get(db, document_id)
+    if document.scope != "PROCESS":
+        raise HTTPException(400, "岗位生成文档只能从岗位职责重新生成，不能人工上传替换")
     if not re.fullmatch(r"\d+\.\d+", version_label):
         raise HTTPException(status_code=400, detail="version_label 必须形如 3.2")
 
@@ -497,6 +507,7 @@ def transition_version(
     user: ManagerUser,
 ):
     document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
     version = _get_version(db, document, version_id)
     previous = version.status
     try:
@@ -525,6 +536,7 @@ def transition_version(
 )
 def download_version(document_id: int, version_id: int, db: DbSession, user: CurrentUser):
     document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
     version = _get_version(db, document, version_id)
     if not version.storage_key:
         raise HTTPException(status_code=404, detail="该版本没有上传文件")
@@ -568,6 +580,7 @@ def download_version(document_id: int, version_id: int, db: DbSession, user: Cur
 )
 def preview_version(document_id: int, version_id: int, db: DbSession, user: CurrentUser):
     document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
     version = _get_version(db, document, version_id)
     if not version.storage_key:
         raise HTTPException(status_code=404, detail="该版本没有上传文件")
@@ -624,6 +637,7 @@ def copy_to_deliverable(
     user: WriteUser,
 ):
     document = _get(db, document_id)
+    document_service.ensure_document_visible(db, user, document)
     version = _get_version(db, document, version_id)
     instance = db.get(DeliverableInstance, payload.deliverable_instance_id)
     if instance is None:

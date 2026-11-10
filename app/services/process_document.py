@@ -49,6 +49,7 @@ CATEGORY_LABELS: Dict[str, str] = {
     ProcessDocumentCategory.CHECKLIST.value: "检查表",
     ProcessDocumentCategory.TEMPLATE.value: "模板",
     ProcessDocumentCategory.POLICY.value: "制度",
+    ProcessDocumentCategory.JOB_DESCRIPTION.value: "岗位责任书",
     ProcessDocumentCategory.OTHER.value: "其他",
 }
 
@@ -76,6 +77,41 @@ class ProcessDocumentError(ValueError):
 
 
 # ------------------------------------------------------------------ 文档
+
+
+def require_process_document(document: ProcessDocument) -> None:
+    if document.scope != "PROCESS" or document.process_id is None:
+        raise ProcessDocumentError("该文档不属于流程，不能作为流程标准或来源")
+
+
+def ensure_document_visible(db: Session, user: User, document: ProcessDocument) -> None:
+    from fastapi import HTTPException
+
+    from app.models.org import Position
+    from app.models.raci import GovernanceRole
+    from app.services import org_access
+
+    if document.scope == "PROCESS":
+        return  # 原流程文档继承范围由各原入口维持。
+    subject = db.get(
+        Position if document.scope == "POSITION" else GovernanceRole,
+        document.position_id if document.scope == "POSITION" else document.governance_role_id,
+    )
+    if subject is None:
+        raise HTTPException(404, "文档主体不存在")
+    org_access.ensure_visible(db, user, subject.org_unit_id)
+    org_access.ensure_visible(db, user, document.org_unit_id)
+    for version in document.versions:
+        manifest = version.compile_manifest or {}
+        if manifest.get("kind") == "JOB_DESCRIPTION":
+            from app.services.job_description_access import ensure_manifest_visible
+
+            ensure_manifest_visible(db, user, manifest)
+        for model in manifest.get("models", []):
+            process = db.get(ProcessArch, model["process_id"])
+            if process is None:
+                raise HTTPException(404, "来源不可见")
+            org_access.ensure_visible(db, user, process.org_unit_id)
 
 
 def require_document(db: Session, document_id: int) -> ProcessDocument:
@@ -204,6 +240,10 @@ def transition_version(
             f"变更为 {deliverable_service.STATUS_LABELS.get(target, target)}"
         )
 
+    if document.scope != "PROCESS":
+        from app.services.job_description import validate_for_transition
+
+        validate_for_transition(db, document, version, target, user)
     today = date.today()
     if target == DeliverableStatus.APPROVED.value:
         version.approved_by = user.display_name
@@ -292,6 +332,7 @@ def validate_variant(
     db: Session, base: ProcessDocument, org_unit_id: Optional[int]
 ) -> ProcessDocumentVersion:
     """校验本地变体：只允许下级组织、上级必须已生效、锁定策略不允许变体。"""
+    require_process_document(base)
     if not base.is_active:
         raise ProcessDocumentError("上级标准文件已停用，不能建立变体")
     if base.variation_policy == AssetVariationPolicy.LOCKED.value:
@@ -343,7 +384,7 @@ def effective_documents(
             joinedload(ProcessDocument.org_unit),
             selectinload(ProcessDocument.versions),
         )
-        .where(ProcessDocument.is_active.is_(True))
+        .where(ProcessDocument.is_active.is_(True), ProcessDocument.scope == "PROCESS")
     )
     condition = visible_conditions(db, org_unit_id)
     if condition is not None:
@@ -713,6 +754,7 @@ def copy_to_deliverable(
     note: Optional[str] = None,
 ) -> DeliverableVersion:
     """把生效的标准文件复制成项目交付物版本，记录来源文档版本。"""
+    require_process_document(document)
     if version.status != DeliverableStatus.EFFECTIVE.value:
         raise ProcessDocumentError("只能复制已生效的标准文件版本")
     if version.storage_key is None:
@@ -750,6 +792,7 @@ def promote_deliverable(
     note: Optional[str] = None,
 ) -> ProcessDocumentVersion:
     """把项目交付物版本晋升为标准文件草稿；审批仍走标准文件的版本状态机。"""
+    require_process_document(document)
     if deliverable_version.status not in {
         DeliverableStatus.APPROVED.value,
         DeliverableStatus.EFFECTIVE.value,
@@ -902,6 +945,12 @@ def document_out(db: Session, document: ProcessDocument) -> ProcessDocumentOut:
     return ProcessDocumentOut(
         id=document.id,
         process_id=document.process_id,
+        document_scope=document.scope,
+        document_scope_label={"PROCESS": "流程", "POSITION": "岗位", "ROLE": "治理角色"}[
+            document.scope
+        ],
+        position_id=document.position_id,
+        governance_role_id=document.governance_role_id,
         process_code=document.process.code if document.process else None,
         process_name=document.process.name if document.process else None,
         node_key=document.node_key,

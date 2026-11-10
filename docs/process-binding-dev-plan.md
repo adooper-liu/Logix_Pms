@@ -211,6 +211,22 @@ SELECT count(*) FROM raci_assignment WHERE scope_key IS NULL;   -- 应为 0
 
 **目标**：第一个真正的经营产物；它会反过来压出所有没绑到活动的断点。
 
+### 2026-11-10 岗位粒度与实施边界（用户确认）
+
+- P2先把“这个岗位负责什么”做准：流程责任、岗位覆盖度与岗位责任书到岗位，不停在部门职能，不按个人或高级/基础能力等级复制岗位。
+- 职级/能力等级在后续工作量表环节划分并实施，回答“需要什么能力、配置多少人”；不预设能力效率系数。主管/专员等实际职责授权不同的岗位仍明确区分。
+- 细化实施见 [P2计划](superpowers/plans/2026-11-10-binding-p2.md)。本工作树已实现岗位覆盖度、责任书预览/生成/原版本评审与岗位页；尚未提交、合并、推送或迁移实际业务库。
+
+### 2026-11-10 P2 实施与验收记录
+
+- 隔离分支 `worktree-binding-p2`，基线 `307520a`；基线工程检查 `779 passed, 1 skipped, 4 warnings`。复核前双库803项通过是历史时点；修复后最终完整工程检查 `809 passed, 1 skipped, 4 warnings in 276.24s`，格式/lint/tests通过、退出0；专用新PostgreSQL库最终全量 `809 passed, 1 skipped, 4 warnings in 343.41s`，退出0。
+- SQLite与专用PostgreSQL Alembic upgrade/check均输出 `No new upgrade operations detected.`；PG空库降一版再升级通过；新增回归验证历史PROCESS回填及已有岗位产物拒绝降级。实际PG另测输出 `PASS PG missing position rejected by CHECK`、`PASS PG downgrade refused with position document retained`，未依靠SQLite替代PG约束验证。
+- 三合成岗位已沿真实页面走发布模型→岗位活动→责任书草稿→原评审/批准/生效→刷新，节点深链专项RED→GREEN。全站首轮执行到底退出1：P0原定位一项失败，其余含P2通过、无500；根因为加载时清空原内部待定位，已修复，独立P0专项退出0；修复后当前全站完整重跑 `全部检查通过。`、退出0、`SERVER_500: []`，P0/P1/P2及既有场景通过。1024宽度、换岗位清旧内容/刷新、真实迟到响应及viewer只读禁写补验退出0。复核修复后的最终全站同样完整退出0、无500；条件调色板跳过、预期负例及外部draw.io限制保留，不称零错误。
+- 已完成一次独立整片复核：1项Critical（固定历史来源权限）与4项Important（发布职责被工作版删除后遗漏、任务内容未入hash、仅角色歧义遗漏、正文深链无效）均新增回归先RED后修GREEN；定向29项通过。正文链接改为应用绝对地址+原路由+basis，真实三岗位逐条点击回原节点通过，未作独立二次复核。条件调色板跳过、预期负例及外部draw.io限制保留，不称零错误。
+- 曾遇测试断言把版本号1.0误匹配时间戳、结构清单未加新视图/设计器模块超限，均保留失败记录并改为精确版本标题/同步结构/定位逻辑归binding子模块。PG复用库因原drop_all循环依赖失败exit4，尚未进入断言；不删旧库，另用专用新库重跑通过。
+- 用户随后授权提交、推送、合并；P2提交及远端集成身份以Git/PR实际记录为准。远端main尚缺P0/P1，按每阶段独立PR先承接依赖；发布这两个此前仅本地合入的阶段须明确公开目标授权。业务库仍不迁移。
+- **P2软件切片与本轮自动化验收完成。** 证据保留 `.superpowers/sdd/2026-11-10-binding-p2/`（`check-final.log`、`postgres-final.log`、`frontend-reviewed.log`、`review-resolution.md`、截图）；测试服务已停止，自有专用PG容器已停止但保留数据。单迁移 `h0c1d2e3f4a5` 未应用实际业务库。生产并发、组织授权充分性、历史任职快照与真实业务效果未验收；职级/能力及人数配置仍留工作量表后续。
+
 ### 岗位覆盖度（只读，先做）
 
 `app/services/position_coverage.py`（新）：
@@ -226,7 +242,7 @@ API：`GET /workload/position-coverage`（挂 `app/api/v1/workload.py`，与工�
 1. **编译服务**：`app/services/job_description.py`（新）
    - `preview(db, position_id) -> JobDescriptionPreviewOut`：只读，返回结构化章节 + HTML + `content_hash` + 输入快照；
    - `compile(db, position_id, user)`：落库，复用文档版本状态机。
-2. **产物容器**：按主模型 §6.5 的**方案 A**，扩 `ProcessDocument`：
+2. **产物容器**：按主模型 §6.6 的**方案 A**，扩 `ProcessDocument`：
    - `process_id` 改可空；加 `scope`（`PROCESS` / `POSITION` / `ROLE`）、`position_id`、`governance_role_id`；
    - 检查约束：`scope='PROCESS'` 时 `process_id` 非空；`scope='POSITION'` 时 `position_id` 非空；`scope='ROLE'` 时 `governance_role_id` 非空；
    - 逐处加作用域守卫：`app/api/v1/process_documents.py:120`–`:140`、`app/services/process_document.py:352`、`app/services/maturity.py:324`、`app/services/asset_package.py:594` 等。

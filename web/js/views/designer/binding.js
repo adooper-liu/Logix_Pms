@@ -3,7 +3,7 @@ import { esc, tipHelp } from '../../core/format.js';
 import { foldCard } from '../../core/layout.js';
 import { GET } from '../../core/api.js';
 import { state } from '../../core/state.js';
-import { on } from '../../core/ui.js';
+import { on, toast } from '../../core/ui.js';
 import { canManage } from '../../core/auth.js';
 
 const TONE = { READY: 't-grn', PARTIAL: 't-yel', MISSING: 't-gry', CONFLICT: 't-red' };
@@ -139,5 +139,15 @@ export function createBinding(ctx) {
     state.designer.binding = matches ? result.data || null : null;
     state.designer.bindingError = matches ? result.error || null : '模型已变化，请重新加载核对';
   }
-  return {paneHtml, nodeHtml, refresh, applyMarkers, mounted, load, accept};
+  function acceptLocation(params, result, model) {
+    if (!params.node) return;
+    state.designer.tab = 'model';
+    state.designer.bindingLocate = null;
+    if (params.basis && String(result.data?.model_version_id) !== params.basis) {
+      toast('原责任书模型与当前工作版不同，请先核对版本；未自动定位同名节点。', 'error');
+    } else if (model.nodes.some(node => node.node_key === params.node)) {
+      state.designer.bindingLocate = params.node;
+    } else toast('原活动节点当前不存在，请核对来源版本。', 'error');
+  }
+  return {paneHtml, nodeHtml, refresh, applyMarkers, mounted, load, accept, acceptLocation};
 }

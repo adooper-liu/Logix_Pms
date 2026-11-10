@@ -30,6 +30,8 @@ def ancestor_ids(db: Session, process_id: Optional[int]) -> Set[int]:
 def is_document_applicable(
     db: Session, document_process_id: int, project_process_id: Optional[int]
 ) -> bool:
+    if document_process_id is None:
+        return False
     if project_process_id is None:
         return True
     return document_process_id in ancestor_ids(db, project_process_id)

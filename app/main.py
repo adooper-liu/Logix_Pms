@@ -60,6 +60,7 @@ SPA_VIEWS = {
     "knowledge",
     "deliverables",
     "orgs",
+    "responsibility",
     "sketches",
     "help",
 }
