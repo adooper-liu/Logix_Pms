@@ -369,7 +369,11 @@ docker compose down -v          # 删除 pgdata 卷，现有数据全部丢失
 docker compose --profile full up -d --build
 ```
 
-### 切换生产环境
+### 生产部署文档
+
+已有生产数据库的应用升级、备份、迁移、健康检查和回滚流程见 [生产升级 Runbook](docs/production-upgrade-runbook.md)。
+
+## 切换生产环境
 
 生产**不要复用演示库**，也不要只删几张表：新建数据库/卷，用 `bootstrap` 初始化。
 
