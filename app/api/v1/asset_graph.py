@@ -187,7 +187,7 @@ def get_evidence_claims(process_id: int, db: DbSession, user: CurrentUser):
 )
 def get_asset_readiness(process_id: int, db: DbSession, user: CurrentUser):
     process = asset_service.require_process(db, user, process_id)
-    return asset_service.readiness(db, process)
+    return asset_service.readiness(db, process, user)
 
 
 # ------------------------------------------------------------------ 架构关系写入

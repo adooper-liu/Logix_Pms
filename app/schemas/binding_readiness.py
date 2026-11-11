@@ -4,6 +4,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.asset_graph import ReadinessBlockerOut
+
 
 class BindingRefOut(BaseModel):
     kind: str
@@ -68,3 +70,15 @@ class ActivityBindingsOut(BaseModel):
     activities: List[ActivityBindingOut]
     nodes: List[NodeBindingOut]
     limitations: List[str]
+
+
+class BindingGateOut(BaseModel):
+    profile: str
+    profile_label: str
+    model_version_id: Optional[int] = None
+    consistency: str
+    consistency_label: str
+    blockers: List[ReadinessBlockerOut] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    fingerprint: str
+    ready: bool

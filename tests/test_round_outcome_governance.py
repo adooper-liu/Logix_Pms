@@ -3,6 +3,9 @@
 from uuid import uuid4
 
 import pytest
+from test_publish_gate_bindings import gate_case as shared_gate_case
+
+gate_case = pytest.fixture(name="gate_case")(shared_gate_case.__wrapped__)
 
 API = "/api/v1"
 
@@ -315,17 +318,28 @@ def test_control_review_uses_original_sheet_and_has_next_owner(
 
 
 def test_go_live_outcome_requires_same_current_publish_and_stales_with_config(
-    client, manager_client, outcome_scope
+    client, manager_client, gate_case, outcome_scope
 ):
+    from test_publish_gate_bindings import add_a, publish
+
     from app.core.database import SessionLocal
     from app.models.execution import ProcessExecutionConfig
     from app.models.improvement_round import ProcessImprovementRound
     from app.models.process import ProcessArch
+    from app.models.project import Project
+    from app.services.binding_readiness import binding_gate
     from app.services.execution_readiness import basis
     from app.services.improvement_round import digest
 
-    process_id, pid, rid, _ = outcome_scope
+    add_a(client, gate_case)
+    publish(client, gate_case)
+    _original_process_id, pid, rid, _ = outcome_scope
+    process_id = gate_case["pid"]
     with SessionLocal() as db:
+        db.get(Project, pid).process_id = process_id
+        original_round = db.get(ProcessImprovementRound, rid)
+        original_round.process_id = process_id
+        original_round.asis_model_version_id = gate_case["vid"]
         process = db.get(ProcessArch, process_id)
         version, _, snapshot, *_ = basis(db, process)
         row = db.get(ProcessImprovementRound, rid)
@@ -354,7 +368,17 @@ def test_go_live_outcome_requires_same_current_publish_and_stales_with_config(
                 k: {"mode": "NOT_APPLICABLE", "reason": "测试人工办理"}
                 for k in ("forms", "assignments", "deadlines")
             },
-            "confirmation": {"decision": "ACCEPT", "fingerprint": digest(snapshot)},
+            "confirmation": {
+                "decision": "ACCEPT",
+                "fingerprint": digest(
+                    {
+                        **snapshot,
+                        "binding_fingerprint": binding_gate(
+                            db, process_id, profile="EXECUTION", model_version_id=version.id
+                        ).fingerprint,
+                    }
+                ),
+            },
         }
         db.commit()
     payload = {

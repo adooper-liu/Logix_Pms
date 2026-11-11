@@ -73,15 +73,33 @@ def preview(
         "org_unit_name": position.org_unit_name,
         "is_active": position.is_active,
     }
+
+    def relevant_gap(gap):
+        if gap.process_id is None:
+            return True
+        related = [a for a in coverage.activities if a.process_id == gap.process_id]
+        if gap.activity_id is not None:
+            return any(a.activity_id == gap.activity_id for a in related)
+        if gap.node_key:
+            return any(gap.node_key in a.node_keys for a in related)
+        # 流程事项不自动分配给任意岗位；来源身份等流程缺口仍保留。
+        return gap.code != "UNMAPPED_ROLE" and bool(related)
+
+    coverage.unmapped_roles = [g for g in coverage.unmapped_roles if relevant_gap(g)]
+    coverage.gaps = [g for g in coverage.gaps if relevant_gap(g)]
     gaps = list(coverage.gaps) + list(coverage.unmapped_roles)
     if not position.is_active:
         gaps.append(CoverageGapOut(code="POSITION_INACTIVE", message="岗位已停用"))
     sources = []
     published_bindings = []
     facets = []
+    binding_gates = []
     for process_info in coverage.processes:
         process = db.get(ProcessArch, process_info.id)
         version = asset_graph.published_model(db, process)
+        relevant_ids = {
+            row.activity_id for row in coverage.activities if row.process_id == process.id
+        }
         if version is None:
             gaps.append(
                 CoverageGapOut(
@@ -99,8 +117,12 @@ def preview(
                 )
             )
         if version:
-            current = binding_snapshot.capture(db, process, version)
-            consistency = binding_snapshot.compare(current, version.binding_snapshot)
+            current = binding_snapshot.activity_scope(
+                binding_snapshot.capture(db, process, version), relevant_ids
+            )
+            consistency = binding_snapshot.compare(
+                current, binding_snapshot.activity_scope(version.binding_snapshot, relevant_ids)
+            )
             if consistency != "CONFIRMED":
                 gaps.append(
                     CoverageGapOut(
@@ -118,13 +140,20 @@ def preview(
             }
             sources.append(source)
         bindings = binding_readiness.activity_bindings(
-            db, process.id, user, model_version_id=version.id if version else None
+            db,
+            process.id,
+            user,
+            model_version_id=version.id if version else None,
+            activity_ids=relevant_ids,
         )
         if version:
             published_bindings.append(bindings.model_dump(mode="json"))
         if not org_access.unrestricted(user):
             full = binding_readiness.activity_bindings(
-                db, process.id, model_version_id=version.id if version else None
+                db,
+                process.id,
+                model_version_id=version.id if version else None,
+                activity_ids=relevant_ids,
             )
             if [a.model_dump(mode="json") for a in full.activities] != [
                 a.model_dump(mode="json") for a in bindings.activities
@@ -139,17 +168,40 @@ def preview(
         relevant_ids = {
             row.activity_id for row in coverage.activities if row.process_id == process.id
         }
+        gate = binding_readiness.binding_gate(
+            db,
+            process.id,
+            user,
+            profile="PERFORMANCE",
+            model_version_id=version.id if version else None,
+            activity_ids=relevant_ids,
+        )
+        binding_gates.append(gate)
+        for activity in coverage.activities:
+            if activity.process_id == process.id:
+                activity.binding_consistency = gate.consistency
+        for blocker in gate.blockers:
+            gaps.append(
+                CoverageGapOut(code=blocker.code, message=blocker.message, process_id=process.id)
+            )
         facets.extend(
             row.model_dump(mode="json")
             for row in bindings.activities
             if row.activity_id in relevant_ids
         )
     roles = []
-    process_ids = [r.id for r in coverage.processes]
+    role_ids = {r.role_id for a in coverage.activities for r in a.raci}
+    for data in published_bindings:
+        for activity in data["activities"]:
+            for facet in activity["facets"]:
+                for ref in facet["refs"]:
+                    if ref["kind"] == "RACI" and ref.get("id"):
+                        assignment = db.get(RaciAssignment, ref["id"])
+                        if assignment:
+                            role_ids.add(assignment.role_id)
     for role in db.scalars(
         select(GovernanceRole)
-        .join(RaciAssignment)
-        .where(RaciAssignment.process_id.in_(process_ids))
+        .where(GovernanceRole.id.in_(role_ids))
         .distinct()
         .order_by(GovernanceRole.id)
     ).all():
@@ -245,6 +297,11 @@ def preview(
         manifest=manifest,
         gaps=gaps,
         can_compile=not any(g.code in identity_blockers for g in gaps),
+        can_submit_review=bool(binding_gates)
+        and all(g.ready for g in binding_gates)
+        and not any(g.code in identity_blockers for g in gaps)
+        and not any(g.code == "UNMAPPED_ROLE" for g in gaps),
+        binding_gates=binding_gates,
         limitations=coverage.limitations,
     )
 
@@ -435,3 +492,21 @@ def validate_for_transition(db: Session, document, version, target: str, user: U
     )
     if not data.can_compile or data.input_hash != manifest.get("input_hash"):
         raise HTTPException(409, "原岗位或绑定依据已变化，请重新预览并生成责任书")
+
+    if not data.can_submit_review:
+        raise HTTPException(
+            409,
+            {
+                "message": "岗位责任书绩效版绑定未齐，草稿可保留，不能正式流转。",
+                "blockers": [b.model_dump() for gate in data.binding_gates for b in gate.blockers]
+                + [
+                    {
+                        "code": g.code,
+                        "message": g.message,
+                        "targets": ["activity:" + str(g.activity_id)],
+                    }
+                    for g in data.gaps
+                    if g.code == "UNMAPPED_ROLE"
+                ],
+            },
+        )

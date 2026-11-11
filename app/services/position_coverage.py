@@ -180,6 +180,8 @@ def coverage(
         relevant = {}
         local_unmapped = []
         local_matters = []
+        assignments.sort(key=lambda row: row.id)
+        tasks.sort(key=lambda row: row.id)
         for assignment in assignments:
             mapped_position = role_position(db, assignment.role)
             if mapped_position is None:
@@ -204,7 +206,7 @@ def coverage(
                 for aid in aids:
                     relevant.setdefault(aid, []).append(assignment)
         local_rows = []
-        for aid, activity in l4s.items():
+        for aid, activity in sorted(l4s.items()):
             related = [n for n in nodes if aid in node_ids[n.node_key]]
             sources = [
                 CoverageSourceOut(

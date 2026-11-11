@@ -22,7 +22,11 @@ def test_two_nodes_same_activity_have_independent_accountability(client):
         db.add(position)
         db.commit()
         posid = position.id
-    roles = client.get(f"{API}/governance/roles?active_only=true").json()[:2]
+    from binding_test_helpers import position_role, remove_position_roles
+
+    with SessionLocal() as db:
+        roles = [{"id": position_role(db, posid)[0].id} for _ in range(2)]
+        db.commit()
     response = client.put(
         f"{API}/processes/{p['id']}/design",
         json={
@@ -81,5 +85,6 @@ def test_two_nodes_same_activity_have_independent_accountability(client):
             client.delete(f"{API}/governance/raci/{rid}")
         client.delete(f"{API}/process-map/{p['id']}")
         with SessionLocal() as db:
+            remove_position_roles(db, [posid])
             db.delete(db.get(Position, posid))
             db.commit()

@@ -244,6 +244,12 @@ def transition_version(
         from app.services.job_description import validate_for_transition
 
         validate_for_transition(db, document, version, target, user)
+    elif version.source_kind == "COMPILED" or any(
+        v.source_kind == "COMPILED" for v in document.versions
+    ):
+        from app.services.asset_package import validate_for_transition
+
+        validate_for_transition(db, document, version, target, user)
     today = date.today()
     if target == DeliverableStatus.APPROVED.value:
         version.approved_by = user.display_name

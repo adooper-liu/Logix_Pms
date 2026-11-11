@@ -116,8 +116,13 @@ def get(db, user, pid):
     process = require_process(db, pid)
     version, config, snapshot, facts, nodes = basis(db, process)
     data = config.readiness if config else None
-    fingerprint = improvement_round.digest(snapshot)
-    missing = []
+    from app.services.binding_readiness import binding_gate
+
+    gate = binding_gate(
+        db, pid, user, profile="EXECUTION", model_version_id=version.id if version else None
+    )
+    fingerprint = improvement_round.digest({**snapshot, "binding_fingerprint": gate.fingerprint})
+    missing = [b.message for b in gate.blockers]
     if version is None:
         missing.append("没有真实当前发布模型")
     if data is None:
@@ -167,6 +172,7 @@ def get(db, user, pid):
         "confirmed": confirmed,
         "state_label": state,
         "missing": missing,
+        "binding_gate": gate.model_dump(mode="json"),
         "fingerprint": fingerprint,
         "limitations": LIMITATIONS,
         "reviewers": [{"id": u.id, "name": u.display_name} for u in reviewers],

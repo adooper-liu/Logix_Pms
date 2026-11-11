@@ -426,6 +426,17 @@ def build_publish_preview(db: Session, process: ProcessArch, user: User) -> dict
     elif version is not None:
         diff = diff_snapshots({}, version.snapshot or {})
 
+    from app.services.binding_readiness import binding_gate
+
+    gate = binding_gate(
+        db,
+        process.id,
+        user,
+        profile="PERFORMANCE",
+        model_version_id=version.id if version else None,
+        require_confirmed=False,
+    )
+    warnings.extend("绑定告警（不阻断设计发布）：" + b.message for b in gate.blockers)
     return {
         "process_id": process.id,
         "process_code": process.code,

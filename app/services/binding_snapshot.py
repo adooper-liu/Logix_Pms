@@ -174,12 +174,52 @@ def capture(db, process, version):
                 and (not row.node_key or row.node_key in keys)
             ):
                 role = db.get(GovernanceRole, row.role_id)
-                add("RACI", row, _row(role) if role else {}, valid=bool(role and role.is_active))
+                from app.services.position_coverage import role_position
+
+                members = (
+                    [
+                        {
+                            "member_id": m.id,
+                            "user_id": m.user_id,
+                            "user_active": bool(m.user and m.user.is_active),
+                            "position_id": m.user.position_id if m.user else None,
+                            "position_active": bool(
+                                m.user
+                                and m.user.position_id
+                                and (pos := db.get(Position, m.user.position_id))
+                                and pos.is_active
+                            ),
+                        }
+                        for m in sorted(role.members, key=lambda member: member.id)
+                    ]
+                    if role
+                    else []
+                )
+                add(
+                    "RACI",
+                    row,
+                    {"role": _row(role) if role else {}, "members": members},
+                    valid=bool(
+                        role
+                        and role.is_active
+                        and (
+                            row.activity_id is None
+                            and not row.node_key
+                            or role_position(db, role) is not None
+                        )
+                    ),
+                )
         for row in resources:
             if row.activity_id != activity.id:
                 continue
             valid, _, _ = resource_link.source(
-                db, process, activity, row.resource_type, row.ref_id, row.node_key
+                db,
+                process,
+                activity,
+                row.resource_type,
+                row.ref_id,
+                row.node_key,
+                model_version=version,
             )
             source_model = resource_link.MODELS.get(row.resource_type)
             original = db.get(source_model, row.ref_id) if source_model and row.ref_id else None
@@ -211,6 +251,9 @@ def capture(db, process, version):
                     and (row.valid_from is None or row.valid_from <= day),
                 )
         for row in documents:
+            # 编译产物是投影，不反向成为自己的输入；显式资源引用仍在上方捕获。
+            if any(v.source_kind == "COMPILED" for v in row.versions):
+                continue
             if row.is_active and (
                 row.process_id == activity.id
                 and not row.node_key
@@ -289,3 +332,17 @@ def compare(current, basis):
     if current.get("model_version_id") != basis.get("model_version_id") or _hash(new) != _hash(old):
         return "PENDING_CONFIRM"
     return "CONFIRMED"
+
+
+def activity_scope(snapshot, activity_ids):
+    """只裁剪活动字典；保留模型身份与每个活动的全部原来源。"""
+    if snapshot is None or activity_ids is None:
+        return snapshot
+    return {
+        **snapshot,
+        "activities": {
+            key: value
+            for key, value in snapshot.get("activities", {}).items()
+            if int(key) in activity_ids
+        },
+    }

@@ -5,6 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.binding_readiness import BindingGateOut
 from app.schemas.position_coverage import CoverageGapOut
 
 
@@ -28,4 +29,6 @@ class JobDescriptionPreviewOut(BaseModel):
     manifest: dict
     gaps: list[CoverageGapOut]
     can_compile: bool
+    can_submit_review: bool
+    binding_gates: list[BindingGateOut] = Field(default_factory=list)
     limitations: list[str]

@@ -1,4 +1,4 @@
-"""活动四绑定只读查询：不补建基线、不更新原对象、不作为发布门禁。"""
+"""活动四绑定只读查询：不补建基线、不更新原对象、使用入口按档位投影，不阻断设计发布。"""
 
 from collections import defaultdict
 from typing import Optional
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.timeutil import utcnow
 from app.models.adoption import ProcessTrainingRecord
-from app.models.asset_graph import EvidenceClaim, NodeActivityLink
+from app.models.asset_graph import EvidenceAdjudication, EvidenceClaim, NodeActivityLink
 from app.models.execution import FormDefinition, ProcessRule
 from app.models.monitor import KpiDefinition
 from app.models.org import Position
@@ -87,7 +87,7 @@ def _in_date(row, day):
     )
 
 
-def _team_facet(related, activity_id, racis, positions):
+def _team_facet(db, related, activity_id, racis, positions):
     keys = {node.node_key for node in related}
     relevant = [
         row
@@ -119,7 +119,11 @@ def _team_facet(related, activity_id, racis, positions):
     for row in relevant:
         if row.raci == "A":
             by_scope[row.scope_key].append(row)
-    conflict = any(len(rows) > 1 for rows in by_scope.values())
+    from app.services.position_coverage import role_position
+
+    conflict = any(len(rows) > 1 for rows in by_scope.values()) or any(
+        role_position(db, row.role) is None for row in relevant
+    )
     activity_a = by_scope.get(f"ACTIVITY:{activity_id}", [])
     ready = (
         bool(related)
@@ -145,6 +149,7 @@ def activity_bindings(
     user: Optional[User] = None,
     *,
     model_version_id: Optional[int] = None,
+    activity_ids: Optional[set[int]] = None,
 ) -> ActivityBindingsOut:
     process = db.get(ProcessArch, process_id)
     if process is None:
@@ -179,6 +184,10 @@ def activity_bindings(
     )
     if process.level == 4 and not process.is_draft:
         activities = [process]
+    available_ids = {row.id for row in activities}
+    requested_ids = activity_ids
+    if requested_ids is not None:
+        activities = [row for row in activities if row.id in requested_ids]
     activity_map = {row.id: row for row in activities}
     activity_ids = set(activity_map)
     links = list(
@@ -192,6 +201,7 @@ def activity_bindings(
             )
         ).all()
     )
+    links.sort(key=lambda row: row.id)
     by_node = defaultdict(list)
     controls = defaultdict(list)
     for link in links:
@@ -209,15 +219,18 @@ def activity_bindings(
             if relations
             else ([node.process_arch_id] if node.process_arch_id else [])
         )
-        bad = any(ident not in activity_ids for ident in ids)
+        bad = any(ident not in available_ids for ident in ids)
         conflicts[node.node_key] = ["活动映射不属于当前流程或活动仍为草稿"] if bad else []
         # 有权威关系时不退回兼容指针，即使关系本身无效。
         node_ids[node.node_key] = [ident for ident in ids if ident in activity_ids]
         for ident in node_ids[node.node_key]:
             mapped[ident].append(node)
 
+    if requested_ids is not None:
+        nodes = [node for node in nodes if node_ids[node.node_key]]
+
     def rows(cls, *conditions):
-        return list(db.scalars(select(cls).where(*conditions)).all())
+        return list(db.scalars(select(cls).where(*conditions).order_by(cls.id)).all())
 
     kpis = rows(
         KpiDefinition,
@@ -236,7 +249,7 @@ def activity_bindings(
     )
     if user:
         raci_stmt = org_access.restrict(raci_stmt, db, user, GovernanceRole.org_unit_id)
-    racis = list(db.scalars(raci_stmt).all())
+    racis = list(db.scalars(raci_stmt.order_by(RaciAssignment.id)).all())
     standards_stmt = select(WorkMeasurementStandard).where(
         WorkMeasurementStandard.activity_id.in_(activity_ids),
         WorkMeasurementStandard.status == "VERIFIED",
@@ -247,7 +260,7 @@ def activity_bindings(
         )
     standards = [
         row
-        for row in db.scalars(standards_stmt).all()
+        for row in db.scalars(standards_stmt.order_by(WorkMeasurementStandard.id)).all()
         if _in_date(row, day) and row.task_id is None
     ]
     forms = rows(
@@ -272,14 +285,32 @@ def activity_bindings(
             if condition is not None
             else docs_stmt.where(ProcessDocument.org_unit_id.is_(None))
         )
-    documents = [(row, effective_version_on(row, day)) for row in db.scalars(docs_stmt).all()]
-    documents = [(row, ver) for row, ver in documents if ver is not None]
+    documents = [
+        (row, effective_version_on(row, day))
+        for row in db.scalars(docs_stmt.order_by(ProcessDocument.id)).all()
+    ]
+    documents = [
+        (row, ver) for row, ver in documents if ver is not None and ver.source_kind != "COMPILED"
+    ]
     claims = list(
         db.scalars(
             select(EvidenceClaim)
             .options(selectinload(EvidenceClaim.targets))
             .where(EvidenceClaim.process_id == process_id)
+            .order_by(EvidenceClaim.id)
         ).all()
+    )
+    groups = {claim.conflict_group for claim in claims if claim.conflict_group}
+    adjudicated_groups = (
+        set(
+            db.scalars(
+                select(EvidenceAdjudication.conflict_group).where(
+                    EvidenceAdjudication.conflict_group.in_(groups)
+                )
+            )
+        )
+        if groups
+        else set()
     )
     visible_claims = []
     # NODE证据使用持久化主键；快照rows_from_snapshot的顺序ID不是证据身份。
@@ -297,7 +328,11 @@ def activity_bindings(
     tools = rows(NodeTool, NodeTool.process_id == process_id)
     from app.services import resource_link
 
-    linked_resources = resource_link.list_links(db, process, user) if process.level == 3 else []
+    linked_resources = (
+        resource_link.list_links(db, process, user, model_version=version)
+        if process.level == 3
+        else []
+    )
     training = rows(ProcessTrainingRecord, ProcessTrainingRecord.process_id == process_id)
     # 目标的祖先承接沿原主数据，不按名称匹配。
     ancestors = {process_id}
@@ -317,6 +352,7 @@ def activity_bindings(
         ).all()
     )
 
+    objectives.sort(key=lambda pair: pair[0].id)
     activity_out = []
     for activity in activities:
         related = mapped[activity.id]
@@ -349,7 +385,7 @@ def activity_bindings(
             [] if goal_ready else ["缺活动级完整 KPI（目标值、口径与方向）"],
         )
 
-        team = _team_facet(related, activity.id, racis, positions)
+        team = _team_facet(db, related, activity.id, racis, positions)
 
         applicable_standards = [
             row
@@ -412,7 +448,9 @@ def activity_bindings(
             for row in valid_resources
         ]
         linked_forms = {
-            row.node_key for row in valid_resources if row.resource_type == "FORM" and row.node_key
+            row.node_key
+            for row in valid_resources
+            if row.resource_type == "FORM" and row.node_key and row.is_record_carrier
         }
         linked_carrier = any(row.is_record_carrier and not row.node_key for row in valid_resources)
         covered = (
@@ -534,7 +572,10 @@ def activity_bindings(
             refs,
             method_ready,
             [] if method_ready else ["缺活动生效标准及控制点 / 证据要求"],
-            conflict=any(claim.status == "CONFLICTED" for claim in activity_claims),
+            conflict=any(
+                claim.status == "CONFLICTED" and claim.conflict_group not in adjudicated_groups
+                for claim in activity_claims
+            ),
         )
         activity_out.append(
             ActivityBindingOut(
@@ -554,7 +595,7 @@ def activity_bindings(
         facets = []
         for key in FACETS:
             parts = (
-                [_team_facet([node], ident, racis, positions) for ident in ids]
+                [_team_facet(db, [node], ident, racis, positions) for ident in ids]
                 if key == "TEAM"
                 else [next(f for f in by_activity[ident].facets if f.key == key) for ident in ids]
             )
@@ -631,7 +672,9 @@ def activity_bindings(
     from app.models.process import ProcessModelVersion
     from app.services import binding_snapshot
 
-    current_bindings = binding_snapshot.capture(db, process, version)
+    current_bindings = binding_snapshot.activity_scope(
+        binding_snapshot.capture(db, process, version), requested_ids
+    )
     basis = (
         version
         if version and version.binding_snapshot is not None
@@ -644,7 +687,9 @@ def activity_bindings(
             .order_by(ProcessModelVersion.version.desc())
         )
     )
-    basis_snapshot = basis.binding_snapshot if basis else None
+    basis_snapshot = binding_snapshot.activity_scope(
+        basis.binding_snapshot if basis else None, requested_ids
+    )
     consistency = binding_snapshot.compare(current_bindings, basis_snapshot)
     for item in activity_out:
         aid = str(item.activity_id)
@@ -676,7 +721,7 @@ def activity_bindings(
             "只读结构核对，不代表授权充分、资源到位或业务绩效达标。",
             "活动级唯一 A 只核绑定结构；不替代组织有权政策与职责分离核验。",
             "按当前已保存设计模型核对；未保存修改不纳入。设计估计不等于已验证工时。",
-            "绑定齐全不直接改变执行上线或资产评审门禁；冻结依据变更需新工作版。",
+            "设计发布允许缺项；执行上线及正式产物按用途核对绑定，冻结依据变更需新工作版。",
         ],
     )
 
@@ -685,3 +730,104 @@ def process_bindings(
     db: Session, process_id: int, user: Optional[User] = None
 ) -> ProcessBindingSummaryOut:
     return activity_bindings(db, process_id, user).summary
+
+
+PROFILES = {"EXECUTION": ("执行版", {"TEAM", "RESOURCE"}), "PERFORMANCE": ("绩效版", set(FACETS))}
+
+
+def binding_gate(
+    db: Session,
+    process_id: int,
+    user: Optional[User] = None,
+    *,
+    profile: str,
+    model_version_id: Optional[int] = None,
+    activity_ids: Optional[set[int]] = None,
+    require_confirmed: bool = True,
+):
+    """仅投影原四面结果；不保存就绪状态，不替代原来源授权。"""
+    from app.models.process import ProcessModelVersion
+    from app.schemas.asset_graph import ReadinessBlockerOut
+    from app.schemas.binding_readiness import BindingGateOut
+    from app.services import binding_snapshot
+
+    if profile not in PROFILES:
+        raise HTTPException(400, "无效绑定用途")
+    label, required = PROFILES[profile]
+    data = activity_bindings(
+        db, process_id, user, model_version_id=model_version_id, activity_ids=activity_ids
+    )
+    activities = [
+        a for a in data.activities if activity_ids is None or a.activity_id in activity_ids
+    ]
+    selected = {a.activity_id for a in activities}
+    nodes = [n for n in data.nodes if activity_ids is None or selected.intersection(n.activity_ids)]
+    blockers = []
+
+    def block(code, message, targets=()):
+        blockers.append(ReadinessBlockerOut(code=code, message=message, targets=list(targets)))
+
+    if not nodes or not activities:
+        block("BINDING_SCOPE_EMPTY", "没有可核对的已实现活动与节点。")
+    unmapped = [n for n in nodes if n.blockers]
+    if unmapped:
+        block(
+            "NODE_ACTIVITY_UNMAPPED",
+            "活动节点未正确映射到本流程 L4 活动。",
+            [n.node_key + " " + n.node_name for n in unmapped],
+        )
+    if profile == "PERFORMANCE":
+        unmodeled = [a for a in activities if not a.node_keys]
+        if unmodeled:
+            block(
+                "BINDING_ACTIVITY_UNMODELED",
+                "活动尚未由当前模型实现。",
+                ["activity:" + str(a.activity_id) for a in unmodeled],
+            )
+    for key in FACETS:
+        if key not in required:
+            continue
+        bad = [a for a in activities if any(f.key == key and f.status != "READY" for f in a.facets)]
+        bad_nodes = [
+            n for n in nodes if any(f.key == key and f.status != "READY" for f in n.facets)
+        ]
+        if bad or bad_nodes:
+            gaps = list(
+                dict.fromkeys(g for a in bad for f in a.facets if f.key == key for g in f.gaps)
+            )
+            block(
+                "BINDING_" + key + "_INCOMPLETE",
+                label + " · " + FACETS[key] + "未齐：" + "；".join(gaps),
+                [n.node_key + " " + n.node_name for n in bad_nodes]
+                + ["activity:" + str(a.activity_id) for a in bad],
+            )
+    version = db.get(ProcessModelVersion, data.model_version_id) if data.model_version_id else None
+    current = binding_snapshot.capture(db, db.get(ProcessArch, process_id), version)
+    original = version.binding_snapshot if version else None
+    current = binding_snapshot.activity_scope(current, activity_ids)
+    original = binding_snapshot.activity_scope(original, activity_ids)
+    consistency = binding_snapshot.compare(current, original)
+    if require_confirmed and consistency != "CONFIRMED":
+        block(
+            "BINDINGS_NOT_CONFIRMED", "原发布绑定依据缺失、变化或失效；请新建工作版核对并重新固定。"
+        )
+    fingerprint = binding_snapshot._hash(
+        {
+            "profile": profile,
+            "model_version_id": data.model_version_id,
+            "activities": current["activities"],
+            "blockers": [b.model_dump() for b in blockers],
+            "consistency": consistency,
+        }
+    )
+    return BindingGateOut(
+        profile=profile,
+        profile_label=label,
+        model_version_id=data.model_version_id,
+        consistency=consistency,
+        consistency_label=binding_snapshot.LABELS[consistency],
+        blockers=blockers,
+        warnings=[],
+        fingerprint=fingerprint,
+        ready=not blockers,
+    )

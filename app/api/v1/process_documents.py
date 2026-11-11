@@ -430,6 +430,8 @@ def upload_version(
     document = _get(db, document_id)
     if document.scope != "PROCESS":
         raise HTTPException(400, "岗位生成文档只能从岗位职责重新生成，不能人工上传替换")
+    if any(v.source_kind == "COMPILED" for v in document.versions):
+        raise HTTPException(400, "生成产物只能从原入口重新编译，不能人工上传替换")
     if not re.fullmatch(r"\d+\.\d+", version_label):
         raise HTTPException(status_code=400, detail="version_label 必须形如 3.2")
 

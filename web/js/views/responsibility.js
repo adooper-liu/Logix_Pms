@@ -111,7 +111,10 @@ function paint(data) {
       <p>负荷率 ${cov.workload.totals.utilization === null ? '待登记产能' : esc((cov.workload.totals.utilization * 100).toFixed(1)) + '%'}</p>`, { open: false })}</div>`;
   } else if (cov && active === 'description') {
     body = `<div class="card"><h3>责任书预览</h3><p>${data.preview.can_compile ? '来源身份可核对；生成后仍为草稿。' : '来源身份待确认，仅可预览。'}</p>
+      <div data-job-binding-gate><p><b>${data.preview.can_submit_review ? '可提交评审' : '暂不可提交评审'}</b> · 草稿不代表使用门禁通过。</p>
+      ${(data.preview.binding_gates || []).map(g => `<p class="tiny">${esc(g.profile_label)} · ${esc(g.consistency_label)}</p>`).join('')}
       ${data.preview.gaps.map(g => `<p class="tiny">${esc(g.message)}</p>`).join('')}
+      ${cov.activities.flatMap(a => a.node_keys.map(node => `<button class="btn-sm btn-g" data-act="responsibility.node" data-process="${a.process_id}" data-activity="${a.activity_id}" data-node="${esc(node)}" data-model="${a.model_version_id || ''}">回原节点 ${esc(node)}</button>`)).join(' ')}</div>
       <button class="btn-sm btn-g" data-act="responsibility.refresh">刷新预览</button>
       ${canManage() ? `<button class="btn-sm" data-act="responsibility.compile" ${busy || !data.preview.can_compile ? 'disabled' : ''}>${busy ? '正在生成…' : '生成责任书草稿'}</button>` : ''}</div>
       ${data.preview.sections.map(section => foldCard(section.title, section.html, { open: false })).join('')}`;

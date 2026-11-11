@@ -26,7 +26,20 @@ def verify_binding_p1(page, base):
         "/process-map",
         {"code": "P1A-" + suffix, "name": "自检活动", "level": 4, "parent_id": pid},
     )
-    role = api("GET", "/governance/roles?active_only=true")[0]
+    position = api("POST", "/positions", {"code": "P1POS-" + suffix, "name": "P1合成负责岗位"})
+    role = api("POST", "/governance/roles", {"code": "P1ROLE-" + suffix, "name": "P1合成负责角色"})
+    member = api(
+        "POST",
+        "/auth/users",
+        {
+            "username": "p1-member-" + suffix,
+            "display_name": "P1合成成员",
+            "password": "Synthetic-Only-48!",
+            "role": "OWNER",
+            "position_id": position["id"],
+        },
+    )
+    api("POST", f"/governance/roles/{role['id']}/members", {"user_id": member["id"]})
     form = None
     try:
         api(

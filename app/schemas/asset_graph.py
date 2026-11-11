@@ -196,7 +196,7 @@ class AssetPackageOut(BaseModel):
 
 
 class AssetPackageTransitionIn(BaseModel):
-    status: Literal["IN_REVIEW", "APPROVED", "EFFECTIVE", "RETIRED"]
+    status: Literal["DRAFT", "IN_REVIEW", "APPROVED", "EFFECTIVE", "RETIRED"]
     note: Optional[str] = Field(default=None, max_length=200)
 
 

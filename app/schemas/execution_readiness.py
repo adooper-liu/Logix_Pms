@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.binding_readiness import BindingGateOut
+
 
 class ReadinessRequirement(BaseModel):
     mode: Literal["REQUIRED", "NOT_APPLICABLE"]
@@ -34,6 +36,7 @@ class ReadinessOut(BaseModel):
     state_label: str
     missing: list[str]
     fingerprint: str
+    binding_gate: BindingGateOut
     limitations: list[str]
     reviewers: list[dict]
     facts: dict[str, bool]
