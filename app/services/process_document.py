@@ -107,6 +107,10 @@ def ensure_document_visible(db: Session, user: User, document: ProcessDocument) 
             from app.services.job_description_access import ensure_manifest_visible
 
             ensure_manifest_visible(db, user, manifest)
+        elif manifest.get("kind") == "HANDBOOK":
+            from app.services.handbook_sources import ensure_visible
+
+            ensure_visible(db, user, manifest)
         for model in manifest.get("models", []):
             process = db.get(ProcessArch, model["process_id"])
             if process is None:
@@ -241,9 +245,17 @@ def transition_version(
         )
 
     if document.scope != "PROCESS":
-        from app.services.job_description import validate_for_transition
+        manifest = version.compile_manifest or {}
+        if manifest.get("kind") == "JOB_DESCRIPTION":
+            from app.services.job_description import validate_for_transition
 
-        validate_for_transition(db, document, version, target, user)
+            validate_for_transition(db, document, version, target, user)
+        elif manifest.get("kind") == "HANDBOOK":
+            from app.services.handbook_transition import validate_for_transition
+
+            validate_for_transition(db, document, version, target, user)
+        else:
+            raise ProcessDocumentError("岗位产物缺少可识别的编译依据")
     elif version.source_kind == "COMPILED" or any(
         v.source_kind == "COMPILED" for v in document.versions
     ):

@@ -45,6 +45,7 @@ import * as deliverableView from './views/deliverables.js';
 import * as orgsView from './views/orgs.js';
 import * as responsibilityView from './views/responsibility.js';
 import * as sketchesView from './views/sketches.js';
+import * as handbookView from './views/handbook.js';
 import * as helpView from './views/help.js';
 import { openPageHelp } from './core/help.js';
 
@@ -76,6 +77,7 @@ register('deliverables', deliverableView.renderDeliverables);
 register('orgs', orgsView.renderOrgs);
 register('responsibility', responsibilityView.renderResponsibility);
 register('sketches', sketchesView.renderSketches);
+register('handbook', handbookView.renderHandbook);
 register('help', helpView.renderHelp);
 
 // 跨视图动作：视图只导出自己的 action map，由组合根统一注册。

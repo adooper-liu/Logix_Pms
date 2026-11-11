@@ -25,6 +25,7 @@ from app.api.v1 import (
     designer,
     execution,
     governance_evidence,
+    handbook,
     improvement_round,
     integrations,
     job_description,
@@ -94,6 +95,7 @@ protected.include_router(notifications.router)
 protected.include_router(orgs.router)
 protected.include_router(positions.router)
 protected.include_router(job_description.router)
+protected.include_router(handbook.router)
 protected.include_router(workload.router)
 protected.include_router(workforce.router)
 protected.include_router(strategy.router)
