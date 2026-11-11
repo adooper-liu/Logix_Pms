@@ -61,6 +61,7 @@ VIEWS = [
     ("deliverables", "交付物与模板库"),
     ("orgs", "组织与人员"),
     ("responsibility", "岗位职责"),
+    ("handbook", "员工手册"),
     ("sketches", "架构草图"),
     ("bpmn", "BPMN 符号"),
     ("pcf", "流程架构"),

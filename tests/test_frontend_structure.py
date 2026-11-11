@@ -176,6 +176,7 @@ def test_view_modules_are_registered():
         "deliverables",
         "orgs",
         "responsibility",
+        "handbook",
         "sketches",
         "help",
     ):
@@ -226,6 +227,7 @@ MIGRATED_PAGE_SHELL = {
     "deliverables.js",
     "orgs.js",
     "responsibility.js",
+    "handbook.js",
     "data.js",
     "designer/index.js",
     "bpmn.js",
@@ -567,6 +569,7 @@ def test_nav_follows_what_each_page_writes():
         "authorization",
         "orgs",
         "responsibility",
+        "handbook",
         "strategy",
         "traceability",
         "deliverables",
