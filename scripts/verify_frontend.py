@@ -22,6 +22,7 @@ from verify_binding_p2 import verify_binding_p2
 from verify_binding_readiness import verify_binding_readiness
 from verify_execution_readiness import verify_execution_readiness
 from verify_improvement_round import verify_improvement_round
+from verify_key_process_coverage import verify_key_process_coverage
 from verify_lifecycle import (
     verify_lifecycle,
     verify_lifecycle_handoffs,
@@ -153,6 +154,7 @@ def main() -> int:
         check("P1活动责任资源与绑定快照", lambda: verify_binding_p1(page, base))
         check("P2岗位覆盖度与责任书", lambda: verify_binding_p2(page, base))
         check("P2′使用入口绑定门禁", lambda: verify_binding_gates(page, base))
+        check("P3b关键过程覆盖度矩阵", lambda: verify_key_process_coverage(page, base))
         check("八阶段任务入口与流程上下文", lambda: verify_lifecycle(page, base))
         check("八阶段跨模块承接回归", lambda: verify_lifecycle_handoffs(page, base))
         check("八阶段原页面操作承接", lambda: verify_lifecycle_original_actions(page, base))

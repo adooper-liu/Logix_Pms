@@ -11,6 +11,7 @@ export const state = {
   map: {
     code: null, name: null, path: [], improvementOnly: false,
     pendingJump: null, navCollapsed: false, tab: 'architecture',
+    coverage: null, coverageError: null, coverageLoading: false, coverageRequest: 0,
     frameworks: null, benchmarkFramework: '', benchmark: null, openCode: null,
     openGuidedPcf: false, guidedPcfExternal: '', guidedPcfFramework: '',
     guidedPcfActivities: true,

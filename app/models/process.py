@@ -58,6 +58,10 @@ class ProcessArch(Base):
         index=True,
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_key_process: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), index=True
+    )
+    key_basis: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     process_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
     classification_basis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     classification_inherit: Mapped[bool] = mapped_column(

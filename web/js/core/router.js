@@ -110,6 +110,12 @@ export function go(view, options = {}) {
     }
   }
   state.view = view;
+  if (previousView === 'map' && view !== 'map' && state.map) {
+    state.map.coverage = null;
+    state.map.coverageError = null;
+    state.map.coverageLoading = false;
+    state.map.coverageRequest += 1;
+  }
   const activeView = view === 'monitor' ? 'dashboard' : view;
   document.querySelectorAll('.nav a').forEach((a) => {
     a.classList.toggle('active', a.dataset.view === activeView);

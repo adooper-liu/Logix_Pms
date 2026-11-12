@@ -1,6 +1,6 @@
 /* 视图：map */
 import { esc, num, bar, tipHelp, HEAT_CLASS, HEAT_LABEL, emptyRow } from '../core/format.js';
-import { pageShell } from '../core/layout.js';
+import { pageShell, foldCard } from '../core/layout.js';
 import { metricHelp } from '../core/metrics.js';
 import { toast, openModal, closeModal, modalAlive, confirmDialog, viewEl, on } from '../core/ui.js';
 import { state } from '../core/state.js';
@@ -19,6 +19,10 @@ on('map.saveClassification', ({ id }) => saveClassification(Number(id)));
 on('map.typeFilter', (_data, el) => {
   state.map.path = [];
   state.map.tree = null;
+  state.map.coverage = null;
+  state.map.coverageError = null;
+  state.map.coverageLoading = false;
+  state.map.coverageRequest += 1;
   const params = { ...urlParams() };
   delete params.process;
   if (el.value) params.process_type = el.value;
@@ -31,12 +35,18 @@ on('map.go', ({ index }) => mapGo(Number(index)));
 on('map.row', ({ code, kids }) => mapClick(code, kids === '1'));
 on('map.coverage', ({ index }) => openCoverageCategory(Number(index)));
 on('map.categoryMetrics', ({ index }) => openCategoryMetrics(Number(index)));
+on('map.openCoverageProcess', ({ code }) => openCoverageMapTarget(code));
+on('map.openCoverageActivity', ({ code }) => openCoverageMapTarget(code));
+on('map.coverageRefresh', () => loadKeyProcessCoverage(true));
 on('map.goProjects', () => go('projects'));
 on('map.goSketches', () => go('sketches'));
 on('map.tab', ({ tab }) => {
   if (!tab || !state.map.repaint) return;
   state.map.tab = tab;
   state.map.repaint();
+  if (tab === 'coverage' && !state.map.coverage && !state.map.coverageLoading) {
+    loadKeyProcessCoverage();
+  }
 });
 on('map.benchmarkFramework', (_data, el) => setBenchmarkFramework(el.value));
 on('map.pcfWizard', () => openPcfDraftWizard());
@@ -156,6 +166,124 @@ function findPathTo(code, list, trail) {
     if (hit) return hit;
   }
   return null;
+}
+
+function coverageImplementationHtml(row, activityCode) {
+  const flags = row.source_label || '—';
+  return `<tr>
+    <td><button class="link-btn" type="button" data-act="map.openCoverageProcess"
+      data-code="${esc(row.process_code)}">${esc(row.process_code)} ${esc(row.process_name)}</button></td>
+    <td><button class="link-btn" type="button" data-act="map.openCoverageActivity"
+      data-code="${esc(activityCode)}">${esc(row.node_key)} ${esc(row.node_name || '')}</button></td>
+    <td>${esc(row.relation_label || row.relation || '—')}</td>
+    <td>${num(row.coverage, 2)}</td>
+    <td>${esc(flags)}<div class="tiny">${esc(row.source_note || '')}</div></td>
+  </tr>`;
+}
+
+function coverageActivityHtml(activity) {
+  const implementations = activity.implementations || [];
+  const unmodeled = activity.unmodeled || [];
+  const owners = activity.gap_owner_positions || [];
+  const gaps = activity.gaps || [];
+  const implementationHtml = implementations.length
+    ? `<table class="tbl"><thead><tr><th>实现流程</th><th>节点</th><th>关系</th><th>覆盖</th><th>来源</th></tr></thead>
+      <tbody>${implementations.map((row) => coverageImplementationHtml(row, activity.code)).join('')}</tbody></table>`
+    : '<div class="empty">没有已登记的实现关系。</div>';
+  const unmodeledHtml = unmodeled.length
+    ? `<div class="note"><b>未建模登记</b>${unmodeled.map((row) =>
+      `<div>${esc(row.reason)}${row.source_ref ? ` · ${esc(row.source_ref)}` : ''}</div>`).join('')}</div>`
+    : '';
+  const ownersHtml = owners.length
+    ? `<div class="tag-row">${owners.map((row) =>
+      `<span class="tag t-gry">${esc(row.name || row.code || '未命名岗位')} · ${esc((row.source || []).join('、'))}</span>`).join('')}</div>`
+    : '<div class="note">未归位：没有可用的显式节点责任岗位或 RACI 成员岗位。</div>';
+  const gapsHtml = gaps.length
+    ? `<div class="note"><b>缺口</b>${gaps.map((gap) => `<div>${esc(gap.message)}</div>`).join('')}</div>`
+    : '';
+  const duplicateHtml = (activity.duplicate_processes || []).length > 1
+    ? `<div class="note">多流程实现，仅列出证据，需人工核对边界：${
+      activity.duplicate_processes.map((row) => esc(row.code + ' ' + row.name)).join('、')}</div>`
+    : '';
+  const basis = activity.key_basis
+    ? `${esc(activity.key_basis)} · ${esc(activity.key_basis_source || '')}`
+    : '未提供';
+  return foldCard(
+    `${activity.code} ${activity.name} · ${activity.coverage_status_label || activity.coverage_status}`,
+    `<div class="between mb"><div><b>关键依据</b><div class="tiny">${basis}</div></div>
+      <button class="btn-sm" type="button" data-act="map.openCoverageActivity"
+        data-code="${esc(activity.code)}">回到活动</button></div>
+      ${duplicateHtml}${implementationHtml}${unmodeledHtml}
+      <div class="mt"><b>缺口责任岗位</b>${ownersHtml}</div>${gapsHtml}`,
+    { open: false },
+  );
+}
+
+function renderCoverageHtml() {
+  const data = state.map.coverage;
+  if (state.map.coverageLoading && !data) return '<div class="card"><div class="empty">正在加载关键过程覆盖度矩阵…</div></div>';
+  if (state.map.coverageError && !data) return `<div class="card"><div class="errbar"><div>${esc(state.map.coverageError)}</div>
+    <button class="btn btn-g" type="button" data-act="map.coverageRefresh">重试</button></div></div>`;
+  if (!data) return '<div class="card"><div class="empty">切换到此页签后加载矩阵。</div></div>';
+  const summary = data.summary || {};
+  const stats = [
+    ['关键活动', summary.key_activities], ['已覆盖', summary.implemented],
+    ['未建模', summary.unmodeled], ['未覆盖', summary.uncovered],
+    ['多流程实现', summary.multi_process], ['未评审', summary.unreviewed],
+  ];
+  const activities = (data.activities || []).map(coverageActivityHtml).join('');
+  const boundaries = (data.boundary_reviews || []).map((row) => `<tr>
+    <td>${esc(row.code)} ${esc(row.name)}</td><td>${esc(row.status_label || row.status)}</td>
+    <td>${row.overlap_found == null ? '—' : String(row.overlap_found)}</td>
+    <td>${esc(row.line_complete_label || (row.line_complete ? '完整' : '不完整'))}</td>
+  </tr>`).join('');
+  return `<div class="card">
+    <div class="between mb"><div><h3>关键过程覆盖度矩阵</h3>
+      <div class="tiny muted">以 L4 活动为主键；矩阵只展示已有实现和评审证据，不自动判定重叠或断点。</div></div>
+      <button class="btn-sm" type="button" data-act="map.coverageRefresh">刷新矩阵</button></div>
+    <div class="map-stats">${stats.map(([label, value]) => `<span class="map-stat"><b>${value ?? 0}</b> ${label}</span>`).join('')}</div>
+  </div>
+  ${activities ? `<div class="card"><h3>关键活动明细</h3>${activities}</div>` : '<div class="card"><div class="empty">当前没有具备关键依据的 L4 活动。</div></div>'}
+  <div class="card"><h3>同级边界评审</h3>
+    ${boundaries ? `<table class="tbl"><thead><tr><th>L2</th><th>状态</th><th>评审结论</th><th>边界证据</th></tr></thead><tbody>${boundaries}</tbody></table>` : '<div class="empty">没有边界评审记录。</div>'}
+  </div>`;
+}
+
+async function loadKeyProcessCoverage(force = false) {
+  if (!force && (state.map.coverage || state.map.coverageLoading)) return;
+  const request = ++state.map.coverageRequest;
+  const viewAtRequest = state.view;
+  const tabAtRequest = state.map.tab;
+  state.map.coverageLoading = true;
+  state.map.coverageError = null;
+  if (state.map.repaint) state.map.repaint();
+  try {
+    const data = await GET('/process-map/key-process-coverage');
+    if (request !== state.map.coverageRequest || state.view !== 'map'
+      || state.view !== viewAtRequest || state.map.tab !== tabAtRequest) return;
+    state.map.coverage = data;
+  } catch (e) {
+    if (request !== state.map.coverageRequest || state.view !== 'map'
+      || state.view !== viewAtRequest || state.map.tab !== tabAtRequest) return;
+    state.map.coverageError = e.message || '覆盖度矩阵加载失败';
+  } finally {
+    if (request === state.map.coverageRequest) state.map.coverageLoading = false;
+    if (request === state.map.coverageRequest && state.view === 'map'
+      && state.view === viewAtRequest && state.map.tab === tabAtRequest && state.map.repaint) {
+      state.map.repaint();
+    }
+  }
+}
+
+function openCoverageMapTarget(code) {
+  if (!code) return;
+  const path = findPathTo(code, state.map.tree || [], []);
+  if (!path) return toast('当前流程地图中找不到该来源', true);
+  state.map.tab = 'architecture';
+  state.map.path = path.slice(0, -1);
+  state.map.openCode = null;
+  RENDERERS.map();
+  setTimeout(() => mapClick(code, false), 30);
 }
 
 const renderMap = () => {
@@ -438,6 +566,9 @@ const renderMap = () => {
         </table>
       </div>`;
 
+    const coverageSummary = state.map.coverage?.summary || {};
+    const coverageHtml = renderCoverageHtml();
+    const coverageCount = coverageSummary.key_activities == null ? null : coverageSummary.key_activities;
     const shell = pageShell({
       title: '流程框架',
       badge: '<span class="module-badge">流程资产 · 定位与优先级</span>',
@@ -451,6 +582,7 @@ const renderMap = () => {
         { key: 'architecture', label: '架构', count: flat.length, html: architectureHtml },
         { key: 'benchmark', label: '对标', html: benchmarkHtml },
         { key: 'priority', label: '优先级', html: priorityHtml },
+        { key: 'coverage', label: '覆盖度', count: coverageCount, html: coverageHtml },
       ],
       active: state.map.tab,
       tabAct: 'map.tab',
@@ -458,6 +590,12 @@ const renderMap = () => {
     });
     state.map.tab = shell.active;
     viewEl().innerHTML = shell.html;
+    if (state.map.tab === 'coverage' && !state.map.coverage && !state.map.coverageLoading) {
+      loadKeyProcessCoverage();
+    }
+    if (state.map.tab === 'coverage' && state.map.coverageLoading) {
+      state.map.coverageLoading = true;
+    }
   };
   state.map.repaint = paint;
 
@@ -600,8 +738,17 @@ function mapClick(code, hasKids) {
               <input value="${esc(node.department || '—')}" readonly></div>
           </div>
         </section>
+        <section class="form-block" data-key-process="${node.is_key_process ? 'true' : 'false'}">
+          <h4 class="form-block-hd">3. 关键过程</h4>
+          <div class="row2">
+            <div class="field"><label>纳入覆盖度矩阵</label>
+              <input value="${node.is_key_process ? '是' : '否'}" readonly></div>
+            <div class="field"><label>关键依据</label>
+              <textarea readonly>${esc(node.key_basis || '')}</textarea></div>
+          </div>
+        </section>
         <section class="form-block">
-          <h4 class="form-block-hd">3. 说明与评估</h4>
+          <h4 class="form-block-hd">4. 说明与评估</h4>
           <div class="field"><label>流程说明</label>
             <textarea readonly>${esc(node.description || '')}</textarea></div>
           <div class="field"><label>流程类型</label><input readonly value="${esc(node.process_type_label || '')}">
@@ -1307,6 +1454,10 @@ async function openCategoryMetrics(index) {
 /** 写操作会让地图树、设计器下拉的缓存失效 */
 function invalidateProcessCaches() {
   state.map.tree = null;
+  state.map.coverage = null;
+  state.map.coverageError = null;
+  state.map.coverageLoading = false;
+  state.map.coverageRequest += 1;
   state.map.benchmark = null;
   state.designer.processes = null;
   state.designer.model = null;
@@ -2105,9 +2256,15 @@ async function newChildModal(parentId) {
         </div>
       </section>
       <section class="form-block">
-        <h4 class="form-block-hd">4. 说明与评估</h4>
-        <div class="field"><label>${noun}说明 ${
-          tipHelp(ph.desc, `${noun}说明`)}</label>
+        <h4 class="form-block-hd">4. 关键过程</h4>
+        <label class="check-line"><input type="checkbox" id="pfKeyProcess">
+          纳入关键过程覆盖度矩阵</label>
+        <div class="field"><label>关键依据</label>
+          <textarea id="pfKeyBasis" maxlength="200" placeholder="勾选关键过程时必填"></textarea></div>
+      </section>
+      <section class="form-block">
+        <h4 class="form-block-hd">5. 说明与评估</h4>
+        <div class="field"><label>${noun}说明 ${tipHelp(ph.desc, `${noun}说明`)}</label>
           <textarea id="pfDesc" rows="2" placeholder="${esc(ph.desc)}"></textarea></div>
         ${scoreAssessmentHtml({
           si: inheritL4 ? parent.strategic_importance : 3,
@@ -2207,11 +2364,15 @@ async function newProcessModal() {
         <div class="field"><label>责任部门</label>
           <input id="pfDepartment" placeholder="如：采购部"></div>
       </div>
-      <div class="form-sec">3. 说明与评估</div>
+      <div class="form-sec">4. 关键过程</div>
+      <label class="check-line"><input type="checkbox" id="pfKeyProcess">
+        纳入关键过程覆盖度矩阵</label>
+      <div class="field"><label>关键依据</label>
+        <textarea id="pfKeyBasis" maxlength="200" placeholder="勾选关键过程时必填"></textarea></div>
+      <div class="form-sec">5. 说明与评估</div>
       <div class="field"><label>流程说明</label>
         <textarea id="pfDesc" rows="2" placeholder="这条流程从哪开始、到哪结束"></textarea></div>
       ${scoreAssessmentHtml({
-        si: 3, pain: 3, space: 3, health: '', target: false,
         inheritAvailable: false, inheritDefault: false, parentName: '',
       })}
     </div>`,
@@ -2266,7 +2427,12 @@ async function editProcessModal(processId) {
         <div class="field"><label>责任部门</label>
           <input id="pfDepartment" value="${esc(node.department || '')}"></div>
       </div>
-      <div class="form-sec">3. 说明与评估</div>
+      <div class="form-sec">4. 关键过程</div>
+      <label class="check-line"><input type="checkbox" id="pfKeyProcess"${node.is_key_process ? ' checked' : ''}>
+        纳入关键过程覆盖度矩阵</label>
+      <div class="field"><label>关键依据</label>
+        <textarea id="pfKeyBasis" maxlength="200" placeholder="勾选关键过程时必填">${esc(node.key_basis || '')}</textarea></div>
+      <div class="form-sec">5. 说明与评估</div>
       <div class="field"><label>流程说明</label>
         <textarea id="pfDesc" rows="2">${esc(node.description || '')}</textarea></div>
       ${scoreAssessmentHtml({
@@ -2307,6 +2473,8 @@ async function saveProcess(processId) {
     pain_score: Number(val('pfPain') || 3),
     improvement_space: Number(val('pfSpace') || 3),
     is_improvement_target: val('pfTarget') === 'true',
+    is_key_process: !!document.getElementById('pfKeyProcess')?.checked,
+    key_basis: val('pfKeyBasis').trim() || null,
   };
   if (processId === null) {
     payload.code = val('pfCode').trim();
