@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import API
 
 
@@ -98,7 +97,6 @@ def test_key_process_null_boolean_is_rejected(client):
         json={"is_key_process": None},
     )
     assert response.status_code == 422, response.text
-
 
     created = _create_process(client, "P3B-T1-DEFAULT")
 
