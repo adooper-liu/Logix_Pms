@@ -363,6 +363,39 @@ def test_map_uses_page_shell_with_three_tabs():
         assert f"label: '{label}'" in src
 
 
+def test_map_coverage_uses_readonly_matrix_and_backend_labels():
+    """覆盖度是流程地图的单一主题页签，不复制页面壳或前端枚举。"""
+    src = (JS_ROOT / "views" / "map.js").read_text(encoding="utf-8")
+    state_src = (JS_ROOT / "core" / "state.js").read_text(encoding="utf-8")
+    verify_src = (PROJECT_ROOT / "scripts" / "verify_frontend.py").read_text(encoding="utf-8")
+    assert "key: 'coverage'" in src and "label: '覆盖度'" in src
+    assert "/process-map/key-process-coverage" in src
+    assert "coverage_status_label" in src
+    assert "status_label" in src
+    assert "source_note" in src and "gap_owner_positions" in src
+    assert "state.map.coverage" in src
+    assert "coverage: null" in state_src
+    assert "coverageRequest" in state_src or "coverageGeneration" in state_src
+    assert "state.map.coverage = null" in src
+    assert "state.map.coverageRequest += 1" in src
+    assert "state.view === 'map'" in src
+    assert "map.categoryMetrics" in src
+    assert "map.goProjects" in src
+    assert 'id="pfDesc"' in src
+    assert "scoreAssessmentHtml({" in src
+    assert "si: node.strategic_importance" in src
+    assert "coverageRequest += 1" in src
+    assert "data-key-process" in src
+    assert "key_basis" in src
+    assert "relation_label" in src
+    assert "line_complete_label" in src
+    assert "verify_key_process_coverage" in verify_src
+    assert "verify_key_process_coverage(page, base)" in verify_src
+    assert not (JS_ROOT / "views" / "key_process_coverage.js").exists()
+    assert "IMPLEMENTED: '" not in src
+    assert "UNMODELED: '" not in src
+
+
 def test_strategy_three_columns_keep_detail_in_middle():
     """战略目标是左树/中详情/右行动；详情必须在中间列，不能掉到第三列。"""
     src = (JS_ROOT / "views" / "strategy.js").read_text(encoding="utf-8")

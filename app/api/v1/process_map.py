@@ -8,13 +8,14 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, ManagerUser, apply_owner_update, resolve_owner
+from app.api.deps import CurrentUser, DbSession, ManagerUser, apply_owner_update, resolve_owner
 from app.models.benchmark import ProcessBenchmarkMap
 from app.models.knowledge import KnowledgeItem
 from app.models.monitor import ExceptionEvent, KpiDefinition
 from app.models.process import ProcessArch, ProcessEdge, ProcessNode
 from app.models.project import Project
 from app.schemas.common import DeleteResult
+from app.schemas.key_process_coverage import KeyProcessCoverageOut
 from app.schemas.process import (
     DraftPromoteRequest,
     DraftPromoteResult,
@@ -29,6 +30,7 @@ from app.schemas.process import (
     ProcessClassificationUpdate,
 )
 from app.services import audit as audit_service
+from app.services import key_process_coverage as key_process_coverage_service
 from app.services import org_unit as org_service
 from app.services import pcf_draft as pcf_draft_service
 from app.services import process_classification as classification_service
@@ -42,6 +44,13 @@ HEAT_HIGH = 55.0
 HEAT_MEDIUM = 30.0
 HEALTH_CRITICAL = 50.0  # 健康度低于此值直接判紧急
 HEALTH_POOR = 65.0  # 低于此值至少判「高」
+
+
+def _validate_key_process(is_key_process: bool, key_basis: Optional[str]) -> Optional[str]:
+    basis = key_basis.strip() if key_basis else None
+    if is_key_process and not basis:
+        raise HTTPException(status_code=422, detail="关键过程必须填写关键依据")
+    return basis
 
 
 def _heat_level(p: ProcessArch) -> str:
@@ -74,6 +83,8 @@ def _to_out(p: ProcessArch, classification: Optional[dict] = None) -> ProcessArc
         org_unit_id=p.org_unit_id,
         org_unit_name=p.org_unit_name,
         description=p.description,
+        is_key_process=p.is_key_process,
+        key_basis=p.key_basis,
         strategic_importance=p.strategic_importance,
         pain_score=p.pain_score,
         improvement_space=p.improvement_space,
@@ -236,6 +247,15 @@ def heatmap(
     return items[:limit]
 
 
+@router.get(
+    "/key-process-coverage",
+    response_model=KeyProcessCoverageOut,
+    summary="关键过程覆盖度矩阵（只读）",
+)
+def get_key_process_coverage(db: DbSession, user: CurrentUser):
+    return key_process_coverage_service.coverage(db, user)
+
+
 @router.get("/{process_id}", response_model=ProcessArchOut, summary="流程详情")
 def get_process(process_id: int, db: DbSession):
     p = db.get(ProcessArch, process_id)
@@ -302,6 +322,9 @@ def create_process(payload: ProcessArchCreate, db: DbSession, user: ManagerUser)
         except org_service.OrgError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     data = payload.model_dump()
+    data["key_basis"] = _validate_key_process(
+        data.get("is_key_process", False), data.get("key_basis")
+    )
     if data.get("publish_policy") not in (None, "direct", "review_required"):
         raise HTTPException(status_code=422, detail="publish_policy 须为 direct 或 review_required")
     if data.get("org_unit_id") and not data.get("department"):
@@ -378,6 +401,13 @@ def update_process(process_id: int, payload: ProcessArchUpdate, db: DbSession, u
         "review_required",
     ):
         raise HTTPException(status_code=422, detail="publish_policy 须为 direct 或 review_required")
+    if "is_key_process" in data and data["is_key_process"] is None:
+        raise HTTPException(status_code=422, detail="is_key_process 不能为 null")
+    final_is_key = data.get("is_key_process", obj.is_key_process)
+    final_basis = data["key_basis"] if "key_basis" in data else obj.key_basis
+    if "key_basis" in data:
+        data["key_basis"] = final_basis.strip() if final_basis else None
+    _validate_key_process(final_is_key, final_basis)
     if data.get("org_unit_id") is not None:
         try:
             org = org_service.require_org(db, data["org_unit_id"])

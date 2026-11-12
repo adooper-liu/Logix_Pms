@@ -25,6 +25,8 @@ class ProcessArchBase(BaseModel):
     department: Optional[str] = Field(default=None, max_length=64)
     org_unit_id: Optional[int] = Field(default=None, description="归属组织（主数据外键）")
     description: Optional[str] = None
+    is_key_process: bool = False
+    key_basis: Optional[str] = Field(default=None, max_length=200)
 
     strategic_importance: float = Field(default=3.0, ge=0, le=5)
     pain_score: float = Field(default=3.0, ge=0, le=5)
@@ -49,6 +51,8 @@ class ProcessArchUpdate(BaseModel):
     department: Optional[str] = None
     org_unit_id: Optional[int] = None
     description: Optional[str] = None
+    is_key_process: Optional[bool] = None
+    key_basis: Optional[str] = Field(default=None, max_length=200)
     strategic_importance: Optional[float] = Field(default=None, ge=0, le=5)
     pain_score: Optional[float] = Field(default=None, ge=0, le=5)
     improvement_space: Optional[float] = Field(default=None, ge=0, le=5)
@@ -91,6 +95,8 @@ class ProcessArchOut(ORMModel, ProcessClassificationOut):
     org_unit_id: Optional[int] = None
     org_unit_name: Optional[str] = None
     description: Optional[str] = None
+    is_key_process: bool = False
+    key_basis: Optional[str] = None
     strategic_importance: float
     pain_score: float
     improvement_space: float
