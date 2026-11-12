@@ -37,7 +37,7 @@ def _objective_payload(**overrides) -> dict:
 def test_seeded_objectives_and_summary(client):
     rows = client.get(f"{API}/strategy/objectives", params={"year": 2026}).json()
     by_code = {row["code"]: row for row in rows}
-    assert {"OBJ-2026-01", "OBJ-2026-02", "OBJ-2026-03"} <= set(by_code)
+    assert set(by_code) == {"OBJ-2026-01"}
     first = by_code["OBJ-2026-01"]
     assert first["period_label"] == "年度"
     assert first["status_label"] == "进行中"
@@ -48,11 +48,11 @@ def test_seeded_objectives_and_summary(client):
     assert any(link["kpi_code"] == "EFF-01" for link in first["links"])
 
     summary = client.get(f"{API}/strategy/summary", params={"year": 2026}).json()
-    assert summary["objective_count"] == 3
-    assert summary["active_count"] == 3
-    assert summary["linked_count"] == 3
+    assert summary["objective_count"] == 1
+    assert summary["active_count"] == 1
+    assert summary["linked_count"] == 1
     assert summary["unlinked_count"] == 0
-    assert summary["kpi_link_count"] == 3
+    assert summary["kpi_link_count"] == 1
 
 
 def test_reverse_lookup_by_process_and_kpi(client):
@@ -119,13 +119,39 @@ def test_link_rules_and_duplicate_guard(client):
     assert duplicate.status_code == 400
     assert "已存在" in duplicate.json()["detail"]
 
-    # QUA-01 挂在 L2-005 下，不能接到 L3-032
+    # 创建不属于当前流程的临时 KPI，验证跨流程承接被拒绝。
+    foreign_process = client.post(
+        f"{API}/process-map",
+        json={"code": "L3-STR-FOREIGN", "name": "战略测试外部流程", "level": 3},
+    )
+    assert foreign_process.status_code == 201, foreign_process.text
+    foreign_process_id = foreign_process.json()["id"]
+    foreign_kpi = client.post(
+        f"{API}/monitor/kpis",
+        json={
+            "code": "STR-FOREIGN-" + uuid.uuid4().hex[:6],
+            "name": "战略外部 KPI",
+            "dimension": "EFFICIENCY",
+            "kind": "PROCESS",
+            "direction": "LOWER_BETTER",
+            "unit": "天",
+            "process_id": foreign_process_id,
+            "formula": "A / B",
+            "frequency": "MONTHLY",
+            "red_threshold": 10,
+            "yellow_threshold": 8,
+            "green_threshold": 5,
+        },
+    )
+    assert foreign_kpi.status_code == 201, foreign_kpi.text
     mismatch = client.post(
         f"{API}/strategy/objectives/{oid}/links",
-        json={"process_id": processes["L3-032"]["id"], "kpi_id": kpis["QUA-01"]["id"]},
+        json={"process_id": processes["L3-032"]["id"], "kpi_id": foreign_kpi.json()["id"]},
     )
     assert mismatch.status_code == 400
     assert "不属于" in mismatch.json()["detail"]
+    client.delete(f"{API}/monitor/kpis/{foreign_kpi.json()['id']}")
+    client.delete(f"{API}/process-map/{foreign_process_id}")
 
     assert (
         client.delete(f"{API}/strategy/objectives/{oid}/links/{link.json()['id']}").status_code

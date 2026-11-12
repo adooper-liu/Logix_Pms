@@ -77,8 +77,8 @@ def test_generate_is_idempotent_promotable_and_cascades(client):
             f"{API}/benchmark/frameworks/APQC_PCF/coverage",
             params={"process_level": 3},
         ).json()
-        assert coverage["total_processes"] == 28
-        assert coverage["mapped_processes"] == 28
+        assert coverage["total_processes"] == 1
+        assert coverage["mapped_processes"] == 1
 
         # 再跑一次：全部复用，不重复创建
         again = _preview(client)

@@ -112,6 +112,29 @@ from app.services.workflow import recompute_progress, seed_project_steps
 LANE_HEIGHT = 120
 NODE_WIDTH = 170
 
+# 开发/测试演示库只保留这一条可追踪主流程；生产模型仍支持任意数量的流程。
+SINGLE_FLOW_PROCESS_CODES = frozenset(
+    {
+        "L1-03",
+        "L2-003",
+        "L3-032",
+        "L4-201",
+        "L4-202",
+        "L4-203",
+        "L4-204",
+        "L4-205",
+        "L4-206",
+    }
+)
+SINGLE_FLOW_PROJECT_CODES = frozenset({"PR-2026-018"})
+_SINGLE_FLOW_SEED = False
+
+
+def _seed_process_enabled(code: Optional[str]) -> bool:
+    """单流程演示 seed 下只保留 L3-032 及其层级节点。"""
+    return not _SINGLE_FLOW_SEED or code in SINGLE_FLOW_PROCESS_CODES
+
+
 # corpus 里所有时间字符串都按中国本地时间书写，入库前统一转成 UTC（库里只存 naive UTC）
 CN_TZ = timezone(timedelta(hours=8))
 
@@ -158,6 +181,8 @@ def _seed_process_arch(
     code_to_id: Dict[str, int] = {}
     # 先按 level 排序，保证父节点先入库
     for row in sorted(corpus.PROCESS_ARCH, key=lambda r: r["level"]):
+        if not _seed_process_enabled(row["code"]):
+            continue
         parent_code = row.get("parent")
         parent_id = code_to_id.get(parent_code) if parent_code else None
         if parent_code and parent_id is None:
@@ -368,6 +393,8 @@ def _seed_projects(
 ) -> Dict[str, int]:
     ids: Dict[str, int] = {}
     for row in corpus_data.PROJECTS:
+        if _SINGLE_FLOW_SEED and row["code"] not in SINGLE_FLOW_PROJECT_CODES:
+            continue
         baseline = row.get("baseline_value")
         target = row.get("target_value")
         improvement = None
@@ -550,6 +577,8 @@ def _seed_benchmarks(
         return categories_by_code.get((row["framework"], row["category"]))
 
     for row in benchmark_data.PROCESS_BENCHMARK_MAP:
+        if _SINGLE_FLOW_SEED and row["process"] not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         process_id = code_to_id.get(row["process"])
         category = resolve_category(row)
         if process_id is None:
@@ -570,6 +599,8 @@ def _seed_benchmarks(
     process_rows = db.scalars(select(ProcessArch)).all()
     mapped_categories: Dict[int, List[int]] = {}
     for row in benchmark_data.PROCESS_BENCHMARK_MAP:
+        if _SINGLE_FLOW_SEED and row["process"] not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         process_id = code_to_id[row["process"]]
         category = resolve_category(row)
         if category is not None:
@@ -591,6 +622,8 @@ def _seed_kpis(db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]
     periods = [date.fromisoformat(p) for p in corpus_data.KPI_PERIODS]
     ids: Dict[str, int] = {}
     for row in corpus_data.KPIS:
+        if _SINGLE_FLOW_SEED and row.get("process") not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         card = corpus_data.KPI_DEFINITION_CARDS[row["code"]]
         owner_name = row.get("owner")
         kpi = KpiDefinition(
@@ -636,6 +669,10 @@ def _seed_strategy(
     kpi_ids: Dict[str, int],
 ) -> None:
     for row in strategy_data.STRATEGY_OBJECTIVES:
+        if _SINGLE_FLOW_SEED and not any(
+            link.get("process") in SINGLE_FLOW_PROCESS_CODES for link in row.get("links", [])
+        ):
+            continue
         owner_name = row.get("owner")
         objective = StrategyObjective(
             code=row["code"],
@@ -678,6 +715,8 @@ def _seed_workload(
 ) -> None:
     verifier_id = user_ids.get("流程管理科")
     for row in workload_data.WORK_MEASUREMENT_STANDARDS:
+        if _SINGLE_FLOW_SEED and row.get("activity") not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         activity_id = code_to_id.get(row["activity"])
         position_id = position_ids.get(row["position"])
         if not activity_id or not position_id:
@@ -740,6 +779,8 @@ def _seed_workload(
 
 def _seed_changes(db: Session, code_to_id: Dict[str, int], user_ids: Dict[str, int]) -> None:
     for row in change_data.CHANGE_REQUESTS:
+        if _SINGLE_FLOW_SEED and row.get("process") not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         process_id = code_to_id.get(row["process"])
         if not process_id:
             continue
@@ -799,6 +840,8 @@ def _seed_governance_roles(db: Session, user_ids: Dict[str, int]) -> Dict[str, i
 
 def _seed_raci(db: Session, code_to_id: Dict[str, int], role_ids: Dict[str, int]) -> None:
     for row in raci_data.RACI_ASSIGNMENTS:
+        if _SINGLE_FLOW_SEED and row["process"] not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         process_id = code_to_id.get(row["process"])
         role_id = role_ids.get(row["role"])
         if not process_id or not role_id:
@@ -823,6 +866,8 @@ def _seed_authorization(
 ) -> None:
     now = utcnow()
     for row in authorization_data.AUTHORIZATION_RULES:
+        if _SINGLE_FLOW_SEED and row.get("process") not in (None, *SINGLE_FLOW_PROCESS_CODES):
+            continue
         process_id = code_to_id.get(row["process"]) if row.get("process") else None
         db.add(
             AuthorizationRule(
@@ -849,6 +894,8 @@ def _seed_authorization(
 
     rules = {row.code: row.id for row in db.scalars(select(AuthorizationRule)).all()}
     for row in authorization_data.AUTHORIZATION_EXCEPTIONS:
+        if _SINGLE_FLOW_SEED and row.get("process") not in (None, *SINGLE_FLOW_PROCESS_CODES):
+            continue
         rule_id = rules.get(row["rule"])
         if not rule_id:
             continue
@@ -895,6 +942,8 @@ def _seed_data_governance(
         db.flush()
         domain_ids[row["code"]] = domain.id
     for row in data_governance_data.DATA_FLOWS:
+        if _SINGLE_FLOW_SEED and row.get("process") not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         domain_id = domain_ids.get(row["domain"])
         if not domain_id:
             continue
@@ -928,6 +977,8 @@ def _seed_exceptions(
     user_ids: Dict[str, int],
 ) -> None:
     for row in corpus_data.EXCEPTIONS:
+        if _SINGLE_FLOW_SEED and row.get("process") not in SINGLE_FLOW_PROCESS_CODES:
+            continue
         detected = _parse_dt(row.get("detected_at")) or utcnow()
         settled = _parse_dt(row.get("due_at")) or detected
         closed = row["status"] == "CLOSED"
@@ -1076,6 +1127,9 @@ def _seed_execution(
         chen_id = user_ids.get("陈经理")
         if open_task is not None and chen_id is not None:
             execution_service.assign_task(db, open_task, chen_id)
+
+    if _SINGLE_FLOW_SEED:
+        return
 
     # L3-033：停在公共任务队列，演示认领
     process = db.get(ProcessArch, code_to_id["L3-033"])
@@ -1325,6 +1379,8 @@ def _seed_design_models(
         for row in db.scalars(select(ProcessArch).where(ProcessArch.level == 4)).all()
     }
     for process_code, model in corpus_data.DESIGN_MODELS.items():
+        if not _seed_process_enabled(process_code):
+            continue
         process_id = code_to_id.get(process_code)
         if process_id is None:
             continue
@@ -1520,6 +1576,8 @@ def _wipe(db: Session) -> None:
         ProcessTechnologyUse,
         ProcessTrainingRecord,
         ProcessCharter,
+        AuthorizationException,
+        AuthorizationRule,
         DataFlow,
         DataDomain,
         RaciAssignment,
@@ -1560,6 +1618,7 @@ def _wipe(db: Session) -> None:
         ExceptionEvent,
         KnowledgeTag,
         KnowledgeItem,
+        KnowledgeScenario,
         KpiDefinition,
         Sketch,
         Project,
@@ -1666,6 +1725,23 @@ def seed(db: Session, reset: bool = False) -> Dict[str, int]:
         "benchmark_mappings": db.scalar(select(func.count()).select_from(ProcessBenchmarkMap)) or 0,
         "benchmark_metrics": db.scalar(select(func.count()).select_from(BenchmarkMetric)) or 0,
     }
+
+
+def seed_single_flow(db: Session, reset: bool = False) -> Optional[Dict[str, int]]:
+    """开发/测试 seed：新库只灌 L3-032 及其必要关联。"""
+    global _SINGLE_FLOW_SEED
+    if not reset:
+        if db.scalar(select(func.count()).select_from(ProcessArch)):
+            return None
+        if db.scalar(select(func.count()).select_from(User)):
+            return None
+    previous = _SINGLE_FLOW_SEED
+    _SINGLE_FLOW_SEED = True
+    try:
+        result = seed(db, reset=reset)
+    finally:
+        _SINGLE_FLOW_SEED = previous
+    return result
 
 
 def seed_if_empty(db: Session) -> Optional[Dict[str, int]]:

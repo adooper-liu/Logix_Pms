@@ -47,10 +47,10 @@ def test_seeded_roles_and_raci(client):
         assert len(accountable) == 1
 
     small = client.get(
-        f"{API}/governance/raci", params={"process_id": _process_id(client, "L3-033")}
+        f"{API}/governance/raci", params={"process_id": _process_id(client, "L3-032")}
     ).json()
     assert small["valid"] is True
-    assert small["matters"][0]["matter"] == "供应商准入例外"
+    assert small["matters"][0]["matter"] == "KPI 口径确认"
 
 
 def test_role_members_and_delete_guard(client):

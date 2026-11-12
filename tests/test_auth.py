@@ -93,21 +93,33 @@ def test_owner_can_edit_own_project(owner_client):
     assert r.json()["priority"] == 2
 
 
-def test_owner_cannot_edit_someone_elses_project(owner_client):
-    projects = owner_client.get(f"{API}/projects", params={"page_size": 100}).json()["items"]
-    others = next(p for p in projects if p["owner"] != "陈经理")
-    r = owner_client.patch(f"{API}/projects/{others['id']}", json={"priority": 4})
-    assert r.status_code == 403
-    assert "只能修改自己名下" in r.json()["detail"]
+def test_owner_cannot_edit_someone_elses_project(owner_client, manager_client):
+    created = manager_client.post(
+        f"{API}/projects",
+        json={"name": "他人项目", "methodology": "BPI", "owner": "流程管理科"},
+    )
+    assert created.status_code == 201, created.text
+    try:
+        r = owner_client.patch(f"{API}/projects/{created.json()['id']}", json={"priority": 4})
+        assert r.status_code == 403
+        assert "只能修改自己名下" in r.json()["detail"]
+    finally:
+        manager_client.delete(f"{API}/projects/{created.json()['id']}")
 
 
-def test_owner_cannot_edit_unbound_project(owner_client):
-    """未绑定账号的历史项目对 OWNER 一律拒绝，不能按姓名字符串猜归属。"""
-    projects = owner_client.get(f"{API}/projects", params={"page_size": 100}).json()["items"]
-    unbound = next(p for p in projects if p["owner_user_id"] is None)
-    r = owner_client.patch(f"{API}/projects/{unbound['id']}", json={"priority": 4})
-    assert r.status_code == 403
-    assert "只能修改自己名下" in r.json()["detail"]
+def test_owner_cannot_edit_unbound_project(owner_client, manager_client):
+    """未绑定账号的项目对 OWNER 一律拒绝，不能按姓名字符串猜归属。"""
+    created = manager_client.post(
+        f"{API}/projects",
+        json={"name": "未绑定项目", "methodology": "BPI", "owner": "外协人员"},
+    )
+    assert created.status_code == 201, created.text
+    try:
+        r = owner_client.patch(f"{API}/projects/{created.json()['id']}", json={"priority": 4})
+        assert r.status_code == 403
+        assert "只能修改自己名下" in r.json()["detail"]
+    finally:
+        manager_client.delete(f"{API}/projects/{created.json()['id']}")
 
 
 def test_owner_permission_is_not_based_on_display_name(client, anon_client):
@@ -177,47 +189,48 @@ def test_manager_can_bind_owner_user_id(manager_client, owner_client):
     assert manager_client.delete(f"{API}/projects/{data['id']}").status_code == 200
 
 
-def test_designer_enforces_owner_by_user_id(owner_client):
+def test_designer_enforces_owner_by_user_id(owner_client, manager_client):
     """流程设计器的归属判断同样只看 owner_user_id。"""
     me = owner_client.get(f"{API}/auth/me").json()["id"]
+    from app.core.database import SessionLocal
+    from app.models.process import ProcessArch
+
     processes = owner_client.get(f"{API}/process-map/flat").json()
-
-    mine = next(p for p in processes if p["owner_user_id"] == me and p["level"] >= 3)
-    model = owner_client.get(f"{API}/processes/{mine['id']}/design").json()
-    payload = {
-        "nodes": [
-            {
-                k: n[k]
-                for k in (
-                    "node_key",
-                    "name",
-                    "node_type",
-                    "lane",
-                    "owner_role",
-                    "duration_minutes",
-                    "wait_minutes",
-                    "cost",
-                    "rework_rate",
-                    "approval_levels",
-                    "is_value_added",
-                    "sequence_order",
-                    "position_x",
-                    "position_y",
-                )
-            }
-            for n in model["nodes"]
-        ],
-        "edges": [
-            {k: e[k] for k in ("source_key", "target_key", "label", "condition", "probability")}
-            for e in model["edges"]
-        ],
-        "expected_version": model["version"],
-    }
-    assert owner_client.put(f"{API}/processes/{mine['id']}/design", json=payload).status_code == 200
-
-    others = next(p for p in processes if p["level"] >= 3 and p["owner_user_id"] != me)
-    r = owner_client.put(f"{API}/processes/{others['id']}/design", json={"nodes": [], "edges": []})
-    assert r.status_code == 403
+    mine = next(p for p in processes if p["level"] == 3)
+    with SessionLocal() as db:
+        row = db.get(ProcessArch, mine["id"])
+        previous_owner = row.owner_user_id
+        row.owner_user_id = me
+        db.commit()
+    try:
+        model = owner_client.get(f"{API}/processes/{mine['id']}/design").json()
+        payload = {
+            "nodes": [
+                {k: n[k] for k in ("node_key", "name", "node_type", "lane", "owner_role",
+                                   "duration_minutes", "wait_minutes", "cost", "rework_rate",
+                                   "approval_levels", "is_value_added", "sequence_order",
+                                   "position_x", "position_y")}
+                for n in model["nodes"]
+            ],
+            "edges": [{k: e[k] for k in ("source_key", "target_key", "label", "condition", "probability")}
+                      for e in model["edges"]],
+            "expected_version": model["version"],
+        }
+        assert owner_client.put(f"{API}/processes/{mine['id']}/design", json=payload).status_code == 200
+    finally:
+        with SessionLocal() as db:
+            db.get(ProcessArch, mine["id"]).owner_user_id = previous_owner
+            db.commit()
+    created = manager_client.post(
+        f"{API}/process-map",
+        json={"code": "L3-OWNER-OTHER", "name": "他人流程", "level": 3},
+    )
+    assert created.status_code == 201, created.text
+    try:
+        r = owner_client.put(f"{API}/processes/{created.json()['id']}/design", json={"nodes": [], "edges": []})
+        assert r.status_code == 403
+    finally:
+        manager_client.delete(f"{API}/process-map/{created.json()['id']}")
 
 
 def test_owner_cannot_restructure_process_arch(owner_client):

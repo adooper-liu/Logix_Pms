@@ -15,7 +15,7 @@ from app.models.project import Project, WorkflowTemplate
 from app.models.tool import Tool
 from app.models.user import User
 from app.seed import benchmark_data, corpus, pcf_data
-from app.seed.runner import bootstrap_production, seed_if_empty
+from app.seed.runner import bootstrap_production, seed_if_empty, seed_single_flow
 
 
 def _session(tmp_path):
@@ -79,6 +79,31 @@ def test_bootstrap_is_idempotent_and_blocks_demo_seed(tmp_path):
         # 已有账号时，即使 SEED_ON_STARTUP=true 也不会把演示流程灌进来
         assert seed_if_empty(db) is None
         assert db.scalar(select(func.count()).select_from(ProcessArch)) == 0
+
+
+def test_development_seed_contains_only_l3_032_and_its_project(tmp_path):
+    with _session(tmp_path) as db:
+        result = seed_single_flow(db, reset=True)
+
+        processes = db.scalars(select(ProcessArch)).all()
+        assert {row.code for row in processes} == {
+            "L1-03",
+            "L2-003",
+            "L3-032",
+            "L4-201",
+            "L4-202",
+            "L4-203",
+            "L4-204",
+            "L4-205",
+            "L4-206",
+        }
+        projects = db.scalars(select(Project)).all()
+        assert len(projects) == 1
+        assert projects[0].process_id == next(
+            row.id for row in processes if row.code == "L3-032"
+        )
+        assert result["process_arch"] == 9
+        assert result["projects"] == 1
 
 
 def test_bootstrap_can_reset_existing_admin_password(tmp_path):

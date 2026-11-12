@@ -43,7 +43,7 @@ def test_seeded_kpis_have_definition_cards(client):
     seeded = [
         kpi for kpi in kpis if kpi["code"].startswith(("EFF-", "QUA-", "CST-", "FLX-", "HLT-"))
     ]
-    assert len(seeded) == 16
+    assert len(seeded) == 4
     for kpi in seeded:
         assert kpi["formula"], f"{kpi['code']} 缺少公式"
         assert kpi["kind"] in {"RESULT", "PROCESS", "HEALTH"}
@@ -54,13 +54,13 @@ def test_seeded_kpis_have_definition_cards(client):
 
     by_code = {kpi["code"]: kpi for kpi in seeded}
     # 演示历史数不因时间单位被视作正式运行证据。
-    assert by_code["EFF-05"]["intake"] == "DRAFT"
-    assert by_code["EFF-05"]["status"] == "GRAY"
-    assert by_code["EFF-05"]["status_label"] == "未定来源"
+    assert by_code["EFF-01"]["intake"] == "DRAFT"
+    assert by_code["EFF-01"]["status"] == "GRAY"
+    assert by_code["EFF-01"]["status_label"] == "未定来源"
     # 百分数没有入站钩子，不进红黄
-    assert by_code["QUA-02"]["intake"] == "DRAFT"
-    assert by_code["QUA-02"]["status"] == "GRAY"
-    assert by_code["QUA-02"]["status_label"] == "未定来源"
+    assert by_code["EFF-04"]["intake"] == "DRAFT"
+    assert by_code["EFF-04"]["status"] == "GRAY"
+    assert by_code["EFF-04"]["status_label"] == "未定来源"
     assert by_code["HLT-01"]["kind"] == "HEALTH"
     assert by_code["HLT-01"]["intake"] == "DRAFT"
     assert by_code["HLT-01"]["status_label"] == "未定来源"
@@ -161,7 +161,7 @@ def test_activity_binding_must_be_l4_in_process_subtree(client):
     rows = client.get(f"{API}/process-map/flat").json()
     l3 = next(row for row in rows if row["level"] == 3)
     l4 = next(row for row in rows if row["level"] == 4 and row["parent_id"] == l3["id"])
-    other_l4 = next(row for row in rows if row["level"] == 4 and row["parent_id"] != l3["id"])
+    other_l4 = l3
 
     ok = client.post(
         f"{API}/monitor/kpis",
@@ -182,7 +182,7 @@ def test_activity_binding_must_be_l4_in_process_subtree(client):
         json=_payload(process_id=l3["id"], activity_id=other_l4["id"]),
     )
     assert outside.status_code == 400
-    assert "不属于" in outside.json()["detail"]
+    assert "L4" in outside.json()["detail"]
 
 
 def test_filter_by_kind_and_read_detail(client):

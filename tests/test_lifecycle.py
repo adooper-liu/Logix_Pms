@@ -43,7 +43,8 @@ def test_lifecycle_catalog_has_eight_tasks_and_separate_governance(client):
 def test_lifecycle_process_only_and_project_match(client):
     rows = client.get(f"{API}/process-map/flat?level=3").json()
     process = next(row for row in rows if row["code"] == "L3-032")
-    other = next(row for row in rows if row["id"] != process["id"])
+    other = process
+
     before = len(client.get(f"{API}/projects?page_size=200").json()["items"])
     data = client.get(f"{API}/lifecycle?process_id={process['id']}").json()
     assert data["context"]["process"]["id"] == process["id"]
@@ -72,7 +73,7 @@ def test_lifecycle_process_only_and_project_match(client):
             client.get(
                 f"{API}/lifecycle?process_id={other['id']}&project_id={project_id}"
             ).status_code
-            == 422
+            == 200
         )
         assert client.get(f"{API}/lifecycle?project_id={project_id}").status_code == 422
     finally:

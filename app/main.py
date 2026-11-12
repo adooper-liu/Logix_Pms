@@ -84,10 +84,10 @@ async def lifespan(app: FastAPI):
     # 演示账号只在显式允许开发密钥时灌入。生产即使误开 SEED_ON_STARTUP 也不会写入已知口令。
     if settings.seed_on_startup and settings.allow_dev_secret:
         from app.seed.fillable_templates import ensure_fillable_templates
-        from app.seed.runner import seed_if_empty
+        from app.seed.runner import seed_single_flow
 
         with SessionLocal() as db:
-            seed_if_empty(db)
+            seed_single_flow(db, reset=False)
             ensure_fillable_templates(db)
             db.commit()
     yield
