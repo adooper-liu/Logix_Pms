@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, select
-
-import pytest
-
 import conftest  # noqa: F401
+import pytest
+from sqlalchemy import delete, select
 
 from app.core.database import SessionLocal
 from app.core.timeutil import utcnow
 from app.models.asset_graph import NodeActivityLink, UnmodeledActivity
+from app.models.org import Position
 from app.models.process import ProcessArch, ProcessModelVersion, ProcessNode
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
 from app.models.user import User
-from app.models.org import Position
 from app.services import key_process_coverage
 
 
@@ -22,18 +20,22 @@ from app.services import key_process_coverage
 def _cleanup_p3b_rows(client):
     yield
     with SessionLocal() as db:
-        process_ids = list(db.scalars(
-            select(ProcessArch.id).where(ProcessArch.code.like("P3B-SVC-%"))
-        ))
+        process_ids = list(
+            db.scalars(select(ProcessArch.id).where(ProcessArch.code.like("P3B-SVC-%")))
+        )
         if process_ids:
-            activity_ids = list(db.scalars(
-                select(ProcessArch.id).where(ProcessArch.parent_id.in_(process_ids))
-            ))
+            activity_ids = list(
+                db.scalars(select(ProcessArch.id).where(ProcessArch.parent_id.in_(process_ids)))
+            )
             db.execute(delete(NodeActivityLink).where(NodeActivityLink.process_id.in_(process_ids)))
-            db.execute(delete(UnmodeledActivity).where(UnmodeledActivity.process_id.in_(process_ids)))
+            db.execute(
+                delete(UnmodeledActivity).where(UnmodeledActivity.process_id.in_(process_ids))
+            )
             db.execute(delete(RaciAssignment).where(RaciAssignment.process_id.in_(process_ids)))
             db.execute(delete(ProcessNode).where(ProcessNode.process_id.in_(process_ids)))
-            db.execute(delete(ProcessModelVersion).where(ProcessModelVersion.process_id.in_(process_ids)))
+            db.execute(
+                delete(ProcessModelVersion).where(ProcessModelVersion.process_id.in_(process_ids))
+            )
             if activity_ids:
                 db.execute(delete(ProcessArch).where(ProcessArch.id.in_(activity_ids)))
             db.execute(delete(ProcessArch).where(ProcessArch.id.in_(process_ids)))
@@ -51,14 +53,24 @@ def _case(prefix: str, *, key_l3=True, key_l4=False, basis="测试依据"):
         db.add(l2)
         db.flush()
         l3 = ProcessArch(
-            code=f"{prefix}-L3", name="覆盖度流程", level=3, parent_id=l2.id,
-            is_key_process=key_l3, key_basis=basis if key_l3 else None, is_draft=False,
+            code=f"{prefix}-L3",
+            name="覆盖度流程",
+            level=3,
+            parent_id=l2.id,
+            is_key_process=key_l3,
+            key_basis=basis if key_l3 else None,
+            is_draft=False,
         )
         db.add(l3)
         db.flush()
         l4 = ProcessArch(
-            code=f"{prefix}-L4", name="覆盖度活动", level=4, parent_id=l3.id,
-            is_key_process=key_l4, key_basis=basis if key_l4 else None, is_draft=False,
+            code=f"{prefix}-L4",
+            name="覆盖度活动",
+            level=4,
+            parent_id=l3.id,
+            is_key_process=key_l4,
+            key_basis=basis if key_l4 else None,
+            is_draft=False,
         )
         db.add(l4)
         db.flush()
@@ -66,7 +78,11 @@ def _case(prefix: str, *, key_l3=True, key_l4=False, basis="测试依据"):
             process_id=l3.id, version=1, status="PUBLISHED", snapshot={}, published_at=utcnow()
         )
         node = ProcessNode(
-            process_id=l3.id, node_key="n1", name="覆盖度节点", node_type="TASK", lane="测试",
+            process_id=l3.id,
+            node_key="n1",
+            name="覆盖度节点",
+            node_type="TASK",
+            lane="测试",
             sequence_order=1,
         )
         db.add_all([version, node])
@@ -82,7 +98,20 @@ def _activity(prefix: str):
         result = key_process_coverage.coverage(db, _admin())
         rows = db.scalars(select(ProcessArch).where(ProcessArch.code.like(f"{prefix}%"))).all()
         codes = [item.code for item in result.activities]
-        assert f"{prefix}-L4" in codes, ([(row.code, row.level, row.parent_id, row.is_draft, row.is_key_process, row.key_basis) for row in rows], codes)
+        assert f"{prefix}-L4" in codes, (
+            [
+                (
+                    row.code,
+                    row.level,
+                    row.parent_id,
+                    row.is_draft,
+                    row.is_key_process,
+                    row.key_basis,
+                )
+                for row in rows
+            ],
+            codes,
+        )
         return next(item for item in result.activities if item.code == f"{prefix}-L4")
 
 
@@ -97,10 +126,16 @@ def test_old_published_links_are_not_current_implementations():
         db.flush()
         db.get(ProcessArch, process_id).published_model_version = 2
         db.get(ProcessNode, node_id).process_arch_id = activity_id
-        db.add(NodeActivityLink(
-            model_version_id=version_id, process_id=process_id, node_key="n1",
-            activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-        ))
+        db.add(
+            NodeActivityLink(
+                model_version_id=version_id,
+                process_id=process_id,
+                node_key="n1",
+                activity_id=activity_id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
         db.commit()
     activity = _activity(prefix)
     assert len(activity.implementations) == 1
@@ -113,26 +148,43 @@ def test_owner_projection_is_scoped_by_process_and_node_key():
     _, process_id, activity_id, version_id, _ = _case(prefix)
     with SessionLocal() as db:
         unrelated = ProcessArch(
-            code=f"{prefix}-UNRELATED", name="无关流程", level=3,
-            is_key_process=False, is_draft=False,
+            code=f"{prefix}-UNRELATED",
+            name="无关流程",
+            level=3,
+            is_key_process=False,
+            is_draft=False,
         )
         db.add(unrelated)
         db.flush()
         version = ProcessModelVersion(
-            process_id=unrelated.id, version=1, status="PUBLISHED", snapshot={}, published_at=utcnow()
+            process_id=unrelated.id,
+            version=1,
+            status="PUBLISHED",
+            snapshot={},
+            published_at=utcnow(),
         )
         position = Position(code=f"{prefix}-POS", name="无关岗位")
         node = ProcessNode(
-            process_id=unrelated.id, node_key="n1", name="同名无关节点",
-            node_type="TASK", lane="测试", owner_position=position,
+            process_id=unrelated.id,
+            node_key="n1",
+            name="同名无关节点",
+            node_type="TASK",
+            lane="测试",
+            owner_position=position,
         )
         db.add_all([version, position, node])
         db.flush()
         unrelated.published_model_version = 1
-        db.add(NodeActivityLink(
-            model_version_id=version_id, process_id=process_id, node_key="n1",
-            activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-        ))
+        db.add(
+            NodeActivityLink(
+                model_version_id=version_id,
+                process_id=process_id,
+                node_key="n1",
+                activity_id=activity_id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
         db.commit()
     activity = _activity(prefix)
     assert not any(row.code == f"{prefix}-POS" for row in activity.gap_owner_positions)
@@ -142,10 +194,16 @@ def test_invalid_node_relation_is_reported_as_gap():
     prefix = "P3B-SVC-INVALID-LINK"
     _, process_id, activity_id, version_id, _ = _case(prefix)
     with SessionLocal() as db:
-        db.add(NodeActivityLink(
-            model_version_id=version_id, process_id=process_id, node_key="missing",
-            activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-        ))
+        db.add(
+            NodeActivityLink(
+                model_version_id=version_id,
+                process_id=process_id,
+                node_key="missing",
+                activity_id=activity_id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
         db.commit()
     activity = _activity(prefix)
     assert not activity.implementations
@@ -156,8 +214,13 @@ def test_broken_parent_chain_is_reported_as_gap():
     prefix = "P3B-SVC-BROKEN-HIERARCHY"
     with SessionLocal() as db:
         l4 = ProcessArch(
-            code=f"{prefix}-L4", name="断链活动", level=4, parent_id=999999,
-            is_key_process=True, key_basis="断链依据", is_draft=False,
+            code=f"{prefix}-L4",
+            name="断链活动",
+            level=4,
+            parent_id=999999,
+            is_key_process=True,
+            key_basis="断链依据",
+            is_draft=False,
         )
         db.add(l4)
         db.commit()
@@ -177,7 +240,6 @@ def test_unrelated_l2_and_uncovered_activity_do_not_hide_owner_gap():
     with SessionLocal() as db:
         result = key_process_coverage.coverage(db, _admin())
     assert all(row.code != f"{prefix}-OTHER-L2" for row in result.boundary_reviews)
-
 
     prefix = "P3B-SVC-INHERIT"
     _case(prefix, key_l3=True, key_l4=False)
@@ -210,16 +272,26 @@ def test_versioned_and_historical_links_are_deduplicated_and_marked():
     _, process_id, activity_id, version_id, node_id = _case(prefix)
     with SessionLocal() as db:
         node = db.get(ProcessNode, node_id)
-        db.add_all([
-            NodeActivityLink(
-                model_version_id=None, process_id=process_id, node_key=node.node_key,
-                activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-            ),
-            NodeActivityLink(
-                model_version_id=version_id, process_id=process_id, node_key=node.node_key,
-                activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-            ),
-        ])
+        db.add_all(
+            [
+                NodeActivityLink(
+                    model_version_id=None,
+                    process_id=process_id,
+                    node_key=node.node_key,
+                    activity_id=activity_id,
+                    relation="REALIZES",
+                    path_condition="ALL",
+                ),
+                NodeActivityLink(
+                    model_version_id=version_id,
+                    process_id=process_id,
+                    node_key=node.node_key,
+                    activity_id=activity_id,
+                    relation="REALIZES",
+                    path_condition="ALL",
+                ),
+            ]
+        )
         db.commit()
     activity = _activity(prefix)
     assert len(activity.implementations) == 1
@@ -239,10 +311,15 @@ def test_legacy_process_arch_pointer_is_fallback_only():
     assert len(activity.implementations) == 1
     assert activity.implementations[0].legacy is True
     with SessionLocal() as db:
-        db.add(NodeActivityLink(
-            process_id=process_id, node_key="n1", activity_id=activity_id,
-            relation="REALIZES", path_condition="ALL",
-        ))
+        db.add(
+            NodeActivityLink(
+                process_id=process_id,
+                node_key="n1",
+                activity_id=activity_id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
         db.commit()
     activity = _activity(prefix)
     assert len(activity.implementations) == 1
@@ -273,16 +350,26 @@ def test_unmodeled_uncovered_and_multi_process_are_distinct():
         db.flush()
         second.model_version = 1
         second.published_model_version = 1
-        db.add_all([
-            NodeActivityLink(
-                model_version_id=first_version, process_id=first_process, node_key="n1",
-                activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-            ),
-            NodeActivityLink(
-                model_version_id=version.id, process_id=second.id, node_key="n2",
-                activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-            ),
-        ])
+        db.add_all(
+            [
+                NodeActivityLink(
+                    model_version_id=first_version,
+                    process_id=first_process,
+                    node_key="n1",
+                    activity_id=activity_id,
+                    relation="REALIZES",
+                    path_condition="ALL",
+                ),
+                NodeActivityLink(
+                    model_version_id=version.id,
+                    process_id=second.id,
+                    node_key="n2",
+                    activity_id=activity_id,
+                    relation="REALIZES",
+                    path_condition="ALL",
+                ),
+            ]
+        )
         db.commit()
     assert _activity(prefix).coverage_status == "UNMODELED"
     assert _activity(uncovered).coverage_status == "UNCOVERED"
@@ -306,24 +393,38 @@ def test_gap_owner_positions_are_explicit_only():
     prefix = "P3B-SVC-OWNERS"
     _, process_id, activity_id, version_id, node_id = _case(prefix)
     with SessionLocal() as db:
-        db.add(NodeActivityLink(
-            model_version_id=version_id, process_id=process_id, node_key="n1",
-            activity_id=activity_id, relation="REALIZES", path_condition="ALL",
-        ))
+        db.add(
+            NodeActivityLink(
+                model_version_id=version_id,
+                process_id=process_id,
+                node_key="n1",
+                activity_id=activity_id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
         position = Position(code=f"{prefix}-POS", name="显式岗位")
         role = GovernanceRole(code=f"{prefix}-ROLE", name="显式角色")
         member = User(
-            username=f"{prefix.lower()}-user", display_name="岗位成员",
-            password_hash="not-used", role="VIEWER", position=position,
+            username=f"{prefix.lower()}-user",
+            display_name="岗位成员",
+            password_hash="not-used",
+            role="VIEWER",
+            position=position,
         )
         db.add_all([position, role, member])
         db.flush()
         db.get(ProcessNode, node_id).owner_position_id = position.id
         db.add(GovernanceRoleMember(role_id=role.id, user_id=member.id))
-        db.add(RaciAssignment(
-            process_id=process_id, matter="活动责任", activity_id=activity_id,
-            role_id=role.id, raci="R",
-        ))
+        db.add(
+            RaciAssignment(
+                process_id=process_id,
+                matter="活动责任",
+                activity_id=activity_id,
+                role_id=role.id,
+                raci="R",
+            )
+        )
         db.commit()
     activity = _activity(prefix)
     assert any(row.code == f"{prefix}-POS" for row in activity.gap_owner_positions)

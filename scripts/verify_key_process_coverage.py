@@ -121,9 +121,7 @@ def verify_key_process_coverage(page, base):
         finally:
             context.close()
     finally:
-        page.request.delete(
-            base + f"/api/v1/process-map/{process_id}", headers=headers
-        )
+        page.request.delete(base + f"/api/v1/process-map/{process_id}", headers=headers)
 
     print("PASS P3b 关键过程编辑、覆盖度矩阵、未评审边界与 viewer 只读")
 
