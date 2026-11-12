@@ -192,7 +192,13 @@ def test_signature_and_scope_rejections(anon_client, manager_client, hook):
     )
     assert _post(anon_client, "NOPE", body, hook["secret"]).status_code == 404
 
-    other_process = _process_id(manager_client, "L3-033")
+    created_other = manager_client.post(
+        f"{API}/process-map",
+        json={"code": "L3-INBOUND-OTHER", "name": "入站其他流程", "level": 3},
+    )
+    assert created_other.status_code == 201, created_other.text
+    other_process = created_other.json()["id"]
+
     scoped = manager_client.post(
         f"{API}/integrations/inbound-hooks",
         json={
@@ -235,6 +241,7 @@ def test_signature_and_scope_rejections(anon_client, manager_client, hook):
         if iid:
             manager_client.delete(f"{API}/execution/instances/{iid}")
         manager_client.delete(f"{API}/integrations/inbound-hooks/{scoped_hook['id']}")
+        manager_client.delete(f"{API}/process-map/{other_process}")
 
 
 def test_complete_task_via_inbound(anon_client, manager_client, hook):

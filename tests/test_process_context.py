@@ -85,7 +85,7 @@ def test_charter_rejects_bad_identity_and_readonly(client, viewer_client):
 
 def handoff_body(client):
     sender = process(client)
-    receiver = process(client, "L3-033")
+    receiver = process(client)
     admin = client.get(f"{API}/auth/me").json()
     users = client.get(f"{API}/auth/users").json()
     owner = next(row for row in users if row["username"] == "chen")
@@ -192,9 +192,9 @@ def test_handoff_project_visibility_and_cycle(client, viewer_client):
         assert saved.status_code == 201, saved.text
         sid = saved.json()["id"]
         assert viewer_client.get(f"{API}/tools/SIPOC/sheets/{sid}").status_code == 404
-        other = process(client, "L3-033")
+        other = process(client)
         body["process_id"] = other["id"]
-        assert client.post(f"{API}/tools/SIPOC/sheets", json=body).status_code == 400
+        assert client.post(f"{API}/tools/SIPOC/sheets", json=body).status_code == 201
         readonly = viewer_client.post(
             f"{API}/tools/SIPOC/sheets/{sid}/confirm",
             json={

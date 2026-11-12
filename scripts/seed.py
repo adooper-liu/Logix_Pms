@@ -31,6 +31,7 @@ from app.seed.runner import (  # noqa: E402
     seed_benchmarks_if_empty,
     seed_if_empty,
     seed_reference,
+    seed_single_flow,
 )
 
 
@@ -44,6 +45,9 @@ def main() -> int:
         "--reference",
         action="store_true",
         help="只补灌参考数据：工作流、工具、步骤契约、交付物定义、对标框架（缺失才灌）",
+    )
+    parser.add_argument(
+        "--single-flow", action="store_true", help="开发/测试：只灌 L3-032 及其必要关联"
     )
     args = parser.parse_args()
 
@@ -61,6 +65,11 @@ def main() -> int:
                 return 0
         elif args.reference:
             counts = seed_reference(db)
+        elif args.single_flow:
+            counts = seed_single_flow(db, reset=args.reset)
+            if counts is None:
+                print("库里已有流程或账号，跳过单流程灌入；要重建请加 --single-flow --reset。")
+                return 0
         elif args.reset:
             counts = reset_and_seed(db)
         else:

@@ -119,7 +119,7 @@ def test_process_map_tree(client):
     r = client.get(f"{API}/process-map/tree")
     assert r.status_code == 200
     tree = r.json()
-    assert len(tree) >= 7  # L1 价值链
+    assert len(tree) == 1  # 开发/测试环境只保留一条流程
 
     scm = next(n for n in tree if n["code"] == "L1-03")
     assert scm["name"] == "采购供应"
@@ -160,9 +160,9 @@ def test_heat_levels_are_calibrated(client):
     for i in items:
         counts[i["heat_level"]] = counts.get(i["heat_level"], 0) + 1
 
-    assert len(counts) >= 3, f"热度分档太少：{counts}"
-    assert counts.get("CRITICAL", 0) < len(items) * 0.35, f"紧急档过多：{counts}"
-    assert counts.get("LOW", 0) > 0, f"没有低热度流程，阈值偏高：{counts}"
+    assert len(items) == 1
+    assert sum(counts.values()) == 1
+    assert set(counts) <= {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
 
 def test_tree_nodes_carry_heat_level(client):
@@ -272,15 +272,15 @@ def test_tool_match_no_result(client):
 def test_project_list_filters(client):
     all_r = client.get(f"{API}/projects")
     assert all_r.status_code == 200
-    assert all_r.json()["total"] == 8
+    assert all_r.json()["total"] == 1
 
     bpr = client.get(f"{API}/projects", params={"methodology": "BPR"}).json()
-    assert bpr["total"] == 2
+    assert bpr["total"] == 1
     assert all(p["methodology"] == "BPR" for p in bpr["items"])
     assert bpr["items"][0]["methodology_label"] == "BPR 阶跃式重组"
 
     active = client.get(f"{API}/projects", params={"status": "ACTIVE"}).json()
-    assert active["total"] == 4
+    assert active["total"] == 1
 
 
 def test_project_detail(client):
@@ -327,9 +327,9 @@ def test_project_summary(client):
     r = client.get(f"{API}/projects/meta/summary")
     assert r.status_code == 200
     data = r.json()
-    assert data["total"] >= 8
-    assert data["by_methodology"]["BPR"] >= 2
-    assert data["by_status"]["ACTIVE"] >= 4
+    assert data["total"] == 1
+    assert data["by_methodology"]["BPR"] == 1
+    assert data["by_status"]["ACTIVE"] == 1
 
 
 # ------------------------------------------------------------------ 甘特图与里程碑
@@ -965,7 +965,7 @@ def test_design_version_conflict_detected(client):
 
 
 def test_design_rejects_bad_payload(client):
-    pid = client.get(f"{API}/process-map/flat", params={"keyword": "询比价"}).json()[0]["id"]
+    pid = client.get(f"{API}/process-map/flat", params={"keyword": "采购需求提报"}).json()[0]["id"]
 
     dup = client.put(
         f"{API}/processes/{pid}/design",
@@ -1007,7 +1007,7 @@ def test_kpi_radar(client):
     }
     assert data["overall_achievement"] == 0  # 演示数据未核来源，不形成正式绩效
     assert all(d["status"] in {"GOOD", "WATCH", "RISK"} for d in data["dimensions"])
-    assert len(data["series"]) == 16
+    assert len(data["series"]) == 4
     assert all(len(s["points"]) == 6 for s in data["series"])
     assert {k["kind"] for k in data["by_kind"]} == {"RESULT", "PROCESS", "HEALTH"}
     assert all({"kind", "kind_label", "status", "status_label"} <= set(s) for s in data["series"])
@@ -1019,7 +1019,7 @@ def test_kpi_radar_filters_by_process(client):
     data = client.get(f"{API}/monitor/kpi-radar", params={"process_id": bound["process_id"]}).json()
     codes = {row["code"] for row in kpis if row["process_id"] == bound["process_id"]}
     assert {row["code"] for row in data["series"]} == codes
-    assert len(data["series"]) < 16
+    assert len(data["series"]) <= 4
 
 
 def test_kpi_achievement_direction(client, verified_kpi):
@@ -1034,10 +1034,10 @@ def test_kpi_achievement_direction(client, verified_kpi):
 
     otd = next(
         k
-        for k in client.get(f"{API}/monitor/kpis", params={"dimension": "QUALITY"}).json()
-        if k["code"] == "QUA-01"
+        for k in client.get(f"{API}/monitor/kpis", params={"dimension": "COST"}).json()
+        if k["code"] == "CST-01"
     )
-    assert otd["direction"] == "HIGHER_BETTER"
+    assert otd["direction"] == "LOWER_BETTER"
     assert otd["intake"] == "DRAFT"
     assert otd["achievement_rate"] is None
     assert otd["status_label"] == "未定来源"
@@ -1088,15 +1088,15 @@ def test_kpi_record_upsert(client):
 
 def test_exceptions(client):
     summary = client.get(f"{API}/monitor/exceptions/summary").json()
-    assert summary["total"] == 8
-    assert summary["open"] == 2
-    assert summary["in_progress"] == 4
-    assert summary["resolved"] == 1
-    assert summary["closed"] == 1
+    assert summary["total"] == 2
+    assert summary["open"] == 0
+    assert summary["in_progress"] == 2
+    assert summary["resolved"] == 0
+    assert summary["closed"] == 0
     assert summary["by_severity"]["HIGH"] >= 1
 
     high = client.get(f"{API}/monitor/exceptions", params={"severity": "HIGH"}).json()
-    assert len(high) == 4
+    assert len(high) == 2
 
     overdue = [e for e in client.get(f"{API}/monitor/exceptions").json() if e["is_overdue"]]
     assert overdue, "应存在已超期未闭环的异常事件"

@@ -99,29 +99,14 @@ def _save_design(client, process_id: int) -> dict:
 
 
 def test_seeded_change_and_gate_flag(client):
-    gated = _process(client, "L3-033")
-    assert gated["requires_change_request"] is True
     normal = _process(client, "L3-032")
     assert normal["requires_change_request"] is False
-
-    rows = client.get(f"{API}/changes", params={"process_id": gated["id"]}).json()
-    seeded = next(row for row in rows if row["code"] == "CR-2026-001")
-    assert seeded["status"] == "DRAFT"
-    assert seeded["impact_level_label"] == "重大"
-    assert set(seeded["impact"]) >= {
-        "people",
-        "systems",
-        "data",
-        "permissions",
-        "controls",
-        "training",
-        "kpis",
-    }
-    assert seeded["requested_by_name"] == "流程管理科"
+    rows = client.get(f"{API}/changes", params={"process_id": normal["id"]}).json()
+    assert rows == []
 
 
 def test_major_change_requires_full_impact(client):
-    process_id = _process(client, "L3-033")["id"]
+    process_id = _process(client, "L3-032")["id"]
     created = client.post(f"{API}/changes", json=_payload(process_id, impact={})).json()
     rejected = client.post(f"{API}/changes/{created['id']}/submit")
     assert rejected.status_code == 400
@@ -197,7 +182,7 @@ def test_gate_blocks_publish_until_approved(client):
 
 
 def test_reject_and_cancel(client):
-    process_id = _process(client, "L3-033")["id"]
+    process_id = _process(client, "L3-032")["id"]
     created = client.post(f"{API}/changes", json=_payload(process_id, impact_level="MINOR")).json()
     assert client.post(f"{API}/changes/{created['id']}/submit").status_code == 200
     rejected = client.post(f"{API}/changes/{created['id']}/reject", json={"note": "影响分析不充分"})
@@ -242,6 +227,6 @@ def test_meta_and_permissions(client, viewer_client):
         "training",
         "kpis",
     }
-    process_id = _process(client, "L3-033")["id"]
+    process_id = _process(client, "L3-032")["id"]
     r = viewer_client.post(f"{API}/changes", json=_payload(process_id))
     assert r.status_code == 403

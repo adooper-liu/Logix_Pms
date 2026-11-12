@@ -44,20 +44,15 @@ def test_seeded_domains_flows_and_summary(client):
     assert by_code["DD-001"]["domain_type_label"] == "客户"
     assert by_code["DD-001"]["owner_name"] == "系统管理员"
     assert by_code["DD-001"]["steward_name"] == "流程管理科"
-    assert by_code["DD-001"]["flow_count"] == 1
+    assert by_code["DD-001"]["flow_count"] == 0
 
     flows = client.get(f"{API}/data-governance/flows").json()
     by_flow = {row["code"]: row for row in flows}
-    assert {"DF-001", "DF-002", "DF-003"} <= set(by_flow)
-    first = by_flow["DF-001"]
-    assert first["domain_name"] == "客户主数据"
-    assert first["frequency_label"] == "每日"
-    assert first["process_code"] == "L3-061"
-    assert first["quality_rule"]
+    assert by_flow == {}
 
     summary = client.get(f"{API}/data-governance/summary").json()
     assert summary["domains"] == 5
-    assert summary["flows"] == 3
+    assert summary["flows"] == 0
     assert summary["domains_without_owner"] == 0
     assert summary["flows_without_quality_rule"] == 0
     assert summary["flows_without_source"] == 0

@@ -144,7 +144,13 @@ def test_baseline_lifecycle_changed_added_removed(client, manager_client, viewer
 def test_baseline_scope_org_and_process(client, manager_client):
     orgs = _orgs(client)
     process_id = _process_id(client, "L3-032")
-    other_process = _process_id(client, "L3-010")
+    created_process = manager_client.post(
+        f"{API}/process-map",
+        json={"code": "L3-BASELINE-OTHER", "name": "基线其他流程", "level": 3},
+    )
+    assert created_process.status_code == 201, created_process.text
+    other_process = created_process.json()["id"]
+
 
     group_doc = _doc(manager_client, process_id, "范围集团 SOP")
     _serve_doc(manager_client, group_doc["id"], "1.0")
@@ -180,7 +186,9 @@ def test_baseline_scope_org_and_process(client, manager_client):
     process_ids = {item["id"] for item in process_baseline["items"] if item["kind"] == "document"}
     assert group_doc["id"] in process_ids and east_doc["id"] in process_ids
     assert other_doc["id"] not in process_ids
+
     assert all(item["kind"] == "document" for item in process_baseline["items"])
+    manager_client.delete(f"{API}/process-map/{other_process}")
 
     # 参数校验
     assert (

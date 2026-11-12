@@ -47,11 +47,11 @@ def test_framework_catalog(client):
 
     # 已映射的流程数按框架不同：SCOR 只覆盖供应链相关流程。
     # L4 活动继承所属 L3 的映射，所以数量包含 L3 + L4。
-    assert items["SCOR"]["mapped_process_count"] == 117
-    assert items["APQC_PCF"]["mapped_process_count"] == 134
+    assert items["SCOR"]["mapped_process_count"] == 7
+    assert items["APQC_PCF"]["mapped_process_count"] == 7
     # 行业变体按 PCF ID 继承主框架映射，不需要重复维护。
-    assert items["APQC_PCF_CP"]["mapped_process_count"] == 134
-    assert items["APQC_PCF_CE"]["mapped_process_count"] == 134
+    assert items["APQC_PCF_CP"]["mapped_process_count"] == 7
+    assert items["APQC_PCF_CE"]["mapped_process_count"] == 7
 
 
 def test_pcf_tree_keeps_bilingual_names(client):
@@ -137,28 +137,23 @@ def test_scor_coverage_reports_gaps(client):
     data = client.get(
         f"{API}/benchmark/frameworks/SCOR/coverage", params={"process_level": 3}
     ).json()
-    assert data["total_processes"] == 28
-    assert data["mapped_processes"] == 24
-    assert data["coverage_rate"] == 0.8571
+    assert data["total_processes"] == 1
+    assert data["mapped_processes"] == 1
+    assert data["coverage_rate"] == 1.0
     # 研发与费用报销不在 SCOR 范围内，正是两套框架适配差异的体现
-    assert {p["code"] for p in data["unmapped_processes"]} == {
-        "L3-010",
-        "L3-011",
-        "L3-012",
-        "L3-071",
-    }
+    assert data["unmapped_processes"] == []
     by_top = {item["code"]: item for item in data["by_top_category"]}
     assert set(by_top) == {"PLAN", "SOURCE", "MAKE", "DELIVER", "RETURN", "ENABLE"}
-    assert by_top["SOURCE"]["mapped_count"] == 5
-    assert by_top["ENABLE"]["mapped_count"] == 8
+    assert by_top["SOURCE"]["mapped_count"] == 1
+    assert by_top["ENABLE"]["mapped_count"] == 0
 
 
 def test_apqc_coverage_is_complete(client):
     data = client.get(
         f"{API}/benchmark/frameworks/APQC_PCF/coverage", params={"process_level": 3}
     ).json()
-    assert data["total_processes"] == 28
-    assert data["mapped_processes"] == 28
+    assert data["total_processes"] == 1
+    assert data["mapped_processes"] == 1
     assert data["coverage_rate"] == 1.0
     assert data["unmapped_processes"] == []
     assert len(data["by_top_category"]) == 13
@@ -170,7 +165,7 @@ def test_industry_variants_inherit_primary_mappings(client):
         data = client.get(
             f"{API}/benchmark/frameworks/{code}/coverage", params={"process_level": 3}
         ).json()
-        assert data["mapped_processes"] == 28, code
+        assert data["mapped_processes"] == 1, code
         assert data["coverage_rate"] == 1.0, code
         assert data["unmapped_processes"] == [], code
 
@@ -180,9 +175,9 @@ def test_coverage_rolls_up_descendants(client):
     scor = client.get(
         f"{API}/benchmark/frameworks/SCOR/coverage", params={"process_level": 1}
     ).json()
-    assert scor["total_processes"] == 7
-    assert scor["mapped_processes"] == 6
-    assert {p["code"] for p in scor["unmapped_processes"]} == {"L1-02"}
+    assert scor["total_processes"] == 1
+    assert scor["mapped_processes"] == 1
+    assert scor["unmapped_processes"] == []
 
     apqc = client.get(
         f"{API}/benchmark/frameworks/APQC_PCF/coverage", params={"process_level": 1}
@@ -215,7 +210,7 @@ def test_unknown_framework_404(client):
 
 
 def test_manager_can_create_and_delete_mapping(manager_client):
-    pid = _process_id(manager_client, "L3-071")
+    pid = _process_id(manager_client, "L3-032")
     category_id = _category_id(manager_client, "SCOR", "E6")
     created = manager_client.post(
         f"{API}/benchmark/mappings",

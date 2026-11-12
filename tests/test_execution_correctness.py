@@ -57,7 +57,7 @@ def test_idempotent_start(manager_client):
         # 同一个 key 换参数必须拒绝，避免把错误响应回放给另一个请求
         other = manager_client.post(
             f"{API}/execution/instances",
-            json={"process_id": _process_id(manager_client, "L3-033")},
+            json={"process_id": _process_id(manager_client, "L3-032"), "variables": {"different": True}},
             headers={"Idempotency-Key": key},
         )
         assert other.status_code == 409, other.text

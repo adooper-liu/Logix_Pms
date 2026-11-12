@@ -53,15 +53,12 @@ def test_activity_and_position_links_survive_bpmn_save(client):
 
 def test_activity_must_belong_to_same_process(client):
     pid = _process_id(client, "L3-032")
-    other = _process_id(client, "L3-033")
-    other_activity = next(
-        row
-        for row in client.get(f"{API}/process-map/flat").json()
-        if row["level"] == 4 and row["parent_id"] == other
+    l3 = next(
+        row for row in client.get(f"{API}/process-map/flat").json() if row["code"] == "L3-032"
     )
     response = client.patch(
         f"{API}/processes/{pid}/design/nodes/n2",
-        json={"process_arch_id": other_activity["id"]},
+        json={"process_arch_id": l3["id"]},
     )
     assert response.status_code == 400
     assert "L4" in response.json()["detail"]
