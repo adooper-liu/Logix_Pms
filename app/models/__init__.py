@@ -137,6 +137,12 @@ from app.models.process_document import (
     ProcessDocument,
     ProcessDocumentVersion,
 )
+from app.models.process_operating import (
+    ProcessGateAssessment,
+    ProcessGateEvidence,
+    ProcessOperatingCycle,
+    ProcessOperatingDecision,
+)
 from app.models.process_task import ProcessTaskDefinition
 from app.models.project import Project, ProjectGateCondition, ProjectStep, WorkflowTemplate
 from app.models.raci import GovernanceRole, GovernanceRoleMember, RaciAssignment
@@ -173,6 +179,10 @@ __all__ = [
     "ProcessArch",
     "ProcessModelVersion",
     "ProcessNode",
+    "ProcessGateAssessment",
+    "ProcessGateEvidence",
+    "ProcessOperatingCycle",
+    "ProcessOperatingDecision",
     "ProcessTaskDefinition",
     "ProcessEdge",
     "NodeTool",
