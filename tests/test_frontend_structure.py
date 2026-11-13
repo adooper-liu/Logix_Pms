@@ -205,7 +205,7 @@ def test_kpi_edit_seeds_process_before_async_options():
 
 
 def test_asset_page_uses_workspace_shell():
-    """流程资产首屏只挂载概览主题，专家内容按后续 Gate 逐项恢复。"""
+    """高密度页面必须用左目录 + 中内容 + 右上下文，不能整页铺开。"""
     src = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
     assert "pageShell" in src
     assert "workspaceHtml" not in src, "页面不应再手写三栏外壳"
@@ -215,14 +215,17 @@ def test_asset_page_uses_workspace_shell():
     assert "ASSET().tab" in src
     section_block = src.split("const sectionList = [", 1)[1].split("  ];", 1)[0]
     assert "key: 'overview'" in section_block
-    for key in ("package", "sources", "diagnosis", "architecture", "evidence", "impact"):
-        assert f"key: '{key}'" not in section_block
-    aside_block = src.split("function assetAside", 1)[1].split("function paintAsset", 1)[0]
-    assert 'data-view="designer"' not in aside_block
+    assert "key: 'package'" not in section_block
+    assert "key: 'sources'" not in section_block
+    assert "key: 'diagnosis'" not in section_block
+    assert "key: 'architecture'" not in section_block
+    assert "key: 'evidence'" not in section_block
+    assert "key: 'impact'" not in section_block
+    assert 'data-view="designer"' not in src.split("function assetAside", 1)[1].split("function paintAsset", 1)[0]
     load_block = src.split("async function loadAsset", 1)[1].split("export async function renderAsset", 1)[0]
     assert "asset-readiness" in load_block
-    for endpoint in ("architecture-map", "evidence-claims", "r1-readiness", "model-source-profile"):
-        assert endpoint not in load_block
+    for expert_endpoint in ("architecture-map", "evidence-claims", "r1-readiness", "model-source-profile"):
+        assert expert_endpoint not in load_block
 
 
 MIGRATED_PAGE_SHELL = {

@@ -578,7 +578,8 @@ async function latestCompiled(documents, prefix, pid) {
 
 async function loadAsset(pid) {
   const readiness = await GET(`/processes/${pid}/asset-readiness`);
-  const pkg = ASSET().package && ASSET().package.process_id === pid ? ASSET().package : null;
+  let pkg = ASSET().package;
+  if (!pkg || pkg.process_id !== pid) pkg = null;
   return {
     readiness,
     map: null,
