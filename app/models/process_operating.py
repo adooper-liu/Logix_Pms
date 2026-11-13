@@ -28,6 +28,10 @@ class ProcessOperatingCycle(Base):
     supersedes_cycle_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("process_operating_cycle.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    launch_authorizer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    launch_authorizer_scope: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     cycle_type: Mapped[str] = mapped_column(String(16), index=True)
     status: Mapped[str] = mapped_column(String(16), default="DRAFT", index=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
