@@ -9,18 +9,6 @@ def db_session():
 
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
-        from app.models.process_operating import (
-            ProcessGateAssessment,
-            ProcessGateEvidence,
-            ProcessOperatingCycle,
-            ProcessOperatingDecision,
-        )
-
-        db.query(ProcessOperatingDecision).delete()
-        db.query(ProcessGateEvidence).delete()
-        db.query(ProcessGateAssessment).delete()
-        db.query(ProcessOperatingCycle).delete()
-        db.commit()
         yield db
         db.rollback()
 
@@ -39,8 +27,6 @@ def temporary_process(db_session):
     db_session.add(process)
     db_session.flush()
     yield process
-    db_session.delete(process)
-    db_session.commit()
 
 
 @pytest.fixture
