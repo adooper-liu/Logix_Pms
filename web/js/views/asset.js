@@ -491,7 +491,7 @@ function overviewHtml(readiness, blockers, writable) {
   )}`;
 }
 
-function assetAside(readiness, pid, canGenerate) {
+function assetAside(readiness, canGenerate) {
   const status = readiness.versioned
     ? `v${readiness.model_version}（${readiness.model_status}）` : '未发布';
   return `
@@ -503,8 +503,6 @@ function assetAside(readiness, pid, canGenerate) {
     ${sideCard('主操作', `
       <button class="btn btn-p" style="width:100%" data-act="asset.generate"
         ${canGenerate ? '' : 'disabled'}>生成资产包草稿</button>
-      <button class="btn btn-g mt" style="width:100%" data-act="asset.go"
-        data-view="designer" data-process="${pid}">打开设计器</button>
       <button class="btn btn-g mt" style="width:100%" data-act="asset.pick">切换流程</button>`)}`;
 }
 
@@ -527,27 +525,10 @@ function paintAsset(pid, data) {
 
   const sections = {
     overview: overviewHtml(readiness, blockers, writable),
-    package: packageHtml(pkg, blockers),
-    sources: sourceProfileHtml(sourceProfile),
-    diagnosis: diagnosisHtml(diagnosisReadiness, diagnosis),
-    architecture: relationHtml(map),
-    evidence: claimHtml(claims),
-    impact: impactHtml(),
   };
   if (!sections[ASSET().tab]) ASSET().tab = 'overview';
   const sectionList = [
     { key: 'overview', label: '概览', count: blockers.length, html: sections.overview },
-    { key: 'package', label: '资产包', html: sections.package },
-    { key: 'sources', label: '来源画像', count: sourceProfile?.claims_active, html: sections.sources },
-    {
-      key: 'diagnosis',
-      label: '诊断 R1',
-      count: diagnosisReadiness?.missing_inputs?.length,
-      html: sections.diagnosis,
-    },
-    { key: 'architecture', label: '架构关系', count: map?.nodes?.length, html: sections.architecture },
-    { key: 'evidence', label: '证据账本', count: claims?.claims?.length, html: sections.evidence },
-    { key: 'impact', label: '变更影响', html: sections.impact },
   ];
 
   const shell = pageShell({
@@ -567,7 +548,7 @@ function paintAsset(pid, data) {
     sections: sectionList,
     active: ASSET().tab,
     tabAct: 'asset.tab',
-    aside: assetAside(readiness, pid, canGenerate),
+    aside: assetAside(readiness, canGenerate),
   });
   ASSET().tab = shell.active;
   viewEl().innerHTML = shell.html;
@@ -596,21 +577,17 @@ async function latestCompiled(documents, prefix, pid) {
 }
 
 async function loadAsset(pid) {
-  const [readiness, map, claims, documents, diagnosisReadiness, sourceProfile] = await Promise.all([
-    GET(`/processes/${pid}/asset-readiness`),
-    GET(`/processes/${pid}/architecture-map`),
-    GET(`/processes/${pid}/evidence-claims`),
-    GET(`/process-documents?process_id=${pid}`),
-    GET(`/processes/${pid}/r1-readiness`),
-    GET(`/processes/${pid}/model-source-profile`),
-  ]);
-  let pkg = ASSET().package;
-  if (!pkg || pkg.process_id !== pid) pkg = await latestCompiled(documents, 'AP-', pid);
-  let diagnosis = ASSET().diagnosis;
-  if (!diagnosis || diagnosis.process_id !== pid) {
-    diagnosis = await latestCompiled(documents, 'DG-', pid);
-  }
-  return { readiness, map, claims, pkg, diagnosisReadiness, diagnosis, sourceProfile };
+  const readiness = await GET(`/processes/${pid}/asset-readiness`);
+  const pkg = ASSET().package && ASSET().package.process_id === pid ? ASSET().package : null;
+  return {
+    readiness,
+    map: null,
+    claims: { claims: [], conflicts: [], unknown_targets: [], labels: { method: {} } },
+    pkg,
+    diagnosisReadiness: null,
+    diagnosis: null,
+    sourceProfile: null,
+  };
 }
 
 export async function renderAsset() {
