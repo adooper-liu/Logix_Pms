@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.process import ProcessArch
 from app.models.process_operating import ProcessGateAssessment, ProcessOperatingCycle
-from app.services.process_operating import can_enter_pilot
+from app.services.process_operating import can_enter_pilot, readiness
 
 GATE_KEYS = tuple(f"GATE_{number}" for number in range(1, 13))
 
@@ -58,7 +58,7 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
         }
         for key in GATE_KEYS
     ]
-    status_map = {row["key"]: row["status"] for row in gates}
+    status_map = readiness(db, cycle.id)
     blocking = [
         row["key"]
         for row in gates[:10]

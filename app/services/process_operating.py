@@ -19,6 +19,10 @@ from app.models.process_operating import (
 from app.models.user import User
 
 
+class GateReadiness(dict[str, str]):
+    """Readiness result marker; prevents raw caller-supplied status maps."""
+
+
 def create_cycle(
     db: Session,
     *,
@@ -158,14 +162,14 @@ def record_decision(
     return row
 
 
-def readiness(db: Session, cycle_id: int) -> dict[str, str]:
+def readiness(db: Session, cycle_id: int) -> GateReadiness:
     rows = db.scalars(
         select(ProcessGateAssessment).where(
             ProcessGateAssessment.cycle_id == cycle_id,
             ProcessGateAssessment.is_current.is_(True),
         )
     ).all()
-    result = {}
+    result: GateReadiness = GateReadiness()
     for row in rows:
         evidence = db.scalars(
             select(ProcessGateEvidence).where(ProcessGateEvidence.gate_assessment_id == row.id)
@@ -179,6 +183,8 @@ def readiness(db: Session, cycle_id: int) -> dict[str, str]:
 
 
 def can_enter_pilot(gates: Mapping[str, str]) -> bool:
+    if not hasattr(gates, "get") or getattr(gates, "__class__", None) is dict:
+        raise TypeError("准入判断必须使用 readiness() 返回结果")
     return all(gates.get(f"GATE_{number}") in {"PASS", "NOT_APPLICABLE"} for number in range(1, 11))
 
 

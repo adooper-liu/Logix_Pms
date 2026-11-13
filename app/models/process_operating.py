@@ -73,7 +73,17 @@ class ProcessGateAssessment(Base):
     is_current: Mapped[bool] = mapped_column(default=True, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
-    __table_args__ = (UniqueConstraint("cycle_id", "gate_key", "revision", name="uq_gate_revision"),)
+    __table_args__ = (
+        UniqueConstraint("cycle_id", "gate_key", "revision", name="uq_gate_revision"),
+        Index(
+            "uq_gate_current",
+            "cycle_id",
+            "gate_key",
+            unique=True,
+            postgresql_where=text("is_current = true"),
+            sqlite_where=text("is_current = 1"),
+        ),
+    )
 
     @property
     def does_not_block_launch(self) -> bool:
