@@ -509,13 +509,9 @@ function assetAside(readiness, canGenerate) {
       <button class="btn btn-g mt" style="width:100%" data-act="asset.pick">切换流程</button>`)}`;
 }
 
-function paintAsset(pid, data) {
-  const {
-    readiness, operating, map, claims, pkg, diagnosisReadiness, diagnosis, sourceProfile,
-  } = data;
-  Object.assign(ASSET(), {
-    readiness, map, claims, diagnosisReadiness, diagnosis, sourceProfile, data,
-  });
+function paintAsset(_pid, data) {
+  const { readiness, operating } = data;
+  Object.assign(ASSET(), { readiness, operating, data });
   const blockers = readiness.blockers || [];
   const writable = canWrite();
   const stateLabel = readiness.versioned
@@ -578,21 +574,15 @@ async function latestCompiled(documents, prefix, pid) {
 }
 
 async function loadAsset(pid) {
-  const [readiness, operating] = await Promise.all([
-    GET(`/processes/${pid}/asset-readiness`),
-    GET(`/api/v1/processes/${pid}/operating-summary`),
-  ]);
-  let pkg = ASSET().package;
-  if (!pkg || pkg.process_id !== pid) pkg = null;
-  return {
-    readiness,
-    operating,
-    claims: { claims: [], conflicts: [], unknown_targets: [], labels: { method: {} } },
-    pkg,
-    diagnosisReadiness: null,
-    diagnosis: null,
-    sourceProfile: null,
-  };
+  const readiness = await GET(`/processes/${pid}/asset-readiness`);
+  const operating = await GET(`/processes/${pid}/operating-summary`).catch(() => ({
+    unavailable: true,
+    next_action: '经营摘要暂不可用，请稍后重试',
+    blocking_gates: [],
+    conditional_gates: [],
+    unverified_evidence: [],
+  }));
+  return { readiness, operating };
 }
 
 export async function renderAsset() {

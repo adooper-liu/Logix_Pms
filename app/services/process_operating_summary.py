@@ -79,6 +79,7 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
                 "evidence_grades": grades,
             }
         )
+    conditional = [row["key"] for row in gates[:10] if row["status"] == "CONDITIONAL"]
     blocking = [
         row["key"]
         for row in gates[:10]
@@ -90,8 +91,12 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
         "cycle_id": cycle.id,
         "gates": gates,
         "blocking_gates": blocking,
+        "conditional_gates": conditional,
+        "unverified_evidence": unverified,
         "next_action": (
-            f"补齐 {blocking[0]} 的事实与证据" if blocking else "可以准备受控试点"
+            f"补齐 {blocking[0]} 的事实与证据" if blocking
+            else f"复核 {conditional[0]} 的条件" if conditional
+            else "可以准备受控试点"
         ),
         "can_enter_pilot": can_enter_pilot(status_map),
         "sample_only": True,

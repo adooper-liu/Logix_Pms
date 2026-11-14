@@ -20,6 +20,7 @@ class ProcessOperatingSummaryOut(BaseModel):
     cycle_id: Optional[int] = None
     gates: List[OperatingGateOut] = []
     blocking_gates: List[str] = []
+    conditional_gates: List[str] = []
     unverified_evidence: List[str] = []
     next_action: str
     can_enter_pilot: bool = False
