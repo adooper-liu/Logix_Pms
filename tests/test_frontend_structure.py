@@ -213,6 +213,19 @@ def test_asset_page_uses_workspace_shell():
     assert "foldCard" in src
     assert "tipHelp(" in src
     assert "ASSET().tab" in src
+    section_block = src.split("const sectionList = [", 1)[1].split("  ];", 1)[0]
+    assert "key: 'overview'" in section_block
+    assert "key: 'package'" not in section_block
+    assert "key: 'sources'" not in section_block
+    assert "key: 'diagnosis'" not in section_block
+    assert "key: 'architecture'" not in section_block
+    assert "key: 'evidence'" not in section_block
+    assert "key: 'impact'" not in section_block
+    assert 'data-view="designer"' not in src.split("function assetAside", 1)[1].split("function paintAsset", 1)[0]
+    load_block = src.split("async function loadAsset", 1)[1].split("export async function renderAsset", 1)[0]
+    assert "asset-readiness" in load_block
+    for expert_endpoint in ("architecture-map", "evidence-claims", "r1-readiness", "model-source-profile"):
+        assert expert_endpoint not in load_block
 
 
 MIGRATED_PAGE_SHELL = {
