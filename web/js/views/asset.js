@@ -449,9 +449,16 @@ function paintPicker(rows) {
     </div>`;
 }
 
-function overviewHtml(readiness, blockers, writable) {
+function overviewHtml(readiness, operating, blockers, writable) {
   const metrics = readiness.metrics || {};
   const missing = blockers.length ? `${blockers.length} 项待处理` : '没有阻断';
+  const operatingGate = operating?.gates?.find((gate) => gate.key === 'GATE_1');
+  const operatingHtml = operating
+    ? `<div class="note mt"><div class="between"><b>流程经营状态</b>
+        <span class="tag ${operatingGate?.status === 'PASS' ? 't-grn' : 't-yel'}">${esc(operatingGate?.status || 'NOT_STARTED')}</span></div>
+        <div class="tiny muted mt">${esc(operating.next_action)}</div>
+        ${operating.unverified_evidence?.length ? `<div class="tiny muted mt">未核验证据：${esc(operating.unverified_evidence.join('、'))}</div>` : ''}
+      </div>` : '';
   const warnings = readiness.warnings && readiness.warnings.length
     ? `<div class="tiny muted mt">${readiness.warnings.map(esc).join('；')}</div>` : '';
   return `
@@ -469,10 +476,10 @@ function overviewHtml(readiness, blockers, writable) {
       <div class="card" style="padding:16px 18px">
         <div class="tiny muted">下一步做什么</div>
         <h3 style="margin:6px 0">${esc(readiness.next_action)}</h3>
-        <div class="tiny muted">${writable
-    ? '可生成草稿；提交评审前会重新跑阻断。' : '当前角色只读。'}</div>
+        <div class="tiny muted">${writable ? '可生成草稿；提交评审前会重新跑阻断。' : '当前角色只读。'}</div>
       </div>
     </div>
+    ${operatingHtml}
     <div class="card" style="padding:16px 18px;margin-bottom:14px">
       <h3>生成就绪度</h3>
       <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px">
@@ -484,11 +491,7 @@ function overviewHtml(readiness, blockers, writable) {
         <div class="kpi"><div class="num">${metrics.claims_total || 0}</div><div class="lab">证据主张</div></div>
       </div>
     </div>
-    ${foldCard(
-    '阻断与下一步',
-    `${blockers.map(blockerHtml).join('') || '<div class="tiny muted">没有阻断，可以生成草稿并提交评审。</div>'}${warnings}`,
-    { open: true },
-  )}`;
+    ${foldCard('阻断与下一步', `${blockers.map(blockerHtml).join('') || '<div class="tiny muted">没有阻断，可以生成草稿并提交评审。</div>'}${warnings}`, { open: true })}`;
 }
 
 function assetAside(readiness, canGenerate) {
@@ -508,7 +511,7 @@ function assetAside(readiness, canGenerate) {
 
 function paintAsset(pid, data) {
   const {
-    readiness, map, claims, pkg, diagnosisReadiness, diagnosis, sourceProfile,
+    readiness, operating, map, claims, pkg, diagnosisReadiness, diagnosis, sourceProfile,
   } = data;
   Object.assign(ASSET(), {
     readiness, map, claims, diagnosisReadiness, diagnosis, sourceProfile, data,
@@ -524,7 +527,7 @@ function paintAsset(pid, data) {
   const canGenerate = readiness.can_generate_draft && writable;
 
   const sections = {
-    overview: overviewHtml(readiness, blockers, writable),
+    overview: overviewHtml(readiness, operating, blockers, writable),
   };
   if (!sections[ASSET().tab]) ASSET().tab = 'overview';
   const sectionList = [
@@ -542,9 +545,7 @@ function paintAsset(pid, data) {
       + '资产包是流程级 SOP，不是项目交付物。',
       '本页说明',
     ),
-    actions: `<button class="btn btn-g" data-act="asset.pick">切换流程</button>
-      <button class="btn btn-g" data-act="asset.go" data-view="designer"
-        data-process="${pid}">打开设计器</button>`,
+    actions: `<button class="btn btn-g" data-act="asset.pick">切换流程</button>`,
     sections: sectionList,
     active: ASSET().tab,
     tabAct: 'asset.tab',
@@ -577,12 +578,15 @@ async function latestCompiled(documents, prefix, pid) {
 }
 
 async function loadAsset(pid) {
-  const readiness = await GET(`/processes/${pid}/asset-readiness`);
+  const [readiness, operating] = await Promise.all([
+    GET(`/processes/${pid}/asset-readiness`),
+    GET(`/api/v1/processes/${pid}/operating-summary`),
+  ]);
   let pkg = ASSET().package;
   if (!pkg || pkg.process_id !== pid) pkg = null;
   return {
     readiness,
-    map: null,
+    operating,
     claims: { claims: [], conflicts: [], unknown_targets: [], labels: { method: {} } },
     pkg,
     diagnosisReadiness: null,

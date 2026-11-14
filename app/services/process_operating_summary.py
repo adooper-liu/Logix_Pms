@@ -6,7 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.process import ProcessArch
-from app.models.process_operating import ProcessGateAssessment, ProcessOperatingCycle
+from app.models.process_operating import (
+    ProcessGateAssessment,
+    ProcessGateEvidence,
+    ProcessOperatingCycle,
+)
 from app.services.process_operating import can_enter_pilot, readiness
 
 GATE_KEYS = tuple(f"GATE_{number}" for number in range(1, 13))
@@ -49,16 +53,32 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
             )
         ).all()
     }
-    gates = [
-        {
-            "key": key,
-            "status": assessments[key].status if key in assessments else "NOT_STARTED",
-            "applicability": assessments[key].applicability if key in assessments else "APPLICABLE",
-            "rigor": assessments[key].rigor if key in assessments else "STANDARD",
-        }
-        for key in GATE_KEYS
-    ]
     status_map = readiness(db, cycle.id)
+    gates = []
+    unverified = []
+    for key in GATE_KEYS:
+        assessment = assessments.get(key)
+        evidence = (
+            db.scalars(
+                select(ProcessGateEvidence).where(
+                    ProcessGateEvidence.gate_assessment_id == assessment.id
+                )
+            ).all()
+            if assessment is not None
+            else []
+        )
+        grades = [item.evidence_grade for item in evidence]
+        if any(item.verification_status != "VERIFIED" for item in evidence):
+            unverified.append(key)
+        gates.append(
+            {
+                "key": key,
+                "status": status_map.get(key, "NOT_STARTED"),
+                "applicability": assessment.applicability if assessment else "APPLICABLE",
+                "rigor": assessment.rigor if assessment else "STANDARD",
+                "evidence_grades": grades,
+            }
+        )
     blocking = [
         row["key"]
         for row in gates[:10]
