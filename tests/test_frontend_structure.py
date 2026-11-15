@@ -221,11 +221,21 @@ def test_asset_page_uses_workspace_shell():
     assert "key: 'architecture'" not in section_block
     assert "key: 'evidence'" not in section_block
     assert "key: 'impact'" not in section_block
-    assert 'data-view="designer"' not in src.split("function assetAside", 1)[1].split("function paintAsset", 1)[0]
-    load_block = src.split("async function loadAsset", 1)[1].split("export async function renderAsset", 1)[0]
+    assert (
+        'data-view="designer"'
+        not in src.split("function assetAside", 1)[1].split("function paintAsset", 1)[0]
+    )
+    load_block = src.split("async function loadAsset", 1)[1].split(
+        "export async function renderAsset", 1
+    )[0]
     assert "asset-readiness" in load_block
     assert "operating-summary" in load_block
-    for expert_endpoint in ("architecture-map", "evidence-claims", "r1-readiness", "model-source-profile"):
+    for expert_endpoint in (
+        "architecture-map",
+        "evidence-claims",
+        "r1-readiness",
+        "model-source-profile",
+    ):
         assert expert_endpoint not in load_block
 
 

@@ -61,7 +61,6 @@ def test_seeded_instances_and_queue(client):
     instances = client.get(f"{API}/execution/instances").json()
     assert len(instances) >= 1
 
-
     assert all(i["status"] in ("RUNNING", "COMPLETED") for i in instances)
     running = [i for i in instances if i["status"] == "RUNNING"]
     assert running, "种子应有运行中实例"
@@ -74,11 +73,8 @@ def test_seeded_instances_and_queue(client):
     tasks = client.get(f"{API}/execution/tasks", params={"only_open": True}).json()
     assert len(tasks) >= 1
 
-
-
     assert any(t["assignee_name"] for t in tasks), "种子数据应有一条已指派任务"
     assert any(t["assignee_user_id"] is not None for t in tasks), "种子数据应有一条已指派任务"
-
 
 
 # ------------------------------------------------------------------ 主流程

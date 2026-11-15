@@ -1,7 +1,7 @@
 """表单定义与分支规则：校验、快照与条件求值。
 
 表单字段是 JSON 数组，支持 text / textarea / number / date / select / checkbox。
-规则条件是「全部满足」语义，命中后流转到 target_node_key；显式 next_node_key 优先。
+规则条件是「全部满足」语义；显式 next_node_key 不得绕过已配置的机器条件。
 """
 
 from __future__ import annotations
@@ -278,4 +278,45 @@ def pick_target_from_edges(outgoing: List[Dict], context: Dict) -> Optional[str]
         return matched[0].get("dst")
     if defaults:
         return defaults[0].get("dst")
+    return None
+
+
+def resolve_target(outgoing, rules, context, explicit_target=None):
+    """Resolve a task route without allowing manual or single-edge bypasses."""
+    targets = {edge["dst"] for edge in outgoing}
+    if explicit_target and explicit_target not in targets:
+        raise HTTPException(400, "next_node_key 不在该节点的出边目标中")
+    controlled = any(edge.get("match_conditions") or edge.get("match") for edge in outgoing)
+    if controlled:
+        matched = []
+        for edge in outgoing:
+            conditions = edge.get("match_conditions") or edge.get("match")
+            if conditions and all(_match(c, context) for c in normalize_conditions(conditions)):
+                matched.append(edge["dst"])
+        if len(matched) > 1:
+            raise HTTPException(400, "多个分支条件同时满足，请先修正模型规则")
+        defaults = [
+            edge["dst"]
+            for edge in outgoing
+            if edge.get("is_default") and not (edge.get("match_conditions") or edge.get("match"))
+        ]
+        if not matched and len(defaults) > 1:
+            raise HTTPException(400, "存在多个默认分支，请先修正模型规则")
+        target = matched[0] if matched else defaults[0] if defaults else None
+        if target is None:
+            raise HTTPException(400, "当前记录不满足任何分支条件，不能继续流转")
+        if explicit_target and explicit_target != target:
+            raise HTTPException(400, "指定下一步与分支条件不一致，不能绕过过程控制")
+        return target
+    if explicit_target:
+        return explicit_target
+    target = pick_target_from_edges(outgoing, context) or evaluate_rules(rules, context)
+    if target:
+        if target not in targets:
+            raise HTTPException(400, "规则目标不是该节点的出边目标")
+        return target
+    if len(outgoing) == 1:
+        return outgoing[0]["dst"]
+    if outgoing:
+        raise HTTPException(400, "该节点有多个分支，请用 next_node_key 指定下一步")
     return None

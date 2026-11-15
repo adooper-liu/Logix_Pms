@@ -3,8 +3,8 @@
 当前版本刻意保持简单，先跑通「实例 → 待办任务 → 完成 → 下一任务」：
 
 - 一个实例同一时刻只有一个 OPEN 任务；
-- 节点有多条出边时，由处理人在完成时选择下一步（`next_node_key`）；
-- 并行网关、子流程、定时器、自动规则留到后续版本；
+- 条件出边按记录匹配；人工选择下一步（`next_node_key`）不得绕过机器条件；
+- 并行网关、子流程、定时器留到后续版本；
 - 实例启动时快照流程模型，运行中的实例不受设计器后续修改影响。
 """
 
@@ -767,38 +767,12 @@ def complete_task(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     context = {**(instance.variables or {}), **form_data}
 
-    next_key: Optional[str] = None
-    if payload.next_node_key:
-        targets = {e["dst"] for e in outgoing}
-        if payload.next_node_key not in targets:
-            raise HTTPException(
-                status_code=400,
-                detail=f"next_node_key 不在该节点的出边目标中（可选：{'、'.join(sorted(targets))}）",
-            )
-        next_key = payload.next_node_key
-    else:
-        # 设计定语义：出边 match / 默认流优先；process_rule 仅过渡兜底
-        next_key = forms_service.pick_target_from_edges(outgoing, context)
-        if not next_key:
-            rule_target = forms_service.evaluate_rules(
-                (instance.snapshot.get("rules") or {}).get(task.node_key, []), context
-            )
-            if rule_target:
-                targets = {e["dst"] for e in outgoing}
-                if rule_target not in targets:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"规则目标 {rule_target} 不是该节点的出边目标",
-                    )
-                next_key = rule_target
-        if not next_key and len(outgoing) == 1:
-            next_key = outgoing[0]["dst"]
-        elif not next_key and len(outgoing) > 1:
-            options = "、".join(f"{e['dst']}" for e in outgoing)
-            raise HTTPException(
-                status_code=400,
-                detail=f"该节点有多个分支，请用 next_node_key 指定下一步（可选：{options}）",
-            )
+    next_key = forms_service.resolve_target(
+        outgoing,
+        (instance.snapshot.get("rules") or {}).get(task.node_key, []),
+        context,
+        payload.next_node_key,
+    )
 
     # 表单值是流程上下文的一部分：后续节点的规则必须能读到上游填写的数据。
     # 采用扁平合并，后填的字段覆盖先前的；显式传入的 variables 优先级最高。

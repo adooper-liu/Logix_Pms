@@ -25,12 +25,16 @@ def test_operating_summary_active_cycle_reports_unverified_evidence(client):
         create_cycle,
     )
 
-    process = next(row for row in client.get("/api/v1/process-map/flat").json() if row["level"] == 3)
+    process = next(
+        row for row in client.get("/api/v1/process-map/flat").json() if row["level"] == 3
+    )
     with SessionLocal() as db:
         cycle = create_cycle(db, process_id=process["id"], cycle_type="BASELINE")
         activate_cycle(db, cycle.id)
         gate = assess_gate(db, cycle_id=cycle.id, gate_key="GATE_4", status="PASS")
-        add_evidence(db, gate_assessment_id=gate.id, source_type="REAL_BUSINESS_RUN", source_id="unverified")
+        add_evidence(
+            db, gate_assessment_id=gate.id, source_type="REAL_BUSINESS_RUN", source_id="unverified"
+        )
         db.commit()
     try:
         response = client.get(f"/api/v1/processes/{process['id']}/operating-summary")

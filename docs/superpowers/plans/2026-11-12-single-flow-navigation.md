@@ -58,15 +58,20 @@ def test_development_seed_contains_only_l3_032_and_its_project(tmp_path):
     with _session(tmp_path) as db:
         result = seed_single_flow(db, reset=True)
         assert {row.code for row in db.scalars(select(ProcessArch)).all()} == {
-            "L1-03", "L2-003", "L3-032",
-            "L4-201", "L4-202", "L4-203",
-            "L4-204", "L4-205", "L4-206",
+            "L1-03",
+            "L2-003",
+            "L3-032",
+            "L4-201",
+            "L4-202",
+            "L4-203",
+            "L4-204",
+            "L4-205",
+            "L4-206",
         }
         projects = db.scalars(select(Project)).all()
         assert len(projects) == 1
         assert projects[0].process_id == next(
-            row.id for row in db.scalars(select(ProcessArch)).all()
-            if row.code == "L3-032"
+            row.id for row in db.scalars(select(ProcessArch)).all() if row.code == "L3-032"
         )
         assert result["process_arch"] == 9
         assert result["projects"] == 1
@@ -160,9 +165,15 @@ docker exec logix-pms-db pg_dump -U psm -d logix_pms -Fc > logix_pms_before_sing
 
 ```python
 assert process_codes == {
-    "L1-03", "L2-003", "L3-032",
-    "L4-201", "L4-202", "L4-203",
-    "L4-204", "L4-205", "L4-206",
+    "L1-03",
+    "L2-003",
+    "L3-032",
+    "L4-201",
+    "L4-202",
+    "L4-203",
+    "L4-204",
+    "L4-205",
+    "L4-206",
 }
 assert project_count == 1
 assert project.process_id == l3_032_id

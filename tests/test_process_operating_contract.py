@@ -19,7 +19,9 @@ def temporary_process(db_session):
 
     from app.models.process import ProcessArch
 
-    process = ProcessArch(code=f"L3-CONTRACT-{uuid4().hex[:8]}", name="流程经营契约测试流程", level=3)
+    process = ProcessArch(
+        code=f"L3-CONTRACT-{uuid4().hex[:8]}", name="流程经营契约测试流程", level=3
+    )
     db_session.add(process)
     db_session.flush()
     yield process
@@ -130,16 +132,37 @@ def test_not_applicable_requires_reason_and_allowed_gate(db_session, operating_c
     from app.services.process_operating import assess_gate
 
     with pytest.raises(ValueError):
-        assess_gate(db_session, cycle_id=operating_cycle.id, gate_key="GATE_4", applicability="NOT_APPLICABLE")
+        assess_gate(
+            db_session,
+            cycle_id=operating_cycle.id,
+            gate_key="GATE_4",
+            applicability="NOT_APPLICABLE",
+        )
 
 
 def test_seed_configuration_is_not_business_evidence(db_session, operating_cycle):
     from app.services.process_operating import add_evidence, assess_gate
 
     gate = assess_gate(db_session, cycle_id=operating_cycle.id, gate_key="GATE_4")
-    seed = add_evidence(db_session, gate_assessment_id=gate.id, source_type="SEED_CONFIGURATION", source_id="seed-process-node")
-    real = add_evidence(db_session, gate_assessment_id=gate.id, source_type="REAL_BUSINESS_RUN", source_id="instance-001")
-    verified = add_evidence(db_session, gate_assessment_id=gate.id, source_type="REAL_BUSINESS_RUN", source_id="instance-002", verified_by_user_id=1)
+    seed = add_evidence(
+        db_session,
+        gate_assessment_id=gate.id,
+        source_type="SEED_CONFIGURATION",
+        source_id="seed-process-node",
+    )
+    real = add_evidence(
+        db_session,
+        gate_assessment_id=gate.id,
+        source_type="REAL_BUSINESS_RUN",
+        source_id="instance-001",
+    )
+    verified = add_evidence(
+        db_session,
+        gate_assessment_id=gate.id,
+        source_type="REAL_BUSINESS_RUN",
+        source_id="instance-002",
+        verified_by_user_id=1,
+    )
     assert seed.evidence_grade == "E1"
     assert real.evidence_grade == "E1"
     assert verified.evidence_grade == "E3"
@@ -149,7 +172,9 @@ def test_seed_configuration_is_not_business_evidence(db_session, operating_cycle
 def test_gate_revision_replaces_current_assessment(db_session, operating_cycle):
     from app.services.process_operating import assess_gate
 
-    first = assess_gate(db_session, cycle_id=operating_cycle.id, gate_key="GATE_1", status="IN_PROGRESS")
+    first = assess_gate(
+        db_session, cycle_id=operating_cycle.id, gate_key="GATE_1", status="IN_PROGRESS"
+    )
     second = assess_gate(db_session, cycle_id=operating_cycle.id, gate_key="GATE_1", status="PASS")
     db_session.refresh(first)
     assert first.is_current is False

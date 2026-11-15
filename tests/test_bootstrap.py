@@ -99,9 +99,7 @@ def test_development_seed_contains_only_l3_032_and_its_project(tmp_path):
         }
         projects = db.scalars(select(Project)).all()
         assert len(projects) == 1
-        assert projects[0].process_id == next(
-            row.id for row in processes if row.code == "L3-032"
-        )
+        assert projects[0].process_id == next(row.id for row in processes if row.code == "L3-032")
         assert result["process_arch"] == 9
         assert result["projects"] == 1
 

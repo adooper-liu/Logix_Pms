@@ -83,8 +83,7 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
     blocking = [
         row["key"]
         for row in gates[:10]
-        if row["applicability"] != "NOT_APPLICABLE"
-        and row["status"] not in {"PASS", "CONDITIONAL"}
+        if row["applicability"] != "NOT_APPLICABLE" and row["status"] not in {"PASS", "CONDITIONAL"}
     ]
     return {
         "process_id": process_id,
@@ -94,8 +93,10 @@ def sample_operating_summary(db: Session, process_id: int) -> dict:
         "conditional_gates": conditional,
         "unverified_evidence": unverified,
         "next_action": (
-            f"补齐 {blocking[0]} 的事实与证据" if blocking
-            else f"复核 {conditional[0]} 的条件" if conditional
+            f"补齐 {blocking[0]} 的事实与证据"
+            if blocking
+            else f"复核 {conditional[0]} 的条件"
+            if conditional
             else "可以准备受控试点"
         ),
         "can_enter_pilot": can_enter_pilot(status_map),
