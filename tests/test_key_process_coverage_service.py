@@ -213,16 +213,27 @@ def test_invalid_node_relation_is_reported_as_gap():
 def test_broken_parent_chain_is_reported_as_gap():
     prefix = "P3B-SVC-BROKEN-HIERARCHY"
     with SessionLocal() as db:
+        l3 = ProcessArch(
+            code=f"{prefix}-L3",
+            name="断链流程",
+            level=3,
+            is_key_process=False,
+            is_draft=False,
+        )
         l4 = ProcessArch(
             code=f"{prefix}-L4",
             name="断链活动",
             level=4,
-            parent_id=999999,
+            parent=l3,
             is_key_process=True,
             key_basis="断链依据",
             is_draft=False,
         )
-        db.add(l4)
+        db.add_all([l3, l4])
+        db.flush()
+        # A persisted cycle exercises the same broken-chain branch without
+        # violating PostgreSQL's self-referencing foreign-key constraint.
+        l3.parent_id = l4.id
         db.commit()
     activity = _activity(prefix)
     assert any(g.code == "INVALID_HIERARCHY" for g in activity.gaps)
