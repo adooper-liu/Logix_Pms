@@ -40,6 +40,7 @@ from app.api.v1 import (
     process_card,
     process_documents,
     process_map,
+    process_operating,
     process_tasks,
     projects,
     raci,
@@ -72,6 +73,7 @@ protected.include_router(asset_graph.package_router)
 protected.include_router(asset_graph.trace_router)
 protected.include_router(governance_evidence.router)
 protected.include_router(process_documents.router)
+protected.include_router(process_operating.router)
 protected.include_router(process_tasks.router)
 protected.include_router(benchmark.router)
 protected.include_router(baselines.router)
