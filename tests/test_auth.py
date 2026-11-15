@@ -206,17 +206,37 @@ def test_designer_enforces_owner_by_user_id(owner_client, manager_client):
         model = owner_client.get(f"{API}/processes/{mine['id']}/design").json()
         payload = {
             "nodes": [
-                {k: n[k] for k in ("node_key", "name", "node_type", "lane", "owner_role",
-                                   "duration_minutes", "wait_minutes", "cost", "rework_rate",
-                                   "approval_levels", "is_value_added", "sequence_order",
-                                   "position_x", "position_y")}
+                {
+                    k: n[k]
+                    for k in (
+                        "node_key",
+                        "name",
+                        "node_type",
+                        "lane",
+                        "owner_role",
+                        "duration_minutes",
+                        "wait_minutes",
+                        "cost",
+                        "rework_rate",
+                        "approval_levels",
+                        "is_value_added",
+                        "sequence_order",
+                        "position_x",
+                        "position_y",
+                    )
+                }
                 for n in model["nodes"]
             ],
-            "edges": [{k: e[k] for k in ("source_key", "target_key", "label", "condition", "probability")}
-                      for e in model["edges"]],
+            "edges": [
+                {k: e[k] for k in ("source_key", "target_key", "label", "condition", "probability")}
+                for e in model["edges"]
+            ],
             "expected_version": model["version"],
         }
-        assert owner_client.put(f"{API}/processes/{mine['id']}/design", json=payload).status_code == 200
+        assert (
+            owner_client.put(f"{API}/processes/{mine['id']}/design", json=payload).status_code
+            == 200
+        )
     finally:
         with SessionLocal() as db:
             db.get(ProcessArch, mine["id"]).owner_user_id = previous_owner
@@ -227,7 +247,9 @@ def test_designer_enforces_owner_by_user_id(owner_client, manager_client):
     )
     assert created.status_code == 201, created.text
     try:
-        r = owner_client.put(f"{API}/processes/{created.json()['id']}/design", json={"nodes": [], "edges": []})
+        r = owner_client.put(
+            f"{API}/processes/{created.json()['id']}/design", json={"nodes": [], "edges": []}
+        )
         assert r.status_code == 403
     finally:
         manager_client.delete(f"{API}/process-map/{created.json()['id']}")

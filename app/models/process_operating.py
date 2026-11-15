@@ -38,13 +38,15 @@ class ProcessOperatingCycle(Base):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-    __table_args__ = (Index(
-        "uq_operating_cycle_active",
-        "process_id",
-        unique=True,
-        postgresql_where=text("status = 'ACTIVE'"),
-        sqlite_where=text("status = 'ACTIVE'"),
-    ),)
+    __table_args__ = (
+        Index(
+            "uq_operating_cycle_active",
+            "process_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
+    )
 
 
 class ProcessGateAssessment(Base):

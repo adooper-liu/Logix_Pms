@@ -114,7 +114,9 @@ def add_evidence(
     source_id: str,
     **values,
 ) -> ProcessGateEvidence:
-    grade = "E3" if source_type == "REAL_BUSINESS_RUN" and values.get("verified_by_user_id") else "E1"
+    grade = (
+        "E3" if source_type == "REAL_BUSINESS_RUN" and values.get("verified_by_user_id") else "E1"
+    )
     verification_status = "VERIFIED" if grade in {"E2", "E3", "E4"} else "UNVERIFIED"
     evidence = ProcessGateEvidence(
         gate_assessment_id=gate_assessment_id,
@@ -176,8 +178,11 @@ def readiness(db: Session, cycle_id: int) -> GateReadiness:
         ).all()
         verified = any(item.verification_status == "VERIFIED" for item in evidence)
         result[row.gate_key] = (
-            row.status if row.status in {"NOT_APPLICABLE", "CONDITIONAL"} else
-            "PASS" if row.status == "PASS" and verified else "BLOCKED"
+            row.status
+            if row.status in {"NOT_APPLICABLE", "CONDITIONAL"}
+            else "PASS"
+            if row.status == "PASS" and verified
+            else "BLOCKED"
         )
     return result
 

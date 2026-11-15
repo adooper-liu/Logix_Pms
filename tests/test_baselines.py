@@ -151,7 +151,6 @@ def test_baseline_scope_org_and_process(client, manager_client):
     assert created_process.status_code == 201, created_process.text
     other_process = created_process.json()["id"]
 
-
     group_doc = _doc(manager_client, process_id, "范围集团 SOP")
     _serve_doc(manager_client, group_doc["id"], "1.0")
     east_doc = _doc(manager_client, process_id, "范围华东 SOP", orgs["CO-EAST"]["id"])
