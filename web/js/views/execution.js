@@ -7,6 +7,7 @@ import { renderAsync, RENDERERS, go, urlParams, setUrlState } from '../core/rout
 import { AUTH, canWrite, canManage } from '../core/auth.js';
 import { GET, POST, PATCH, PUT, DEL } from '../core/api.js';
 import { executionReadinessHtml } from './shared/execution_readiness.js';
+import { renderGate5 } from './shared/gate5.js';
 import { executionWrite, engineConfigurationHtml } from './shared/engine_execution.js';
 
 /* ============================================================ 9. 流程执行 */
@@ -184,6 +185,7 @@ const renderExecution = () => {
       let rules = [];
       let config = null;
       let readiness = null;
+      let gate5 = null;
       let engine = null;
       let assignments = [];
       let modelEdges = [];
@@ -201,7 +203,7 @@ const renderExecution = () => {
         const pid = stillThere ? ex.configProcess : processes[0].id;
         ex.configProcess = pid;
         let design = null;
-        [forms, rules, config, assignments, orgs, roleMeta, assignees, design, readiness] = await Promise.all([
+        [forms, rules, config, assignments, orgs, roleMeta, assignees, design, readiness, gate5] = await Promise.all([
           GET('/execution/forms?process_id=' + pid),
           GET('/execution/rules?process_id=' + pid),
           GET('/execution/config?process_id=' + pid),
@@ -210,7 +212,7 @@ const renderExecution = () => {
           GET('/auth/meta'),
           GET('/execution/assignees'),
           GET('/processes/' + pid + '/design').catch(() => null),
-          GET('/execution/readiness?process_id=' + pid),
+          GET('/processes/' + pid + '/gate5/readiness'),
         ]);
         modelEdges = (design && design.edges) || [];
         engine = await GET('/execution/engine/status?process_id=' + pid);
@@ -225,7 +227,7 @@ const renderExecution = () => {
         ]);
       }
       return {
-        tasks, instances, processes, forms, rules, config, assignments, modelEdges, readiness, engine,
+        tasks, instances, processes, forms, rules, config, assignments, modelEdges, readiness, gate5, engine,
         orgs, roleMeta, assignees, endpoints, deliveries, inboundHooks, inboundActions,
       };
     }),
@@ -542,6 +544,7 @@ const renderExecution = () => {
       midBody = `
         <h3 style="margin:0 0 8px">就绪检查${tipHelp(CONFIG_STEPS[4].tip, '就绪检查')}</h3>
         ${cfgProcess ? readinessHtml(cfgProcess) : '<div class="empty">请先选择流程</div>'}
+        ${cfgProcess && d.gate5 ? renderGate5(d.gate5) : ''}
         <table class="tbl mt">
           <thead><tr><th>检查项</th><th>状态</th></tr></thead>
           <tbody>
