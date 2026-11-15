@@ -336,3 +336,5 @@ __all__ = [
     "DataDomainType",
     "DataFrequency",
 ]
+
+from app.models.responsibility import ProcessResponsibilityAcceptance  # noqa: F401

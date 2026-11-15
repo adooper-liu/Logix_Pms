@@ -24,6 +24,7 @@ from app.api.v1 import (
     deliverables,
     designer,
     execution,
+    gate5,
     governance_evidence,
     handbook,
     improvement_round,
@@ -71,6 +72,7 @@ protected.include_router(process_card.router)
 protected.include_router(asset_graph.router)
 protected.include_router(asset_graph.package_router)
 protected.include_router(asset_graph.trace_router)
+protected.include_router(gate5.router)
 protected.include_router(governance_evidence.router)
 protected.include_router(process_documents.router)
 protected.include_router(process_operating.router)
