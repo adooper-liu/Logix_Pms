@@ -12,6 +12,7 @@ import { state } from '../core/state.js';
 import { renderAsync, go, urlParams } from '../core/router.js';
 import { canWrite, canManage } from '../core/auth.js';
 import { GET, POST, POST_FORM, DEL, download } from '../core/api.js';
+import { renderGate5 } from './shared/gate5.js';
 
 const ASSET = () => (state.asset || (state.asset = {
   processId: null, package: null, preview: null, tab: 'overview',
@@ -449,7 +450,7 @@ function paintPicker(rows) {
     </div>`;
 }
 
-function overviewHtml(readiness, operating, blockers, writable) {
+function overviewHtml(readiness, operating, blockers, writable, gate5) {
   const metrics = readiness.metrics || {};
   const missing = blockers.length ? `${blockers.length} 项待处理` : '没有阻断';
   const operatingGate = operating?.gates?.find((gate) => gate.key === 'GATE_1');
@@ -480,6 +481,8 @@ function overviewHtml(readiness, operating, blockers, writable) {
       </div>
     </div>
     ${operatingHtml}
+    ${gate5 ? renderGate5(gate5) : ''}
+    ${renderGate5(readiness)}
     <div class="card" style="padding:16px 18px;margin-bottom:14px">
       <h3>生成就绪度</h3>
       <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px">
@@ -510,8 +513,8 @@ function assetAside(readiness, canGenerate) {
 }
 
 function paintAsset(_pid, data) {
-  const { readiness, operating } = data;
-  Object.assign(ASSET(), { readiness, operating, data });
+  const { readiness, operating, gate5 } = data;
+  Object.assign(ASSET(), { readiness, operating, gate5, data });
   const blockers = readiness.blockers || [];
   const writable = canWrite();
   const stateLabel = readiness.versioned
@@ -523,7 +526,7 @@ function paintAsset(_pid, data) {
   const canGenerate = readiness.can_generate_draft && writable;
 
   const sections = {
-    overview: overviewHtml(readiness, operating, blockers, writable),
+    overview: overviewHtml(readiness, operating, blockers, writable, gate5),
   };
   if (!sections[ASSET().tab]) ASSET().tab = 'overview';
   const sectionList = [
@@ -575,6 +578,7 @@ async function latestCompiled(documents, prefix, pid) {
 
 async function loadAsset(pid) {
   const readiness = await GET(`/processes/${pid}/asset-readiness`);
+  const gate5 = await GET(`/processes/${pid}/gate5/readiness`).catch(() => null);
   const operating = await GET(`/processes/${pid}/operating-summary`).catch(() => ({
     unavailable: true,
     next_action: '经营摘要暂不可用，请稍后重试',
@@ -582,7 +586,7 @@ async function loadAsset(pid) {
     conditional_gates: [],
     unverified_evidence: [],
   }));
-  return { readiness, operating };
+  return { readiness, gate5, operating };
 }
 
 export async function renderAsset() {
