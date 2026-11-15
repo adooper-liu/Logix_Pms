@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -385,6 +386,9 @@ class NodeAssignment(Base):
         ),
         index=True,
     )
+    model_version_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_model_version.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     node_key: Mapped[str] = mapped_column(String(64))
     role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # Role
     org_unit_id: Mapped[Optional[int]] = mapped_column(
@@ -405,6 +409,14 @@ class NodeAssignment(Base):
         nullable=True,
         index=True,
     )
+    approver_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    backup_assignee_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    effective_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     due_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     escalation_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     escalation_user_id: Mapped[Optional[int]] = mapped_column(
