@@ -1,8 +1,10 @@
 """Generic Gate 5 responsibility closure API."""
 
 from fastapi import APIRouter, HTTPException
+from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, ManagerUser, WriteUser
+from app.models.asset_graph import NodeActivityLink
 from app.models.responsibility import ProcessResponsibilityAcceptance
 from app.schemas.gate5 import (
     AcceptanceCreate,
@@ -11,7 +13,7 @@ from app.schemas.gate5 import (
     Gate5ReadinessOut,
     OwnerUpdate,
 )
-from app.services import audit
+from app.services import audit, org_access, process_model
 from app.services import gate5_readiness as service
 
 router = APIRouter(prefix="/processes/{process_id}/gate5", tags=["Gate 5 责任闭合"])
@@ -29,8 +31,10 @@ def gate5_readiness(
 
 
 @router.put("/owner")
-def set_owner(process_id: int, payload: OwnerUpdate, db: DbSession, user: ManagerUser):
+def set_owner(process_id: int, payload: OwnerUpdate, db: DbSession, user: WriteUser):
     process = _process(db, process_id)
+    if user.role == "OWNER" and process.owner_user_id != user.id:
+        raise HTTPException(403, "只能维护自己负责的流程")
     service.set_process_owner(
         db,
         process,
@@ -70,30 +74,51 @@ def set_assignment(
 def set_accountability(
     process_id: int, node_key: str, payload: AccountabilityUpdate, db: DbSession, user: ManagerUser
 ):
+    from app.services import raci as raci_service
+
     process = _process(db, process_id)
+    org_access.ensure_visible(db, user, process.org_unit_id)
+    process_model.lock_process(db, process)
     version = service._published(db, process)
     if version is None or version.id != payload.expected_model_version_id:
         raise HTTPException(409, "已发布模型版本已变化，请刷新")
-    activity = next(
-        (
-            n.get("process_arch_id")
-            for n in version.snapshot.get("nodes", [])
-            if n.get("node_key") == node_key
-        ),
-        None,
+    node = next(
+        (n for n in version.snapshot.get("nodes", []) if n.get("node_key") == node_key), None
     )
-    if activity is None:
+    if node is None:
         raise HTTPException(404, "节点不属于当前模型")
-    row = __import__("app.models.raci", fromlist=["RaciAssignment"]).RaciAssignment(
-        process_id=process.id,
-        activity_id=activity,
-        matter=f"{node_key} 活动责任",
-        node_key=node_key,
-        role_id=payload.role_id,
-        raci="A",
+    linked = set(
+        db.scalars(
+            select(NodeActivityLink.activity_id).where(
+                NodeActivityLink.process_id == process.id,
+                NodeActivityLink.model_version_id == version.id,
+                NodeActivityLink.node_key == node_key,
+                NodeActivityLink.relation.in_({"REALIZES", "PART_OF"}),
+            )
+        ).all()
     )
-    db.add(row)
-    db.flush()
+    if not linked and node.get("process_arch_id"):
+        linked = {node["process_arch_id"]}
+    if len(linked) != 1:
+        raise HTTPException(400, "节点活动映射缺失或不唯一，请先明确活动")
+    activity = next(iter(linked))
+    try:
+        row = raci_service.upsert_raci(
+            db,
+            {
+                "process_id": process.id,
+                "activity_id": activity,
+                "matter": f"{node_key} 活动责任",
+                "node_key": node_key,
+                "role_id": payload.role_id,
+                "raci": "A",
+            },
+            model_version=version,
+        )
+    except raci_service.RaciConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except raci_service.RaciError as exc:
+        raise HTTPException(400, str(exc)) from exc
     audit.record(
         db, user, "CREATE", "raci_assignment", row.id, f"写入 {process.code}/{node_key} 活动 A"
     )

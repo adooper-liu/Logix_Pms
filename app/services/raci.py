@@ -43,6 +43,10 @@ class RaciError(ValueError):
     """治理角色/RACI 规则拒绝；API 层转成 400/409。"""
 
 
+class RaciConflictError(RaciError):
+    """An existing accountable role prevents another A for the same scope."""
+
+
 def next_role_code(db: Session) -> str:
     existing = db.scalars(select(GovernanceRole.code).where(GovernanceRole.code.like("GR-%"))).all()
     seq = 0
@@ -249,7 +253,7 @@ def process_raci(db: Session, process_id: int) -> RaciProcessOut:
     )
 
 
-def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
+def upsert_raci(db: Session, data: Dict, *, model_version=None) -> RaciAssignment:
     process = require_process(db, data["process_id"])
     from sqlalchemy import or_
 
@@ -271,13 +275,19 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
             or activity.parent_id != process.id
         ):
             raise RaciError("活动不属于当前流程或仍为草稿")
+    if model_version is not None and model_version.process_id != process.id:
+        raise RaciError("模型版本不属于当前流程")
     if node_key:
-        snapshot = process_model.current_snapshot(db, process.id)
+        snapshot = (
+            model_version.snapshot
+            if model_version
+            else process_model.current_snapshot(db, process.id)
+        )
         node = next((n for n in snapshot.get("nodes", []) if n["node_key"] == node_key), None)
         if node is None or node["node_type"] not in {"TASK", "APPROVAL", "HANDOFF", "DECISION"}:
             raise RaciError("节点不存在于当前设计模型或不支持责任绑定")
         if activity_id is not None:
-            version = process_model.latest_version(db, process.id)
+            version = model_version or process_model.latest_version(db, process.id)
             links = list(
                 db.scalars(
                     select(NodeActivityLink.activity_id).where(
@@ -316,7 +326,7 @@ def upsert_raci(db: Session, data: Dict) -> RaciAssignment:
         )
         if existing_a is not None:
             other = db.get(GovernanceRole, existing_a.role_id)
-            raise RaciError(
+            raise RaciConflictError(
                 f"「{matter}」已有 A：{other.name if other else existing_a.role_id}，"
                 "同一事项只能有一个 A"
             )

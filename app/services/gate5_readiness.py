@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import utcnow
 from app.models.asset_graph import NodeActivityLink
 from app.models.execution import NodeAssignment
+from app.models.org import OrgUnit
 from app.models.process import ProcessArch, ProcessModelVersion
 from app.models.raci import GovernanceRole, RaciAssignment
 from app.models.responsibility import ProcessResponsibilityAcceptance
 from app.models.user import User
 from app.schemas.gate5 import ActivityReadiness, Gate5ReadinessOut, ReadinessItem
-from app.services import audit
+from app.services import audit, org_access, process_model
 from app.services.position_coverage import role_position
 
 SCOPES = {"PROCESS_OWNER", "ACCOUNTABLE", "EXECUTOR", "APPROVER", "BACKUP", "ESCALATION"}
@@ -61,10 +62,11 @@ def _activities(db: Session, process: ProcessArch, version: ProcessModelVersion)
         )
     ).all()
     mapped = {link.node_key: link.activity_id for link in links}
+    versioned_keys = set(mapped)
     for key, node in nodes.items():
         if key not in mapped and node.get("process_arch_id"):
             mapped[key] = node["process_arch_id"]
-    return mapped, bool(links)
+    return mapped, bool(links), versioned_keys
 
 
 def readiness(db: Session, process_id: int, *, model_version_id: int | None = None, viewer=None):
@@ -108,7 +110,19 @@ def readiness(db: Session, process_id: int, *, model_version_id: int | None = No
         blockers.append(
             _item("OWNER_ACCEPTANCE_MISSING", "流程 Owner 缺少当前模型版本的责任接受记录")
         )
-    mapped, has_versioned_links = _activities(db, process, version)
+    mapped, has_versioned_links, versioned_keys = _activities(db, process, version)
+    expected_nodes = {
+        node.get("node_key")
+        for node in version.snapshot.get("nodes", [])
+        if node.get("process_arch_id")
+    }
+    if not has_versioned_links or versioned_keys != expected_nodes:
+        blockers.append(
+            _item(
+                "VERSIONED_ACTIVITY_MAPPING_REQUIRED",
+                "当前发布模型的全部活动必须有版本化活动映射",
+            )
+        )
     if not has_versioned_links:
         warnings.append(
             _item(
@@ -237,6 +251,13 @@ def set_process_owner(
     expected_model_version_id: int,
 ):
     _write_user(actor)
+    if actor.role == "OWNER" and process.owner_user_id != actor.id:
+        raise HTTPException(403, "只能维护自己负责的流程")
+    org_access.ensure_visible(db, actor, process.org_unit_id)
+    process_model.lock_process(db, process)
+    # Recheck ownership after the lock refreshes the current row.
+    if actor.role == "OWNER" and process.owner_user_id != actor.id:
+        raise HTTPException(403, "只能维护自己负责的流程")
     version = _published(db, process)
     if version is None or version.id != expected_model_version_id:
         raise HTTPException(409, "已发布模型版本已变化，请刷新")
@@ -258,28 +279,52 @@ def upsert_assignment(
     expected_model_version_id: int,
 ):
     _write_user(actor)
+    if actor.role == "OWNER" and process.owner_user_id != actor.id:
+        raise HTTPException(403, "只能维护自己负责的流程")
+    org_access.ensure_visible(db, actor, process.org_unit_id)
+    process_model.lock_process(db, process)
+    if actor.role == "OWNER" and process.owner_user_id != actor.id:
+        raise HTTPException(403, "只能维护自己负责的流程")
     version = _published(db, process)
     if version is None or version.id != expected_model_version_id:
         raise HTTPException(409, "已发布模型版本已变化，请刷新")
     if not any(n.get("node_key") == node_key for n in version.snapshot.get("nodes", [])):
         raise HTTPException(404, "节点不属于当前发布模型")
-    for key in (
-        "default_assignee_user_id",
-        "approver_user_id",
-        "backup_assignee_user_id",
-        "escalation_user_id",
-    ):
-        if values.get(key) is not None and _active_user(db, values[key]) is None:
-            raise HTTPException(400, f"{key} 指向的用户不存在或已停用")
-    if values.get("default_assignee_user_id") == values.get("approver_user_id") and values.get(
-        "default_assignee_user_id"
-    ):
-        raise HTTPException(400, "执行账号与审批账号不能相同")
     row = db.scalar(
         select(NodeAssignment).where(
             NodeAssignment.process_id == process.id, NodeAssignment.node_key == node_key
         )
     )
+    user_fields = (
+        "default_assignee_user_id",
+        "approver_user_id",
+        "backup_assignee_user_id",
+        "escalation_user_id",
+    )
+    # Validate the merged configuration before mutating any persisted fields.
+    merged = {key: getattr(row, key, None) for key in ("org_unit_id", *user_fields)}
+    merged.update(values)
+    org_id = merged.get("org_unit_id")
+    if org_id is not None:
+        unit = db.get(OrgUnit, org_id)
+        if unit is None or not unit.is_active:
+            raise HTTPException(400, "执行组织不存在或已停用")
+        org_access.ensure_visible(db, actor, org_id)
+    allowed_orgs = org_access.subtree_ids(db, org_id) if org_id is not None else None
+    for key in user_fields:
+        user_id = merged.get(key)
+        if user_id is None:
+            continue
+        subject = _active_user(db, user_id)
+        if subject is None:
+            raise HTTPException(400, f"{key} 指向的用户不存在或已停用")
+        org_access.ensure_visible(db, actor, subject.org_unit_id)
+        if allowed_orgs is not None and subject.org_unit_id not in allowed_orgs:
+            raise HTTPException(400, f"{key} 不在所选执行组织范围内")
+    if merged.get("default_assignee_user_id") and merged.get(
+        "default_assignee_user_id"
+    ) == merged.get("approver_user_id"):
+        raise HTTPException(400, "执行账号与审批账号不能相同")
     if row is None:
         row = NodeAssignment(process_id=process.id, node_key=node_key)
         db.add(row)

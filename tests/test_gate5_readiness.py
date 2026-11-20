@@ -109,6 +109,58 @@ def test_generic_rules_reject_non_l3(client):
         db.rollback()
 
 
+def test_legacy_mapping_is_a_hard_gate5_blocker(client):
+    from app.core.database import SessionLocal
+    from app.services.gate5_readiness import readiness
+
+    with SessionLocal() as db:
+        process, _activity, _version = _generic_process(db)
+        result = readiness(db, process.id, viewer=_viewer(db))
+        assert any(item.code == "VERSIONED_ACTIVITY_MAPPING_REQUIRED" for item in result.blockers)
+        db.rollback()
+
+
+def test_partial_versioned_mapping_is_a_hard_gate5_blocker(client):
+    from app.core.database import SessionLocal
+    from app.models.asset_graph import NodeActivityLink
+    from app.models.process import ProcessArch
+    from app.services.gate5_readiness import readiness
+
+    with SessionLocal() as db:
+        process, activity, version = _generic_process(db)
+        second = ProcessArch(
+            code="L4-GENERIC-GATE5-RULES-2",
+            name="第二活动",
+            level=4,
+            parent=process,
+            is_draft=False,
+        )
+        db.add(second)
+        db.flush()
+        version.snapshot["nodes"].append(
+            {
+                "node_key": "n2",
+                "name": "第二活动",
+                "node_type": "TASK",
+                "process_arch_id": second.id,
+            }
+        )
+        db.add(
+            NodeActivityLink(
+                process_id=process.id,
+                model_version_id=version.id,
+                node_key="n1",
+                activity_id=activity.id,
+                relation="REALIZES",
+                path_condition="ALL",
+            )
+        )
+        db.flush()
+        result = readiness(db, process.id, viewer=_viewer(db))
+        assert any(item.code == "VERSIONED_ACTIVITY_MAPPING_REQUIRED" for item in result.blockers)
+        db.rollback()
+
+
 # Optional smoke test only; the generic synthetic tests above determine mechanism acceptance.
 def test_optional_l3_032_smoke(client):
     from app.core.database import SessionLocal
