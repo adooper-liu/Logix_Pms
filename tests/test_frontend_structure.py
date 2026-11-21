@@ -22,8 +22,9 @@ def test_gate5_readiness_is_wired_into_asset_and_execution_entrypoints():
     assert "/gate5/readiness" in asset
     assert "/gate5/readiness" in execution
     assert "renderGate5" in shared
-    assert "renderGate5" in asset
-    assert "renderGate5" in execution
+    assert "${gate5 ? renderGate5(gate5) : ''}" in asset
+    assert "${renderGate5(readiness)}" not in asset
+    assert "${cfgProcess && d.gate5 ? renderGate5(d.gate5) : ''}" in execution
 
 
 def _modules() -> list[Path]:

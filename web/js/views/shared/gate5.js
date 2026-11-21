@@ -9,11 +9,11 @@ export function renderGate5(readiness) {
   const activities = (readiness.activities || []).map((row) => `
     <div class="between tiny mt"><span>${esc(row.node_key)} · ${esc(row.activity_code || '未映射')}</span>
       <span class="tag ${row.status === 'PASS' ? 't-grn' : 't-red'}">${esc(row.status)}</span></div>`).join('');
-  return `<div class="note gate5-readiness" data-gate5-readiness>
-    <div class="between"><b>责任闭合</b><span class="tag ${tone}">${esc(readiness.status)} · ${esc(readiness.evidence_grade)}</span></div>
+  return `<div class="card gate5-readiness" data-gate5-readiness>
+    <div class="between"><div><div class="tiny muted">责任闭合</div><h3 style="margin:4px 0">Gate 5 · 组织与责任</h3></div><span class="tag ${tone}">${esc(readiness.status)} · ${esc(readiness.evidence_grade)}</span></div>
     <div class="tiny muted mt">模型 v${esc(readiness.model_version || '—')} · Owner ${esc(readiness.process_owner?.label || '未绑定')}</div>
     ${blockers.slice(0, 6).map(item).join('') || '<div class="tiny mt">当前没有责任阻断。</div>'}
     ${warnings.slice(0, 3).map(item).join('')}
-    <details class="mt"><summary class="tiny">查看活动责任状态（${activities ? readiness.activities.length : 0}）</summary>${activities}</details>
+    <details class="mt"><summary class="tiny">查看活动责任状态（${readiness.activities.length}）</summary>${activities}</details>
   </div>`;
 }
