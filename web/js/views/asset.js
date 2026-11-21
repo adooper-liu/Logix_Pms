@@ -482,7 +482,6 @@ function overviewHtml(readiness, operating, blockers, writable, gate5) {
     </div>
     ${operatingHtml}
     ${gate5 ? renderGate5(gate5) : ''}
-    ${renderGate5(readiness)}
     <div class="card" style="padding:16px 18px;margin-bottom:14px">
       <h3>生成就绪度</h3>
       <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px">
