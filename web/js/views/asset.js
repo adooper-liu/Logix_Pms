@@ -469,11 +469,11 @@ function overviewHtml(readiness, operating, blockers, writable, gate5) {
   const warnings = readiness.warnings && readiness.warnings.length
     ? `<div class="tiny muted mt">${readiness.warnings.map(esc).join('；')}</div>` : '';
   return `
-    <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px">
+    <div class="grid asset-primary" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px">
       <div class="card" style="padding:16px 18px">
         <div class="tiny muted">能产出什么</div>
-        <h3 style="margin:6px 0">${readiness.can_generate_draft ? '活动级资产包 R0' : '还不能产出'}</h3>
-        <div class="tiny muted">SOP 正文 · 活动责任 · 流程级 RACI · 控制点 · 表单引用</div>
+        <h3 style="margin:6px 0">${readiness.can_generate_draft ? '可以生成资产包草稿' : '暂不能生成资产包'}</h3>
+        <div class="tiny muted">${readiness.can_generate_draft ? '活动级资产包 R0' : '请核对下方资产阻断'}</div>
       </div>
       <div class="card" style="padding:16px 18px">
         <div class="tiny muted">还缺什么</div>
@@ -486,10 +486,9 @@ function overviewHtml(readiness, operating, blockers, writable, gate5) {
         <div class="tiny muted">${writable ? '可生成草稿；提交评审前会重新跑阻断。' : '当前角色只读。'}</div>
       </div>
     </div>
-    ${operatingHtml}
     ${gate5 ? renderGate5(gate5) : ''}
-    <div class="card" style="padding:16px 18px;margin-bottom:14px">
-      <h3>生成就绪度</h3>
+    ${foldCard('资产明细与专家核对', `${operatingHtml}
+      <div class="asset-expert">
       <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px">
         <div class="kpi"><div class="num">${metrics.activity_nodes || 0}</div><div class="lab">活动节点</div></div>
         <div class="kpi"><div class="num">${metrics.mapped_activities || 0}</div><div class="lab">已映射</div></div>
@@ -498,19 +497,15 @@ function overviewHtml(readiness, operating, blockers, writable, gate5) {
         <div class="kpi"><div class="num">${metrics.rule_ready || 0}</div><div class="lab">规则就绪</div></div>
         <div class="kpi"><div class="num">${metrics.claims_total || 0}</div><div class="lab">证据主张</div></div>
       </div>
-    </div>
-    ${foldCard('阻断与下一步', `${blockers.map(blockerHtml).join('') || '<div class="tiny muted">没有阻断，可以生成草稿并提交评审。</div>'}${warnings}`, { open: true })}`;
+      </div>
+      <div data-asset-blockers tabindex="-1">
+      ${foldCard('阻断与下一步', `${blockers.map(blockerHtml).join('') || '<div class="tiny muted">没有阻断，可以生成草稿并提交评审。</div>'}${warnings}`, { open: true })}
+      </div>
+    `, { open: false })}`;
 }
 
-function assetAside(readiness, canGenerate) {
-  const status = readiness.versioned
-    ? `v${readiness.model_version}（${readiness.model_status}）` : '未发布';
+function assetAside(canGenerate) {
   return `
-    ${sideCard('流程状态', `
-      <div class="kv"><span>层级</span><b>L3</b></div>
-      <div class="kv"><span>模型</span><b>${esc(status)}</b></div>
-      <div class="kv"><span>阻断</span><b>${(readiness.blockers || []).length}</b></div>
-      <div class="kv"><span>下一步</span><b>${esc(readiness.next_action)}</b></div>`)}
     ${sideCard('主操作', `
       <button class="btn btn-p" style="width:100%" data-act="asset.generate"
         ${canGenerate ? '' : 'disabled'}>生成资产包草稿</button>
@@ -525,9 +520,6 @@ function paintAsset(_pid, data) {
   const stateLabel = readiness.versioned
     ? `模型 v${readiness.model_version}（${readiness.model_status}）`
     : '未发布模型';
-  const missing = blockers.length
-    ? `${blockers.length} 项待处理`
-    : '没有阻断';
   const canGenerate = readiness.can_generate_draft && writable;
 
   const sections = {
@@ -542,7 +534,7 @@ function paintAsset(_pid, data) {
     title: `${esc(readiness.process_code)} ${esc(readiness.process_name)}`,
     badge: `<span class="tag t-blu">L3</span>
       <span class="tag ${readiness.versioned ? 't-grn' : 't-yel'}">${esc(stateLabel)}</span>
-      <span class="tag ${blockers.length ? 't-yel' : 't-grn'}">${esc(missing)}</span>`,
+      <button type="button" class="btn-sm tag ${blockers.length ? 't-yel' : 't-grn'}" data-act="asset.showBlockers">资产待处理 ${blockers.length} 项</button>`,
     subtitle: '一条流程的模型、资产、证据与日志都在这里。',
     tip: tipHelp(
       '关系与证据可在本页维护；阻断也可去设计器、执行运行配置或分析页处理。'
@@ -553,7 +545,7 @@ function paintAsset(_pid, data) {
     sections: sectionList,
     active: ASSET().tab,
     tabAct: 'asset.tab',
-    aside: assetAside(readiness, canGenerate),
+    aside: assetAside(canGenerate),
   });
   ASSET().tab = shell.active;
   viewEl().innerHTML = shell.html;
@@ -2037,6 +2029,17 @@ on('asset.tab', ({ tab }) => {
   if (!tab || !ASSET().data) return;
   ASSET().tab = tab;
   paintAsset(ASSET().processId, ASSET().data);
+});
+on('asset.showBlockers', () => {
+  const target = viewEl().querySelector('[data-asset-blockers]');
+  if (!target) return;
+  let parent = target.parentElement;
+  while (parent && parent !== viewEl()) {
+    if (parent.tagName === 'DETAILS') parent.open = true;
+    parent = parent.parentElement;
+  }
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'start', behavior: 'auto' });
 });
 on('asset.transition', ({ status }) => transitionPackage(status));
 on('asset.go', ({ view, tab, process: pid }) => {
