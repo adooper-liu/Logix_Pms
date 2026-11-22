@@ -15,6 +15,25 @@ IMPORT_RE = re.compile(r"""from\s+['"]([^'"]+)['"]""")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def test_asset_status_has_no_duplicate_sidebar_next_step_and_pending_is_actionable():
+    src = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
+    aside = src.split("function assetAside(", 1)[1].split("function paintAsset(", 1)[0]
+    assert "流程状态" not in aside
+    assert "下一步" not in aside
+    assert 'data-act="asset.showBlockers"' in src
+    assert "on('asset.showBlockers'" in src
+    assert "data-asset-blockers" in src
+
+
+def test_asset_page_uses_one_primary_topic_and_defers_expert_sections():
+    src = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
+    assert "readiness.can_generate_draft" in src
+    assert "asset-primary" in src
+    assert "asset-expert" in src
+    assert "Gate 5" in src
+    assert "运营与治理" not in src
+
+
 def test_gate5_readiness_is_wired_into_asset_and_execution_entrypoints():
     asset = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
     execution = (JS_ROOT / "views" / "execution.js").read_text(encoding="utf-8")
