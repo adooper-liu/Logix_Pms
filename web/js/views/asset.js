@@ -452,7 +452,13 @@ function paintPicker(rows) {
 
 function overviewHtml(readiness, operating, blockers, writable, gate5) {
   const metrics = readiness.metrics || {};
-  const missing = blockers.length ? `${blockers.length} 项待处理` : '没有阻断';
+  const gate5Blocked = gate5?.status === 'BLOCKED';
+  const nextAction = gate5Blocked
+    ? `先补齐责任闭合：${gate5.next_actions?.[0] || '查看 Gate 5 阻断'}`
+    : readiness.next_action;
+  const missing = gate5Blocked
+    ? '责任闭合未完成'
+    : blockers.length ? `${blockers.length} 项待处理` : '没有阻断';
   const operatingGate = operating?.gates?.find((gate) => gate.key === 'GATE_1');
   const operatingHtml = operating
     ? `<div class="note mt"><div class="between"><b>流程经营状态</b>
@@ -472,11 +478,11 @@ function overviewHtml(readiness, operating, blockers, writable, gate5) {
       <div class="card" style="padding:16px 18px">
         <div class="tiny muted">还缺什么</div>
         <h3 style="margin:6px 0">${esc(missing)}</h3>
-        <div class="tiny muted">${esc(readiness.next_action)}</div>
+        <div class="tiny muted">${esc(nextAction)}</div>
       </div>
       <div class="card" style="padding:16px 18px">
         <div class="tiny muted">下一步做什么</div>
-        <h3 style="margin:6px 0">${esc(readiness.next_action)}</h3>
+        <h3 style="margin:6px 0">${esc(nextAction)}</h3>
         <div class="tiny muted">${writable ? '可生成草稿；提交评审前会重新跑阻断。' : '当前角色只读。'}</div>
       </div>
     </div>
@@ -2016,7 +2022,16 @@ on('asset.downloadPdf', () => {
   download(pkg.pdf_url, `${pkg.document_code}-${pkg.version_label}.pdf`)
     .catch((error) => toast(errorText(error), true));
 });
-on('asset.adjudicate', ({ claim }) => openAdjudicate(Number(claim)));
+on('gate5.go', ({ view, tab, process: pid, node }) => {
+  const params = { process: pid || ASSET().processId };
+  if (tab) params.tab = tab;
+  if (node) params.node = node;
+  go(view, { params, push: true });
+});
+on('gate5.acceptance', ({ scope, node, model }) => {
+  openModal('责任接受要求', `<div class="note"><b>这里不是自动确认。</b><p class="mt">需要由责任人本人或有权治理人员，确认该责任适用于指定模型版本。</p><p class="tiny muted">模型版本：${esc(model || '当前已发布版本')} · 活动节点：${esc(node || '流程 Owner')} · 责任范围：${esc(scope || '待核对')}</p></div>`, '<button class="btn btn-g" data-act="ui.close">关闭</button>');
+});
+
 on('asset.submitAdjudication', ({ claim }) => submitAdjudication(Number(claim)));
 on('asset.tab', ({ tab }) => {
   if (!tab || !ASSET().data) return;

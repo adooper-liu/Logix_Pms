@@ -27,6 +27,19 @@ def test_gate5_readiness_is_wired_into_asset_and_execution_entrypoints():
     assert "${cfgProcess && d.gate5 ? renderGate5(d.gate5) : ''}" in execution
 
 
+def test_gate5_cards_show_business_copy_not_internal_codes():
+    shared = (JS_ROOT / "views" / "shared" / "gate5.js").read_text(encoding="utf-8")
+    assert "GATE5_LABELS" in shared
+    assert "责任人账号未绑定" in shared
+    assert "gate5Label(row)" in shared
+    assert "${esc(row.code)}" not in shared
+
+    asset = (JS_ROOT / "views" / "asset.js").read_text(encoding="utf-8")
+    assert "gate5?.status === 'BLOCKED'" in asset
+    assert "先补齐责任闭合" in asset
+    assert "gate5.next_actions?.[0]" in asset
+
+
 def _modules() -> list[Path]:
     return sorted(JS_ROOT.rglob("*.js"))
 
